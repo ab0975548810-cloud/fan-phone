@@ -1,0 +1,1140 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FAN 救手機 - 智慧進銷存與每日結算系統</title>
+    <!-- 引入美觀的 Tailwind CSS 樣式 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans">
+
+    <!-- 頂部大標題與選單 -->
+    <header class="bg-teal-600 text-white shadow-lg sticky top-0 z-50">
+        <div class="container mx-auto px-4 py-4 flex flex-col md:flex-row justify-between items-center gap-4">
+            <h1 class="text-2xl font-bold flex items-center gap-2">
+                🛠️ FAN 救手機（內壢店）店務日結金流系統
+            </h1>
+            <nav class="flex flex-wrap gap-2">
+                <button onclick="switchTab('finance')" id="btn-finance" class="tab-btn px-4 py-2 rounded-lg bg-teal-800 font-bold transition">📊 金流與庫存總覽</button>
+                <button onclick="switchTab('repairs')" id="btn-repairs" class="tab-btn px-4 py-2 rounded-lg hover:bg-teal-500 font-bold transition">👥 顧客維修單 (收入)</button>
+                <button onclick="switchTab('expenses')" id="btn-expenses" class="tab-btn px-4 py-2 rounded-lg hover:bg-teal-500 font-bold transition">💸 營業支出單 (支出)</button>
+                <button onclick="switchTab('settings')" id="btn-settings" class="tab-btn px-4 py-2 rounded-lg hover:bg-teal-500 font-bold transition">⚙️ 品項設定與舊檔匯入</button>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container mx-auto px-4 py-6 max-w-6xl space-y-6">
+        
+        <!-- 核心控制列 -->
+        <div class="bg-white p-4 rounded-xl shadow-sm border-2 border-teal-500 flex flex-col lg:flex-row items-center gap-4 justify-between">
+            <div class="flex flex-wrap items-center gap-4 w-full lg:w-auto">
+                <div class="flex items-center gap-2">
+                    <span class="text-2xl">📅</span>
+                    <label class="font-black text-slate-800 text-base">查看月份：</label>
+                    <input type="month" id="global-month" onchange="renderAll()" class="border-2 border-teal-600 rounded-lg px-2 py-1 font-black text-teal-700 text-base focus:outline-none bg-teal-50">
+                </div>
+                
+                <div class="flex items-center gap-2 flex-1 min-w-[320px]">
+                    <span class="text-2xl">🔍</span>
+                    <label class="font-black text-slate-800 text-base">即時搜尋：</label>
+                    <input type="text" id="global-search" oninput="renderAll()" class="border-2 border-teal-600 rounded-lg px-3 py-1.5 w-full font-bold text-slate-700 placeholder-slate-400 focus:outline-none bg-slate-50 focus:border-orange-500" placeholder="可搜單號、客人名字、電話、手機型號、維修原因...">
+                </div>
+            </div>
+            <p id="search-hint" class="text-xs text-slate-500 font-medium lg:text-right">※ 未輸入搜尋時，會自動切換為選取月份的資料。</p>
+        </div>
+
+        <!-- 分頁 1：金流與庫存總覽 -->
+        <section id="tab-finance" class="tab-content active space-y-6">
+            
+            <!-- 每日營運抽屜結算（日結助手）區塊 -->
+            <div class="bg-gradient-to-br from-amber-50 to-orange-50 p-6 rounded-2xl shadow-sm border-2 border-amber-400 space-y-4">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-amber-200 pb-3">
+                    <h2 class="text-xl font-black text-amber-900 flex items-center gap-2">🏪 每日營運抽屜結算 (日結對帳)</h2>
+                    <div class="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-amber-300 shadow-sm">
+                        <label class="text-sm font-bold text-slate-700">選擇結算日期：</label>
+                        <input type="date" id="daily-settle-date" onchange="renderDailySettlement()" class="font-bold text-amber-800 focus:outline-none bg-transparent">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <!-- 今日帳面數據 -->
+                    <div class="bg-white p-4 rounded-xl border border-amber-200 shadow-xs space-y-2">
+                        <div class="text-xs font-bold text-slate-500">📥 今日應收 (維修單)</div>
+                        <div id="daily-income-text" class="text-xl font-black text-emerald-600">$0 (0筆)</div>
+                        <div class="text-xs font-bold text-slate-500 pt-1 border-t border-slate-100">📤 今日已付 (支出單)</div>
+                        <div id="daily-expense-text" class="text-xl font-black text-rose-600">$0 (0筆)</div>
+                    </div>
+                    
+                    <!-- 應有淨庫存現金 -->
+                    <div class="bg-white p-4 rounded-xl border border-amber-200 shadow-xs flex flex-col justify-between">
+                        <span class="text-xs font-bold text-slate-500">💰 今日帳面淨現金流</span>
+                        <div id="daily-net-text" class="text-2xl font-black text-slate-800 mt-1">$0</div>
+                        <span class="text-[11px] text-slate-400 font-medium">（今日實收 － 今日支出）</span>
+                    </div>
+
+                    <!-- 人工盤點輸入欄 -->
+                    <div class="bg-white p-4 rounded-xl border border-amber-200 shadow-xs space-y-3 md:col-span-2">
+                        <span class="text-xs font-black text-amber-800 block">📝 晚班/閉店抽屜實地盤點：</span>
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
+                                <label class="block text-[11px] font-bold text-slate-500 mb-0.5">早上開班備用金 ($)</label>
+                                <input type="number" id="cash-start-input" oninput="calculateCashDiff()" class="w-full border border-slate-300 rounded px-2 py-1 text-sm font-bold text-slate-700 focus:ring-1 focus:ring-amber-500 focus:outline-none" value="3000">
+                            </div>
+                            <div>
+                                <label class="block text-[11px] font-bold text-slate-500 mb-0.5">晚上關班實點現金 ($)</label>
+                                <input type="number" id="cash-actual-input" oninput="calculateCashDiff()" class="w-full border-2 border-amber-500 rounded px-2 py-1 text-sm font-bold text-slate-800 focus:outline-none" placeholder="請數好錢包輸入...">
+                            </div>
+                        </div>
+                        <div class="flex items-center justify-between pt-2 border-t border-dashed border-slate-200 text-sm font-bold">
+                            <span id="cash-should-be-text" class="text-slate-600 text-xs">帳面應有總額：$0</span>
+                            <span id="cash-diff-result" class="text-slate-500">請輸入實清金額...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 月結總覽看板 -->
+            <h2 class="text-xl font-bold text-slate-900 border-l-4 border-teal-600 pl-2"><span id="title-month-text" class="text-teal-600 font-black">本月</span> 營業金流統計</h2>
+            
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="bg-white p-6 rounded-xl shadow-sm border border-emerald-100 flex flex-col justify-between">
+                    <span class="text-slate-500 font-bold">💰 <span class="id-finance-card-label">該月</span> 累積總收入 (實收)</span>
+                    <span class="text-3xl font-black text-emerald-600 mt-2" id="stat-income">$0</span>
+                </div>
+                <div class="bg-white p-6 rounded-xl shadow-sm border border-rose-100 flex flex-col justify-between">
+                    <span class="text-slate-500 font-bold">📉 <span class="id-finance-card-label">該月</span> 累積總成本 (零件+雜支)</span>
+                    <span class="text-3xl font-black text-rose-600 mt-2" id="stat-expense">$0</span>
+                </div>
+                <div class="bg-white p-6 rounded-xl shadow-sm border border-blue-100 flex flex-col justify-between">
+                    <span class="text-slate-500 font-bold">💎 <span class="id-finance-card-label">該月</span> 營業毛利 (實賺)</span>
+                    <span class="text-3xl font-black text-blue-600 mt-2" id="stat-profit">$0</span>
+                </div>
+            </div>
+
+            <!-- 🔥 新增：月營運明細報表（按日拉出金流表）與 CSV 匯出功能 -->
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-100 pb-3">
+                    <div>
+                        <h3 class="text-lg font-bold text-slate-900">📅 <span class="id-selected-month-label text-teal-600 font-black">本月</span> 每日營運金流報表</h3>
+                        <p class="text-xs text-slate-400 mt-0.5">自動按日統整當天總收入與總支出，點擊右側按鈕可直接下載 Excel 檔。</p>
+                    </div>
+                    <button onclick="exportMonthlyCsv()" class="bg-teal-600 hover:bg-teal-700 text-white font-bold text-sm py-2.5 px-4 rounded-lg shadow transition flex items-center gap-1.5 whitespace-nowrap self-stretch sm:self-auto justify-center">
+                        📥 匯出整月金流報表 (Excel/CSV)
+                    </button>
+                </div>
+                <div class="overflow-x-auto max-h-72 overflow-y-auto border border-slate-100 rounded-lg">
+                    <table class="w-full text-left border-collapse">
+                        <thead class="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
+                            <tr class="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                                <th class="p-3 bg-slate-50">營運日期</th>
+                                <th class="p-3 bg-slate-50 text-emerald-600">當日總收入 (維修)</th>
+                                <th class="p-3 bg-slate-50 text-rose-600">當日總支出 (成本)</th>
+                                <th class="p-3 bg-slate-50 text-slate-700">當日淨現金增減</th>
+                            </tr>
+                        </thead>
+                        <tbody id="monthly-report-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="low-stock-alert-box" class="hidden bg-amber-50 border-l-4 border-amber-500 text-amber-900 p-4 rounded-r-lg shadow-sm font-bold animate-pulse">
+                ⚠️ 提醒：有材料庫存過低，請記得找廠商補貨！
+            </div>
+
+            <h2 class="text-xl font-bold text-slate-900 border-l-4 border-teal-600 pl-2 pt-4">📦 材料零件【目前實際總庫存】狀態</h2>
+            <div class="bg-white shadow-sm rounded-xl overflow-hidden border border-slate-200">
+                <table class="w-full text-left border-collapse">
+                    <thead class="bg-slate-100 border-b border-slate-200">
+                        <tr>
+                            <th class="p-4 font-bold text-slate-700">零件編號</th>
+                            <th class="p-4 font-bold text-slate-700">零件名稱</th>
+                            <th class="p-4 font-bold text-slate-500">期初庫存</th>
+                            <th class="p-4 font-bold text-emerald-600">歷史總進貨</th>
+                            <th class="p-4 font-bold text-rose-600">歷史總消耗</th>
+                            <th class="p-4 font-bold text-slate-700">目前剩餘庫存</th>
+                            <th class="p-4 font-bold text-slate-700">安全臨界點</th>
+                            <th class="p-4 font-bold text-center">補貨通知</th>
+                        </tr>
+                    </thead>
+                    <tbody id="inventory-table-body"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- 分頁 2：顧客維修單 (收入) -->
+        <section id="tab-repairs" class="tab-content space-y-6">
+            <h2 class="text-xl font-bold text-slate-900 border-l-4 border-teal-600 pl-2">👥 顧客維修單管理</h2>
+            
+            <form id="repair-form" class="bg-white p-6 shadow-sm rounded-xl border border-slate-200 space-y-4">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div>
+                        <label class="block text-sm font-bold text-slate-700 mb-1">維修日期</label>
+                        <input type="date" id="r-date" required class="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-bold text-slate-700 mb-1">客戶資訊 (稱呼/電話)</label>
+                        <input type="text" id="r-customer" required class="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:outline-none" placeholder="王小明 0912-345678">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-bold text-slate-700 mb-1">維修品項 (可打字搜尋 🔍)</label>
+                        <input type="text" id="r-item" list="r-item-list" oninput="autoFillPrice()" required class="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:outline-none" placeholder="輸入關鍵字搜尋或選擇...">
+                        <datalist id="r-item-list"></datalist>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-bold text-slate-700 mb-1">向顧客實收金額 ($)</label>
+                        <input type="number" id="r-price" min="0" required class="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:outline-none">
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div>
+                        <label class="block text-sm font-bold text-slate-700 mb-1">維修原因/故障狀況</label>
+                        <input type="text" id="r-reason" class="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-bold text-slate-700 mb-1">解鎖密碼</label>
+                        <input type="text" id="r-password" class="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-bold text-slate-700 mb-1">IMEI 序號</label>
+                        <input type="text" id="r-imei" class="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-bold text-slate-700 mb-1">備註說明</label>
+                        <input type="text" id="r-notes" class="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:outline-none">
+                    </div>
+                </div>
+                <div class="flex justify-between items-center">
+                    <div id="repair-edit-no-hint" class="text-sm font-bold text-teal-600 hidden"></div>
+                    <div class="flex gap-2 ml-auto">
+                        <button type="button" id="repair-cancel-btn" onclick="cancelEditRepair()" class="hidden bg-slate-400 hover:bg-slate-500 text-white font-bold py-2.5 px-4 rounded-lg transition shadow">❌ 取消編輯</button>
+                        <button type="submit" id="repair-submit-btn" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-6 rounded-lg transition shadow">💾 儲存維修單（入帳）</button>
+                    </div>
+                </div>
+            </form>
+
+            <h3 class="text-lg font-bold text-slate-800 pt-4">📋 <span class="text-teal-600 font-black id-selected-month-label">本月</span> 維修明細紀錄</h3>
+            <div class="bg-white shadow-sm rounded-xl overflow-hidden border border-slate-200">
+                <table class="w-full text-left border-collapse table-auto">
+                    <thead class="bg-slate-100 border-b border-slate-200">
+                        <tr class="text-sm">
+                            <th class="p-3 font-bold text-slate-700">單號</th>
+                            <th class="p-3 font-bold text-slate-700">日期</th>
+                            <th class="p-3 font-bold text-slate-700">客戶資訊</th>
+                            <th class="p-3 font-bold text-slate-700">維修品項 / 原因</th>
+                            <th class="p-3 font-bold text-slate-700">密碼/IMEI</th>
+                            <th class="p-3 font-bold text-slate-700">金額</th>
+                            <th class="p-3 font-bold text-slate-700">備註</th>
+                            <th class="p-3 font-bold text-slate-700">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="repairs-table-body"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- 分頁 3：營業支出單 (支出) -->
+        <section id="tab-expenses" class="tab-content space-y-6">
+            <h2 class="text-xl font-bold text-slate-950 border-l-4 border-teal-600 pl-2">💸 營業支出單管理</h2>
+            
+            <form id="expense-form" class="bg-white p-6 shadow-sm rounded-xl border border-slate-200 space-y-4">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                    <div>
+                        <label class="block text-sm font-bold text-slate-700 mb-1">支出日期</label>
+                        <input type="date" id="e-date" required class="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-bold text-slate-700 mb-1">支出類型</label>
+                        <select id="e-type" onchange="toggleExpenseType()" class="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:outline-none">
+                            <option value="part">📦 材料零件補貨進貨</option>
+                            <option value="other">☕ 店面日常一般開銷</option>
+                        </select>
+                    </div>
+                    <div id="expense-part-box" class="block">
+                        <label class="block text-sm font-bold text-slate-700 mb-1">選擇進貨的零件</label>
+                        <select id="e-part-id" class="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:outline-none"></select>
+                    </div>
+                    <div id="expense-part-qty-box" class="block">
+                        <label class="block text-sm font-bold text-slate-700 mb-1">進貨數量</label>
+                        <input type="number" id="e-part-qty" min="1" class="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:outline-none" value="1">
+                    </div>
+                    <div id="expense-other-box" class="hidden md:col-span-2">
+                        <label class="block text-sm font-bold text-slate-700 mb-1">支出項目名稱（備註）</label>
+                        <input type="text" id="e-other-name" class="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:outline-none" placeholder="例如：付店面房租">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                    <div>
+                        <label class="block text-sm font-bold text-slate-700 mb-1">支出總金額 ($)</label>
+                        <input type="number" id="e-amount" min="0" required class="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:outline-none">
+                    </div>
+                    <div class="md:col-span-3 flex justify-between items-center">
+                        <div id="expense-edit-no-hint" class="text-sm font-bold text-rose-600 hidden"></div>
+                        <div class="flex gap-2 ml-auto">
+                            <button type="button" id="expense-cancel-btn" onclick="cancelEditExpense()" class="hidden bg-slate-400 hover:bg-slate-500 text-white font-bold py-2.5 px-4 rounded-lg transition shadow">❌ 取消編輯</button>
+                            <button type="submit" id="expense-submit-btn" class="bg-rose-600 hover:bg-rose-700 text-white font-bold py-2.5 px-6 rounded-lg transition shadow">💾 儲存支出單（扣帳）</button>
+                        </div>
+                    </div>
+                </div>
+            </form>
+
+            <h3 class="text-lg font-bold text-slate-800 pt-4">📋 <span class="text-teal-600 font-black id-selected-month-label">本月</span> 營業支出與歷史成本紀錄</h3>
+            <div class="bg-white shadow-sm rounded-xl overflow-hidden border border-slate-200">
+                <table class="w-full text-left border-collapse">
+                    <thead class="bg-slate-100 border-b border-slate-200">
+                        <tr>
+                            <th class="p-4 font-bold text-slate-700">單號</th>
+                            <th class="p-4 font-bold text-slate-700">日期</th>
+                            <th class="p-4 font-bold text-slate-700">支出類型</th>
+                            <th class="p-4 font-bold text-slate-700">項目說明</th>
+                            <th class="p-4 font-bold text-slate-700">金額</th>
+                            <th class="p-4 font-bold text-slate-700">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="expenses-table-body"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- 分頁 4：品項與零件設定 -->
+        <section id="tab-settings" class="tab-content space-y-6">
+            <div class="bg-white p-6 shadow-sm rounded-xl border border-slate-200 space-y-4">
+                <h2 class="text-xl font-bold text-slate-900 border-l-4 border-teal-600 pl-2">⚙️ 店內固定品項與材料設定</h2>
+                <form id="item-form" class="grid grid-cols-1 md:grid-cols-6 gap-4 items-end">
+                    <div>
+                        <label class="block text-sm font-bold text-slate-700 mb-1">編號</label>
+                        <input type="text" id="i-id" required class="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:outline-none" placeholder="P001">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-bold text-slate-700 mb-1">品項/零件名稱</label>
+                        <input type="text" id="i-name" required class="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-bold text-slate-700 mb-1">種類</label>
+                        <select id="i-type" onchange="toggleItemTypeSetup()" class="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:outline-none">
+                            <option value="service">🛠️ 純維修服務/代工</option>
+                            <option value="part">📦 材料零件 (需計庫存)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-bold text-slate-700 mb-1">預設售價 ($)</label>
+                        <input type="number" id="i-price" min="0" required class="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:outline-none">
+                    </div>
+                    <div id="setup-init-box" class="hidden">
+                        <label class="block text-sm font-bold text-slate-700 mb-1">開店初期庫存</label>
+                        <input type="number" id="i-init" min="0" class="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:outline-none" value="0">
+                    </div>
+                    <div id="setup-min-box" class="hidden">
+                        <label class="block text-sm font-bold text-slate-700 mb-1">安全庫存量</label>
+                        <input type="number" id="i-min" min="0" class="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:outline-none" value="3">
+                    </div>
+                    <div class="flex gap-2">
+                        <button type="button" id="item-cancel-btn" onclick="cancelEditItem()" class="hidden bg-slate-400 hover:bg-slate-500 text-white font-bold py-2 px-3 rounded-lg transition shadow">取消</button>
+                        <button type="submit" id="item-submit-btn" class="bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-4 rounded-lg transition w-full shadow">➕ 新增</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- 歷史資料搬家區 -->
+            <div class="bg-orange-50 p-6 shadow-sm rounded-xl border-2 border-dashed border-orange-300 space-y-4">
+                <h3 class="text-lg font-black text-orange-800 flex items-center justify-between">
+                    <span>📥 歷史資料大搬家 (每日獨立單號版)</span>
+                    <button onclick="clearAllDataForReset()" class="bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs py-1 px-3 rounded shadow transition">🧹 清空目前所有紀錄 (重新來過)</button>
+                </h3>
+                <p class="text-sm text-orange-700 font-medium">
+                    更新說明：此版本已全面整合「月份獨立流水號」、「每日抽屜結算」與「按日拉出月報表」功能。
+                </p>
+                <div class="flex flex-col sm:flex-row items-center gap-4 bg-white p-4 rounded-lg border border-orange-200">
+                    <input type="file" id="csvFileInput" accept=".csv" class="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-orange-100 file:text-orange-700 hover:file:bg-orange-200" />
+                    <button onclick="handleCsvImport()" class="w-full sm:w-auto bg-orange-600 hover:bg-orange-700 text-white font-bold py-2 px-6 rounded-lg transition whitespace-nowrap shadow">🚀 開始搬家匯入</button>
+                </div>
+            </div>
+
+            <!-- 品項清單 -->
+            <h3 class="text-lg font-bold text-slate-800 pt-2">📋 目前系統內設定的品項一覽</h3>
+            <div class="bg-white shadow-sm rounded-xl overflow-hidden border border-slate-200">
+                <table class="w-full text-left border-collapse">
+                    <thead class="bg-slate-100 border-b border-slate-200">
+                        <tr>
+                            <th class="p-4 font-bold text-slate-700">編號</th>
+                            <th class="p-4 font-bold text-slate-700">名稱</th>
+                            <th class="p-4 font-bold text-slate-600">類型</th>
+                            <th class="p-4 font-bold text-slate-900">預設售價</th>
+                            <th class="p-4 font-bold text-slate-700">安全庫存量</th>
+                            <th class="p-4 font-bold text-slate-700">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="settings-table-body"></tbody>
+                </table>
+            </div>
+        </section>
+
+    </main>
+
+    <script>
+        // 核心資料庫初始化
+        let shopData = JSON.parse(localStorage.getItem('repairShopSystem_FAN')) || {
+            items: [{ id: 'S_DEFAULT', name: '歷史匯入之純代工/服務', type: 'service', price: 0, init: 0, min: 0 }],
+            repairs: [],
+            expenses: [],
+            monthlyCounters: {} 
+        };
+
+        if (!shopData.monthlyCounters) shopData.monthlyCounters = {};
+
+        let currentEditRepairId = null;
+        let currentEditExpenseId = null;
+        let currentEditItemId = null;
+
+        // 預設日期與月份設定
+        const today = new Date();
+        const formattedTodayStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+        const currentYearMonth = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0');
+        
+        document.getElementById('global-month').value = currentYearMonth;
+        document.getElementById('daily-settle-date').value = formattedTodayStr;
+
+        function saveData() {
+            localStorage.setItem('repairShopSystem_FAN', JSON.stringify(shopData));
+            renderAll();
+        }
+
+        // 月份獨立流水號生成
+        function generateMonthlyTicketNo(type, dateStr) {
+            const parts = dateStr.split('-');
+            if (parts.length < 2) return (type === 'repair' ? 'R' : 'E') + '0001';
+            
+            const yearMonth = parts[0] + '-' + parts[1];
+            const yy = parts[0].slice(-2);
+            const mm = parts[1];
+            
+            if (!shopData.monthlyCounters[yearMonth]) {
+                shopData.monthlyCounters[yearMonth] = { repair: 0, expense: 0 };
+            }
+            
+            if (type === 'repair') {
+                shopData.monthlyCounters[yearMonth].repair++;
+                return `R${yy}${mm}-${String(shopData.monthlyCounters[yearMonth].repair).padStart(4, '0')}`;
+            } else {
+                shopData.monthlyCounters[yearMonth].expense++;
+                return `E${yy}${mm}-${String(shopData.monthlyCounters[yearMonth].expense).padStart(4, '0')}`;
+            }
+        }
+
+        // 每日抽屜結算邏輯
+        let computedDailyNetCash = 0; 
+
+        function renderDailySettlement() {
+            const targetDate = document.getElementById('daily-settle-date').value;
+            if(!targetDate) return;
+
+            const targetRepairs = shopData.repairs.filter(r => r.date === targetDate);
+            const targetExpenses = shopData.expenses.filter(e => e.date === targetDate);
+
+            const dayIncome = targetRepairs.reduce((sum, r) => sum + r.price, 0);
+            const dayExpense = targetExpenses.reduce((sum, e) => sum + e.amount, 0);
+            computedDailyNetCash = dayIncome - dayExpense;
+
+            document.getElementById('daily-income-text').innerText = `$${dayIncome.toLocaleString()} (${targetRepairs.length} 筆)`;
+            document.getElementById('daily-expense-text').innerText = `$${dayExpense.toLocaleString()} (${targetExpenses.length} 筆)`;
+            
+            const netEl = document.getElementById('daily-net-text');
+            netEl.innerText = (computedDailyNetCash >= 0 ? '+' : '') + `$${computedDailyNetCash.toLocaleString()}`;
+            if(computedDailyNetCash >= 0) {
+                netEl.className = "text-2xl font-black text-emerald-600 mt-1";
+            } else {
+                netEl.className = "text-2xl font-black text-rose-600 mt-1";
+            }
+
+            calculateCashDiff();
+        }
+
+        function calculateCashDiff() {
+            const startCash = parseInt(document.getElementById('cash-start-input').value) || 0;
+            const actualCashInput = document.getElementById('cash-actual-input').value;
+            
+            const shouldBeCash = startCash + computedDailyNetCash;
+            document.getElementById('cash-should-be-text').innerText = `帳面應有總額：$${shouldBeCash.toLocaleString()}`;
+
+            const diffResultEl = document.getElementById('cash-diff-result');
+
+            if (actualCashInput === "") {
+                diffResultEl.innerText = "請輸入實清金額...";
+                diffResultEl.className = "text-slate-400 text-xs font-medium";
+                return;
+            }
+
+            const actualCash = parseInt(actualCashInput) || 0;
+            const diff = actualCash - shouldBeCash;
+
+            if (diff === 0) {
+                diffResultEl.innerText = "🟢 帳實完全吻合！一塊都不差！";
+                diffResultEl.className = "text-emerald-600 font-black text-sm";
+            } else if (diff > 0) {
+                diffResultEl.innerText = `⚠️ 盤盈：多出 +$${diff.toLocaleString()} 元 (找錯錢或少記支出)`;
+                diffResultEl.className = "text-blue-600 font-black text-sm";
+            } else {
+                diffResultEl.innerText = `🚨 盤虧：虧空 $${diff.toLocaleString()} 元 (找錯錢或漏記帳)`;
+                diffResultEl.className = "text-rose-600 font-black text-sm";
+            }
+        }
+
+        // 🔥 新增：渲染按日統計的月金流報表
+        function renderMonthlyReportTable(selectedMonth) {
+            const tbody = document.getElementById('monthly-report-tbody');
+            if(!selectedMonth) {
+                tbody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-slate-400">請選擇月份。</td></tr>`;
+                return;
+            }
+
+            // 收集該月有資料的所有日期
+            const datesSet = new Set();
+            shopData.repairs.forEach(r => { if(r.date.startsWith(selectedMonth)) datesSet.add(r.date); });
+            shopData.expenses.forEach(e => { if(e.date.startsWith(selectedMonth)) datesSet.add(e.date); });
+            
+            const sortedDates = Array.from(datesSet).sort();
+
+            if(sortedDates.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-slate-400">📅 該月份尚無任何收支紀錄。</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = sortedDates.map(date => {
+                const dayIncome = shopData.repairs.filter(r => r.date === date).reduce((sum, r) => sum + r.price, 0);
+                const dayExpense = shopData.expenses.filter(e => e.date === date).reduce((sum, e) => sum + e.amount, 0);
+                const dayNet = dayIncome - dayExpense;
+
+                return `
+                    <tr class="border-b border-slate-100 hover:bg-slate-50 text-sm">
+                        <td class="p-3 font-mono font-bold text-slate-700">${date}</td>
+                        <td class="p-3 text-emerald-600 font-bold">$${dayIncome.toLocaleString()}</td>
+                        <td class="p-3 text-rose-600 font-bold">$${dayExpense.toLocaleString()}</td>
+                        <td class="p-3 font-black ${dayNet >= 0 ? 'text-emerald-700' : 'text-rose-700'}">
+                            ${dayNet >= 0 ? '+' : ''}$${dayNet.toLocaleString()}
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        // 🔥 新增：一鍵匯出月報表為 Excel/CSV 檔案
+        function exportMonthlyCsv() {
+            const selectedMonth = document.getElementById('global-month').value;
+            if (!selectedMonth) { alert('請先選擇想匯出的月份！'); return; }
+            
+            const datesSet = new Set();
+            shopData.repairs.forEach(r => { if(r.date.startsWith(selectedMonth)) datesSet.add(r.date); });
+            shopData.expenses.forEach(e => { if(e.date.startsWith(selectedMonth)) datesSet.add(e.date); });
+            const sortedDates = Array.from(datesSet).sort();
+            
+            if(sortedDates.length === 0) {
+                alert(`${selectedMonth} 月沒有任何數據可以匯出喔！`);
+                return;
+            }
+
+            // 加入 \uFEFF 確保 Excel 開啟不會變亂碼 (BOM)
+            let csvContent = "\uFEFF"; 
+            csvContent += `FAN 救手機 — ${selectedMonth} 月營運金流日計表\n`;
+            csvContent += "日期,當日總收入(維修服務),當日總支出(材料開銷),當日淨現金流\n";
+            
+            sortedDates.forEach(date => {
+                const income = shopData.repairs.filter(r => r.date === date).reduce((sum, r) => sum + r.price, 0);
+                const expense = shopData.expenses.filter(e => e.date === date).reduce((sum, e) => sum + e.amount, 0);
+                const net = income - expense;
+                csvContent += `${date},${income},${expense},${net}\n`;
+            });
+            
+            // 下載檔案機制
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.setAttribute("download", `FAN救手機_${selectedMonth}_月金流報表.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function clearAllDataForReset() {
+            if(confirm('🚨 確定要【徹底重置系統】嗎？\n這將會清除所有帳目、每月單號計數器，並且將「品項清單」恢復原廠狀態！')) {
+                shopData.repairs = [];
+                shopData.expenses = [];
+                shopData.monthlyCounters = {};
+                shopData.items = [{ id: 'S_DEFAULT', name: '歷史匯入之純代工/服務', type: 'service', price: 0, init: 0, min: 0 }];
+                cancelEditRepair();
+                cancelEditExpense();
+                cancelEditItem();
+                saveData();
+                alert('✨ 系統已全面徹底重置！所有月份單號已重新歸零。');
+            }
+        }
+
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(el => {
+                el.classList.remove('bg-teal-800');
+                el.classList.add('hover:bg-teal-500');
+            });
+            document.getElementById(`tab-${tabName}`).classList.add('active');
+            document.getElementById(`btn-${tabName}`).classList.add('bg-teal-800');
+        }
+
+        document.getElementById('r-date').value = formattedTodayStr;
+        document.getElementById('e-date').value = formattedTodayStr;
+
+        function autoFillPrice() {
+            const val = document.getElementById('r-item').value.trim();
+            const item = shopData.items.find(i => i.name === val || i.id === val);
+            if(item) document.getElementById('r-price').value = item.price;
+        }
+
+        function toggleExpenseType() {
+            const type = document.getElementById('e-type').value;
+            document.getElementById('expense-part-box').style.display = type === 'part' ? 'block' : 'none';
+            document.getElementById('expense-part-qty-box').style.display = type === 'part' ? 'block' : 'none';
+            document.getElementById('expense-other-box').style.display = type === 'part' ? 'none' : 'block';
+        }
+
+        function toggleItemTypeSetup() {
+            const type = document.getElementById('i-type').value;
+            document.getElementById('setup-init-box').style.display = type === 'part' ? 'block' : 'none';
+            document.getElementById('setup-min-box').style.display = type === 'part' ? 'block' : 'none';
+        }
+
+        function startEditRepair(id) {
+            const r = shopData.repairs.find(x => x.id === id);
+            if(!r) return;
+            currentEditRepairId = id;
+            document.getElementById('r-date').value = r.date;
+            document.getElementById('r-customer').value = r.customer;
+            
+            const item = shopData.items.find(i => i.id === r.itemId);
+            document.getElementById('r-item').value = item ? item.name : (r.itemId || '');
+            
+            document.getElementById('r-price').value = r.price;
+            document.getElementById('r-reason').value = r.reason || '';
+            document.getElementById('r-password').value = r.password || '';
+            document.getElementById('r-imei').value = r.imei || '';
+            document.getElementById('r-notes').value = r.notes || '';
+
+            const hintBox = document.getElementById('repair-edit-no-hint');
+            hintBox.innerText = `⚙️ 正在修改維修單號：${r.ticketNo || '無單號'}`;
+            hintBox.classList.remove('hidden');
+
+            document.getElementById('repair-submit-btn').innerText = '🔄 更新維修單資料';
+            document.getElementById('repair-cancel-btn').classList.remove('hidden');
+            document.getElementById('repair-form').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function cancelEditRepair() {
+            currentEditRepairId = null;
+            document.getElementById('repair-form').reset();
+            document.getElementById('r-date').value = formattedTodayStr;
+            document.getElementById('repair-submit-btn').innerText = '💾 儲存維修單（入帳）';
+            document.getElementById('repair-cancel-btn').classList.add('hidden');
+            document.getElementById('repair-edit-no-hint').classList.add('hidden');
+        }
+
+        function startEditExpense(id) {
+            const e = shopData.expenses.find(x => x.id === id);
+            if(!e) return;
+            currentEditExpenseId = id;
+            document.getElementById('e-date').value = e.date;
+            document.getElementById('e-type').value = e.type;
+            toggleExpenseType();
+
+            if(e.type === 'part') {
+                document.getElementById('e-part-id').value = e.partId;
+                document.getElementById('e-part-qty').value = e.qty;
+            } else {
+                document.getElementById('e-other-name').value = e.name.replace(/^\[維修成本\]\s/, '');
+            }
+            document.getElementById('e-amount').value = e.amount;
+
+            const hintBox = document.getElementById('expense-edit-no-hint');
+            hintBox.innerText = `⚙️ 正在修改支出單號：${e.ticketNo || '無單號'}`;
+            hintBox.classList.remove('hidden');
+
+            document.getElementById('expense-submit-btn').innerText = '🔄 更新支出單資料';
+            document.getElementById('expense-cancel-btn').classList.remove('hidden');
+            document.getElementById('expense-form').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function cancelEditExpense() {
+            currentEditExpenseId = null;
+            document.getElementById('expense-form').reset();
+            document.getElementById('e-date').value = formattedTodayStr;
+            toggleExpenseType();
+            document.getElementById('expense-submit-btn').innerText = '💾 儲存支出單（扣帳）';
+            document.getElementById('expense-cancel-btn').classList.add('hidden');
+            document.getElementById('expense-edit-no-hint').classList.add('hidden');
+        }
+
+        function startEditItem(id) {
+            const i = shopData.items.find(x => x.id === id);
+            if(!i) return;
+            currentEditItemId = id;
+            document.getElementById('i-id').value = i.id;
+            document.getElementById('i-id').disabled = true; 
+            document.getElementById('i-name').value = i.name;
+            document.getElementById('i-type').value = i.type;
+            document.getElementById('i-price').value = i.price;
+            document.getElementById('i-init').value = i.init || 0;
+            document.getElementById('i-min').value = i.min || 0;
+            toggleItemTypeSetup();
+
+            document.getElementById('item-submit-btn').innerText = '🔄 更新';
+            document.getElementById('item-cancel-btn').classList.remove('hidden');
+            document.getElementById('item-form').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function cancelEditItem() {
+            currentEditItemId = null;
+            document.getElementById('i-id').disabled = false;
+            document.getElementById('item-form').reset();
+            toggleItemTypeSetup();
+            document.getElementById('item-submit-btn').innerText = '➕ 新增';
+            document.getElementById('item-cancel-btn').classList.add('hidden');
+        }
+
+        function parseCsvLine(line) {
+            let arr = [];
+            let current = '';
+            let inQuotes = false;
+            for (let i = 0; i < line.length; i++) {
+                let char = line[i];
+                if (char === '"') {
+                    inQuotes = !inQuotes;
+                } else if (char === ',' && !inQuotes) {
+                    arr.push(current.trim());
+                    current = '';
+                } else {
+                    current += char;
+                }
+            }
+            arr.push(current.trim());
+            return arr.map(val => val.replace(/^"|"$/g, '').trim());
+        }
+
+        function handleCsvImport() {
+            const fileInput = document.getElementById('csvFileInput');
+            if (!fileInput.files.length) {
+                alert('請先選擇下載好的 Google 試算表 .csv 檔案！');
+                return;
+            }
+
+            const file = fileInput.files[0];
+            const reader = new FileReader();
+
+            reader.onload = function(e) {
+                const text = e.target.result;
+                const rows = text.split('\n');
+                
+                let repairCount = 0;
+                let expenseCount = 0;
+                let validRecords = [];
+
+                for (let i = 1; i < rows.length; i++) {
+                    let line = rows[i].trim();
+                    if (!line) continue;
+
+                    const columns = parseCsvLine(line);
+                    if (!columns[0] || !columns[1]) continue;
+                    if (columns[0].includes('總計') || columns[1].includes('總計') || columns[0].includes('合計')) continue;
+
+                    let formattedDate = columns[0].replace(/\//g, '-');
+                    const parts = formattedDate.split('-');
+                    if(parts.length === 3) {
+                        parts[1] = parts[1].padStart(2, '0');
+                        parts[2] = parts[2].padStart(2, '0');
+                        formattedDate = parts.join('-');
+                    }
+
+                    validRecords.push({
+                        date: formattedDate,
+                        customer: columns[1],
+                        itemName: columns[2] || '未註明品項',
+                        reason: columns[3] || '',
+                        amount: parseInt(columns[4].replace(/[^0-9]/g, '')) || 0,
+                        cost: parseInt(columns[5].replace(/[^0-9]/g, '')) || 0,
+                        notes: columns[7] || '',
+                        password: columns[8] || '',
+                        imei: columns[9] || '',
+                        lineIdx: i
+                    });
+                }
+
+                validRecords.sort((a, b) => a.date.localeCompare(b.date));
+
+                validRecords.forEach((record) => {
+                    const logIdSuffix = '_' + record.lineIdx + '_' + Math.floor(Math.random()*1000);
+
+                    if (record.amount > 0) {
+                        let item = shopData.items.find(idx => idx.name === record.itemName);
+                        if (!item) {
+                            const newId = 'IMP_' + Date.now() + '_' + Math.floor(Math.random()*1000);
+                            item = { id: newId, name: record.itemName, type: 'service', price: record.amount, init: 0, min: 0 };
+                            shopData.items.push(item);
+                        }
+
+                        const rTicketNo = generateMonthlyTicketNo('repair', record.date);
+                        shopData.repairs.push({
+                            id: 'R_OLD_' + Date.now() + logIdSuffix,
+                            ticketNo: rTicketNo,
+                            date: record.date,
+                            customer: record.customer, 
+                            itemId: item.id,
+                            price: record.amount,
+                            reason: record.reason,
+                            password: record.password,
+                            imei: record.imei,
+                            notes: record.notes
+                        });
+                        repairCount++;
+
+                        if (record.cost > 0) {
+                            const eTicketNo = generateMonthlyTicketNo('expense', record.date);
+                            shopData.expenses.push({
+                                id: 'E_OLD_' + Date.now() + logIdSuffix,
+                                ticketNo: eTicketNo,
+                                date: record.date,
+                                type: 'other',
+                                partId: '',
+                                qty: 0,
+                                name: `[維修成本] ${record.itemName} (客:${record.customer})`,
+                                amount: record.cost
+                            });
+                            expenseCount++;
+                        }
+                    } else if (record.cost > 0) {
+                        const eTicketNo = generateMonthlyTicketNo('expense', record.date);
+                        let expenseName = (record.itemName && record.itemName !== '未註明品項') ? `${record.itemName} (${record.customer})` : record.customer;
+                        if (record.notes) expenseName += ` — ${record.notes}`;
+
+                        shopData.expenses.push({
+                            id: 'E_OLD_' + Date.now() + logIdSuffix,
+                            ticketNo: eTicketNo,
+                            date: record.date,
+                            type: 'other',
+                            partId: '',
+                            qty: 0,
+                            name: expenseName,
+                            amount: record.cost
+                        });
+                        expenseCount++;
+                    }
+                });
+
+                saveData();
+                alert(`🎉 完美匯入！共還原 ${repairCount} 筆顧客維修單，以及 ${expenseCount} 筆營業支出單！`);
+                switchTab('finance');
+            };
+
+            reader.readAsText(file, 'UTF-8');
+        }
+
+        // 表單提交事件
+        document.getElementById('item-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const id = document.getElementById('i-id').value.trim();
+            const data = {
+                name: document.getElementById('i-name').value.trim(),
+                type: document.getElementById('i-type').value,
+                price: parseInt(document.getElementById('i-price').value) || 0,
+                init: parseInt(document.getElementById('i-init').value) || 0,
+                min: parseInt(document.getElementById('i-min').value) || 0
+            };
+
+            if (currentEditItemId) {
+                const index = shopData.items.findIndex(i => i.id === currentEditItemId);
+                if (index !== -1) shopData.items[index] = { ...shopData.items[index], ...data };
+                currentEditItemId = null;
+                document.getElementById('i-id').disabled = false;
+                document.getElementById('item-submit-btn').innerText = '➕ 新增';
+                document.getElementById('item-cancel-btn').classList.add('hidden');
+            } else {
+                if(shopData.items.some(i => i.id === id)) { alert('編號重複囉！'); return; }
+                shopData.items.push({ id: id, ...data });
+            }
+            document.getElementById('item-form').reset();
+            toggleItemTypeSetup();
+            saveData();
+        });
+
+        document.getElementById('repair-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const rItemValue = document.getElementById('r-item').value.trim();
+            let item = shopData.items.find(i => i.name === rItemValue || i.id === rItemValue);
+            let itemId = '';
+            
+            if (item) {
+                itemId = item.id;
+            } else if (rItemValue) {
+                const newId = 'AUTO_' + Date.now();
+                const newPrice = parseInt(document.getElementById('r-price').value) || 0;
+                item = { id: newId, name: rItemValue, type: 'service', price: newPrice, init: 0, min: 0 };
+                shopData.items.push(item);
+                itemId = newId;
+            } else {
+                itemId = 'S_DEFAULT';
+            }
+
+            const data = {
+                date: document.getElementById('r-date').value,
+                customer: document.getElementById('r-customer').value.trim(),
+                itemId: itemId,
+                price: parseInt(document.getElementById('r-price').value) || 0,
+                reason: document.getElementById('r-reason').value.trim(),
+                password: document.getElementById('r-password').value.trim(),
+                imei: document.getElementById('r-imei').value.trim(),
+                notes: document.getElementById('r-notes').value.trim()
+            };
+
+            if (currentEditRepairId) {
+                const index = shopData.repairs.findIndex(r => r.id === currentEditRepairId);
+                if (index !== -1) shopData.repairs[index] = { ...shopData.repairs[index], ...data };
+                currentEditRepairId = null;
+                document.getElementById('repair-submit-btn').innerText = '💾 儲存維修單（入帳）';
+                document.getElementById('repair-cancel-btn').classList.add('hidden');
+                document.getElementById('repair-edit-no-hint').classList.add('hidden');
+            } else {
+                const newTicketNo = generateMonthlyTicketNo('repair', data.date);
+                shopData.repairs.push({ id: 'R_' + Date.now(), ticketNo: newTicketNo, ...data });
+            }
+
+            document.getElementById('repair-form').reset();
+            document.getElementById('r-date').value = formattedTodayStr;
+            saveData();
+        });
+
+        document.getElementById('expense-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const type = document.getElementById('e-type').value;
+            let name = '', partId = '', qty = 0;
+
+            if(type === 'part') {
+                partId = document.getElementById('e-part-id').value;
+                const partItem = shopData.items.find(i => i.id === partId);
+                qty = parseInt(document.getElementById('e-part-qty').value) || 1;
+                name = `補貨進貨：${partItem.name} x${qty}個`;
+            } else {
+                name = document.getElementById('e-other-name').value.trim() || '日常一般雜支';
+            }
+
+            const amount = parseInt(document.getElementById('e-amount').value) || 0;
+            const targetDate = document.getElementById('e-date').value;
+
+            if (currentEditExpenseId) {
+                const index = shopData.expenses.findIndex(ex => ex.id === currentEditExpenseId);
+                if (index !== -1) {
+                    shopData.expenses[index] = {
+                        ...shopData.expenses[index],
+                        date: targetDate,
+                        type: type,
+                        partId: partId,
+                        qty: qty,
+                        name: name,
+                        amount: amount
+                    };
+                }
+                currentEditExpenseId = null;
+                document.getElementById('expense-submit-btn').innerText = '💾 儲存支出單（扣帳）';
+                document.getElementById('expense-cancel-btn').classList.add('hidden');
+                document.getElementById('expense-edit-no-hint').classList.add('hidden');
+            } else {
+                const newTicketNo = generateMonthlyTicketNo('expense', targetDate);
+                shopData.expenses.push({
+                    id: 'E_' + Date.now(),
+                    ticketNo: newTicketNo,
+                    date: targetDate,
+                    type: type,
+                    partId: partId,
+                    qty: qty,
+                    name: name,
+                    amount: amount
+                });
+            }
+
+            document.getElementById('expense-form').reset();
+            document.getElementById('e-date').value = formattedTodayStr;
+            toggleExpenseType();
+            saveData();
+        });
+
+        function deleteLog(listName, id) {
+            if(confirm('確定要刪除這筆紀錄嗎？（注意：為確保歷史帳目核對，其餘單號不會重新遞補）')) { 
+                if(currentEditRepairId === id) cancelEditRepair();
+                if(currentEditExpenseId === id) cancelEditExpense();
+                shopData[listName] = shopData[listName].filter(x => x.id !== id); 
+                saveData(); 
+            }
+        }
+        function deleteItem(id) {
+            if(id === 'S_DEFAULT') { alert('此為系統預設品項，不可刪除！'); return; }
+            if(confirm('確定要移除這個品項嗎？')) { 
+                if(currentEditItemId === id) cancelEditItem();
+                shopData.items = shopData.items.filter(x => x.id !== id); 
+                saveData(); 
+            }
+        }
+
+        function renderAll() {
+            const selectedMonth = document.getElementById('global-month').value;
+            const searchKeyword = document.getElementById('global-search').value.trim().toLowerCase();
+            const searchHint = document.getElementById('search-hint');
+
+            document.getElementById('r-item-list').innerHTML = shopData.items.map(i => `<option value="${i.name}"></option>`).join('');
+            document.getElementById('e-part-id').innerHTML = shopData.items.filter(i => i.type === 'part').map(i => `<option value="${i.id}">${i.name}</option>`).join('');
+
+            let filteredRepairs = [];
+            let filteredExpenses = [];
+            const displayMonthText = selectedMonth ? selectedMonth.replace('-', '年') + '月' : '本月';
+
+            if (searchKeyword) {
+                searchHint.innerHTML = `✨ 正在搜尋包含「<span class="text-orange-600 font-bold">${searchKeyword}</span>」的全部歷史資料`;
+                document.getElementById('title-month-text').innerHTML = `搜尋「${searchKeyword}」的結果`;
+                document.querySelectorAll('.id-selected-month-label').forEach(el => el.innerText = `搜尋「${searchKeyword}」`);
+                document.querySelectorAll('.id-finance-card-label').forEach(el => el.innerText = '搜尋加總');
+
+                filteredRepairs = shopData.repairs.filter(r => {
+                    const item = shopData.items.find(i => i.id === r.itemId) || { name: '' };
+                    return (r.ticketNo || '').toLowerCase().includes(searchKeyword) ||
+                           r.customer.toLowerCase().includes(searchKeyword) || 
+                           item.name.toLowerCase().includes(searchKeyword) ||
+                           (r.reason && r.reason.toLowerCase().includes(searchKeyword)) ||
+                           (r.notes && r.notes.toLowerCase().includes(searchKeyword)) ||
+                           r.date.includes(searchKeyword);
+                });
+                filteredExpenses = shopData.expenses.filter(e => (e.ticketNo || '').toLowerCase().includes(searchKeyword) || e.name.toLowerCase().includes(searchKeyword) || e.date.includes(searchKeyword));
+            } else {
+                searchHint.innerText = `※ 未輸入搜尋時，會自動切換為 ${displayMonthText} 的資料喔！`;
+                document.getElementById('title-month-text').innerText = displayMonthText;
+                document.querySelectorAll('.id-selected-month-label').forEach(el => el.innerText = displayMonthText);
+                document.querySelectorAll('.id-finance-card-label').forEach(el => el.innerText = '該月');
+
+                filteredRepairs = shopData.repairs.filter(r => r.date.startsWith(selectedMonth));
+                filteredExpenses = shopData.expenses.filter(e => e.date.startsWith(selectedMonth));
+            }
+
+            const totalIncome = filteredRepairs.reduce((sum, r) => sum + r.price, 0);
+            const totalExpense = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
+            const netProfit = totalIncome - totalExpense;
+
+            document.getElementById('stat-income').innerText = `$${totalIncome.toLocaleString()}`;
+            document.getElementById('stat-expense').innerText = `$${totalExpense.toLocaleString()}`;
+            document.getElementById('stat-profit').innerText = `$${netProfit.toLocaleString()}`;
+
+            let triggerAlert = false;
+            const invTbody = document.getElementById('inventory-table-body');
+            const partItems = shopData.items.filter(i => i.type === 'part');
+            
+            if(partItems.length === 0) {
+                invTbody.innerHTML = `<tr><td colspan="8" class="p-4 text-center text-slate-400">目前沒有實體零件庫存。</td></tr>`;
+            } else {
+                invTbody.innerHTML = partItems.map(p => {
+                    const totalIn = shopData.expenses.filter(e => e.type === 'part' && e.partId === p.id).reduce((sum, e) => sum + e.qty, 0);
+                    const totalOut = shopData.repairs.filter(r => r.itemId === p.id).length;
+                    const current = p.init + totalIn - totalOut;
+                    const isLow = current <= p.min;
+                    if(isLow) triggerAlert = true;
+
+                    return `
+                        <tr class="border-b border-slate-200 hover:bg-slate-50 ${isLow ? 'bg-amber-50' : ''}">
+                            <td class="p-4 font-medium">${p.id}</td>
+                            <td class="p-4 font-bold text-slate-900">${p.name}</td>
+                            <td class="p-4 text-slate-500">${p.init}</td>
+                            <td class="p-4 text-emerald-600 font-bold">+${totalIn}</td>
+                            <td class="p-4 text-rose-600 font-bold">-${totalOut}</td>
+                            <td class="p-4 font-black text-lg">${current}</td>
+                            <td class="p-4 text-slate-600 font-medium">${p.min}</td>
+                            <td class="p-4 text-center">${isLow ? '<span class="bg-rose-100 text-rose-700 text-xs font-black px-2.5 py-1 rounded-full">🚨 庫存低</span>' : '<span class="bg-emerald-100 text-emerald-700 text-xs font-bold px-2.5 py-1 rounded-full">🟢 充足</span>'}</td>
+                        </tr>
+                    `;
+                }).join('');
+            }
+            document.getElementById('low-stock-alert-box').style.display = triggerAlert ? 'block' : 'none';
+
+            // 顧客維修明細
+            const repairTbody = document.getElementById('repairs-table-body');
+            if(filteredRepairs.length === 0) {
+                repairTbody.innerHTML = `<tr><td colspan="8" class="p-4 text-center text-slate-400">查無任何維修紀錄。</td></tr>`;
+            } else {
+                repairTbody.innerHTML = filteredRepairs.map(r => {
+                    const item = shopData.items.find(i => i.id === r.itemId) || { name: '未知品項' };
+                    return `
+                        <tr class="border-b border-slate-100 hover:bg-slate-50 text-sm">
+                            <td class="p-3 font-mono font-bold text-teal-600">${r.ticketNo || '-'}</td>
+                            <td class="p-3 whitespace-nowrap">${r.date}</td>
+                            <td class="p-3 font-bold text-slate-900">${r.customer}</td>
+                            <td class="p-3">
+                                <div class="font-bold text-teal-700">${item.name}</div>
+                                ${r.reason ? `<div class="text-xs text-rose-600">🚨 ${r.reason}</div>` : ''}
+                            </td>
+                            <td class="p-3 text-xs font-mono text-slate-500">
+                                ${r.password ? `<div>密:${r.password}</div>` : ''}
+                                ${r.imei ? `<div>串:${r.imei}</div>` : ''}
+                            </td>
+                            <td class="p-3 text-emerald-600 font-black">$${r.price.toLocaleString()}</td>
+                            <td class="p-3 text-xs text-slate-500">${r.notes || '-'}</td>
+                            <td class="p-3 whitespace-nowrap">
+                                <button onclick="startEditRepair('${r.id}')" class="text-teal-600 hover:underline mr-2 font-bold">✏️ 編輯</button>
+                                <button onclick="deleteLog('repairs', '${r.id}')" class="text-rose-500 hover:underline">🗑️ 刪除</button>
+                            </td>
+                        </tr>
+                    `;
+                }).reverse().join('');
+            }
+
+            // 支出明細
+            const expenseTbody = document.getElementById('expenses-table-body');
+            if(filteredExpenses.length === 0) {
+                expenseTbody.innerHTML = `<tr><td colspan="6" class="p-4 text-center text-slate-400">查無 any 支出與成本紀錄。</td></tr>`;
+            } else {
+                expenseTbody.innerHTML = filteredExpenses.map(e => `
+                    <tr class="border-b border-slate-100 hover:bg-slate-50 text-sm">
+                        <td class="p-4 font-mono font-bold text-rose-600">${e.ticketNo || '-'}</td>
+                        <td class="p-4 font-medium">${e.date}</td>
+                        <td class="p-4 text-xs text-slate-500">${e.type === 'part' ? '📦 材料零件進貨' : '💼 營業成本/開銷'}</td>
+                        <td class="p-4 font-medium text-slate-700">${e.name}</td>
+                        <td class="p-4 text-rose-600 font-bold">$${e.amount.toLocaleString()}</td>
+                        <td class="p-4 whitespace-nowrap">
+                            <button onclick="startEditExpense('${e.id}')" class="text-teal-600 hover:underline mr-2 font-bold">✏️ 編輯</button>
+                            <button onclick="deleteLog('expenses', '${e.id}')" class="text-rose-500 hover:underline">🗑️ 刪除</button>
+                        </td>
+                    </tr>
+                `).reverse().join('');
+            }
+
+            // 品項設定一覽
+            document.getElementById('settings-table-body').innerHTML = shopData.items.map(i => `
+                <tr class="border-b border-slate-100 hover:bg-slate-50 text-sm">
+                    <td class="p-4 text-slate-500 font-mono">${i.id}</td>
+                    <td class="p-4 font-bold text-slate-800">${i.name}</td>
+                    <td class="p-4 text-slate-600">${i.type === 'part' ? '📦 零件材料' : '🛠️ 純服務/代工'}</td>
+                    <td class="p-4 font-bold text-slate-900">$${i.price.toLocaleString()}</td>
+                    <td class="p-4 text-slate-500">${i.type === 'part' ? i.min : '-'}</td>
+                    <td class="p-4 whitespace-nowrap">
+                        <button onclick="startEditItem('${i.id}')" class="text-teal-600 hover:underline mr-2 font-bold">✏️ 編輯</button>
+                        <button onclick="deleteItem('${i.id}')" class="text-rose-500 hover:underline">🗑️ 移除</button>
+                    </td>
+                </tr>
+            `).join('');
+
+            // 同步更新日結數據
+            renderDailySettlement();
+            
+            // 🔥 新增：同步更新月報表表格
+            renderMonthlyReportTable(selectedMonth);
+        }
+
+        // 初始化執行
+        renderAll();
+        toggleExpenseType();
+        toggleItemTypeSetup();
+    </script>
+</body>
+</html>
