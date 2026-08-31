@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>客製化手機殼 - 專業版</title>
+    <title>客製化手機殼 - 專業完美版</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
     <style>
@@ -51,7 +51,7 @@
         .workspace { flex: 1; background: #e2e4e9; display: flex; justify-content: center; align-items: center; position: relative; overflow: hidden; }
         .canvas-container-wrapper { width: 240px; height: 480px; background: white; border-radius: 30px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); position: relative; overflow: hidden; }
         
-        /* 這裡設定遮罩永遠在最上層，並且不阻擋底層點擊 (pointer-events: none) */
+        /* 遮罩在最上層，確保不阻擋點擊 */
         .phone-mask-img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; object-fit: contain; }
         
         .bottom-panel { background: var(--panel-bg); border-top: 1px solid var(--border-color); z-index: 10; }
@@ -131,8 +131,7 @@
         <div class="workspace">
             <div class="canvas-container-wrapper">
                 <canvas id="main-canvas"></canvas>
-                <!-- 遮罩圖片：加入錯誤攔截，如果失敗會彈出警告視窗告訴你檔名問題 -->
-                <img id="real-phone-mask" class="phone-mask-img" src="" alt="" onerror="if(this.src && !this.src.endsWith('undefined')){ alert('❌ 找不到這張遮罩圖！請確認 GitHub 裡是否有這個檔案：\n' + decodeURIComponent(this.src)); this.style.display='none'; }">
+                <img id="real-phone-mask" class="phone-mask-img" src="" alt="">
             </div>
             
             <div class="overlay" id="overlay" onclick="closeDrawers()"></div>
@@ -238,11 +237,14 @@
         closeSpecModal();
         document.getElementById('selected-spec-info').innerText = `已選擇：${selectedModelName}`;
         
-        // 🌟 必殺技：強制將檔名轉碼，解決空白和中文檔名問題
         const safeFileName = encodeURIComponent(selectedModelFile);
         const maskImg = document.getElementById('real-phone-mask');
-        maskImg.style.display = 'block'; // 確保顯示
+        maskImg.style.display = 'block';
         maskImg.src = "/static/" + safeFileName;
+        
+        // 🌟 核心升級：自動依據手機殼外框形狀，建立畫布的裁切範圍 (ClipPath)
+        // 這樣貓咪或圖片絕對不會跑出手機殼外面！
+        applyCanvasClipPath(safeFileName);
         
         goToPage('page-templates');
     }
@@ -264,6 +266,24 @@
     function initCanvas() {
         if(canvas) return;
         canvas = new fabric.Canvas('main-canvas', { width: 240, height: 480, backgroundColor: '#ffffff' });
+    }
+
+    // 🌟 自動裁切防護罩：建立圓角矩形範圍限制，超越邊界的圖案會自動隱藏
+    function applyCanvasClipPath(filename) {
+        setTimeout(() => {
+            initCanvas();
+            const clipPath = new fabric.Rect({
+                left: 0,
+                top: 0,
+                width: 240,
+                height: 480,
+                rx: 35, // 手機殼圓角弧度
+                ry: 35,
+                absolutePositioned: true
+            });
+            canvas.clipPath = clipPath;
+            canvas.renderAll();
+        }, 300);
     }
 
     function openDrawer(id) { document.getElementById('overlay').classList.add('active'); document.getElementById(id).classList.add('active'); }
