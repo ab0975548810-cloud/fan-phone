@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>客製化手機殼 - 除錯版</title>
+    <title>客製化手機殼 - 專業版</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
     <style>
@@ -50,6 +50,8 @@
         
         .workspace { flex: 1; background: #e2e4e9; display: flex; justify-content: center; align-items: center; position: relative; overflow: hidden; }
         .canvas-container-wrapper { width: 240px; height: 480px; background: white; border-radius: 30px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); position: relative; overflow: hidden; }
+        
+        /* 這裡設定遮罩永遠在最上層，並且不阻擋底層點擊 (pointer-events: none) */
         .phone-mask-img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; object-fit: contain; }
         
         .bottom-panel { background: var(--panel-bg); border-top: 1px solid var(--border-color); z-index: 10; }
@@ -67,7 +69,7 @@
         .sticker-card { background: #f9f9f9; border-radius: 8px; padding: 10px; text-align: center; cursor: pointer; height: 80px; display: flex; align-items: center; justify-content: center; }
         .sticker-card img { max-width: 100%; max-height: 100%; object-fit: contain; }
         
-        .overlay { fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); z-index: 15; display: none; position: absolute; }
+        .overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); z-index: 15; display: none; }
         .overlay.active { display: block; }
     </style>
 </head>
@@ -129,8 +131,8 @@
         <div class="workspace">
             <div class="canvas-container-wrapper">
                 <canvas id="main-canvas"></canvas>
-                <!-- 🌟 加上錯誤提示，如果遮罩載入失敗會跳出紅色字 -->
-                <img id="real-phone-mask" class="phone-mask-img" src="" alt="請確認 static 裡是否有此圖片" onerror="this.style.display='block'; this.style.background='red'; this.style.color='white'; this.style.fontSize='10px'; this.value='遮罩載入失敗';" onload="this.style.display='block';">
+                <!-- 遮罩圖片：加入錯誤攔截，如果失敗會彈出警告視窗告訴你檔名問題 -->
+                <img id="real-phone-mask" class="phone-mask-img" src="" alt="" onerror="if(this.src && !this.src.endsWith('undefined')){ alert('❌ 找不到這張遮罩圖！請確認 GitHub 裡是否有這個檔案：\n' + decodeURIComponent(this.src)); this.style.display='none'; }">
             </div>
             
             <div class="overlay" id="overlay" onclick="closeDrawers()"></div>
@@ -235,8 +237,13 @@
     function confirmSpecAndNext() {
         closeSpecModal();
         document.getElementById('selected-spec-info').innerText = `已選擇：${selectedModelName}`;
-        // 🌟 設定遮罩圖片路徑
-        document.getElementById('real-phone-mask').src = "/static/" + selectedModelFile;
+        
+        // 🌟 必殺技：強制將檔名轉碼，解決空白和中文檔名問題
+        const safeFileName = encodeURIComponent(selectedModelFile);
+        const maskImg = document.getElementById('real-phone-mask');
+        maskImg.style.display = 'block'; // 確保顯示
+        maskImg.src = "/static/" + safeFileName;
+        
         goToPage('page-templates');
     }
 
