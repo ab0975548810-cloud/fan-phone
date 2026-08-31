@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>客製化手機殼 - 專業版</title>
+    <title>客製化手機殼 - 除錯版</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
     <style>
@@ -17,24 +17,19 @@
         .top-nav { height: 50px; background: var(--panel-bg); display: flex; justify-content: space-between; align-items: center; padding: 0 15px; border-bottom: 1px solid var(--border-color); flex-shrink: 0; z-index: 10; }
         .nav-btn { background: none; border: none; font-size: 18px; color: var(--text-main); cursor: pointer; }
         .title { font-weight: 600; font-size: 16px; }
-        
         .content { flex: 1; overflow-y: auto; padding: 15px; }
         
-        /* 搜尋列 */
         .search-box-container { display: flex; gap: 10px; margin-bottom: 15px; }
         .search-input { flex: 1; background: #eee; border: none; border-radius: 20px; padding: 10px 15px; font-size: 14px; outline: none; }
         .search-btn { background: var(--primary-color); color: white; border: none; border-radius: 20px; padding: 0 20px; font-weight: bold; cursor: pointer; }
         
-        /* 型號與規格按鈕 */
         .model-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
         .model-card { background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 12px; padding: 15px 10px; text-align: center; font-weight: bold; font-size: 14px; cursor: pointer; transition: 0.2s; }
         .model-card:hover, .model-card.selected { border-color: var(--primary-color); background: #fff5f2; color: var(--primary-color); }
         
-        /* 彈窗樣式 (規格選擇) */
         .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 100; display: none; justify-content: center; align-items: flex-end; }
         .modal-overlay.active { display: flex; }
-        .modal-content { background: white; width: 100%; max-width: 500px; border-radius: 20px 20px 0 0; padding: 20px; box-sizing: border-box; animation: slideUp 0.3s ease; max-height: 85vh; overflow-y: auto; }
-        @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+        .modal-content { background: white; width: 100%; max-width: 500px; border-radius: 20px 20px 0 0; padding: 20px; box-sizing: border-box; max-height: 85vh; overflow-y: auto; }
         
         .option-group { margin-bottom: 20px; }
         .option-title { font-weight: bold; font-size: 14px; margin-bottom: 10px; color: #555; }
@@ -42,32 +37,26 @@
         .chip { padding: 8px 15px; background: #f0f0f0; border-radius: 8px; font-size: 13px; cursor: pointer; border: 1px solid transparent; }
         .chip.selected { background: #fff5f2; border-color: var(--primary-color); color: var(--primary-color); font-weight: bold; }
         
-        /* 底部按鈕 */
         .primary-btn { width: 100%; background: var(--primary-color); color: white; border: none; padding: 14px; border-radius: 25px; font-size: 16px; font-weight: bold; cursor: pointer; text-align: center; margin-top: 15px; box-shadow: 0 4px 10px rgba(255,106,72,0.3); }
         
-        /* 底部導航切換 (店鋪推薦 / 自主 DIY) */
         .mode-switch-bar { height: 75px; background: white; border-top: 1px solid var(--border-color); display: flex; justify-content: space-around; align-items: center; flex-shrink: 0; z-index: 10; }
         .mode-tab { display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer; font-size: 12px; color: #666; }
-        .mode-tab img, .mode-tab i { font-size: 22px; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; }
+        .mode-tab i { font-size: 22px; }
         .mode-tab.active { color: var(--primary-color); font-weight: bold; }
         
-        /* 模版清單網格 */
         .template-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; padding-bottom: 20px; }
         .template-item { background: white; border-radius: 12px; overflow: hidden; border: 1px solid var(--border-color); cursor: pointer; padding: 10px; text-align: center; }
         .template-item img { width: 100%; height: 160px; object-fit: contain; background: #f0f0f0; border-radius: 8px; }
         
-        /* DIY 畫布工作區 */
         .workspace { flex: 1; background: #e2e4e9; display: flex; justify-content: center; align-items: center; position: relative; overflow: hidden; }
         .canvas-container-wrapper { width: 240px; height: 480px; background: white; border-radius: 30px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); position: relative; overflow: hidden; }
         .phone-mask-img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; object-fit: contain; }
         
-        /* 底部編輯工具列 */
         .bottom-panel { background: var(--panel-bg); border-top: 1px solid var(--border-color); z-index: 10; }
         .toolbar { display: flex; justify-content: space-around; padding: 10px; }
         .tool-btn { display: flex; flex-direction: column; align-items: center; gap: 4px; background: none; border: none; min-width: 60px; color: var(--text-main); cursor: pointer; font-size: 11px; }
         .tool-btn i { font-size: 20px; color: #555; }
         
-        /* 抽屜選單 */
         .drawer { position: absolute; bottom: -100%; left: 0; width: 100%; height: 260px; background: white; border-radius: 20px 20px 0 0; box-shadow: 0 -5px 15px rgba(0,0,0,0.1); transition: bottom 0.3s ease; z-index: 20; display: flex; flex-direction: column; }
         .drawer.active { bottom: 0; }
         .drawer-header { display: flex; justify-content: space-between; padding: 15px 20px; border-bottom: 1px solid #eee; font-weight: bold; }
@@ -78,55 +67,46 @@
         .sticker-card { background: #f9f9f9; border-radius: 8px; padding: 10px; text-align: center; cursor: pointer; height: 80px; display: flex; align-items: center; justify-content: center; }
         .sticker-card img { max-width: 100%; max-height: 100%; object-fit: contain; }
         
-        .overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); z-index: 15; display: none; }
+        .overlay { fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); z-index: 15; display: none; position: absolute; }
         .overlay.active { display: block; }
     </style>
 </head>
 <body>
 <div class="app-container">
 
-    <!-- 頁面 1：選擇型號 (圖 1) -->
     <div id="page-model" class="page active">
         <div class="top-nav">
-            <button class="nav-btn"><i class="fa-solid fa-chevron-left"></i></button>
+            <button class="nav-btn"></button>
             <div class="title">選擇型號</div>
-            <button class="nav-btn" style="font-size: 14px; color:#888;" onclick="alert('聯絡客服：請洽現場人員')">客服</button>
+            <button class="nav-btn" style="font-size: 14px; color:#888;" onclick="alert('請選擇型號')">說明</button>
         </div>
         <div class="content">
             <div class="search-box-container">
-                <input type="text" id="model-search" class="search-input" placeholder="搜索型號 (例如 iPhone 17)" oninput="filterModels()">
+                <input type="text" id="model-search" class="search-input" placeholder="搜索型號" oninput="filterModels()">
                 <button class="search-btn" onclick="filterModels()">搜索</button>
             </div>
-            <h4 style="margin: 10px 0; color:var(--primary-color);">蘋果 (Apple)</h4>
+            <h4 style="margin: 10px 0; color:var(--primary-color);">支援型號列表</h4>
             <div class="model-grid" id="auto-model-grid">
-                <!-- 動態載入型號 -->
+                <div style="grid-column:span 2; text-align:center; color:#888;">正在讀取型號...</div>
             </div>
         </div>
     </div>
 
-    <!-- 頁面 2：店鋪推薦模版 / 選擇模版 (圖 3) -->
     <div id="page-templates" class="page">
         <div class="top-nav">
             <button class="nav-btn" onclick="goToPage('page-model')"><i class="fa-solid fa-chevron-left"></i></button>
             <div class="title">選擇你喜歡的模板</div>
-            <button class="nav-btn" style="font-size:12px; color:var(--primary-color);" onclick="openSpecModal()">更換規格</button>
+            <button class="nav-btn" style="font-size:12px; color:var(--primary-color);" onclick="openSpecModal()">規格</button>
         </div>
         <div class="content">
-            <div style="font-size: 13px; color: #666; margin-bottom: 15px; text-align: center;" id="selected-spec-info">已選擇：iPhone 17 pro max / 雙料防摔軟殼</div>
-            
-            <div class="template-grid" id="template-list">
-                <!-- 範例模版 -->
+            <div style="font-size: 13px; color: #666; margin-bottom: 15px; text-align: center;" id="selected-spec-info">已選擇型號</div>
+            <div class="template-grid">
                 <div class="template-item" onclick="loadTemplate('https://wsrv.nl/?url=https://images.unsplash.com/photo-1543852786-1cf6624b9987?w=400&q=80')">
                     <img src="https://wsrv.nl/?url=https://images.unsplash.com/photo-1543852786-1cf6624b9987?w=400&q=80">
-                    <div style="font-size:12px; margin-top:8px; font-weight:bold;">萌寵大集合模版</div>
-                </div>
-                <div class="template-item" onclick="loadTemplate('https://wsrv.nl/?url=https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?w=400&q=80')">
-                    <img src="https://wsrv.nl/?url=https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?w=400&q=80">
-                    <div style="font-size:12px; margin-top:8px; font-weight:bold;">簡約文青貓咪</div>
+                    <div style="font-size:12px; margin-top:8px; font-weight:bold;">可愛萌寵範本</div>
                 </div>
             </div>
         </div>
-        <!-- 底部切換欄 (圖 3 底部) -->
         <div class="mode-switch-bar">
             <div class="mode-tab active" onclick="goToPage('page-templates')">
                 <i class="fa-solid fa-store" style="color:var(--primary-color);"></i>
@@ -139,7 +119,6 @@
         </div>
     </div>
 
-    <!-- 頁面 3：DIY 編輯器 (圖 5) -->
     <div id="page-editor" class="page">
         <div class="top-nav">
             <button class="nav-btn" onclick="goToPage('page-templates')"><i class="fa-solid fa-chevron-left"></i></button>
@@ -150,25 +129,23 @@
         <div class="workspace">
             <div class="canvas-container-wrapper">
                 <canvas id="main-canvas"></canvas>
-                <img id="real-phone-mask" class="phone-mask-img" src="" alt="機型遮罩" onerror="this.style.display='none'">
+                <!-- 🌟 加上錯誤提示，如果遮罩載入失敗會跳出紅色字 -->
+                <img id="real-phone-mask" class="phone-mask-img" src="" alt="請確認 static 裡是否有此圖片" onerror="this.style.display='block'; this.style.background='red'; this.style.color='white'; this.style.fontSize='10px'; this.value='遮罩載入失敗';" onload="this.style.display='block';">
             </div>
             
             <div class="overlay" id="overlay" onclick="closeDrawers()"></div>
             
-            <!-- 貼紙抽屜 -->
             <div class="drawer" id="drawer-sticker">
-                <div class="drawer-header"><span>選擇可愛貼紙</span><button class="close-drawer" onclick="closeDrawers()"><i class="fa-solid fa-xmark"></i></button></div>
+                <div class="drawer-header"><span>選擇貼紙</span><button class="close-drawer" onclick="closeDrawers()"><i class="fa-solid fa-xmark"></i></button></div>
                 <div class="drawer-content">
                     <div class="sticker-grid">
                         <div class="sticker-card" onclick="addSticker('https://images.unsplash.com/photo-1534361960057-19889db9621e?w=200&q=80')"><img src="https://images.unsplash.com/photo-1534361960057-19889db9621e?w=200&q=80"></div>
-                        <div class="sticker-card" onclick="addSticker('https://images.unsplash.com/photo-1574158622682-e40e69881006?w=200&q=80')"><img src="https://images.unsplash.com/photo-1574158622682-e40e69881006?w=200&q=80"></div>
                     </div>
                 </div>
             </div>
 
-            <!-- 文字抽屜 -->
             <div class="drawer" id="drawer-text">
-                <div class="drawer-header"><span>添加自定義文字</span><button class="close-drawer" onclick="closeDrawers()"><i class="fa-solid fa-xmark"></i></button></div>
+                <div class="drawer-header"><span>添加文字</span><button class="close-drawer" onclick="closeDrawers()"><i class="fa-solid fa-xmark"></i></button></div>
                 <div class="drawer-content">
                     <input type="text" id="input-text-val" style="width:100%; padding:12px; border:1px solid #ddd; border-radius:8px; font-size:14px; margin-bottom:10px;" placeholder="請輸入文字...">
                     <button class="primary-btn" onclick="addCustomText()">確認加入</button>
@@ -188,31 +165,18 @@
         </div>
     </div>
 
-    <!-- 規格與外框顏色彈窗 (對應圖 2) -->
     <div class="modal-overlay" id="spec-modal">
         <div class="modal-content">
             <div style="display: flex; justify-content: space-between; align-items:center; margin-bottom: 15px;">
-                <h3 style="margin:0; font-size: 16px;" id="modal-model-title">已選：iPhone 17 pro max</h3>
+                <h3 style="margin:0; font-size: 16px;" id="modal-model-title">選擇規格</h3>
                 <button onclick="closeSpecModal()" style="background:none; border:none; font-size:18px; cursor:pointer;"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            
             <div class="option-group">
                 <div class="option-title">材質類型</div>
                 <div class="option-chips">
-                    <div class="chip selected" onclick="selectChip(this, 'material')">撞色邊框磁吸亞克力硬殼</div>
-                    <div class="chip" onclick="selectChip(this, 'material')">全包防摔軟殼</div>
+                    <div class="chip selected" onclick="selectChip(this)">撞色邊框磁吸殼</div>
                 </div>
             </div>
-
-            <div class="option-group">
-                <div class="option-title">邊框顏色</div>
-                <div class="option-chips" id="color-chips">
-                    <div class="chip selected" onclick="selectChip(this, 'color')">黑色邊框</div>
-                    <div class="chip" onclick="selectChip(this, 'color')">白色邊框</div>
-                    <div class="chip" onclick="selectChip(this, 'color')">透黑邊框</div>
-                </div>
-            </div>
-
             <button class="primary-btn" onclick="confirmSpecAndNext()">確定</button>
         </div>
     </div>
@@ -225,7 +189,6 @@
     let selectedModelName = "";
     let canvas;
 
-    // 頁面載入時抓取型號
     window.onload = async () => {
         try {
             const res = await fetch('/api/get_models');
@@ -233,7 +196,7 @@
             allModels = data.models || [];
             renderModelGrid(allModels);
         } catch(e) {
-            document.getElementById('auto-model-grid').innerHTML = '<div style="grid-column:span 2; text-align:center; color:red;">伺服器連線中...請確保後端正常</div>';
+            document.getElementById('auto-model-grid').innerHTML = '<div style="grid-column:span 2; text-align:center; color:red;">無法載入型號清單</div>';
         }
     };
 
@@ -241,7 +204,7 @@
         const grid = document.getElementById('auto-model-grid');
         grid.innerHTML = '';
         if(models.length === 0) {
-            grid.innerHTML = '<div style="grid-column:span 2; text-align:center; color:#888;">找不到型號，請檢查 static 資料夾</div>';
+            grid.innerHTML = '<div style="grid-column:span 2; text-align:center; color:red;">static 資料夾內沒有圖片！</div>';
             return;
         }
         models.forEach(m => {
@@ -259,7 +222,6 @@
         renderModelGrid(filtered);
     }
 
-    // 點擊型號後跳出規格彈窗 (圖 2 邏輯)
     function chooseModel(filename, name) {
         selectedModelFile = filename;
         selectedModelName = name;
@@ -267,36 +229,20 @@
         document.getElementById('spec-modal').classList.add('active');
     }
 
-    function closeSpecModal() {
-        document.getElementById('spec-modal').classList.remove('active');
-    }
+    function closeSpecModal() { document.getElementById('spec-modal').classList.remove('active'); }
+    function selectChip(el) { el.parentElement.querySelectorAll('.chip').forEach(c => c.classList.remove('selected')); el.classList.add('selected'); }
 
-    function selectChip(el, type) {
-        el.parentElement.querySelectorAll('.chip').forEach(c => c.classList.remove('selected'));
-        el.classList.add('selected');
-    }
-
-    // 確認規格後進入模板頁面 (圖 3)
     function confirmSpecAndNext() {
         closeSpecModal();
-        document.getElementById('selected-spec-info').innerText = `已選擇：${selectedModelName} / 撞色磁吸殼`;
+        document.getElementById('selected-spec-info').innerText = `已選擇：${selectedModelName}`;
+        // 🌟 設定遮罩圖片路徑
         document.getElementById('real-phone-mask').src = "/static/" + selectedModelFile;
         goToPage('page-templates');
     }
 
-    function openSpecModal() {
-        document.getElementById('spec-modal').classList.add('active');
-    }
-
-    function goToPage(pageId) {
-        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-        document.getElementById(pageId).classList.add('active');
-    }
-
-    function startPureDIY() {
-        goToPage('page-editor');
-        initCanvas();
-    }
+    function openSpecModal() { document.getElementById('spec-modal').classList.add('active'); }
+    function goToPage(pageId) { document.querySelectorAll('.page').forEach(p => p.classList.remove('active')); document.getElementById(pageId).classList.add('active'); }
+    function startPureDIY() { goToPage('page-editor'); initCanvas(); }
 
     function loadTemplate(imgUrl) {
         goToPage('page-editor');
@@ -308,22 +254,13 @@
         }, { crossOrigin: 'anonymous' });
     }
 
-    // 初始化 Fabric 畫布
     function initCanvas() {
         if(canvas) return;
         canvas = new fabric.Canvas('main-canvas', { width: 240, height: 480, backgroundColor: '#ffffff' });
-        fabric.Object.prototype.set({ transparentCorners: false, cornerColor: '#ff6a48', borderColor: '#ff6a48' });
     }
 
-    function openDrawer(id) {
-        document.getElementById('overlay').classList.add('active');
-        document.getElementById(id).classList.add('active');
-    }
-
-    function closeDrawers() {
-        document.getElementById('overlay').classList.remove('active');
-        document.querySelectorAll('.drawer').forEach(d => d.classList.remove('active'));
-    }
+    function openDrawer(id) { document.getElementById('overlay').classList.add('active'); document.getElementById(id).classList.add('active'); }
+    function closeDrawers() { document.getElementById('overlay').classList.remove('active'); document.querySelectorAll('.drawer').forEach(d => d.classList.remove('active')); }
 
     function handleImageUpload(e) {
         const file = e.target.files[0];
@@ -364,22 +301,18 @@
         if(activeObj) canvas.remove(activeObj);
     }
 
-    // 送單與傳輸給後台
     async function exportOrder() {
         if(!canvas) return;
         canvas.discardActiveObject();
         canvas.renderAll();
-
         const printBase64 = canvas.toDataURL({ format: 'png', multiplier: 2 });
-        alert("🔄 正在生成訂單並上傳...");
+        alert("🔄 正在生成訂單...");
 
-        // 合成遮罩送出
         const maskImgEl = document.getElementById('real-phone-mask');
         fabric.Image.fromURL(maskImgEl.src, async function(maskImg) {
             maskImg.set({ left: 0, top: 0, width: 240, height: 480, selectable: false });
             canvas.add(maskImg);
             canvas.renderAll();
-            
             const mockupBase64 = canvas.toDataURL({ format: 'png', multiplier: 2 });
             canvas.remove(maskImg);
             canvas.renderAll();
@@ -391,13 +324,10 @@
                     body: JSON.stringify({ print_file: printBase64, mockup_file: mockupBase64 })
                 });
                 const result = await res.json();
-                if(res.ok) {
-                    alert("✅ 訂單已送出！圖片已自動存入 orders 準備列印！");
-                } else {
-                    alert("⚠️ 錯誤：" + result.msg);
-                }
+                if(res.ok) alert("✅ 訂單已送出，圖片已存入 orders！");
+                else alert("⚠️ 錯誤：" + result.msg);
             } catch(err) {
-                alert("❌ 網路連線錯誤！");
+                alert("❌ 連線錯誤！");
             }
         }, { crossOrigin: 'anonymous' });
     }
