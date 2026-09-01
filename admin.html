@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>型號與參數管理後台</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root { --primary-color: #ff6a48; --bg-color: #f4f7f6; --text-color: #333; }
+        body { font-family: -apple-system, sans-serif; background: var(--bg-color); color: var(--text-color); margin: 0; padding: 20px; }
+        .container { max-width: 900px; margin: 0 auto; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #ddd; }
+        .card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 20px; }
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px; }
+        .form-group { display: flex; flex-direction: column; }
+        .form-group label { font-size: 13px; font-weight: bold; margin-bottom: 5px; color: #555; }
+        .form-group input { padding: 10px; border: 1px solid #ccc; border-radius: 5px; font-size: 14px; }
+        .primary-btn { background: var(--primary-color); color: white; border: none; padding: 10px 20px; border-radius: 5px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        .primary-btn:hover { background: #e55a3a; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #f9f9f9; font-size: 14px; color: #666; }
+        .tag { background: #fff5f2; color: var(--primary-color); padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h2>⚙️ 列印參數與商品管理中心</h2>
+        <a href="/" style="color: #666; text-decoration: none;"><i class="fa-solid fa-house"></i> 回前台</a>
+    </div>
+
+    <!-- 新增/編輯型號區塊 -->
+    <div class="card">
+        <h3>➕ 新增 / 更新型號參數</h3>
+        <p style="font-size: 13px; color: #888; margin-top: -10px;">輸入相同的「型號代碼」即可更新該型號的參數。尺寸單位皆為毫米 (mm)。</p>
+        
+        <div class="form-grid">
+            <div class="form-group">
+                <label>型號代碼 (英數字, 例如: ip17pm)</label>
+                <input type="text" id="m_id" placeholder="必填">
+            </div>
+            <div class="form-group">
+                <label>顯示名稱 (例如: iPhone 17 Pro Max)</label>
+                <input type="text" id="m_name" placeholder="前台顯示用的名稱">
+            </div>
+            <div class="form-group">
+                <label>蒙版圖檔名 (例如: ip17pm_mask.png)</label>
+                <input type="text" id="m_mask" placeholder="請確保圖片已在 static 中">
+            </div>
+            <div class="form-group">
+                <label>基底圖檔名 (選項, 若無可留空)</label>
+                <input type="text" id="m_base" placeholder="">
+            </div>
+            <div class="form-group">
+                <label>實際列印寬度 (W)</label>
+                <input type="number" id="m_width" step="0.1" value="0">
+            </div>
+            <div class="form-group">
+                <label>實際列印高度 (H)</label>
+                <input type="number" id="m_height" step="0.1" value="0">
+            </div>
+            <div class="form-group">
+                <label>列印起始 X 座標</label>
+                <input type="number" id="m_x" step="0.1" value="0">
+            </div>
+            <div class="form-group">
+                <label>列印起始 Y 座標</label>
+                <input type="number" id="m_y" step="0.1" value="0">
+            </div>
+        </div>
+        <button class="primary-btn" onclick="saveModel()"><i class="fa-solid fa-floppy-disk"></i> 儲存設定</button>
+    </div>
+
+    <!-- 已有型號列表 -->
+    <div class="card">
+        <h3>📋 已建立的型號清單</h3>
+        <table id="model-table">
+            <thead>
+                <tr>
+                    <th>代碼</th>
+                    <th>顯示名稱</th>
+                    <th>尺寸 (W x H)</th>
+                    <th>座標 (X, Y)</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody id="model-list">
+                <tr><td colspan="5" style="text-align:center; color:#999;">讀取中...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    // 載入所有已設定的型號
+    async function loadModels() {
+        try {
+            const res = await fetch('/api/admin/get_all_models');
+            if (res.status === 401) { alert("登入逾時，請重新登入"); window.location.href='/login'; return; }
+            
+            const data = await res.json();
+            const tbody = document.getElementById('model-list');
+            tbody.innerHTML = '';
+            
+            const config = data.data;
+            if(Object.keys(config).length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#999;">目前沒有任何型號資料，請在上方新增。</td></tr>';
+                return;
+            }
+
+            for(let id in config) {
+                let info = config[id];
+                tbody.innerHTML += `
+                    <tr>
+                        <td><span class="tag">${id}</span></td>
+                        <td><strong>${info.name}</strong><br><small style="color:#888;">遮罩: ${info.mask_img}</small></td>
+                        <td>${info.print_width} x ${info.print_height} mm</td>
+                        <td>X: ${info.start_x}, Y: ${info.start_y}</td>
+                        <td>
+                            <button onclick="editModel('${id}')" style="background:#f0f0f0; border:none; padding:5px 10px; border-radius:4px; cursor:pointer;">載入編輯</button>
+                        </td>
+                    </tr>
+                `;
+            }
+        } catch(e) {
+            alert("讀取列表失敗");
+        }
+    }
+
+    // 將資料帶入上方表單
+    async function editModel(id) {
+        const res = await fetch('/api/admin/get_all_models');
+        const data = await res.json();
+        const info = data.data[id];
+        
+        document.getElementById('m_id').value = id;
+        document.getElementById('m_name').value = info.name;
+        document.getElementById('m_mask').value = info.mask_img;
+        document.getElementById('m_base').value = info.base_img || "";
+        document.getElementById('m_width').value = info.print_width;
+        document.getElementById('m_height').value = info.print_height;
+        document.getElementById('m_x').value = info.start_x;
+        document.getElementById('m_y').value = info.start_y;
+        
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    // 儲存資料到伺服器
+    async function saveModel() {
+        const payload = {
+            id: document.getElementById('m_id').value,
+            name: document.getElementById('m_name').value,
+            mask_img: document.getElementById('m_mask').value,
+            base_img: document.getElementById('m_base').value,
+            print_width: document.getElementById('m_width').value,
+            print_height: document.getElementById('m_height').value,
+            start_x: document.getElementById('m_x').value,
+            start_y: document.getElementById('m_y').value,
+            angle: 0
+        };
+        
+        if(!payload.id || !payload.name || !payload.mask_img) {
+            alert("請至少填寫型號代碼、顯示名稱與蒙版檔名！");
+            return;
+        }
+
+        try {
+            const res = await fetch('/api/admin/save_model', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const result = await res.json();
+            if(res.ok) {
+                alert("✅ " + result.msg);
+                loadModels(); // 重新載入列表
+            } else {
+                alert("❌ " + result.msg);
+            }
+        } catch(e) {
+            alert("網路錯誤");
+        }
+    }
+
+    // 頁面載入時執行
+    window.onload = loadModels;
+</script>
+</body>
+</html>
