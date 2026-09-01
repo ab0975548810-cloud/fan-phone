@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>客製化手機殼 - 完美遮罩版</title>
+    <title>客製化手機殼 - 完美遮罩防快取版</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
     <style>
@@ -240,7 +240,10 @@
         const safeFileName = encodeURIComponent(selectedModelFile);
         const maskImg = document.getElementById('real-phone-mask');
         maskImg.style.display = 'block';
-        maskImg.src = "/static/" + safeFileName;
+        
+        // 🌟 神奇黑科技：加上 ?v=時間戳記，強制手機每次都去伺服器抓最新圖片，打破快取！
+        const timeStamp = new Date().getTime();
+        maskImg.src = "/static/" + safeFileName + "?v=" + timeStamp;
         
         goToPage('page-templates');
     }
