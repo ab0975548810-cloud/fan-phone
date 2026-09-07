@@ -17,20 +17,22 @@
             --danger-color: #ff4d4f;
             --edit-color: #409EFF;
         }
-        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg-color); color: var(--text-main); display: flex; height: 100vh; overflow: hidden; }
+        body { margin: 0; font-family: -apple-system, sans-serif; background: var(--bg-color); color: var(--text-main); display: flex; height: 100vh; overflow: hidden; }
         
-        .sidebar { width: 220px; background: var(--sidebar-bg); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; flex-shrink: 0; z-index: 10; box-shadow: 2px 0 8px rgba(0,0,0,0.02); }
+        /* 側邊導航 */
+        .sidebar { width: 230px; background: var(--sidebar-bg); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; flex-shrink: 0; z-index: 10; box-shadow: 2px 0 8px rgba(0,0,0,0.02); }
         .logo-area { height: 70px; display: flex; align-items: center; justify-content: center; border-bottom: 1px solid var(--border-color); color: var(--primary-color); font-weight: 800; font-size: 20px; letter-spacing: 1px; }
         .logo-area i { font-size: 22px; margin-right: 8px; }
         .menu-list { flex: 1; overflow-y: auto; padding-top: 15px; }
-        .menu-item { padding: 15px 25px; font-size: 14px; font-weight: bold; color: var(--text-regular); cursor: pointer; transition: 0.2s; border-left: 4px solid transparent; }
+        .menu-item { padding: 15px 25px; font-size: 14px; font-weight: bold; color: var(--text-regular); cursor: pointer; transition: 0.2s; border-left: 4px solid transparent; display: flex; align-items: center; }
+        .menu-item i { width: 25px; font-size: 16px; }
         .menu-item:hover { background: var(--bg-color); color: var(--primary-color); }
         .menu-item.active { background: var(--primary-light); color: var(--primary-color); border-left-color: var(--primary-color); }
         
+        /* 右側主內容 */
         .main-container { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
         .top-header { height: 60px; background: white; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; padding: 0 25px; box-shadow: 0 2px 5px rgba(0,0,0,0.02); }
         .header-links a { display: inline-block; background: #67c23a; color: white; padding: 6px 15px; border-radius: 20px; text-decoration: none; font-size: 13px; font-weight: bold; }
-        
         .content-area { flex: 1; padding: 25px; overflow-y: auto; }
         .page-title { font-size: 20px; font-weight: 800; margin-top: 0; margin-bottom: 20px; color: var(--text-main); }
         .panel { background: white; border-radius: 12px; border: 1px solid var(--border-color); padding: 25px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); }
@@ -44,28 +46,35 @@
         .el-btn.edit { background: var(--edit-color); }
         .el-btn.danger { background: white; color: var(--danger-color); border: 1px solid #ffcccd; }
         .el-btn.danger:hover { background: #fff1f0; }
+        .el-btn.outline { background: white; color: var(--primary-color); border: 1px solid var(--primary-color); }
         
         .el-table { width: 100%; border-collapse: collapse; font-size: 14px; text-align: left; }
         .el-table th { background: #fff5f7; color: var(--primary-color); font-weight: bold; padding: 14px; border-bottom: 2px solid var(--primary-light); }
-        .el-table td { padding: 14px; border-bottom: 1px solid var(--border-color); color: var(--text-regular); }
+        .el-table td { padding: 14px; border-bottom: 1px solid var(--border-color); color: var(--text-regular); vertical-align: middle; }
         
-        /* Switch 開關 */
-        .switch { position: relative; display: inline-block; width: 44px; height: 22px; }
-        .switch input { opacity: 0; width: 0; height: 0; }
-        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 22px; }
-        .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
-        input:checked + .slider { background-color: var(--primary-color); }
-        input:checked + .slider:before { transform: translateX(22px); }
-
+        /* 切換區塊 */
         .view-section { display: none; }
         .view-section.active { display: block; animation: fadeIn 0.3s ease; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 
+        /* 素材網格 */
         .asset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 15px; margin-top: 20px; }
         .asset-card { border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; text-align: center; position: relative; background: #fafafa; }
         .asset-card img { width: 100%; height: 100px; object-fit: contain; }
         .asset-del-btn { position: absolute; top: -8px; right: -8px; background: var(--danger-color); color: white; border: none; width: 24px; height: 24px; border-radius: 50%; cursor: pointer; font-size: 12px; }
 
+        /* 動態顏色標籤 */
+        .color-tags-container { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+        .color-tag { background: #f0f2f5; border: 1px solid #dcdfe6; padding: 4px 10px; border-radius: 20px; font-size: 12px; display: flex; align-items: center; gap: 5px; }
+        .color-tag i { cursor: pointer; color: var(--danger-color); }
+
+        /* 上傳預覽框 */
+        .upload-preview-box { border: 1px dashed #dcdfe6; border-radius: 6px; padding: 15px; text-align: center; background: #fafafa; position: relative; cursor: pointer; }
+        .upload-preview-box:hover { border-color: var(--primary-color); }
+        .upload-preview-box img { max-width: 100%; max-height: 100px; object-fit: contain; display: none; }
+        .upload-preview-box .placeholder { color: #999; font-size: 13px; }
+
+        /* 彈窗 */
         .modal-overlay { position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index: 100; display: none; justify-content:center; align-items:flex-start; padding-top: 50px; overflow-y: auto; }
         .modal-overlay.active { display: flex; }
         .modal-box { background: white; width: 500px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); margin-bottom: 50px; }
@@ -74,7 +83,7 @@
         .modal-footer { padding: 15px 25px; border-top: 1px solid var(--border-color); text-align: right; background: #fafafa; border-radius: 0 0 12px 12px; }
         .form-group { margin-bottom: 20px; }
         .form-group label { display: block; font-size: 14px; font-weight: bold; margin-bottom: 8px; color: var(--text-main); }
-        .form-control { width: 100%; padding: 10px 12px; border: 1px solid #dcdfe6; border-radius: 6px; box-sizing: border-box; font-size: 14px; outline: none; transition: 0.2s; }
+        .form-control { width: 100%; padding: 10px 12px; border: 1px solid #dcdfe6; border-radius: 6px; box-sizing: border-box; font-size: 14px; outline: none; }
         .form-control:focus { border-color: var(--primary-color); }
         .form-row { display: flex; gap: 15px; }
         .form-row .form-group { flex: 1; }
@@ -85,23 +94,39 @@
     <div class="sidebar">
         <div class="logo-area"><i class="fa-solid fa-wand-magic-sparkles"></i> 本福丸訂製</div>
         <div class="menu-list">
-            <div class="menu-item" onclick="switchMenu('orders')"><i class="fa-solid fa-list-check" style="width:25px;"></i> 訂單管理</div>
-            <div class="menu-item active" onclick="switchMenu('models')"><i class="fa-solid fa-mobile-screen" style="width:25px;"></i> 手機品牌及型號</div>
-            <div class="menu-item" onclick="switchMenu('styles')"><i class="fa-solid fa-layer-group" style="width:25px;"></i> 手機殼材質 (參數)</div>
-            <div class="menu-item" onclick="switchMenu('assets')"><i class="fa-solid fa-face-smile" style="width:25px;"></i> 素材及模板庫</div>
+            <div class="menu-item active" onclick="switchMenu('orders')"><i class="fa-solid fa-list-check"></i> 訂單管理</div>
+            <div class="menu-item" onclick="switchMenu('models')"><i class="fa-solid fa-mobile-screen"></i> 品牌及型號</div>
+            <div class="menu-item" onclick="switchMenu('styles')"><i class="fa-solid fa-layer-group"></i> 手機殼材質</div>
+            <div class="menu-item" onclick="switchMenu('assets')"><i class="fa-solid fa-face-smile"></i> 素材庫 (貼紙)</div>
+            <div class="menu-item" onclick="switchMenu('templates')"><i class="fa-solid fa-border-all"></i> 模板庫</div>
         </div>
     </div>
 
     <div class="main-container">
-        <div class="top-header">
-            <div></div>
-            <div class="header-links"><a href="/" target="_blank"><i class="fa-solid fa-eye"></i> 查看前台</a></div>
-        </div>
+        <div class="top-header"><div></div><div class="header-links"><a href="/" target="_blank"><i class="fa-solid fa-eye"></i> 查看前台</a></div></div>
 
         <div class="content-area">
             
-            <!-- 1. 品牌及型號 -->
-            <div id="view-models" class="view-section active">
+            <!-- 1. 訂單管理 (全面解鎖) -->
+            <div id="view-orders" class="view-section active">
+                <h2 class="page-title">訂單管理</h2>
+                <div class="panel">
+                    <div class="tabs">
+                        <div class="tab active">全部訂單</div>
+                        <div class="tab">未下載</div>
+                        <div class="tab">已下載</div>
+                    </div>
+                    <table class="el-table">
+                        <thead><tr><th>訂單編號</th><th>定制資訊 (型號/材質)</th><th>效果預覽圖</th><th>狀態</th><th width="150">操作</th></tr></thead>
+                        <tbody id="order-table-body">
+                            <tr><td colspan="5" style="text-align:center; padding:30px; color:#999;">讀取中...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 2. 品牌及型號 -->
+            <div id="view-models" class="view-section">
                 <h2 class="page-title">手機品牌及型號</h2>
                 <div class="panel">
                     <div class="tabs">
@@ -120,33 +145,32 @@
                     <div id="model-tab" style="display: none;">
                         <button class="el-btn" style="margin-bottom: 20px;" onclick="openModelModal()"><i class="fa-solid fa-plus"></i> 新增型號</button>
                         <table class="el-table">
-                            <thead><tr><th width="50">序號</th><th>品牌</th><th>型號 ID</th><th>顯示名稱</th><th>狀態</th><th width="160">操作</th></tr></thead>
+                            <thead><tr><th width="50">序號</th><th>品牌</th><th>顯示名稱</th><th width="160">操作</th></tr></thead>
                             <tbody id="model-table-body"></tbody>
                         </table>
                     </div>
                 </div>
             </div>
 
-            <!-- 2. 手機殼材質與參數 (全新) -->
+            <!-- 3. 手機殼材質與參數 -->
             <div id="view-styles" class="view-section">
-                <h2 class="page-title">手機殼材質 (列印參數設定)</h2>
+                <h2 class="page-title">手機殼材質 (參數與線圖設定)</h2>
                 <div class="panel">
                     <button class="el-btn" style="margin-bottom: 20px;" onclick="openStyleModal()"><i class="fa-solid fa-plus"></i> 新增材質</button>
                     <table class="el-table">
-                        <thead><tr><th width="50">序號</th><th>材質名稱</th><th>材質顏色</th><th>狀態</th><th width="160">操作</th></tr></thead>
+                        <thead><tr><th width="50">序號</th><th>材質名稱</th><th>顏色庫</th><th width="160">操作</th></tr></thead>
                         <tbody id="style-table-body"></tbody>
                     </table>
                 </div>
             </div>
 
-            <!-- 3. 素材與模板 (批量上傳) -->
+            <!-- 4. 素材庫 (貼紙) -->
             <div id="view-assets" class="view-section">
-                <h2 class="page-title">素材庫 (支援批量上傳)</h2>
+                <h2 class="page-title">素材庫 (貼紙)</h2>
                 <div class="panel">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                        <div style="font-size: 13px; color: var(--text-regular);">可一次選擇多張圖檔進行上傳，系統會自動分配至指定分類。</div>
-                        <!-- multiple 屬性實現批量選擇 -->
-                        <button class="el-btn" onclick="document.getElementById('sticker-upload-input').click()"><i class="fa-solid fa-cloud-arrow-up"></i> 批量上傳素材</button>
+                        <div style="font-size: 13px; color: var(--text-regular);">此區僅管理可供客人拖曳的貼紙與裝飾。</div>
+                        <button class="el-btn" onclick="document.getElementById('sticker-upload-input').click()"><i class="fa-solid fa-cloud-arrow-up"></i> 批量上傳貼紙</button>
                         <input type="file" id="sticker-upload-input" accept="image/png, image/jpeg" multiple style="display: none;" onchange="uploadStickerBatch(event)">
                     </div>
                     <div class="tabs" id="asset-category-tabs"></div>
@@ -154,63 +178,89 @@
                 </div>
             </div>
 
-            <div id="view-orders" class="view-section"><h2 class="page-title">訂單管理</h2><div class="panel">訂單列表準備中...</div></div>
+            <!-- 5. 模板庫 (獨立分開) -->
+            <div id="view-templates" class="view-section">
+                <h2 class="page-title">模板庫 (插槽版型設計)</h2>
+                <div class="panel">
+                    <div style="color: #999; text-align: center; padding: 50px;">
+                        <i class="fa-solid fa-border-all" style="font-size: 40px; margin-bottom: 15px;"></i>
+                        <h3>模板編輯器籌備中</h3>
+                        <p>此區預留給未來上傳 PSD/JSON 固定版型插槽使用，與素材庫完全分離。</p>
+                    </div>
+                </div>
+            </div>
+
         </div>
     </div>
 
     <!-- === 彈窗區 === -->
     
-    <!-- 品牌彈窗 -->
     <div class="modal-overlay" id="brand-modal">
         <div class="modal-box">
             <div class="modal-header"><span id="brand-modal-title">新增品牌</span> <button class="el-btn danger" style="padding:4px 8px;" onclick="closeModal('brand-modal')"><i class="fa-solid fa-xmark"></i></button></div>
-            <div class="modal-body">
-                <input type="hidden" id="edit-brand-old-name">
-                <div class="form-group"><label>品牌名稱</label><input type="text" id="input-brand-name" class="form-control"></div>
-            </div>
+            <div class="modal-body"><input type="hidden" id="edit-brand-old-name"><div class="form-group"><label>品牌名稱</label><input type="text" id="input-brand-name" class="form-control"></div></div>
             <div class="modal-footer"><button class="el-btn danger" onclick="closeModal('brand-modal')">取消</button> <button class="el-btn" onclick="saveBrand()">儲存</button></div>
         </div>
     </div>
 
-    <!-- 型號彈窗 -->
     <div class="modal-overlay" id="model-modal">
         <div class="modal-box">
             <div class="modal-header"><span id="model-modal-title">新增型號</span> <button class="el-btn danger" style="padding:4px 8px;" onclick="closeModal('model-modal')"><i class="fa-solid fa-xmark"></i></button></div>
             <div class="modal-body">
-                <input type="hidden" id="edit-model-old-id">
+                <input type="hidden" id="edit-model-id">
+                <p style="font-size: 12px; color: #888; margin-top:-10px;">系統將自動生成唯一辨識碼，您只需填寫顯示名稱。</p>
                 <div class="form-group"><label>選擇品牌</label><select id="input-model-brand" class="form-control"></select></div>
-                <div class="form-group"><label>型號 ID (英文小寫)</label><input type="text" id="input-model-id" class="form-control"></div>
                 <div class="form-group"><label>顯示名稱 (例: iPhone 18)</label><input type="text" id="input-model-name" class="form-control"></div>
             </div>
             <div class="modal-footer"><button class="el-btn danger" onclick="closeModal('model-modal')">取消</button> <button class="el-btn" onclick="saveModel()">儲存</button></div>
         </div>
     </div>
 
-    <!-- 材質與參數設定彈窗 (大魔王) -->
+    <!-- 材質設定彈窗 (大升級) -->
     <div class="modal-overlay" id="style-modal">
-        <div class="modal-box" style="width: 600px;">
-            <div class="modal-header"><span id="style-modal-title">新增手機殼材質</span> <button class="el-btn danger" style="padding:4px 8px;" onclick="closeModal('style-modal')"><i class="fa-solid fa-xmark"></i></button></div>
+        <div class="modal-box" style="width: 650px;">
+            <div class="modal-header"><span id="style-modal-title">新增材質與參數</span> <button class="el-btn danger" style="padding:4px 8px;" onclick="closeModal('style-modal')"><i class="fa-solid fa-xmark"></i></button></div>
             <div class="modal-body">
                 <input type="hidden" id="edit-style-id">
-                <div class="form-row">
-                    <div class="form-group"><label>材質/款式名稱</label><input type="text" id="input-style-name" class="form-control" placeholder="例: 氣囊防摔透明殼"></div>
-                    <div class="form-group"><label>材質顏色 (逗號分隔)</label><input type="text" id="input-style-colors" class="form-control" placeholder="例: 透明, 黑色, 粉色"></div>
+                <div class="form-group"><label>材質名稱 (例如: 撞色磁吸殼)</label><input type="text" id="input-style-name" class="form-control"></div>
+                
+                <div class="form-group">
+                    <label>材質顏色支援</label>
+                    <div style="display:flex; gap:10px;">
+                        <input type="text" id="temp-color-input" class="form-control" placeholder="輸入顏色 (如: 鈦金屬)" style="flex:1;">
+                        <button class="el-btn outline" onclick="addColorTag()">加入顏色</button>
+                    </div>
+                    <div class="color-tags-container" id="color-tags-container"></div>
                 </div>
                 
-                <h4 style="margin-top: 10px; border-bottom: 1px solid #eee; padding-bottom: 5px; color:var(--primary-color);">圖檔設定 (輸入檔名，請確保圖片在 static/materials 內)</h4>
+                <h4 style="margin-top: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; color:var(--primary-color);">圖檔上傳設定</h4>
                 <div class="form-row">
-                    <div class="form-group"><label>客人預覽遮罩圖 (Mask)</label><input type="text" id="input-style-mask" class="form-control" placeholder="例: clear_mask.png"></div>
-                    <div class="form-group"><label>實體列印線圖 (Line Art)</label><input type="text" id="input-style-line" class="form-control" placeholder="例: clear_line.png"></div>
+                    <div class="form-group">
+                        <label>預覽遮罩圖 (給客人看)</label>
+                        <div class="upload-preview-box" onclick="document.getElementById('upload-mask').click()">
+                            <img id="preview-mask" src="">
+                            <div class="placeholder" id="placeholder-mask"><i class="fa-solid fa-upload"></i> 點擊上傳遮罩圖 (PNG)</div>
+                        </div>
+                        <input type="file" id="upload-mask" style="display:none;" accept="image/png" onchange="handleImageUpload(event, 'mask')">
+                        <input type="hidden" id="saved-mask-url">
+                    </div>
+                    <div class="form-group">
+                        <label>實體列印線圖 (工廠對位用)</label>
+                        <div class="upload-preview-box" onclick="document.getElementById('upload-line').click()">
+                            <img id="preview-line" src="">
+                            <div class="placeholder" id="placeholder-line"><i class="fa-solid fa-upload"></i> 點擊上傳線圖 (PNG)</div>
+                        </div>
+                        <input type="file" id="upload-line" style="display:none;" accept="image/png" onchange="handleImageUpload(event, 'line')">
+                        <input type="hidden" id="saved-line-url">
+                    </div>
                 </div>
 
-                <h4 style="margin-top: 10px; border-bottom: 1px solid #eee; padding-bottom: 5px; color:var(--primary-color);">UV機 列印座標 (單位: mm)</h4>
+                <h4 style="margin-top: 10px; border-bottom: 1px solid #eee; padding-bottom: 5px; color:var(--primary-color);">列印座標 (單位: mm)</h4>
                 <div class="form-row">
-                    <div class="form-group"><label>列印起始 X</label><input type="number" id="input-style-x" class="form-control" value="0"></div>
-                    <div class="form-group"><label>列印起始 Y</label><input type="number" id="input-style-y" class="form-control" value="0"></div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group"><label>列印寬度 (W)</label><input type="number" id="input-style-w" class="form-control" value="80"></div>
-                    <div class="form-group"><label>列印高度 (H)</label><input type="number" id="input-style-h" class="form-control" value="160"></div>
+                    <div class="form-group"><label>起始 X</label><input type="number" id="input-style-x" class="form-control" value="0"></div>
+                    <div class="form-group"><label>起始 Y</label><input type="number" id="input-style-y" class="form-control" value="0"></div>
+                    <div class="form-group"><label>寬度 W</label><input type="number" id="input-style-w" class="form-control" value="80"></div>
+                    <div class="form-group"><label>高度 H</label><input type="number" id="input-style-h" class="form-control" value="160"></div>
                 </div>
             </div>
             <div class="modal-footer"><button class="el-btn danger" onclick="closeModal('style-modal')">取消</button> <button class="el-btn" onclick="saveStyle()">儲存參數</button></div>
@@ -221,12 +271,16 @@
     let shopData = { brands: [], models: [], styles: [] };
     let assetsData = { stickers: [], categories: ["全部"] };
     let currentAssetCategory = "全部";
+    let tempColors = []; // 暫存材質顏色陣列
 
     window.onload = async () => {
         try {
-            const [resShop, resAssets] = await Promise.all([ fetch('/api/shop_data'), fetch('/api/assets') ]);
+            const [resShop, resAssets, resOrders] = await Promise.all([ fetch('/api/shop_data'), fetch('/api/assets'), fetch('/api/admin/get_orders') ]);
             shopData = (await resShop.json()).data;
             assetsData = (await resAssets.json()).data;
+            const orders = (await resOrders.json()).data || [];
+            
+            renderOrders(orders);
             renderBrands(); renderModels(); renderStyles(); renderAssetTabs(); renderAssets();
         } catch(e) { console.error("資料載入異常"); }
     };
@@ -247,6 +301,29 @@
     function closeModal(id) { document.getElementById(id).classList.remove('active'); }
     async function syncShopData() { await fetch('/api/admin/save_shop_data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(shopData) }); }
 
+    /* === 訂單系統 === */
+    function renderOrders(orders) {
+        const tbody = document.getElementById('order-table-body');
+        tbody.innerHTML = '';
+        if(orders.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:30px; color:#999;">目前沒有訂單</td></tr>';
+            return;
+        }
+        orders.forEach(o => {
+            tbody.innerHTML += `
+                <tr>
+                    <td style="font-weight:bold;">${o.order_id}</td>
+                    <td><div style="font-size:12px; color:#888;">型號:</div><div>${o.model}</div><div style="font-size:12px; color:#888; margin-top:4px;">材質:</div><div>${o.style}</div></td>
+                    <td><img src="${o.mockup_url}" style="height:80px; border-radius:6px; border:1px solid #eee;"></td>
+                    <td><span style="background:#fff1f0; color:#ff4d4f; padding:4px 10px; border-radius:12px; font-size:12px; font-weight:bold;">${o.status}</span></td>
+                    <td>
+                        <a href="${o.print_url}" download="${o.order_id}_print.png" class="el-btn outline" style="text-decoration:none;"><i class="fa-solid fa-download"></i> 下載生產圖</a>
+                    </td>
+                </tr>
+            `;
+        });
+    }
+
     /* === 品牌管理 === */
     function renderBrands() {
         const tbody = document.getElementById('brand-table-body');
@@ -254,7 +331,7 @@
         tbody.innerHTML = ''; select.innerHTML = '';
         shopData.brands.forEach((brand, idx) => {
             tbody.innerHTML += `<tr><td>${idx + 1}</td><td style="font-weight:bold;">${brand}</td><td>
-                <button class="el-btn edit" onclick="openBrandModal('${brand}')"><i class="fa-solid fa-pen"></i> 編輯</button>
+                <button class="el-btn edit" onclick="openBrandModal('${brand}')"><i class="fa-solid fa-pen"></i></button>
                 <button class="el-btn danger" onclick="deleteBrand('${brand}')"><i class="fa-solid fa-trash"></i></button></td></tr>`;
             select.innerHTML += `<option value="${brand}">${brand}</option>`;
         });
@@ -272,7 +349,6 @@
         if(oldName) {
             const idx = shopData.brands.indexOf(oldName);
             if(idx !== -1) shopData.brands[idx] = newName;
-            // 同步更新型號內的品牌名稱
             shopData.models.forEach(m => { if(m.brand === oldName) m.brand = newName; });
         } else {
             if(shopData.brands.includes(newName)) return alert("品牌已存在");
@@ -282,81 +358,132 @@
     }
     function deleteBrand(b) { if(confirm('刪除品牌？')) { shopData.brands = shopData.brands.filter(x => x !== b); syncShopData(); renderBrands(); } }
 
-    /* === 型號管理 === */
+    /* === 型號管理 (自動生成ID) === */
     function renderModels() {
         const tbody = document.getElementById('model-table-body');
         tbody.innerHTML = '';
         shopData.models.forEach((model, idx) => {
-            const checked = model.status !== false ? 'checked' : '';
             tbody.innerHTML += `<tr><td>${idx + 1}</td><td><span style="background:var(--primary-light); color:var(--primary-color); padding:4px 8px; border-radius:4px; font-size:12px;">${model.brand}</span></td>
-                <td>${model.id}</td><td style="font-weight:bold;">${model.name}</td>
-                <td><label class="switch"><input type="checkbox" ${checked} onchange="toggleStatus('model', '${model.id}', this.checked)"><span class="slider"></span></label></td>
+                <td style="font-weight:bold;">${model.name}</td>
                 <td><button class="el-btn edit" onclick="openModelModal('${model.id}')"><i class="fa-solid fa-pen"></i></button><button class="el-btn danger" onclick="deleteModel('${model.id}')"><i class="fa-solid fa-trash"></i></button></td></tr>`;
         });
     }
     function openModelModal(id = '') {
         document.getElementById('model-modal-title').innerText = id ? '編輯型號' : '新增型號';
-        document.getElementById('edit-model-old-id').value = id;
+        document.getElementById('edit-model-id').value = id;
         if(id) {
             const m = shopData.models.find(x => x.id === id);
             document.getElementById('input-model-brand').value = m.brand;
-            document.getElementById('input-model-id').value = m.id;
             document.getElementById('input-model-name').value = m.name;
         } else {
-            document.getElementById('input-model-id').value = ''; document.getElementById('input-model-name').value = '';
+            document.getElementById('input-model-name').value = '';
         }
         openModal('model-modal');
     }
     function saveModel() {
-        const oldId = document.getElementById('edit-model-old-id').value;
+        const oldId = document.getElementById('edit-model-id').value;
         const brand = document.getElementById('input-model-brand').value;
-        const id = document.getElementById('input-model-id').value.trim();
         const name = document.getElementById('input-model-name').value.trim();
-        if(!id || !name) return alert("資料不完整");
+        if(!name) return alert("請填寫顯示名稱");
         
         if(oldId) {
             const m = shopData.models.find(x => x.id === oldId);
-            m.brand = brand; m.id = id; m.name = name;
+            m.brand = brand; m.name = name;
         } else {
-            if(shopData.models.find(x => x.id === id)) return alert("ID 重複");
-            shopData.models.push({ id, brand, name, status: true });
+            // 系統自動生成隱藏 ID
+            const newId = 'm_' + new Date().getTime();
+            shopData.models.push({ id: newId, brand, name, status: true });
         }
         syncShopData(); renderModels(); closeModal('model-modal');
     }
     function deleteModel(id) { if(confirm('刪除型號？')) { shopData.models = shopData.models.filter(m => m.id !== id); syncShopData(); renderModels(); } }
 
-    /* === 手機殼材質與參數 (全新大模組) === */
+    /* === 材質與參數管理 (上傳功能 + 動態顏色) === */
     function renderStyles() {
         const tbody = document.getElementById('style-table-body');
         tbody.innerHTML = '';
         shopData.styles.forEach((style, idx) => {
-            const checked = style.status !== false ? 'checked' : '';
-            tbody.innerHTML += `<tr><td>${idx + 1}</td><td style="font-weight:bold;">${style.name}</td><td><span style="color:#666;">${style.colors || '無'}</span></td>
-                <td><label class="switch"><input type="checkbox" ${checked} onchange="toggleStatus('style', '${style.id}', this.checked)"><span class="slider"></span></label></td>
+            let colorHtml = (style.colors || []).map(c => `<span class="color-tag" style="display:inline-block; margin-right:4px;">${c}</span>`).join('');
+            if(!colorHtml) colorHtml = '<span style="color:#999;">無指定</span>';
+            
+            tbody.innerHTML += `<tr><td>${idx + 1}</td><td style="font-weight:bold;">${style.name}</td><td>${colorHtml}</td>
                 <td><button class="el-btn edit" onclick="openStyleModal('${style.id}')"><i class="fa-solid fa-pen"></i> 編輯參數</button><button class="el-btn danger" onclick="deleteStyle('${style.id}')"><i class="fa-solid fa-trash"></i></button></td></tr>`;
         });
     }
+    
     function openStyleModal(id = '') {
-        document.getElementById('style-modal-title').innerText = id ? '編輯材質與列印參數' : '新增材質與列印參數';
+        document.getElementById('style-modal-title').innerText = id ? '編輯材質與參數' : '新增材質與參數';
         document.getElementById('edit-style-id').value = id;
+        tempColors = [];
+        
         if(id) {
             const s = shopData.styles.find(x => x.id === id);
             document.getElementById('input-style-name').value = s.name || '';
-            document.getElementById('input-style-colors').value = s.colors || '';
-            document.getElementById('input-style-mask').value = s.mask_img || '';
-            document.getElementById('input-style-line').value = s.line_img || '';
+            tempColors = [...(s.colors || [])];
+            
+            setPreview('mask', s.mask_img);
+            setPreview('line', s.line_img);
+            
             document.getElementById('input-style-x').value = s.print_x || 0;
             document.getElementById('input-style-y').value = s.print_y || 0;
             document.getElementById('input-style-w').value = s.print_w || 80;
             document.getElementById('input-style-h').value = s.print_h || 160;
         } else {
-            // 清空
-            ['name','colors','mask','line'].forEach(k => document.getElementById(`input-style-${k}`).value = '');
+            document.getElementById('input-style-name').value = '';
+            setPreview('mask', ''); setPreview('line', '');
             document.getElementById('input-style-x').value = 0; document.getElementById('input-style-y').value = 0;
             document.getElementById('input-style-w').value = 80; document.getElementById('input-style-h').value = 160;
         }
+        renderColorTags();
         openModal('style-modal');
     }
+
+    function addColorTag() {
+        const input = document.getElementById('temp-color-input');
+        const val = input.value.trim();
+        if(val && !tempColors.includes(val)) {
+            tempColors.push(val);
+            renderColorTags();
+            input.value = '';
+        }
+    }
+    function removeColorTag(idx) { tempColors.splice(idx, 1); renderColorTags(); }
+    function renderColorTags() {
+        const container = document.getElementById('color-tags-container');
+        container.innerHTML = tempColors.map((c, i) => `<div class="color-tag">${c} <i class="fa-solid fa-xmark" onclick="removeColorTag(${i})"></i></div>`).join('');
+    }
+
+    // 實體檔案上傳 (遮罩與線圖)
+    async function handleImageUpload(event, type) {
+        const file = event.target.files[0];
+        if(!file) return;
+        
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('type', 'material');
+
+        document.getElementById(`placeholder-${type}`).innerText = '上傳中...';
+        
+        try {
+            const res = await fetch('/api/admin/upload_image', { method: 'POST', body: formData });
+            const result = await res.json();
+            if(res.ok) {
+                setPreview(type, result.url);
+            } else { alert("上傳失敗"); setPreview(type, ''); }
+        } catch(e) { alert("連線錯誤"); setPreview(type, ''); }
+    }
+    
+    function setPreview(type, url) {
+        document.getElementById(`saved-${type}-url`).value = url;
+        const img = document.getElementById(`preview-${type}`);
+        const placeholder = document.getElementById(`placeholder-${type}`);
+        if(url) {
+            img.src = url; img.style.display = 'block'; placeholder.style.display = 'none';
+        } else {
+            img.style.display = 'none'; placeholder.style.display = 'block'; placeholder.innerHTML = `<i class="fa-solid fa-upload"></i> 點擊上傳${type === 'mask'?'遮罩':'線'}圖 (PNG)`;
+        }
+    }
+
     function saveStyle() {
         const oldId = document.getElementById('edit-style-id').value;
         const name = document.getElementById('input-style-name').value.trim();
@@ -365,9 +492,9 @@
         const styleData = {
             id: oldId || 'style_' + new Date().getTime(),
             name: name,
-            colors: document.getElementById('input-style-colors').value.trim(),
-            mask_img: document.getElementById('input-style-mask').value.trim(),
-            line_img: document.getElementById('input-style-line').value.trim(),
+            colors: [...tempColors],
+            mask_img: document.getElementById('saved-mask-url').value,
+            line_img: document.getElementById('saved-line-url').value,
             print_x: parseFloat(document.getElementById('input-style-x').value),
             print_y: parseFloat(document.getElementById('input-style-y').value),
             print_w: parseFloat(document.getElementById('input-style-w').value),
@@ -377,23 +504,14 @@
 
         if(oldId) {
             const idx = shopData.styles.findIndex(x => x.id === oldId);
-            styleData.status = shopData.styles[idx].status; // 保留原本開關狀態
+            styleData.status = shopData.styles[idx].status; 
             shopData.styles[idx] = styleData;
-        } else {
-            shopData.styles.push(styleData);
-        }
+        } else { shopData.styles.push(styleData); }
         syncShopData(); renderStyles(); closeModal('style-modal');
     }
     function deleteStyle(id) { if(confirm('刪除材質？')) { shopData.styles = shopData.styles.filter(s => s.id !== id); syncShopData(); renderStyles(); } }
-    
-    // 共用狀態開關
-    function toggleStatus(type, id, isChecked) {
-        if(type === 'model') shopData.models.find(m => m.id === id).status = isChecked;
-        if(type === 'style') shopData.styles.find(s => s.id === id).status = isChecked;
-        syncShopData();
-    }
 
-    /* === 批量上傳素材庫 === */
+    /* === 批量上傳貼紙庫 === */
     function renderAssetTabs() {
         const container = document.getElementById('asset-category-tabs');
         container.innerHTML = '';
@@ -411,47 +529,30 @@
         grid.innerHTML = '';
         let list = assetsData.stickers;
         if(currentAssetCategory !== "全部") list = list.filter(s => s.category === currentAssetCategory);
-        
-        list.forEach(sticker => {
-            grid.innerHTML += `<div class="asset-card"><button class="asset-del-btn" onclick="deleteSticker('${sticker.id}')"><i class="fa-solid fa-xmark"></i></button><img src="${sticker.url}"><div style="font-size:12px; color:#888; margin-top:8px;">${sticker.category}</div></div>`;
-        });
+        list.forEach(sticker => { grid.innerHTML += `<div class="asset-card"><button class="asset-del-btn" onclick="deleteSticker('${sticker.id}')"><i class="fa-solid fa-xmark"></i></button><img src="${sticker.url}"></div>`; });
     }
 
     async function uploadStickerBatch(event) {
         const files = event.target.files;
         if(files.length === 0) return;
-        
-        let cat = prompt(`您選擇了 ${files.length} 張圖片。\n請輸入這批素材的分類 (例如: 可愛, Y2K)：`, "可愛");
-        if(!cat) cat = "全部";
-
+        let cat = prompt(`選了 ${files.length} 張。輸入分類 (如: 可愛, Y2K)：`, "可愛") || "全部";
         const formData = new FormData();
-        // 迴圈把所有圖片塞進 formData
-        for(let i = 0; i < files.length; i++) {
-            formData.append('files', files[i]);
-        }
+        for(let i = 0; i < files.length; i++) formData.append('files', files[i]);
         formData.append('category', cat);
-        
         document.getElementById('sticker-upload-input').value = '';
-
         try {
             alert("上傳中，請稍候...");
             const res = await fetch('/api/admin/batch_upload_stickers', { method: 'POST', body: formData });
-            const result = await res.json();
             if(res.ok) {
-                const resAssets = await fetch('/api/assets');
-                assetsData = (await resAssets.json()).data;
-                renderAssetTabs(); renderAssets();
-                alert(result.msg);
-            } else { alert("上傳失敗：" + result.msg); }
-        } catch(e) { alert("上傳連線錯誤"); }
+                assetsData = (await (await fetch('/api/assets')).json()).data;
+                renderAssetTabs(); renderAssets(); alert("上傳成功！");
+            }
+        } catch(e) { alert("連線錯誤"); }
     }
-
     async function deleteSticker(id) {
-        if(!confirm("確定要刪除這張素材嗎？")) return;
-        assetsData.stickers = assetsData.stickers.filter(s => s.id !== id);
-        renderAssets();
-        try { await fetch('/api/admin/delete_sticker', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }); } 
-        catch(e) { console.error(e); }
+        if(!confirm("刪除這張？")) return;
+        assetsData.stickers = assetsData.stickers.filter(s => s.id !== id); renderAssets();
+        fetch('/api/admin/delete_sticker', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({id}) });
     }
 </script>
 </body>
