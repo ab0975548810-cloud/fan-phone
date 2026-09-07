@@ -8,13 +8,15 @@ app = Flask(__name__)
 app.secret_key = 'fan_super_secret_key_2026' 
 ADMIN_PASSWORD = "fan123"
 
+# 資料夾架構
 SAVE_DIR = "orders"
 STATIC_DIR = "static"
 STICKER_DIR = os.path.join(STATIC_DIR, "stickers")
+MATERIAL_DIR = os.path.join(STATIC_DIR, "materials") # 新增：放遮罩與線圖的資料夾
 DATA_FILE = "shop_data.json"
 ASSETS_FILE = "assets.json"
 
-for d in [SAVE_DIR, STATIC_DIR, STICKER_DIR]:
+for d in [SAVE_DIR, STATIC_DIR, STICKER_DIR, MATERIAL_DIR]:
     if not os.path.exists(d):
         os.makedirs(d)
 
@@ -33,17 +35,24 @@ def save_json(filepath, data):
     with open(filepath, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
+# 預設商品資料架構 (加入完整的材質參數)
 DEFAULT_SHOP_DATA = {
-    "brands": ["蘋果", "華為", "小米"],
+    "brands": ["蘋果", "三星"],
     "models": [
         {"id": "ip17pm", "brand": "蘋果", "name": "iPhone 17 Pro Max", "status": True}
     ],
     "styles": [
-        {"id": "clear", "name": "透明防摔殼", "price": 390, "desc": "軍規防摔", "mask_suffix": "_clear_mask.png"}
+        {
+            "id": "clear_01", 
+            "name": "氣囊防摔透明殼", 
+            "colors": "透明",
+            "status": True,
+            "print_x": 0, "print_y": 0, "print_w": 80, "print_h": 160,
+            "mask_img": "", "line_img": ""
+        }
     ]
 }
-
-DEFAULT_ASSETS = {"stickers": [], "categories": ["全部", "可愛", "Y2K", "動物"]}
+DEFAULT_ASSETS = {"stickers": [], "categories": ["全部", "可愛", "Y2K", "文字"]}
 
 @app.route('/')
 def home():
@@ -56,39 +65,6 @@ def get_shop_data():
 @app.route('/api/assets', methods=['GET'])
 def get_assets():
     return jsonify({"status": "success", "data": load_json(ASSETS_FILE, DEFAULT_ASSETS)})
-
-@app.route('/api/create_order', methods=['POST'])
-def create_order():
-    try:
-        data = request.json
-        print_data = base64.b64decode(data['print_file'].split(',')[1])
-        mockup_data = base64.b64decode(data['mockup_file'].split(',')[1])
-        model_name = data.get('model_name', 'Unknown')
-        style_name = data.get('style_name', 'Unknown')
-        price = data.get('price', 0)
-        
-        timestamp = int(time.time())
-        order_prefix = f"Order_{timestamp}_{model_name}"
-        
-        with open(os.path.join(SAVE_DIR, f"{order_prefix}_print.png"), 'wb') as f:
-            f.write(print_data)
-        with open(os.path.join(SAVE_DIR, f"{order_prefix}_mockup.png"), 'wb') as f:
-            f.write(mockup_data)
-            
-        order_info = {
-            "order_id": f"ORD{timestamp}",
-            "model": model_name,
-            "style": style_name,
-            "price": price,
-            "status": "待付款",
-            "time": timestamp
-        }
-        with open(os.path.join(SAVE_DIR, f"{order_prefix}_info.json"), 'w', encoding='utf-8') as f:
-            json.dump(order_info, f, ensure_ascii=False, indent=4)
-            
-        return jsonify({"status": "success", "msg": "訂單建立成功"})
-    except Exception as e:
-        return jsonify({"status": "error", "msg": str(e)}), 500
 
 @app.route('/admin')
 def admin_page():
@@ -118,35 +94,43 @@ def login_page():
 def admin_save_shop_data():
     if not session.get('logged_in'): return jsonify({"status": "error"}), 401
     try:
+        # 直接寫入，保證 (片鏡頭貼) 等特殊字眼不會被修改
         save_json(DATA_FILE, request.json)
         return jsonify({"status": "success", "msg": "資料儲存成功"})
     except Exception as e:
         return jsonify({"status": "error", "msg": str(e)}), 500
 
-@app.route('/api/admin/upload_sticker', methods=['POST'])
-def admin_upload_sticker():
+# === 升級：支援批量上傳的 API ===
+@app.route('/api/admin/batch_upload_stickers', methods=['POST'])
+def admin_batch_upload_stickers():
     if not session.get('logged_in'): return jsonify({"status": "error"}), 401
     try:
-        file = request.files.get('file')
+        files = request.files.getlist('files')
         category = request.form.get('category', '全部')
-        if not file: return jsonify({"status": "error", "msg": "沒有找到檔案"}), 400
-        
-        filename = f"s_{int(time.time())}_{file.filename}"
-        filepath = os.path.join(STICKER_DIR, filename)
-        file.save(filepath)
+        if not files or files[0].filename == '': return jsonify({"status": "error", "msg": "沒有選擇檔案"}), 400
         
         assets = load_json(ASSETS_FILE, DEFAULT_ASSETS)
-        new_sticker = {
-            "id": filename,
-            "category": category,
-            "url": f"/static/stickers/{filename}"
-        }
-        assets['stickers'].append(new_sticker)
+        count = 0
+        
+        for file in files:
+            if file.filename:
+                # 加上微秒防止檔名重複
+                filename = f"s_{int(time.time()*1000)}_{file.filename}"
+                filepath = os.path.join(STICKER_DIR, filename)
+                file.save(filepath)
+                
+                assets['stickers'].append({
+                    "id": filename,
+                    "category": category,
+                    "url": f"/static/stickers/{filename}"
+                })
+                count += 1
+                
         if category not in assets['categories']:
             assets['categories'].append(category)
+            
         save_json(ASSETS_FILE, assets)
-        
-        return jsonify({"status": "success", "msg": "貼紙上傳成功！"})
+        return jsonify({"status": "success", "msg": f"成功批量上傳 {count} 張素材！"})
     except Exception as e:
         return jsonify({"status": "error", "msg": str(e)}), 500
 
@@ -156,10 +140,9 @@ def admin_delete_sticker():
     try:
         sticker_id = request.json.get('id')
         assets = load_json(ASSETS_FILE, DEFAULT_ASSETS)
-        # 就是這裡！ !== 改成了 !=
         assets['stickers'] = [s for s in assets['stickers'] if s['id'] != sticker_id]
         save_json(ASSETS_FILE, assets)
-        return jsonify({"status": "success", "msg": "貼紙已刪除"})
+        return jsonify({"status": "success", "msg": "素材已刪除"})
     except Exception as e:
         return jsonify({"status": "error", "msg": str(e)}), 500
 
