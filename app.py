@@ -10,7 +10,7 @@ ADMIN_PASSWORD = "fan123"
 
 SAVE_DIR = "orders"
 STATIC_DIR = "static"
-STICKER_DIR = os.path.join(STATIC_DIR, "stickers") # 存放後台上傳貼紙的資料夾
+STICKER_DIR = os.path.join(STATIC_DIR, "stickers")
 DATA_FILE = "shop_data.json"
 ASSETS_FILE = "assets.json"
 
@@ -45,7 +45,6 @@ DEFAULT_SHOP_DATA = {
 
 DEFAULT_ASSETS = {"stickers": [], "categories": ["全部", "可愛", "Y2K", "動物"]}
 
-# === 前台 API ===
 @app.route('/')
 def home():
     return send_file('index.html')
@@ -91,7 +90,6 @@ def create_order():
     except Exception as e:
         return jsonify({"status": "error", "msg": str(e)}), 500
 
-# === 後台管理 API ===
 @app.route('/admin')
 def admin_page():
     if not session.get('logged_in'):
@@ -133,12 +131,10 @@ def admin_upload_sticker():
         category = request.form.get('category', '全部')
         if not file: return jsonify({"status": "error", "msg": "沒有找到檔案"}), 400
         
-        # 儲存實體檔案
         filename = f"s_{int(time.time())}_{file.filename}"
         filepath = os.path.join(STICKER_DIR, filename)
         file.save(filepath)
         
-        # 寫入 assets.json
         assets = load_json(ASSETS_FILE, DEFAULT_ASSETS)
         new_sticker = {
             "id": filename,
@@ -160,7 +156,8 @@ def admin_delete_sticker():
     try:
         sticker_id = request.json.get('id')
         assets = load_json(ASSETS_FILE, DEFAULT_ASSETS)
-        assets['stickers'] = [s for s in assets['stickers'] if s['id'] !== sticker_id]
+        # 就是這裡！ !== 改成了 !=
+        assets['stickers'] = [s for s in assets['stickers'] if s['id'] != sticker_id]
         save_json(ASSETS_FILE, assets)
         return jsonify({"status": "success", "msg": "貼紙已刪除"})
     except Exception as e:
