@@ -3,189 +3,330 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>型號與參數管理後台</title>
+    <title>來火定制 - 後台管理系統</title>
+    <!-- 使用 FontAwesome 處理圖示 -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        :root { --primary-color: #ff6a48; --bg-color: #f4f7f6; --text-color: #333; }
-        body { font-family: -apple-system, sans-serif; background: var(--bg-color); color: var(--text-color); margin: 0; padding: 20px; }
-        .container { max-width: 900px; margin: 0 auto; }
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #ddd; }
-        .card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 20px; }
-        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px; }
-        .form-group { display: flex; flex-direction: column; }
-        .form-group label { font-size: 13px; font-weight: bold; margin-bottom: 5px; color: #555; }
-        .form-group input { padding: 10px; border: 1px solid #ccc; border-radius: 5px; font-size: 14px; }
-        .primary-btn { background: var(--primary-color); color: white; border: none; padding: 10px 20px; border-radius: 5px; font-weight: bold; cursor: pointer; transition: 0.2s; }
-        .primary-btn:hover { background: #e55a3a; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
-        th { background: #f9f9f9; font-size: 14px; color: #666; }
-        .tag { background: #fff5f2; color: var(--primary-color); padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+        /* 基礎樣式與 Element UI 風格還原 */
+        :root {
+            --primary-color: #409EFF; /* 經典 Element 藍 */
+            --bg-color: #f0f2f5;
+            --sidebar-bg: #ffffff;
+            --text-main: #303133;
+            --text-regular: #606266;
+            --border-color: #EBEEF5;
+            --danger-color: #F56C6C;
+        }
+        body { margin: 0; font-family: "Helvetica Neue", Helvetica, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "微軟雅黑", Arial, sans-serif; background: var(--bg-color); color: var(--text-main); display: flex; height: 100vh; overflow: hidden; }
+        
+        /* === 左側導航列 (Sidebar) === */
+        .sidebar { width: 220px; background: var(--sidebar-bg); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; flex-shrink: 0; z-index: 10; }
+        .logo-area { height: 70px; display: flex; flex-direction: column; align-items: center; justify-content: center; border-bottom: 1px solid var(--border-color); color: #d32f2f; font-weight: bold; font-size: 20px; }
+        .logo-area i { font-size: 24px; margin-bottom: 4px; }
+        
+        .menu-list { flex: 1; overflow-y: auto; padding-top: 10px; }
+        .menu-item { padding: 15px 20px; font-size: 14px; color: var(--text-main); cursor: pointer; transition: 0.2s; border-left: 3px solid transparent; }
+        .menu-item:hover { background: #f5f7fa; }
+        .menu-item.active { background: #ecf5ff; color: var(--primary-color); border-left-color: var(--primary-color); }
+        
+        /* === 右側主內容區 (Main Content) === */
+        .main-container { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        
+        .top-header { height: 50px; background: white; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; padding: 0 20px; font-size: 13px; color: var(--text-regular); }
+        .header-links a { color: var(--primary-color); text-decoration: none; margin-left: 15px; }
+        
+        .content-area { flex: 1; padding: 20px; overflow-y: auto; box-sizing: border-box; }
+        
+        /* === 內容區塊共用元件 === */
+        .page-title { font-size: 18px; font-weight: bold; margin-top: 0; margin-bottom: 20px; }
+        .panel { background: white; border-radius: 4px; border: 1px solid var(--border-color); padding: 20px; }
+        
+        /* 標籤頁 (Tabs) */
+        .tabs { display: flex; border-bottom: 2px solid var(--border-color); margin-bottom: 20px; }
+        .tab { padding: 10px 20px; font-size: 14px; cursor: pointer; color: var(--text-main); margin-bottom: -2px; border-bottom: 2px solid transparent; }
+        .tab.active { color: var(--primary-color); border-bottom-color: var(--primary-color); font-weight: bold; }
+        
+        /* 按鈕 (Buttons) */
+        .el-btn { display: inline-block; background: var(--primary-color); color: white; border: none; padding: 9px 15px; font-size: 12px; border-radius: 3px; cursor: pointer; transition: 0.1s; }
+        .el-btn:hover { background: #66b1ff; }
+        .el-btn.danger { background: white; color: var(--danger-color); border: 1px solid #fbc4c4; }
+        .el-btn.danger:hover { background: #fef0f0; }
+        
+        /* 表格 (Table) */
+        .el-table { width: 100%; border-collapse: collapse; font-size: 14px; text-align: left; }
+        .el-table th { background: #f5f7fa; color: #909399; font-weight: normal; padding: 12px; border-bottom: 1px solid var(--border-color); }
+        .el-table td { padding: 12px; border-bottom: 1px solid var(--border-color); color: var(--text-regular); }
+        .el-table tr:hover { background: #f5f7fa; }
+        
+        /* 開關 (Switch) */
+        .switch { position: relative; display: inline-block; width: 40px; height: 20px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 20px; }
+        .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 2px; bottom: 2px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: var(--primary-color); }
+        input:checked + .slider:before { transform: translateX(20px); }
+        
+        /* 隱藏區塊 */
+        .view-section { display: none; }
+        .view-section.active { display: block; }
+
+        /* 彈窗 (Modal) */
+        .modal-overlay { position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index: 100; display: none; justify-content:center; align-items:center; }
+        .modal-overlay.active { display: flex; }
+        .modal-box { background: white; width: 400px; border-radius: 4px; box-shadow: 0 2px 12px rgba(0,0,0,0.1); }
+        .modal-header { padding: 15px 20px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; font-size: 16px; }
+        .modal-body { padding: 20px; }
+        .modal-footer { padding: 15px 20px; border-top: 1px solid var(--border-color); text-align: right; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; font-size: 14px; margin-bottom: 8px; color: var(--text-main); }
+        .form-control { width: 100%; padding: 8px 10px; border: 1px solid #dcdfe6; border-radius: 4px; box-sizing: border-box; font-size: 14px; outline: none; }
+        .form-control:focus { border-color: var(--primary-color); }
     </style>
 </head>
 <body>
 
-<div class="container">
-    <div class="header">
-        <h2>⚙️ 列印參數與商品管理中心</h2>
-        <a href="/" style="color: #666; text-decoration: none;"><i class="fa-solid fa-house"></i> 回前台</a>
+    <!-- 左側導航 -->
+    <div class="sidebar">
+        <div class="logo-area">
+            <i class="fa-solid fa-hammer"></i>
+            <div>來火定制</div>
+        </div>
+        <div class="menu-list">
+            <div class="menu-item" onclick="switchMenu('orders')">訂單管理</div>
+            <div class="menu-item active" onclick="switchMenu('models')">手機品牌及型號</div>
+            <div class="menu-item" onclick="switchMenu('styles')">手機殼材質</div>
+            <div class="menu-item" onclick="switchMenu('assets')">素材庫</div>
+            <div class="menu-item" onclick="switchMenu('templates')">模板庫</div>
+        </div>
     </div>
 
-    <!-- 新增/編輯型號區塊 -->
-    <div class="card">
-        <h3>➕ 新增 / 更新型號參數</h3>
-        <p style="font-size: 13px; color: #888; margin-top: -10px;">輸入相同的「型號代碼」即可更新該型號的參數。尺寸單位皆為毫米 (mm)。</p>
-        
-        <div class="form-grid">
-            <div class="form-group">
-                <label>型號代碼 (英數字, 例如: ip17pm)</label>
-                <input type="text" id="m_id" placeholder="必填">
-            </div>
-            <div class="form-group">
-                <label>顯示名稱 (例如: iPhone 17 Pro Max)</label>
-                <input type="text" id="m_name" placeholder="前台顯示用的名稱">
-            </div>
-            <div class="form-group">
-                <label>蒙版圖檔名 (例如: ip17pm_mask.png)</label>
-                <input type="text" id="m_mask" placeholder="請確保圖片已在 static 中">
-            </div>
-            <div class="form-group">
-                <label>基底圖檔名 (選項, 若無可留空)</label>
-                <input type="text" id="m_base" placeholder="">
-            </div>
-            <div class="form-group">
-                <label>實際列印寬度 (W)</label>
-                <input type="number" id="m_width" step="0.1" value="0">
-            </div>
-            <div class="form-group">
-                <label>實際列印高度 (H)</label>
-                <input type="number" id="m_height" step="0.1" value="0">
-            </div>
-            <div class="form-group">
-                <label>列印起始 X 座標</label>
-                <input type="number" id="m_x" step="0.1" value="0">
-            </div>
-            <div class="form-group">
-                <label>列印起始 Y 座標</label>
-                <input type="number" id="m_y" step="0.1" value="0">
+    <!-- 右側主內容 -->
+    <div class="main-container">
+        <!-- 頂部列 -->
+        <div class="top-header">
+            <div></div>
+            <div class="header-links">
+                <span>15602902808</span>
+                <a href="#">幫助文檔</a>
+                <a href="#">聯繫客服</a>
+                <a href="/" target="_blank" style="color: #67c23a;">查看前台</a>
             </div>
         </div>
-        <button class="primary-btn" onclick="saveModel()"><i class="fa-solid fa-floppy-disk"></i> 儲存設定</button>
+
+        <!-- 內容區 -->
+        <div class="content-area">
+            
+            <!-- 模組：手機品牌及型號 -->
+            <div id="view-models" class="view-section active">
+                <h2 class="page-title">手機品牌及型號</h2>
+                <div class="panel">
+                    <div class="tabs">
+                        <div class="tab active" onclick="switchTab('brand-tab', 'model-tab')">品牌列表</div>
+                        <div class="tab" onclick="switchTab('model-tab', 'brand-tab')">型號列表</div>
+                    </div>
+                    
+                    <!-- 品牌列表區 -->
+                    <div id="brand-tab" style="display: block;">
+                        <button class="el-btn" style="margin-bottom: 15px;" onclick="openModal('brand-modal')">新增品牌</button>
+                        <table class="el-table">
+                            <thead><tr><th width="50">序號</th><th>品牌</th><th>狀態</th><th width="100">操作</th></tr></thead>
+                            <tbody id="brand-table-body">
+                                <!-- JS 動態渲染 -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- 型號列表區 -->
+                    <div id="model-tab" style="display: none;">
+                        <button class="el-btn" style="margin-bottom: 15px;" onclick="openModal('model-modal')">新增型號</button>
+                        <table class="el-table">
+                            <thead><tr><th width="50">序號</th><th>所屬品牌</th><th>型號 ID</th><th>型號名稱</th><th>狀態</th><th width="150">操作</th></tr></thead>
+                            <tbody id="model-table-body">
+                                <!-- JS 動態渲染 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 模組：未完成的預留頁面 -->
+            <div id="view-orders" class="view-section"><h2 class="page-title">訂單管理</h2><div class="panel">功能開發中...</div></div>
+            <div id="view-styles" class="view-section"><h2 class="page-title">手機殼材質</h2><div class="panel">功能開發中...</div></div>
+            <div id="view-assets" class="view-section"><h2 class="page-title">素材庫</h2><div class="panel">功能開發中...</div></div>
+            <div id="view-templates" class="view-section"><h2 class="page-title">模板庫</h2><div class="panel">功能開發中...</div></div>
+
+        </div>
     </div>
 
-    <!-- 已有型號列表 -->
-    <div class="card">
-        <h3>📋 已建立的型號清單</h3>
-        <table id="model-table">
-            <thead>
-                <tr>
-                    <th>代碼</th>
-                    <th>顯示名稱</th>
-                    <th>尺寸 (W x H)</th>
-                    <th>座標 (X, Y)</th>
-                    <th>操作</th>
-                </tr>
-            </thead>
-            <tbody id="model-list">
-                <tr><td colspan="5" style="text-align:center; color:#999;">讀取中...</td></tr>
-            </tbody>
-        </table>
+    <!-- 彈窗：新增品牌 -->
+    <div class="modal-overlay" id="brand-modal">
+        <div class="modal-box">
+            <div class="modal-header"><span>新增品牌</span><button class="el-btn danger" style="padding:2px 6px; border:none;" onclick="closeModal('brand-modal')"><i class="fa-solid fa-xmark"></i></button></div>
+            <div class="modal-body">
+                <div class="form-group"><label>品牌名稱</label><input type="text" id="input-brand-name" class="form-control" placeholder="例如：蘋果"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="el-btn danger" onclick="closeModal('brand-modal')">取消</button>
+                <button class="el-btn" onclick="saveNewBrand()">確定</button>
+            </div>
+        </div>
     </div>
-</div>
+
+    <!-- 彈窗：新增型號 -->
+    <div class="modal-overlay" id="model-modal">
+        <div class="modal-box">
+            <div class="modal-header"><span>新增型號</span><button class="el-btn danger" style="padding:2px 6px; border:none;" onclick="closeModal('model-modal')"><i class="fa-solid fa-xmark"></i></button></div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>選擇品牌</label>
+                    <select id="input-model-brand" class="form-control"></select>
+                </div>
+                <div class="form-group"><label>型號 ID (英文小寫，例如 ip18)</label><input type="text" id="input-model-id" class="form-control" placeholder="需為唯一值"></div>
+                <div class="form-group"><label>型號名稱 (顯示用)</label><input type="text" id="input-model-name" class="form-control" placeholder="例如：iPhone 18"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="el-btn danger" onclick="closeModal('model-modal')">取消</button>
+                <button class="el-btn" onclick="saveNewModel()">確定</button>
+            </div>
+        </div>
+    </div>
 
 <script>
-    // 載入所有已設定的型號
-    async function loadModels() {
+    let shopData = { brands: [], models: [], styles: [] };
+
+    // 初始化：讀取伺服器資料
+    window.onload = async () => {
         try {
-            const res = await fetch('/api/admin/get_all_models');
-            if (res.status === 401) { alert("登入逾時，請重新登入"); window.location.href='/login'; return; }
-            
+            const res = await fetch('/api/shop_data');
             const data = await res.json();
-            const tbody = document.getElementById('model-list');
-            tbody.innerHTML = '';
-            
-            const config = data.data;
-            if(Object.keys(config).length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#999;">目前沒有任何型號資料，請在上方新增。</td></tr>';
-                return;
+            if(data.status === "success") {
+                shopData = data.data;
+                renderBrands();
+                renderModels();
             }
+        } catch(e) { alert("讀取資料失敗"); }
+    };
 
-            for(let id in config) {
-                let info = config[id];
-                tbody.innerHTML += `
-                    <tr>
-                        <td><span class="tag">${id}</span></td>
-                        <td><strong>${info.name}</strong><br><small style="color:#888;">遮罩: ${info.mask_img}</small></td>
-                        <td>${info.print_width} x ${info.print_height} mm</td>
-                        <td>X: ${info.start_x}, Y: ${info.start_y}</td>
-                        <td>
-                            <button onclick="editModel('${id}')" style="background:#f0f0f0; border:none; padding:5px 10px; border-radius:4px; cursor:pointer;">載入編輯</button>
-                        </td>
-                    </tr>
-                `;
-            }
-        } catch(e) {
-            alert("讀取列表失敗");
-        }
+    // === UI 切換邏輯 ===
+    function switchMenu(viewId) {
+        document.querySelectorAll('.menu-item').forEach(el => el.classList.remove('active'));
+        event.currentTarget.classList.add('active');
+        document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
+        document.getElementById('view-' + viewId).classList.add('active');
     }
 
-    // 將資料帶入上方表單
-    async function editModel(id) {
-        const res = await fetch('/api/admin/get_all_models');
-        const data = await res.json();
-        const info = data.data[id];
-        
-        document.getElementById('m_id').value = id;
-        document.getElementById('m_name').value = info.name;
-        document.getElementById('m_mask').value = info.mask_img;
-        document.getElementById('m_base').value = info.base_img || "";
-        document.getElementById('m_width').value = info.print_width;
-        document.getElementById('m_height').value = info.print_height;
-        document.getElementById('m_x').value = info.start_x;
-        document.getElementById('m_y').value = info.start_y;
-        
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+    function switchTab(showId, hideId) {
+        document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+        event.currentTarget.classList.add('active');
+        document.getElementById(showId).style.display = 'block';
+        document.getElementById(hideId).style.display = 'none';
     }
 
-    // 儲存資料到伺服器
-    async function saveModel() {
-        const payload = {
-            id: document.getElementById('m_id').value,
-            name: document.getElementById('m_name').value,
-            mask_img: document.getElementById('m_mask').value,
-            base_img: document.getElementById('m_base').value,
-            print_width: document.getElementById('m_width').value,
-            print_height: document.getElementById('m_height').value,
-            start_x: document.getElementById('m_x').value,
-            start_y: document.getElementById('m_y').value,
-            angle: 0
-        };
-        
-        if(!payload.id || !payload.name || !payload.mask_img) {
-            alert("請至少填寫型號代碼、顯示名稱與蒙版檔名！");
-            return;
-        }
+    function openModal(id) { document.getElementById(id).classList.add('active'); }
+    function closeModal(id) { document.getElementById(id).classList.remove('active'); }
 
+    // === 渲染表格 ===
+    function renderBrands() {
+        const tbody = document.getElementById('brand-table-body');
+        const select = document.getElementById('input-model-brand');
+        tbody.innerHTML = ''; select.innerHTML = '';
+        
+        shopData.brands.forEach((brand, idx) => {
+            // 表格
+            tbody.innerHTML += `
+                <tr>
+                    <td>${idx + 1}</td>
+                    <td>${brand}</td>
+                    <td><label class="switch"><input type="checkbox" checked disabled><span class="slider"></span></label></td>
+                    <td><button class="el-btn danger" onclick="deleteBrand('${brand}')">刪除</button></td>
+                </tr>
+            `;
+            // 型號新增彈窗的下拉選單
+            select.innerHTML += `<option value="${brand}">${brand}</option>`;
+        });
+    }
+
+    function renderModels() {
+        const tbody = document.getElementById('model-table-body');
+        tbody.innerHTML = '';
+        
+        shopData.models.forEach((model, idx) => {
+            const checked = model.status !== false ? 'checked' : '';
+            tbody.innerHTML += `
+                <tr>
+                    <td>${idx + 1}</td>
+                    <td>${model.brand}</td>
+                    <td>${model.id}</td>
+                    <td>${model.name}</td>
+                    <td><label class="switch"><input type="checkbox" ${checked} onchange="toggleModelStatus('${model.id}', this.checked)"><span class="slider"></span></label></td>
+                    <td><button class="el-btn danger" onclick="deleteModel('${model.id}')">刪除</button></td>
+                </tr>
+            `;
+        });
+    }
+
+    // === 資料操作與儲存 ===
+    async function syncToServer() {
         try {
-            const res = await fetch('/api/admin/save_model', {
+            const res = await fetch('/api/admin/save_shop_data', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                body: JSON.stringify(shopData)
             });
             const result = await res.json();
-            if(res.ok) {
-                alert("✅ " + result.msg);
-                loadModels(); // 重新載入列表
-            } else {
-                alert("❌ " + result.msg);
-            }
-        } catch(e) {
-            alert("網路錯誤");
+            if(!res.ok) alert("儲存失敗：" + result.msg);
+        } catch(e) { alert("連線錯誤"); }
+    }
+
+    function saveNewBrand() {
+        const name = document.getElementById('input-brand-name').value.trim();
+        if(!name) return alert("請輸入品牌名稱");
+        if(shopData.brands.includes(name)) return alert("品牌已存在");
+        
+        shopData.brands.push(name);
+        syncToServer();
+        renderBrands();
+        closeModal('brand-modal');
+        document.getElementById('input-brand-name').value = '';
+    }
+
+    function saveNewModel() {
+        const brand = document.getElementById('input-model-brand').value;
+        const id = document.getElementById('input-model-id').value.trim();
+        const name = document.getElementById('input-model-name').value.trim();
+        
+        if(!id || !name) return alert("資料不可為空");
+        if(shopData.models.find(m => m.id === id)) return alert("型號 ID 已存在，請換一個");
+        
+        shopData.models.push({ id, brand, name, status: true });
+        syncToServer();
+        renderModels();
+        closeModal('model-modal');
+        document.getElementById('input-model-id').value = '';
+        document.getElementById('input-model-name').value = '';
+    }
+
+    function toggleModelStatus(id, isChecked) {
+        const model = shopData.models.find(m => m.id === id);
+        if(model) {
+            model.status = isChecked;
+            syncToServer();
         }
     }
 
-    // 頁面載入時執行
-    window.onload = loadModels;
+    function deleteBrand(brandName) {
+        if(!confirm(`確定要刪除品牌 [${brandName}] 嗎？`)) return;
+        shopData.brands = shopData.brands.filter(b => b !== brandName);
+        syncToServer();
+        renderBrands();
+    }
+
+    function deleteModel(modelId) {
+        if(!confirm(`確定要刪除型號 ID [${modelId}] 嗎？`)) return;
+        shopData.models = shopData.models.filter(m => m.id !== modelId);
+        syncToServer();
+        renderModels();
+    }
 </script>
 </body>
 </html>
