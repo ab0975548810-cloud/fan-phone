@@ -3,84 +3,82 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>來火定制 - 後台管理系統</title>
-    <!-- 使用 FontAwesome 處理圖示 -->
+    <title>本福丸訂製 - 後台管理系統</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        /* 基礎樣式與 Element UI 風格還原 */
         :root {
-            --primary-color: #409EFF; /* 經典 Element 藍 */
-            --bg-color: #f0f2f5;
+            --primary-color: #ff8599; /* 蜜桃粉 */
+            --primary-light: #ffeef1;
+            --bg-color: #f8f9fa;
             --sidebar-bg: #ffffff;
             --text-main: #303133;
             --text-regular: #606266;
-            --border-color: #EBEEF5;
-            --danger-color: #F56C6C;
+            --border-color: #f0f2f5;
+            --danger-color: #ff4d4f;
         }
-        body { margin: 0; font-family: "Helvetica Neue", Helvetica, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "微軟雅黑", Arial, sans-serif; background: var(--bg-color); color: var(--text-main); display: flex; height: 100vh; overflow: hidden; }
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg-color); color: var(--text-main); display: flex; height: 100vh; overflow: hidden; }
         
-        /* === 左側導航列 (Sidebar) === */
-        .sidebar { width: 220px; background: var(--sidebar-bg); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; flex-shrink: 0; z-index: 10; }
-        .logo-area { height: 70px; display: flex; flex-direction: column; align-items: center; justify-content: center; border-bottom: 1px solid var(--border-color); color: #d32f2f; font-weight: bold; font-size: 20px; }
-        .logo-area i { font-size: 24px; margin-bottom: 4px; }
+        /* === 左側導航列 === */
+        .sidebar { width: 220px; background: var(--sidebar-bg); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; flex-shrink: 0; z-index: 10; box-shadow: 2px 0 8px rgba(0,0,0,0.02); }
+        .logo-area { height: 70px; display: flex; align-items: center; justify-content: center; border-bottom: 1px solid var(--border-color); color: var(--primary-color); font-weight: 800; font-size: 20px; letter-spacing: 1px; }
+        .logo-area i { font-size: 22px; margin-right: 8px; }
         
-        .menu-list { flex: 1; overflow-y: auto; padding-top: 10px; }
-        .menu-item { padding: 15px 20px; font-size: 14px; color: var(--text-main); cursor: pointer; transition: 0.2s; border-left: 3px solid transparent; }
-        .menu-item:hover { background: #f5f7fa; }
-        .menu-item.active { background: #ecf5ff; color: var(--primary-color); border-left-color: var(--primary-color); }
+        .menu-list { flex: 1; overflow-y: auto; padding-top: 15px; }
+        .menu-item { padding: 15px 25px; font-size: 14px; font-weight: bold; color: var(--text-regular); cursor: pointer; transition: 0.2s; border-left: 4px solid transparent; }
+        .menu-item:hover { background: var(--bg-color); color: var(--primary-color); }
+        .menu-item.active { background: var(--primary-light); color: var(--primary-color); border-left-color: var(--primary-color); }
         
-        /* === 右側主內容區 (Main Content) === */
+        /* === 右側主內容區 === */
         .main-container { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
         
-        .top-header { height: 50px; background: white; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; padding: 0 20px; font-size: 13px; color: var(--text-regular); }
-        .header-links a { color: var(--primary-color); text-decoration: none; margin-left: 15px; }
+        .top-header { height: 60px; background: white; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; padding: 0 25px; box-shadow: 0 2px 5px rgba(0,0,0,0.02); }
+        .header-links a { display: inline-block; background: #67c23a; color: white; padding: 6px 15px; border-radius: 20px; text-decoration: none; font-size: 13px; font-weight: bold; transition: 0.2s; }
+        .header-links a:hover { background: #5daf34; transform: translateY(-1px); }
         
-        .content-area { flex: 1; padding: 20px; overflow-y: auto; box-sizing: border-box; }
+        .content-area { flex: 1; padding: 25px; overflow-y: auto; }
         
-        /* === 內容區塊共用元件 === */
-        .page-title { font-size: 18px; font-weight: bold; margin-top: 0; margin-bottom: 20px; }
-        .panel { background: white; border-radius: 4px; border: 1px solid var(--border-color); padding: 20px; }
+        /* 區塊共用元件 */
+        .page-title { font-size: 20px; font-weight: 800; margin-top: 0; margin-bottom: 20px; color: var(--text-main); }
+        .panel { background: white; border-radius: 12px; border: 1px solid var(--border-color); padding: 25px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); }
         
-        /* 標籤頁 (Tabs) */
-        .tabs { display: flex; border-bottom: 2px solid var(--border-color); margin-bottom: 20px; }
-        .tab { padding: 10px 20px; font-size: 14px; cursor: pointer; color: var(--text-main); margin-bottom: -2px; border-bottom: 2px solid transparent; }
-        .tab.active { color: var(--primary-color); border-bottom-color: var(--primary-color); font-weight: bold; }
+        /* 標籤頁 */
+        .tabs { display: flex; border-bottom: 2px solid var(--border-color); margin-bottom: 25px; }
+        .tab { padding: 10px 25px; font-size: 15px; cursor: pointer; color: var(--text-regular); font-weight: bold; margin-bottom: -2px; border-bottom: 3px solid transparent; transition: 0.2s; }
+        .tab.active { color: var(--primary-color); border-bottom-color: var(--primary-color); }
         
-        /* 按鈕 (Buttons) */
-        .el-btn { display: inline-block; background: var(--primary-color); color: white; border: none; padding: 9px 15px; font-size: 12px; border-radius: 3px; cursor: pointer; transition: 0.1s; }
-        .el-btn:hover { background: #66b1ff; }
-        .el-btn.danger { background: white; color: var(--danger-color); border: 1px solid #fbc4c4; }
-        .el-btn.danger:hover { background: #fef0f0; }
+        /* 按鈕 */
+        .el-btn { display: inline-block; background: var(--primary-color); color: white; border: none; padding: 10px 20px; font-size: 13px; font-weight: bold; border-radius: 6px; cursor: pointer; transition: 0.2s; }
+        .el-btn:hover { background: #ff6a80; box-shadow: 0 4px 10px rgba(255,133,153,0.3); }
+        .el-btn.danger { background: white; color: var(--danger-color); border: 1px solid #ffcccd; }
+        .el-btn.danger:hover { background: #fff1f0; border-color: var(--danger-color); box-shadow: none; }
         
-        /* 表格 (Table) */
+        /* 表格 */
         .el-table { width: 100%; border-collapse: collapse; font-size: 14px; text-align: left; }
-        .el-table th { background: #f5f7fa; color: #909399; font-weight: normal; padding: 12px; border-bottom: 1px solid var(--border-color); }
-        .el-table td { padding: 12px; border-bottom: 1px solid var(--border-color); color: var(--text-regular); }
-        .el-table tr:hover { background: #f5f7fa; }
-        
-        /* 開關 (Switch) */
-        .switch { position: relative; display: inline-block; width: 40px; height: 20px; }
-        .switch input { opacity: 0; width: 0; height: 0; }
-        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 20px; }
-        .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 2px; bottom: 2px; background-color: white; transition: .4s; border-radius: 50%; }
-        input:checked + .slider { background-color: var(--primary-color); }
-        input:checked + .slider:before { transform: translateX(20px); }
+        .el-table th { background: #fff5f7; color: var(--primary-color); font-weight: bold; padding: 14px; border-bottom: 2px solid var(--primary-light); }
+        .el-table td { padding: 14px; border-bottom: 1px solid var(--border-color); color: var(--text-regular); }
         
         /* 隱藏區塊 */
         .view-section { display: none; }
-        .view-section.active { display: block; }
+        .view-section.active { display: block; animation: fadeIn 0.3s ease; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
-        /* 彈窗 (Modal) */
+        /* === 素材庫網格 === */
+        .asset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 15px; margin-top: 20px; }
+        .asset-card { border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; text-align: center; position: relative; background: #fafafa; }
+        .asset-card img { width: 100%; height: 100px; object-fit: contain; }
+        .asset-del-btn { position: absolute; top: -8px; right: -8px; background: var(--danger-color); color: white; border: none; width: 24px; height: 24px; border-radius: 50%; cursor: pointer; font-size: 12px; display: flex; justify-content: center; align-items: center; }
+
+        /* 彈窗 */
         .modal-overlay { position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index: 100; display: none; justify-content:center; align-items:center; }
         .modal-overlay.active { display: flex; }
-        .modal-box { background: white; width: 400px; border-radius: 4px; box-shadow: 0 2px 12px rgba(0,0,0,0.1); }
-        .modal-header { padding: 15px 20px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; font-size: 16px; }
-        .modal-body { padding: 20px; }
-        .modal-footer { padding: 15px 20px; border-top: 1px solid var(--border-color); text-align: right; }
-        .form-group { margin-bottom: 15px; }
-        .form-group label { display: block; font-size: 14px; margin-bottom: 8px; color: var(--text-main); }
-        .form-control { width: 100%; padding: 8px 10px; border: 1px solid #dcdfe6; border-radius: 4px; box-sizing: border-box; font-size: 14px; outline: none; }
-        .form-control:focus { border-color: var(--primary-color); }
+        .modal-box { background: white; width: 420px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); overflow: hidden; }
+        .modal-header { padding: 18px 25px; background: var(--primary-light); color: var(--primary-color); display: flex; justify-content: space-between; align-items: center; font-size: 16px; font-weight: bold; }
+        .modal-body { padding: 25px; }
+        .modal-footer { padding: 15px 25px; border-top: 1px solid var(--border-color); text-align: right; background: #fafafa; }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; font-size: 14px; font-weight: bold; margin-bottom: 8px; color: var(--text-main); }
+        .form-control { width: 100%; padding: 10px 12px; border: 1px solid #dcdfe6; border-radius: 6px; box-sizing: border-box; font-size: 14px; outline: none; transition: 0.2s; }
+        .form-control:focus { border-color: var(--primary-color); box-shadow: 0 0 0 2px var(--primary-light); }
     </style>
 </head>
 <body>
@@ -88,35 +86,28 @@
     <!-- 左側導航 -->
     <div class="sidebar">
         <div class="logo-area">
-            <i class="fa-solid fa-hammer"></i>
-            <div>來火定制</div>
+            <i class="fa-solid fa-wand-magic-sparkles"></i> 本福丸訂製
         </div>
         <div class="menu-list">
-            <div class="menu-item" onclick="switchMenu('orders')">訂單管理</div>
-            <div class="menu-item active" onclick="switchMenu('models')">手機品牌及型號</div>
-            <div class="menu-item" onclick="switchMenu('styles')">手機殼材質</div>
-            <div class="menu-item" onclick="switchMenu('assets')">素材庫</div>
-            <div class="menu-item" onclick="switchMenu('templates')">模板庫</div>
+            <div class="menu-item" onclick="switchMenu('orders')"><i class="fa-solid fa-list-check" style="width:25px;"></i> 訂單管理</div>
+            <div class="menu-item active" onclick="switchMenu('models')"><i class="fa-solid fa-mobile-screen" style="width:25px;"></i> 型號及材質</div>
+            <div class="menu-item" onclick="switchMenu('assets')"><i class="fa-solid fa-face-smile" style="width:25px;"></i> 素材庫 (貼紙)</div>
+            <div class="menu-item" onclick="switchMenu('templates')"><i class="fa-solid fa-border-all" style="width:25px;"></i> 模板庫</div>
         </div>
     </div>
 
     <!-- 右側主內容 -->
     <div class="main-container">
-        <!-- 頂部列 -->
         <div class="top-header">
-            <div></div>
+            <div><!-- 預留左側空間 --></div>
             <div class="header-links">
-                <span>15602902808</span>
-                <a href="#">幫助文檔</a>
-                <a href="#">聯繫客服</a>
-                <a href="/" target="_blank" style="color: #67c23a;">查看前台</a>
+                <a href="/" target="_blank"><i class="fa-solid fa-eye"></i> 查看前台</a>
             </div>
         </div>
 
-        <!-- 內容區 -->
         <div class="content-area">
             
-            <!-- 模組：手機品牌及型號 -->
+            <!-- 模組：型號及材質 -->
             <div id="view-models" class="view-section active">
                 <h2 class="page-title">手機品牌及型號</h2>
                 <div class="panel">
@@ -125,89 +116,88 @@
                         <div class="tab" onclick="switchTab('model-tab', 'brand-tab')">型號列表</div>
                     </div>
                     
-                    <!-- 品牌列表區 -->
                     <div id="brand-tab" style="display: block;">
-                        <button class="el-btn" style="margin-bottom: 15px;" onclick="openModal('brand-modal')">新增品牌</button>
+                        <button class="el-btn" style="margin-bottom: 20px;" onclick="openModal('brand-modal')"><i class="fa-solid fa-plus"></i> 新增品牌</button>
                         <table class="el-table">
-                            <thead><tr><th width="50">序號</th><th>品牌</th><th>狀態</th><th width="100">操作</th></tr></thead>
-                            <tbody id="brand-table-body">
-                                <!-- JS 動態渲染 -->
-                            </tbody>
+                            <thead><tr><th width="80">序號</th><th>品牌名稱</th><th width="120">操作</th></tr></thead>
+                            <tbody id="brand-table-body"></tbody>
                         </table>
                     </div>
 
-                    <!-- 型號列表區 -->
                     <div id="model-tab" style="display: none;">
-                        <button class="el-btn" style="margin-bottom: 15px;" onclick="openModal('model-modal')">新增型號</button>
+                        <button class="el-btn" style="margin-bottom: 20px;" onclick="openModal('model-modal')"><i class="fa-solid fa-plus"></i> 新增型號</button>
                         <table class="el-table">
-                            <thead><tr><th width="50">序號</th><th>所屬品牌</th><th>型號 ID</th><th>型號名稱</th><th>狀態</th><th width="150">操作</th></tr></thead>
-                            <tbody id="model-table-body">
-                                <!-- JS 動態渲染 -->
-                            </tbody>
+                            <thead><tr><th width="80">序號</th><th>所屬品牌</th><th>型號 ID</th><th>顯示名稱</th><th width="120">操作</th></tr></thead>
+                            <tbody id="model-table-body"></tbody>
                         </table>
                     </div>
                 </div>
             </div>
 
-            <!-- 模組：未完成的預留頁面 -->
-            <div id="view-orders" class="view-section"><h2 class="page-title">訂單管理</h2><div class="panel">功能開發中...</div></div>
-            <div id="view-styles" class="view-section"><h2 class="page-title">手機殼材質</h2><div class="panel">功能開發中...</div></div>
-            <div id="view-assets" class="view-section"><h2 class="page-title">素材庫</h2><div class="panel">功能開發中...</div></div>
-            <div id="view-templates" class="view-section"><h2 class="page-title">模板庫</h2><div class="panel">功能開發中...</div></div>
+            <!-- 模組：素材庫 (貼紙) -->
+            <div id="view-assets" class="view-section">
+                <h2 class="page-title">素材庫 (貼紙與裝飾)</h2>
+                <div class="panel">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <div style="font-size: 14px; color: var(--text-regular);">上傳的貼紙將直接顯示在前台客人的編輯器中。請上傳透明背景的 PNG 圖檔。</div>
+                        <button class="el-btn" onclick="document.getElementById('sticker-upload-input').click()"><i class="fa-solid fa-cloud-arrow-up"></i> 上傳貼紙</button>
+                        <input type="file" id="sticker-upload-input" accept="image/png" style="display: none;" onchange="uploadSticker(event)">
+                    </div>
+                    
+                    <div class="tabs" id="asset-category-tabs">
+                        <!-- 分類標籤動態產生 -->
+                    </div>
+
+                    <div class="asset-grid" id="asset-grid-body">
+                        <!-- 貼紙網格動態產生 -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- 模組：預留 -->
+            <div id="view-orders" class="view-section"><h2 class="page-title">訂單管理</h2><div class="panel">訂單列表與報表匯出準備中...</div></div>
+            <div id="view-templates" class="view-section"><h2 class="page-title">模板庫</h2><div class="panel">固定版型插槽系統開發中...</div></div>
 
         </div>
     </div>
 
-    <!-- 彈窗：新增品牌 -->
+    <!-- 彈窗群 -->
     <div class="modal-overlay" id="brand-modal">
         <div class="modal-box">
-            <div class="modal-header"><span>新增品牌</span><button class="el-btn danger" style="padding:2px 6px; border:none;" onclick="closeModal('brand-modal')"><i class="fa-solid fa-xmark"></i></button></div>
-            <div class="modal-body">
-                <div class="form-group"><label>品牌名稱</label><input type="text" id="input-brand-name" class="form-control" placeholder="例如：蘋果"></div>
-            </div>
-            <div class="modal-footer">
-                <button class="el-btn danger" onclick="closeModal('brand-modal')">取消</button>
-                <button class="el-btn" onclick="saveNewBrand()">確定</button>
-            </div>
+            <div class="modal-header">新增品牌 <button class="el-btn danger" style="padding:4px 8px;" onclick="closeModal('brand-modal')"><i class="fa-solid fa-xmark"></i></button></div>
+            <div class="modal-body"><div class="form-group"><label>品牌名稱</label><input type="text" id="input-brand-name" class="form-control" placeholder="例如：蘋果"></div></div>
+            <div class="modal-footer"><button class="el-btn danger" onclick="closeModal('brand-modal')">取消</button> <button class="el-btn" onclick="saveNewBrand()">確定儲存</button></div>
         </div>
     </div>
 
-    <!-- 彈窗：新增型號 -->
     <div class="modal-overlay" id="model-modal">
         <div class="modal-box">
-            <div class="modal-header"><span>新增型號</span><button class="el-btn danger" style="padding:2px 6px; border:none;" onclick="closeModal('model-modal')"><i class="fa-solid fa-xmark"></i></button></div>
+            <div class="modal-header">新增型號 <button class="el-btn danger" style="padding:4px 8px;" onclick="closeModal('model-modal')"><i class="fa-solid fa-xmark"></i></button></div>
             <div class="modal-body">
-                <div class="form-group">
-                    <label>選擇品牌</label>
-                    <select id="input-model-brand" class="form-control"></select>
-                </div>
-                <div class="form-group"><label>型號 ID (英文小寫，例如 ip18)</label><input type="text" id="input-model-id" class="form-control" placeholder="需為唯一值"></div>
+                <div class="form-group"><label>選擇品牌</label><select id="input-model-brand" class="form-control"></select></div>
+                <div class="form-group"><label>型號 ID (英文小寫，對應遮罩檔名)</label><input type="text" id="input-model-id" class="form-control" placeholder="例如：ip18"></div>
                 <div class="form-group"><label>型號名稱 (顯示用)</label><input type="text" id="input-model-name" class="form-control" placeholder="例如：iPhone 18"></div>
             </div>
-            <div class="modal-footer">
-                <button class="el-btn danger" onclick="closeModal('model-modal')">取消</button>
-                <button class="el-btn" onclick="saveNewModel()">確定</button>
-            </div>
+            <div class="modal-footer"><button class="el-btn danger" onclick="closeModal('model-modal')">取消</button> <button class="el-btn" onclick="saveNewModel()">確定儲存</button></div>
         </div>
     </div>
 
 <script>
     let shopData = { brands: [], models: [], styles: [] };
+    let assetsData = { stickers: [], categories: ["全部", "可愛", "Y2K", "動物"] };
+    let currentAssetCategory = "全部";
 
-    // 初始化：讀取伺服器資料
     window.onload = async () => {
         try {
-            const res = await fetch('/api/shop_data');
-            const data = await res.json();
-            if(data.status === "success") {
-                shopData = data.data;
-                renderBrands();
-                renderModels();
-            }
-        } catch(e) { alert("讀取資料失敗"); }
+            const [resShop, resAssets] = await Promise.all([ fetch('/api/shop_data'), fetch('/api/assets') ]);
+            const dataShop = await resShop.json();
+            const dataAssets = await resAssets.json();
+            
+            if(dataShop.status === "success") { shopData = dataShop.data; renderBrands(); renderModels(); }
+            if(dataAssets.status === "success") { assetsData = dataAssets.data; renderAssetTabs(); renderAssets(); }
+        } catch(e) { console.error("資料載入異常"); }
     };
 
-    // === UI 切換邏輯 ===
     function switchMenu(viewId) {
         document.querySelectorAll('.menu-item').forEach(el => el.classList.remove('active'));
         event.currentTarget.classList.add('active');
@@ -216,7 +206,7 @@
     }
 
     function switchTab(showId, hideId) {
-        document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+        document.querySelectorAll('.panel .tabs:first-child .tab').forEach(el => el.classList.remove('active'));
         event.currentTarget.classList.add('active');
         document.getElementById(showId).style.display = 'block';
         document.getElementById(hideId).style.display = 'none';
@@ -225,23 +215,13 @@
     function openModal(id) { document.getElementById(id).classList.add('active'); }
     function closeModal(id) { document.getElementById(id).classList.remove('active'); }
 
-    // === 渲染表格 ===
+    /* === 型號管理區 === */
     function renderBrands() {
         const tbody = document.getElementById('brand-table-body');
         const select = document.getElementById('input-model-brand');
         tbody.innerHTML = ''; select.innerHTML = '';
-        
         shopData.brands.forEach((brand, idx) => {
-            // 表格
-            tbody.innerHTML += `
-                <tr>
-                    <td>${idx + 1}</td>
-                    <td>${brand}</td>
-                    <td><label class="switch"><input type="checkbox" checked disabled><span class="slider"></span></label></td>
-                    <td><button class="el-btn danger" onclick="deleteBrand('${brand}')">刪除</button></td>
-                </tr>
-            `;
-            // 型號新增彈窗的下拉選單
+            tbody.innerHTML += `<tr><td>${idx + 1}</td><td style="font-weight:bold;">${brand}</td><td><button class="el-btn danger" onclick="deleteBrand('${brand}')">刪除</button></td></tr>`;
             select.innerHTML += `<option value="${brand}">${brand}</option>`;
         });
     }
@@ -249,83 +229,104 @@
     function renderModels() {
         const tbody = document.getElementById('model-table-body');
         tbody.innerHTML = '';
-        
         shopData.models.forEach((model, idx) => {
-            const checked = model.status !== false ? 'checked' : '';
-            tbody.innerHTML += `
-                <tr>
-                    <td>${idx + 1}</td>
-                    <td>${model.brand}</td>
-                    <td>${model.id}</td>
-                    <td>${model.name}</td>
-                    <td><label class="switch"><input type="checkbox" ${checked} onchange="toggleModelStatus('${model.id}', this.checked)"><span class="slider"></span></label></td>
-                    <td><button class="el-btn danger" onclick="deleteModel('${model.id}')">刪除</button></td>
-                </tr>
-            `;
+            tbody.innerHTML += `<tr><td>${idx + 1}</td><td><span style="background:var(--primary-light); color:var(--primary-color); padding:4px 8px; border-radius:4px; font-size:12px; font-weight:bold;">${model.brand}</span></td><td>${model.id}</td><td style="font-weight:bold;">${model.name}</td><td><button class="el-btn danger" onclick="deleteModel('${model.id}')">刪除</button></td></tr>`;
         });
     }
 
-    // === 資料操作與儲存 ===
-    async function syncToServer() {
-        try {
-            const res = await fetch('/api/admin/save_shop_data', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(shopData)
-            });
-            const result = await res.json();
-            if(!res.ok) alert("儲存失敗：" + result.msg);
-        } catch(e) { alert("連線錯誤"); }
+    async function syncShopData() {
+        await fetch('/api/admin/save_shop_data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(shopData) });
     }
 
     function saveNewBrand() {
         const name = document.getElementById('input-brand-name').value.trim();
-        if(!name) return alert("請輸入品牌名稱");
-        if(shopData.brands.includes(name)) return alert("品牌已存在");
-        
+        if(!name || shopData.brands.includes(name)) return alert("輸入無效或已存在");
         shopData.brands.push(name);
-        syncToServer();
-        renderBrands();
-        closeModal('brand-modal');
-        document.getElementById('input-brand-name').value = '';
+        syncShopData(); renderBrands(); closeModal('brand-modal'); document.getElementById('input-brand-name').value = '';
     }
 
     function saveNewModel() {
         const brand = document.getElementById('input-model-brand').value;
         const id = document.getElementById('input-model-id').value.trim();
         const name = document.getElementById('input-model-name').value.trim();
-        
-        if(!id || !name) return alert("資料不可為空");
-        if(shopData.models.find(m => m.id === id)) return alert("型號 ID 已存在，請換一個");
-        
+        if(!id || !name || shopData.models.find(m => m.id === id)) return alert("資料不可為空或 ID 重複");
         shopData.models.push({ id, brand, name, status: true });
-        syncToServer();
-        renderModels();
-        closeModal('model-modal');
-        document.getElementById('input-model-id').value = '';
-        document.getElementById('input-model-name').value = '';
+        syncShopData(); renderModels(); closeModal('model-modal'); document.getElementById('input-model-id').value = ''; document.getElementById('input-model-name').value = '';
     }
 
-    function toggleModelStatus(id, isChecked) {
-        const model = shopData.models.find(m => m.id === id);
-        if(model) {
-            model.status = isChecked;
-            syncToServer();
-        }
+    function deleteBrand(b) { if(confirm('確定刪除？')) { shopData.brands = shopData.brands.filter(x => x !== b); syncShopData(); renderBrands(); } }
+    function deleteModel(id) { if(confirm('確定刪除？')) { shopData.models = shopData.models.filter(m => m.id !== id); syncShopData(); renderModels(); } }
+
+    /* === 素材庫 (貼紙) 區 === */
+    function renderAssetTabs() {
+        const container = document.getElementById('asset-category-tabs');
+        container.innerHTML = '';
+        assetsData.categories.forEach(cat => {
+            const tab = document.createElement('div');
+            tab.className = `tab ${cat === currentAssetCategory ? 'active' : ''}`;
+            tab.innerText = cat;
+            tab.onclick = () => { currentAssetCategory = cat; renderAssetTabs(); renderAssets(); };
+            container.appendChild(tab);
+        });
     }
 
-    function deleteBrand(brandName) {
-        if(!confirm(`確定要刪除品牌 [${brandName}] 嗎？`)) return;
-        shopData.brands = shopData.brands.filter(b => b !== brandName);
-        syncToServer();
-        renderBrands();
+    function renderAssets() {
+        const grid = document.getElementById('asset-grid-body');
+        grid.innerHTML = '';
+        let list = assetsData.stickers;
+        if(currentAssetCategory !== "全部") list = list.filter(s => s.category === currentAssetCategory);
+        
+        list.forEach(sticker => {
+            grid.innerHTML += `
+                <div class="asset-card">
+                    <button class="asset-del-btn" onclick="deleteSticker('${sticker.id}')"><i class="fa-solid fa-xmark"></i></button>
+                    <img src="${sticker.url}" alt="sticker">
+                    <div style="font-size:12px; color:#888; margin-top:8px;">${sticker.category}</div>
+                </div>
+            `;
+        });
+        if(list.length === 0) grid.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; color: #999; padding: 40px 0;">目前此分類沒有貼紙。</div>';
     }
 
-    function deleteModel(modelId) {
-        if(!confirm(`確定要刪除型號 ID [${modelId}] 嗎？`)) return;
-        shopData.models = shopData.models.filter(m => m.id !== modelId);
-        syncToServer();
-        renderModels();
+    async function uploadSticker(event) {
+        const file = event.target.files[0];
+        if(!file) return;
+        
+        // 要求使用者輸入分類 (預設為 Y2K 或可愛)
+        let cat = prompt("請輸入這張貼紙的分類 (例如: 可愛, Y2K, 文字)：", "可愛");
+        if(!cat) cat = "全部";
+
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('category', cat);
+        
+        document.getElementById('sticker-upload-input').value = ''; // 重置 input
+
+        try {
+            const res = await fetch('/api/admin/upload_sticker', { method: 'POST', body: formData });
+            const result = await res.json();
+            if(res.ok) {
+                // 重新抓取最新圖庫
+                const resAssets = await fetch('/api/assets');
+                assetsData = (await resAssets.json()).data;
+                renderAssetTabs();
+                renderAssets();
+                alert("上傳成功！");
+            } else { alert("上傳失敗：" + result.msg); }
+        } catch(e) { alert("上傳連線錯誤"); }
+    }
+
+    async function deleteSticker(id) {
+        if(!confirm("確定要刪除這張貼紙嗎？")) return;
+        // 先在前端假刪除，然後通知後端
+        assetsData.stickers = assetsData.stickers.filter(s => s.id !== id);
+        renderAssets();
+        
+        try {
+            await fetch('/api/admin/delete_sticker', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id })
+            });
+        } catch(e) { console.error(e); }
     }
 </script>
 </body>
