@@ -5,20 +5,19 @@ import time
 import base64
 
 app = Flask(__name__)
-# 這是後台的密碼鎖
 app.secret_key = 'fan_super_secret_key_2026' 
 ADMIN_PASSWORD = "fan123"
 
 SAVE_DIR = "orders"
 STATIC_DIR = "static"
+STICKER_DIR = os.path.join(STATIC_DIR, "stickers") # 存放後台上傳貼紙的資料夾
 DATA_FILE = "shop_data.json"
 ASSETS_FILE = "assets.json"
 
-for d in [SAVE_DIR, STATIC_DIR]:
+for d in [SAVE_DIR, STATIC_DIR, STICKER_DIR]:
     if not os.path.exists(d):
         os.makedirs(d)
 
-# === JSON 讀寫輔助函式 ===
 def load_json(filepath, default_data):
     if not os.path.exists(filepath):
         with open(filepath, 'w', encoding='utf-8') as f:
@@ -34,19 +33,17 @@ def save_json(filepath, data):
     with open(filepath, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
-# 預設資料
 DEFAULT_SHOP_DATA = {
     "brands": ["蘋果", "華為", "小米"],
     "models": [
-        {"id": "ip17pm", "brand": "蘋果", "name": "iPhone 17 Pro Max", "status": True},
-        {"id": "ip17p", "brand": "蘋果", "name": "iPhone 17 Pro", "status": True}
+        {"id": "ip17pm", "brand": "蘋果", "name": "iPhone 17 Pro Max", "status": True}
     ],
     "styles": [
         {"id": "clear", "name": "透明防摔殼", "price": 390, "desc": "軍規防摔", "mask_suffix": "_clear_mask.png"}
     ]
 }
 
-DEFAULT_ASSETS = {"stickers": [], "categories": ["全部"]}
+DEFAULT_ASSETS = {"stickers": [], "categories": ["全部", "可愛", "Y2K", "動物"]}
 
 # === 前台 API ===
 @app.route('/')
@@ -110,24 +107,62 @@ def login_page():
         else:
             return "密碼錯誤", 401
     return '''
-        <body style="display:flex; justify-content:center; align-items:center; height:100vh; background:#f0f2f5; font-family:sans-serif;">
-            <form method="POST" style="background:white; padding:40px; border-radius:8px; box-shadow:0 2px 12px rgba(0,0,0,0.1); text-align:center;">
-                <h2 style="color:#409EFF; margin-top:0;">後台管理系統</h2>
-                <input type="password" name="password" placeholder="請輸入密碼" style="padding:10px; width:220px; margin-bottom:20px; border:1px solid #dcdfe6; border-radius:4px;"><br>
-                <button type="submit" style="background:#409EFF; color:white; border:none; padding:10px 30px; border-radius:4px; cursor:pointer;">登入</button>
+        <body style="display:flex; justify-content:center; align-items:center; height:100vh; background:#fff5f7; font-family:sans-serif;">
+            <form method="POST" style="background:white; padding:40px; border-radius:12px; box-shadow:0 4px 15px rgba(255,133,153,0.1); text-align:center;">
+                <h2 style="color:#ff8599; margin-top:0;">本福丸訂製 - 管理後台</h2>
+                <input type="password" name="password" placeholder="請輸入密碼" style="padding:12px; width:220px; margin-bottom:20px; border:1px solid #ffcccd; border-radius:6px; outline:none;"><br>
+                <button type="submit" style="background:#ff8599; color:white; border:none; padding:12px 30px; border-radius:20px; cursor:pointer; font-weight:bold;">登入</button>
             </form>
         </body>
     '''
 
 @app.route('/api/admin/save_shop_data', methods=['POST'])
 def admin_save_shop_data():
-    if not session.get('logged_in'):
-        return jsonify({"status": "error", "msg": "未授權"}), 401
+    if not session.get('logged_in'): return jsonify({"status": "error"}), 401
     try:
-        data = request.json
-        # 直接覆寫 shop_data.json，保留所有原汁原味的品項名稱與縮寫
-        save_json(DATA_FILE, data)
+        save_json(DATA_FILE, request.json)
         return jsonify({"status": "success", "msg": "資料儲存成功"})
+    except Exception as e:
+        return jsonify({"status": "error", "msg": str(e)}), 500
+
+@app.route('/api/admin/upload_sticker', methods=['POST'])
+def admin_upload_sticker():
+    if not session.get('logged_in'): return jsonify({"status": "error"}), 401
+    try:
+        file = request.files.get('file')
+        category = request.form.get('category', '全部')
+        if not file: return jsonify({"status": "error", "msg": "沒有找到檔案"}), 400
+        
+        # 儲存實體檔案
+        filename = f"s_{int(time.time())}_{file.filename}"
+        filepath = os.path.join(STICKER_DIR, filename)
+        file.save(filepath)
+        
+        # 寫入 assets.json
+        assets = load_json(ASSETS_FILE, DEFAULT_ASSETS)
+        new_sticker = {
+            "id": filename,
+            "category": category,
+            "url": f"/static/stickers/{filename}"
+        }
+        assets['stickers'].append(new_sticker)
+        if category not in assets['categories']:
+            assets['categories'].append(category)
+        save_json(ASSETS_FILE, assets)
+        
+        return jsonify({"status": "success", "msg": "貼紙上傳成功！"})
+    except Exception as e:
+        return jsonify({"status": "error", "msg": str(e)}), 500
+
+@app.route('/api/admin/delete_sticker', methods=['POST'])
+def admin_delete_sticker():
+    if not session.get('logged_in'): return jsonify({"status": "error"}), 401
+    try:
+        sticker_id = request.json.get('id')
+        assets = load_json(ASSETS_FILE, DEFAULT_ASSETS)
+        assets['stickers'] = [s for s in assets['stickers'] if s['id'] !== sticker_id]
+        save_json(ASSETS_FILE, assets)
+        return jsonify({"status": "success", "msg": "貼紙已刪除"})
     except Exception as e:
         return jsonify({"status": "error", "msg": str(e)}), 500
 
