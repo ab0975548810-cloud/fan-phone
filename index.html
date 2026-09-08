@@ -8,12 +8,9 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
     <style>
         :root { 
-            --primary-color: #ff8599; 
-            --primary-light: #ffeef1;
-            --bg-color: #f8f9fa; 
-            --card-bg: #ffffff;
-            --text-main: #333333; 
-            --text-muted: #888888;
+            --primary-color: #ff8599; --primary-light: #ffeef1;
+            --bg-color: #f8f9fa; --card-bg: #ffffff;
+            --text-main: #333333; --text-muted: #888888;
             --border-color: #f0f0f0; 
         }
         body { margin: 0; padding: 0; font-family: -apple-system, sans-serif; background-color: var(--bg-color); color: var(--text-main); display: flex; justify-content: center; height: 100vh; overflow: hidden; -webkit-tap-highlight-color: transparent; }
@@ -52,7 +49,7 @@
         .primary-btn:active { transform: scale(0.98); }
         .primary-btn:disabled { background: #ddd; box-shadow: none; cursor: not-allowed; }
         
-        /* === DIY 編輯器 === */
+        /* 編輯器 */
         .workspace { flex: 1; background: #f5f6f8; display: flex; justify-content: center; align-items: center; position: relative; overflow: hidden; padding: 20px 0; }
         .canvas-container-wrapper { background: white; border-radius: 35px; box-shadow: 0 10px 25px rgba(0,0,0,0.08); position: relative; overflow: hidden; }
         .phone-mask-img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 50; object-fit: cover; }
@@ -67,11 +64,10 @@
         .tool-btn-icon { width: 48px; height: 48px; background: var(--primary-light); color: var(--primary-color); border-radius: 50%; display: flex; justify-content: center; align-items: center; font-size: 20px; transition: 0.2s; }
         .tool-btn:active .tool-btn-icon { transform: scale(0.9); }
 
-        /* === 全螢幕模板選擇頁 (完美還原 S__67297404.jpg) === */
+        /* 全螢幕模板選擇頁 */
         .template-page { background: #fff5f7; display: flex; flex-direction: column; height: 100%; }
         .template-header-text { padding: 15px 20px 5px 20px; text-align: left; color: var(--text-muted); font-size: 13px; font-weight: bold; }
         
-        /* 圓角粉色標籤設計 */
         .tpl-tabs-wrapper { display: flex; gap: 10px; padding: 10px 20px; overflow-x: auto; scrollbar-width: none; }
         .tpl-tabs-wrapper::-webkit-scrollbar { display: none; }
         .tpl-pill { padding: 6px 16px; border-radius: 20px; background: white; color: var(--text-muted); font-size: 13px; font-weight: bold; cursor: pointer; white-space: nowrap; box-shadow: 0 2px 5px rgba(0,0,0,0.03); border: 1px solid #eee; }
@@ -85,7 +81,7 @@
         
         .tpl-bottom-action { padding: 15px 20px 25px 20px; background: white; border-top: 1px solid var(--border-color); display: flex; gap: 15px; }
 
-        /* === 抽屜 === */
+        /* 抽屜 */
         .overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 90; display: none; opacity: 0; transition: opacity 0.3s; }
         .overlay.active { display: block; opacity: 1; }
         .bottom-sheet { position: absolute; bottom: -100%; left: 0; width: 100%; height: 50%; background: var(--card-bg); border-radius: 20px 20px 0 0; box-shadow: 0 -4px 20px rgba(0,0,0,0.1); transition: bottom 0.3s cubic-bezier(0.1, 0.8, 0.2, 1); z-index: 100; display: flex; flex-direction: column; }
@@ -101,7 +97,7 @@
 
         input[type="file"] { display: none; }
         
-        /* 購物車省略 */
+        /* 購物車與結帳 */
         .cart-item { background: white; border-radius: 12px; padding: 15px; display: flex; gap: 15px; margin: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.02); border: 1px solid var(--border-color); }
         .cart-img { width: 80px; height: 160px; object-fit: contain; background: #f5f5f5; border-radius: 8px; }
         .cart-info { flex: 1; display: flex; flex-direction: column; justify-content: center; }
@@ -114,7 +110,6 @@
 <body>
 <div class="app-container">
 
-    <!-- 選型號 -->
     <div id="page-select-model" class="page active">
         <div class="top-nav"><button class="nav-btn"></button><div class="title">選擇手機型號</div><div style="width: 28px;"></div></div>
         <div class="brand-tabs" id="brand-tabs"></div>
@@ -122,7 +117,6 @@
         <div class="bottom-bar"><button class="primary-btn" id="btn-next-to-style" disabled onclick="goToPage('page-select-style')">下一步</button></div>
     </div>
 
-    <!-- 選材質 -->
     <div id="page-select-style" class="page">
         <div class="top-nav"><button class="nav-btn" onclick="goToPage('page-select-model')"><i class="fa-solid fa-chevron-left"></i></button><div class="title">選擇手機殼材質</div><div style="width: 28px;"></div></div>
         <div class="content">
@@ -132,7 +126,6 @@
         <div class="bottom-bar"><button class="primary-btn" id="btn-start-diy" disabled onclick="startDIY()">開始設計</button></div>
     </div>
 
-    <!-- === DIY 編輯器大魔王 === -->
     <div id="page-editor" class="page">
         <div class="top-nav">
             <button class="nav-btn" onclick="goToPage('page-select-style')"><i class="fa-solid fa-chevron-left"></i></button>
@@ -145,7 +138,6 @@
                 <canvas id="main-canvas"></canvas>
                 <img id="real-phone-mask" class="phone-mask-img" src="" alt="">
             </div>
-            
             <div class="control-panel" id="obj-controls">
                 <button class="icon-btn" onclick="bringForward()"><i class="fa-solid fa-layer-group"></i></button>
                 <button class="icon-btn" onclick="sendBackward()"><i class="fa-solid fa-arrow-down-short-wide"></i></button>
@@ -157,19 +149,19 @@
             <button class="tool-btn" onclick="document.getElementById('file-uploader').click()">
                 <div class="tool-btn-icon"><i class="fa-regular fa-image"></i></div><span>加入照片</span>
             </button>
-            <button class="tool-btn" onclick="openSheet('sheet-sticker')">
+            <!-- 貼紙與模板按鈕改為動態重新抓取資料 -->
+            <button class="tool-btn" onclick="openStickerSheet()">
                 <div class="tool-btn-icon"><i class="fa-regular fa-face-smile"></i></div><span>貼紙</span>
             </button>
             <button class="tool-btn" onclick="openSheet('sheet-text')">
                 <div class="tool-btn-icon"><i class="fa-solid fa-t"></i></div><span>文字</span>
             </button>
             <button class="tool-btn" onclick="openTemplatePage()">
-                <div class="tool-btn-icon" style="background:#fff0f3;"><i class="fa-solid fa-border-all"></i></div><span>模板</span>
+                <div class="tool-btn-icon" style="background:#fff0f3;"><i class="fa-solid fa-border-all"></i></div><span>套用模板</span>
             </button>
         </div>
         
         <input type="file" id="file-uploader" accept="image/*" onchange="handleImageUpload(event)">
-        <!-- 插槽專用上傳 -->
         <input type="file" id="slot-uploader" accept="image/*" onchange="handleSlotUpload(event)">
         
         <div class="overlay" id="sheet-overlay" onclick="closeAllSheets()"></div>
@@ -193,21 +185,15 @@
         </div>
     </div>
 
-    <!-- === 滿版選擇模板頁 (完美還原 S__67297404.jpg) === -->
+    <!-- === 全螢幕選擇模板頁 === -->
     <div id="page-select-template" class="page template-page">
         <div class="top-nav">
             <button class="nav-btn" onclick="goToPage('page-editor')"><i class="fa-solid fa-chevron-left"></i></button>
-            <div class="title">選擇模板</div>
-            <div style="width: 28px;"></div>
+            <div class="title">選擇模板</div><div style="width: 28px;"></div>
         </div>
         <div class="template-header-text">快速套用喜歡的風格，開始設計吧！</div>
-        
-        <!-- 圓角粉紅標籤 -->
         <div class="tpl-tabs-wrapper" id="template-categories"></div>
-        
         <div id="no-template-msg" style="display:none; text-align:center; padding:40px 20px; color:#999; font-size:14px;">此機型目前尚無專屬模板。</div>
-        
-        <!-- 3欄位網格 -->
         <div class="template-grid-container" id="template-grid"></div>
         
         <div class="tpl-bottom-action">
@@ -250,7 +236,6 @@
 </div>
 
 <script>
-    // 預設給空資料，防止 API 慢的時候報錯
     let shopData = { brands: [], models: [], styles: [] };
     let assetsData = { stickers: [], categories: ["全部"] };
     let templatesData = { templates: [], categories: ["全部"] };
@@ -264,13 +249,10 @@
     let activeSlot = null; 
     let selectedTemplateForApply = null; 
 
-    // 【載入資料防呆】
+    // 初次載入資料
     window.onload = async () => {
         try { const res = await fetch('/api/shop_data'); if(res.ok) shopData = (await res.json()).data; } catch(e){}
-        try { const res = await fetch('/api/assets'); if(res.ok) assetsData = (await res.json()).data; } catch(e){}
-        try { const res = await fetch('/api/templates'); if(res.ok) templatesData = (await res.json()).data; } catch(e){}
-        
-        initUI(); initStickerUI();
+        initUI(); 
     };
 
     function initUI() {
@@ -333,18 +315,29 @@
         document.getElementById(pageId).classList.add('active');
     }
 
-    function initStickerUI() {
+    /* === 貼紙庫 (即時抓取防白屏) === */
+    async function openStickerSheet() {
+        try {
+            const res = await fetch('/api/assets');
+            if(res.ok) { const json = await res.json(); if(json.data) assetsData = json.data; }
+        } catch(e) {}
+        
+        if(!assetsData) assetsData = { stickers: [], categories: ["全部"] };
+        if(!assetsData.categories || assetsData.categories.length === 0) assetsData.categories = ["全部"];
+        
         const catTabs = document.getElementById('sticker-categories');
         catTabs.innerHTML = '';
-        (assetsData.categories || []).forEach((cat, idx) => {
+        assetsData.categories.forEach((cat, idx) => {
             const tab = document.createElement('div');
             tab.className = `brand-tab ${idx === 0 ? 'active' : ''}`;
             tab.innerText = cat;
             tab.onclick = () => renderStickers(cat, tab);
             catTabs.appendChild(tab);
         });
-        if(assetsData.categories && assetsData.categories.length > 0) renderStickers(assetsData.categories[0], catTabs.firstChild);
+        renderStickers(assetsData.categories[0], catTabs.firstChild);
+        openSheet('sheet-sticker');
     }
+
     function renderStickers(category, tabElement) {
         if(tabElement) {
             document.getElementById('sticker-categories').querySelectorAll('.brand-tab').forEach(t => t.classList.remove('active'));
@@ -362,7 +355,6 @@
         });
     }
 
-    /* === 畫布初始化 === */
     function startDIY() {
         goToPage('page-editor');
         document.getElementById('editor-title').innerText = `${orderContext.modelName}`;
@@ -389,22 +381,33 @@
         baseClipPath = new fabric.Rect({ left: 0, top: 0, width: canvasW, height: canvasH, absolutePositioned: true });
     }
 
-    /* === 滿版選擇模板頁邏輯 (完美還原) === */
-    function openTemplatePage() {
+    /* === 模板選擇頁面 (即時抓取防白屏) === */
+    async function openTemplatePage() {
         selectedTemplateForApply = null;
         document.getElementById('btn-apply-tpl').disabled = true;
         
+        // 核心：每次點擊都去後台要最新資料，保證不當機
+        try {
+            const res = await fetch('/api/templates');
+            if(res.ok) { const json = await res.json(); if(json.data) templatesData = json.data; }
+        } catch(e) { console.warn("模板讀取失敗"); }
+
+        // 防呆機制：如果 JSON 是空的或壞掉，自動給預設值
+        if(!templatesData) templatesData = { templates: [], categories: ["全部"] };
+        if(!templatesData.categories || templatesData.categories.length === 0) templatesData.categories = ["全部"];
+        if(!templatesData.templates) templatesData.templates = [];
+        
         const catTabs = document.getElementById('template-categories');
         catTabs.innerHTML = '';
-        (templatesData.categories || []).forEach((cat, idx) => {
+        templatesData.categories.forEach((cat, idx) => {
             const tab = document.createElement('div');
             tab.className = `tpl-pill ${idx === 0 ? 'active' : ''}`;
             tab.innerText = cat;
             tab.onclick = () => renderTemplates(cat, tab);
             catTabs.appendChild(tab);
         });
-        if(templatesData.categories && templatesData.categories.length > 0) renderTemplates(templatesData.categories[0], catTabs.firstChild);
         
+        renderTemplates(templatesData.categories[0], catTabs.firstChild);
         goToPage('page-select-template');
     }
     
@@ -417,8 +420,10 @@
         const msg = document.getElementById('no-template-msg');
         grid.innerHTML = '';
         
-        // 核心：只顯示當前手機型號的模板
-        let filtered = (templatesData.templates || []).filter(t => t.model_id === orderContext.modelId);
+        let filtered = templatesData.templates || [];
+        // 核心篩選：只顯示當前手機型號的模板
+        filtered = filtered.filter(t => t.model_id === orderContext.modelId);
+        
         if(category !== "全部") filtered = filtered.filter(t => t.category === category);
         
         if(filtered.length === 0) {
@@ -440,7 +445,7 @@
         }
     }
 
-    /* === 套用模板與插槽系統 (終極修復) === */
+    /* === 套用模板與插槽系統 === */
     function confirmApplyTemplate() {
         if(!selectedTemplateForApply) return;
         const tpl = selectedTemplateForApply;
@@ -449,7 +454,6 @@
         canvas.backgroundColor = '#ffffff';
         const scaleFactor = 3;
         
-        // 1. 將模板背景圖載入並設定為不可選擇的相框
         fabric.Image.fromURL(tpl.thumb_url, function(img) {
             const scale = Math.max(canvas.width / img.width, canvas.height / img.height);
             
@@ -459,7 +463,6 @@
                 selectable: false, evented: false 
             });
             
-            // 2. 畫出後台拉好的插槽 (虛線框)
             if(tpl.slots && tpl.slots.length > 0) {
                 tpl.slots.forEach(slot => {
                     const slotW = parseFloat(slot.w) * scaleFactor;
@@ -478,7 +481,6 @@
                         fontSize: 22, fill: '#ff8599', selectable: false, evented: false, fontWeight: 'bold', textAlign: 'center'
                     });
                     
-                    // 點擊插槽喚起上傳
                     rect.on('mousedown', () => {
                         activeSlot = rect;
                         document.getElementById('slot-uploader').click();
@@ -489,7 +491,6 @@
                 });
             }
             
-            // 3. 把模板相框蓋上去 (確保它在最上層)
             canvas.add(img);
             img.bringToFront();
             canvas.templateFrame = img; 
@@ -499,7 +500,6 @@
         }, { crossOrigin: 'anonymous' });
     }
 
-    // 照片丟入插槽 (裁切並移到相框底下)
     function handleSlotUpload(e) {
         const file = e.target.files[0];
         if(!file || !activeSlot) return;
@@ -521,8 +521,6 @@
                 });
                 
                 canvas.add(img);
-                
-                // 丟到底層 (確保在相框下面)
                 img.sendToBack(); 
                 
                 if(activeSlot.promptText) canvas.remove(activeSlot.promptText);
@@ -547,9 +545,8 @@
                 img.scaleToWidth(canvas.width * 0.8);
                 img.set({ left: canvas.width / 2, top: canvas.height / 2, originX: 'center', originY: 'center', clipPath: baseClipPath });
                 canvas.add(img); 
-                // 新增一般圖片/貼紙時，確保在相框上面 (所以不用 sendToBack)
+                if(canvas.templateFrame) img.moveTo(canvas.getObjects().indexOf(canvas.templateFrame) - 1);
                 canvas.setActiveObject(img);
-                // 但我們要確定相框永遠不會擋住編輯操作，通常貼紙是蓋在相框上面的
             });
         };
         reader.readAsDataURL(file);
@@ -560,7 +557,9 @@
         fabric.Image.fromURL(url, img => {
             img.scaleToWidth(120);
             img.set({ left: canvas.width / 2, top: canvas.height / 2, originX: 'center', originY: 'center', clipPath: baseClipPath });
-            canvas.add(img); canvas.setActiveObject(img);
+            canvas.add(img); 
+            if(canvas.templateFrame) img.moveTo(canvas.getObjects().indexOf(canvas.templateFrame) - 1);
+            canvas.setActiveObject(img);
         }, { crossOrigin: 'anonymous' });
     }
 
@@ -570,11 +569,20 @@
             left: canvas.width / 2, top: canvas.height / 2, originX: 'center', originY: 'center',
             fontSize: 40, fill: color, fontWeight: 'bold', clipPath: baseClipPath
         });
-        canvas.add(textObj); canvas.setActiveObject(textObj);
+        canvas.add(textObj); 
+        if(canvas.templateFrame) textObj.moveTo(canvas.getObjects().indexOf(canvas.templateFrame) - 1);
+        canvas.setActiveObject(textObj);
         document.getElementById('text-input').value = ''; closeAllSheets();
     }
 
-    function bringForward() { const obj = canvas.getActiveObject(); if(obj) { canvas.bringForward(obj); canvas.renderAll(); } }
+    function bringForward() { 
+        const obj = canvas.getActiveObject(); 
+        if(obj) { 
+            canvas.bringForward(obj); 
+            if(canvas.templateFrame) canvas.templateFrame.bringToFront(); 
+            canvas.renderAll(); 
+        } 
+    }
     function sendBackward() { const obj = canvas.getActiveObject(); if(obj) { canvas.sendBackwards(obj); canvas.renderAll(); } }
     function deleteActiveObject() { const obj = canvas.getActiveObject(); if(obj) canvas.remove(obj); }
 
