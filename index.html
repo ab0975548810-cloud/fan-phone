@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>CaseDIY - 客製專屬手機殼</title>
+    <title>本福丸訂製 - 客製專屬手機殼</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- 引入 Fabric.js 處理畫布 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
     <style>
         :root { 
@@ -23,6 +24,7 @@
         .page.active { display: flex; }
         @keyframes slideIn { from { transform: translateX(15px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
         
+        /* 導航列 */
         .top-nav { height: 55px; background: var(--card-bg); display: flex; justify-content: space-between; align-items: center; padding: 0 15px; border-bottom: 1px solid var(--border-color); flex-shrink: 0; z-index: 10; }
         .nav-btn { background: none; border: none; font-size: 18px; color: var(--text-main); cursor: pointer; padding: 8px; }
         .title { font-weight: 700; font-size: 16px; }
@@ -43,6 +45,9 @@
         
         .style-card { border: 2px solid var(--border-color); border-radius: 12px; padding: 15px; margin-bottom:12px; display: flex; align-items: center; gap: 15px; cursor: pointer; }
         .style-card.selected { border-color: var(--primary-color); background: var(--primary-light); }
+        .style-info { flex: 1; }
+        .style-name { font-size: 15px; font-weight: bold; margin-bottom: 4px; }
+        .style-price { font-size: 13px; color: #888; }
         
         .bottom-bar { padding: 10px 15px 20px 15px; background: var(--card-bg); border-top: 1px solid var(--border-color); z-index: 10; }
         .primary-btn { width: 100%; background: var(--primary-color); color: white; border: none; padding: 14px; border-radius: 30px; font-size: 15px; font-weight: bold; cursor: pointer; }
@@ -50,8 +55,11 @@
         
         /* === 編輯器專屬樣式 === */
         .workspace { flex: 1; background: #eef0f3; display: flex; justify-content: center; align-items: center; position: relative; overflow: hidden; }
-        .canvas-container-wrapper { width: 240px; height: 480px; background: white; border-radius: 35px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); position: relative; overflow: hidden; }
-        .phone-mask-img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; object-fit: contain; }
+        
+        /* 畫布外框，動態依照後台長寬設定 */
+        .canvas-container-wrapper { background: white; border-radius: 30px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); position: relative; overflow: hidden; }
+        /* 遮罩圖層，確保手機框在最上層 */
+        .phone-mask-img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; object-fit: cover; }
         
         .editor-toolbar { display: flex; justify-content: space-around; padding: 15px 0 20px 0; background: var(--card-bg); border-top: 1px solid var(--border-color); z-index: 20; }
         .tool-btn { display: flex; flex-direction: column; align-items: center; gap: 6px; background: none; border: none; color: var(--text-main); cursor: pointer; font-size: 11px; font-weight: bold; }
@@ -60,19 +68,17 @@
         /* === 底部抽屜 (Bottom Sheet) === */
         .overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); z-index: 90; display: none; opacity: 0; transition: opacity 0.3s; }
         .overlay.active { display: block; opacity: 1; }
-        
         .bottom-sheet { position: absolute; bottom: -100%; left: 0; width: 100%; height: 50%; background: var(--card-bg); border-radius: 20px 20px 0 0; box-shadow: 0 -4px 20px rgba(0,0,0,0.1); transition: bottom 0.3s cubic-bezier(0.1, 0.8, 0.2, 1); z-index: 100; display: flex; flex-direction: column; }
         .bottom-sheet.active { bottom: 0; }
         .sheet-header { padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); font-weight: bold; }
         .sheet-close { background: none; border: none; font-size: 20px; color: var(--text-muted); cursor: pointer; }
         .sheet-content { flex: 1; overflow-y: auto; padding: 15px; }
         
-        /* 貼紙庫網格 */
         .sticker-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
         .sticker-item { background: var(--bg-color); border-radius: 10px; padding: 10px; display: flex; justify-content: center; align-items: center; cursor: pointer; aspect-ratio: 1; }
         .sticker-item img { max-width: 100%; max-height: 100%; object-fit: contain; }
         
-        /* 圖層與控制區 */
+        /* 選中物件時出現的控制區 */
         .control-panel { position: absolute; right: 15px; top: 15px; display: flex; flex-direction: column; gap: 10px; z-index: 20; display: none; }
         .control-panel.active { display: flex; }
         .icon-btn { background: white; border: none; width: 36px; height: 36px; border-radius: 50%; box-shadow: 0 2px 8px rgba(0,0,0,0.1); cursor: pointer; display: flex; justify-content: center; align-items: center; color: var(--text-main); }
@@ -83,38 +89,49 @@
 <body>
 <div class="app-container">
 
-    <!-- 頁面 1 & 2：選擇流程 (與之前相同) -->
+    <!-- === 頁面 1：選擇手機型號 === -->
     <div id="page-select-model" class="page active">
-        <div class="top-nav"><button class="nav-btn"></button><div class="title">選擇手機型號</div><div style="width: 28px;"></div></div>
+        <div class="top-nav">
+            <button class="nav-btn"><i class="fa-solid fa-house"></i></button>
+            <div class="title">選擇手機型號</div>
+            <div style="width: 28px;"></div>
+        </div>
         <div class="brand-tabs" id="brand-tabs"></div>
         <div class="content"><div class="model-list-container"><div class="model-grid" id="model-grid"></div></div></div>
         <div class="bottom-bar"><button class="primary-btn" id="btn-next-to-style" disabled onclick="goToPage('page-select-style')">下一步</button></div>
     </div>
 
+    <!-- === 頁面 2：選擇手機殼材質 === -->
     <div id="page-select-style" class="page">
-        <div class="top-nav"><button class="nav-btn" onclick="goToPage('page-select-model')"><i class="fa-solid fa-chevron-left"></i></button><div class="title">選擇手機殼款式</div><div style="width: 28px;"></div></div>
+        <div class="top-nav">
+            <button class="nav-btn" onclick="goToPage('page-select-model')"><i class="fa-solid fa-chevron-left"></i></button>
+            <div class="title">選擇手機殼材質</div>
+            <div style="width: 28px;"></div>
+        </div>
         <div class="content">
-            <div style="padding: 15px 15px 0 15px; font-size: 13px; font-weight: bold; color: var(--text-muted);">已選：<span id="display-selected-model" style="color: var(--primary-color);"></span></div>
+            <div style="padding: 15px 15px 0 15px; font-size: 13px; font-weight: bold; color: var(--text-muted);">
+                已選：<span id="display-selected-model" style="color: var(--primary-color);"></span>
+            </div>
             <div class="style-list" id="style-list"></div>
         </div>
         <div class="bottom-bar"><button class="primary-btn" id="btn-start-diy" disabled onclick="startDIY()">開始製作</button></div>
     </div>
 
-    <!-- 頁面 3：DIY 編輯器 -->
+    <!-- === 頁面 3：DIY 插槽編輯器 === -->
     <div id="page-editor" class="page">
         <div class="top-nav">
             <button class="nav-btn" onclick="goToPage('page-select-style')"><i class="fa-solid fa-chevron-left"></i></button>
-            <div class="title" id="editor-title">iPhone 17 Pro Max</div>
-            <button class="nav-btn-done" onclick="exportOrder()">完成</button>
+            <div class="title" id="editor-title" style="font-size:14px;"></div>
+            <button class="nav-btn-done" onclick="exportOrder()">完成送單</button>
         </div>
         
         <div class="workspace">
-            <div class="canvas-container-wrapper">
+            <div class="canvas-container-wrapper" id="canvas-wrapper">
                 <canvas id="main-canvas"></canvas>
+                <!-- 遮罩圖將動態載入後台設定的網址 -->
                 <img id="real-phone-mask" class="phone-mask-img" src="" alt="">
             </div>
             
-            <!-- 選中物件時出現的右上角控制列 (圖層上下、刪除) -->
             <div class="control-panel" id="obj-controls">
                 <button class="icon-btn" onclick="bringForward()" title="往上移"><i class="fa-solid fa-layer-group"></i></button>
                 <button class="icon-btn" onclick="sendBackward()" title="往下移"><i class="fa-solid fa-arrow-down-short-wide"></i></button>
@@ -122,30 +139,25 @@
             </div>
         </div>
 
-        <!-- 底部工具列 -->
         <div class="editor-toolbar">
-            <button class="tool-btn" onclick="document.getElementById('file-uploader').click()"><i class="fa-regular fa-image"></i><span>照片</span></button>
-            <button class="tool-btn" onclick="openSheet('sheet-sticker')"><i class="fa-regular fa-face-smile"></i><span>貼紙</span></button>
+            <button class="tool-btn" onclick="document.getElementById('file-uploader').click()"><i class="fa-regular fa-image"></i><span>加入照片</span></button>
+            <button class="tool-btn" onclick="openSheet('sheet-sticker')"><i class="fa-regular fa-face-smile"></i><span>貼紙庫</span></button>
             <button class="tool-btn" onclick="openSheet('sheet-text')"><i class="fa-solid fa-t"></i><span>文字</span></button>
-            <button class="tool-btn" onclick="alert('模板系統即將開放！')"><i class="fa-solid fa-border-all"></i><span>模板</span></button>
+            <button class="tool-btn" onclick="alert('進階 PSD 模板系統即將開放！')"><i class="fa-solid fa-border-all"></i><span>模板</span></button>
         </div>
         <input type="file" id="file-uploader" accept="image/*" onchange="handleImageUpload(event)">
         
-        <!-- 抽屜覆蓋層 -->
         <div class="overlay" id="sheet-overlay" onclick="closeAllSheets()"></div>
         
         <!-- 貼紙抽屜 -->
         <div class="bottom-sheet" id="sheet-sticker">
             <div class="sheet-header">
-                <span>貼紙庫</span>
+                <span>貼紙素材庫</span>
                 <button class="sheet-close" onclick="closeAllSheets()"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            <!-- 貼紙分類 (可切換) -->
             <div class="brand-tabs" id="sticker-categories" style="padding-top:0;"></div>
             <div class="sheet-content">
-                <div class="sticker-grid" id="sticker-grid">
-                    <!-- 動態載入貼紙 -->
-                </div>
+                <div class="sticker-grid" id="sticker-grid"></div>
             </div>
         </div>
 
@@ -171,8 +183,18 @@
 <script>
     let shopData = { brands: [], models: [], styles: [] };
     let assetsData = { stickers: [], categories: [] };
-    let orderContext = { modelId: null, modelName: null, styleId: null, styleName: null, price: 0, maskSuffix: null };
+    
+    // 訂單狀態與列印參數
+    let orderContext = { 
+        modelId: null, modelName: null, 
+        styleId: null, styleName: null, 
+        maskUrl: null, 
+        printW: 80, printH: 160 
+    };
+    
     let canvas;
+    // 建立一個模板插槽區域 (ClipPath)，確保圖片不會超出手機殼可印範圍
+    let clipPathObj;
 
     window.onload = async () => {
         try {
@@ -180,14 +202,12 @@
             const dataShop = await resShop.json();
             const dataAssets = await resAssets.json();
             
-            if(dataShop.status === "success") shopData = dataShop.data;
-            if(dataAssets.status === "success") assetsData = dataAssets.data;
-            
-            initUI();
-            initStickerUI();
+            if(dataShop.status === "success") { shopData = dataShop.data; initUI(); }
+            if(dataAssets.status === "success") { assetsData = dataAssets.data; initStickerUI(); }
         } catch(e) { console.error("資料庫連線失敗", e); }
     };
 
+    /* === 頁面 1 & 2 流程 (無修改) === */
     function initUI() {
         const brandTabs = document.getElementById('brand-tabs');
         shopData.brands.forEach((brand, idx) => {
@@ -199,13 +219,21 @@
         });
 
         const styleList = document.getElementById('style-list');
-        shopData.styles.forEach(style => {
+        shopData.styles.filter(s => s.status).forEach(style => {
             const card = document.createElement('div');
             card.className = 'style-card';
             card.onclick = () => selectStyle(style, card);
-            card.innerHTML = `<div class="style-img-placeholder"></div><div class="style-info"><div class="style-name">${style.name}</div><div class="style-price">NT$ ${style.price}</div></div>`;
+            
+            let colorHtml = (style.colors || []).join(', ');
+            card.innerHTML = `
+                <div class="style-info">
+                    <div class="style-name">${style.name}</div>
+                    <div class="style-price">支援顏色: ${colorHtml || '透明'}</div>
+                </div>
+            `;
             styleList.appendChild(card);
         });
+
         if(shopData.brands.length > 0) selectBrand(shopData.brands[0], brandTabs.firstChild);
     }
 
@@ -214,7 +242,7 @@
         if(tabElement) tabElement.classList.add('active');
         const modelGrid = document.getElementById('model-grid');
         modelGrid.innerHTML = '';
-        shopData.models.filter(m => m.brand === brand).forEach(model => {
+        shopData.models.filter(m => m.brand === brand && m.status).forEach(model => {
             const btn = document.createElement('div');
             btn.className = 'model-btn';
             if(orderContext.modelId === model.id) btn.classList.add('selected');
@@ -225,8 +253,7 @@
     }
 
     function selectModel(model, btnElement) {
-        orderContext.modelId = model.id;
-        orderContext.modelName = model.name;
+        orderContext.modelId = model.id; orderContext.modelName = model.name;
         document.querySelectorAll('.model-btn').forEach(b => b.classList.remove('selected'));
         btnElement.classList.add('selected');
         document.getElementById('btn-next-to-style').disabled = false;
@@ -234,10 +261,14 @@
     }
 
     function selectStyle(style, cardElement) {
-        orderContext.styleId = style.id;
+        orderContext.styleId = style.id; 
         orderContext.styleName = style.name;
-        orderContext.price = style.price;
-        orderContext.maskSuffix = style.mask_suffix;
+        
+        // 【核心】取得後台設定的圖片路徑與尺寸參數
+        orderContext.maskUrl = style.mask_img;
+        orderContext.printW = parseFloat(style.print_w) || 80;
+        orderContext.printH = parseFloat(style.print_h) || 160;
+
         document.querySelectorAll('.style-card').forEach(c => c.classList.remove('selected'));
         cardElement.classList.add('selected');
         document.getElementById('btn-start-diy').disabled = false;
@@ -258,7 +289,7 @@
             tab.onclick = () => renderStickers(cat, tab);
             catTabs.appendChild(tab);
         });
-        renderStickers("全部", catTabs.firstChild);
+        if(assetsData.categories.length > 0) renderStickers(assetsData.categories[0], catTabs.firstChild);
     }
 
     function renderStickers(category, tabElement) {
@@ -266,67 +297,90 @@
             document.getElementById('sticker-categories').querySelectorAll('.brand-tab').forEach(t => t.classList.remove('active'));
             tabElement.classList.add('active');
         }
-        
         const grid = document.getElementById('sticker-grid');
         grid.innerHTML = '';
-        
-        let filtered = assetsData.stickers;
-        if(category !== "全部") filtered = assetsData.stickers.filter(s => s.category === category);
+        let filtered = category === "全部" ? assetsData.stickers : assetsData.stickers.filter(s => s.category === category);
         
         filtered.forEach(sticker => {
             const item = document.createElement('div');
             item.className = 'sticker-item';
-            item.innerHTML = `<img src="${sticker.url}" alt="sticker">`;
-            item.onclick = () => {
-                addStickerToCanvas(sticker.url);
-                closeAllSheets();
-            };
+            // 加入 lazy loading
+            item.innerHTML = `<img src="${sticker.url}" loading="lazy" alt="sticker">`;
+            item.onclick = () => { addStickerToCanvas(sticker.url); closeAllSheets(); };
             grid.appendChild(item);
         });
     }
 
-    /* === 編輯器與圖層邏輯 === */
+    /* === 進入 DIY 編輯器邏輯 (核心升級區) === */
     function startDIY() {
         goToPage('page-editor');
         document.getElementById('editor-title').innerText = `${orderContext.modelName}`;
         
+        // 1. 動態設定畫布比例 (乘上一個倍率讓畫布在手機上夠大，例如 * 2.5)
+        const scaleFactor = 3; 
+        const canvasW = orderContext.printW * scaleFactor;
+        const canvasH = orderContext.printH * scaleFactor;
+        
+        const wrapper = document.getElementById('canvas-wrapper');
+        wrapper.style.width = `${canvasW}px`;
+        wrapper.style.height = `${canvasH}px`;
+        
+        // 2. 載入後台設定的遮罩圖
         const maskImg = document.getElementById('real-phone-mask');
-        maskImg.src = "/static/" + orderContext.modelId + orderContext.maskSuffix + "?v=" + new Date().getTime();
-        maskImg.onerror = function() { this.style.display = 'none'; };
-        maskImg.style.display = 'block';
+        if (orderContext.maskUrl) {
+            maskImg.src = orderContext.maskUrl;
+            maskImg.style.display = 'block';
+        } else {
+            maskImg.style.display = 'none'; // 如果後台沒設遮罩，就隱藏
+        }
 
-        initCanvas();
+        initCanvas(canvasW, canvasH);
     }
 
-    function initCanvas() {
-        if(canvas) return;
-        canvas = new fabric.Canvas('main-canvas', { width: 240, height: 480, backgroundColor: '#ffffff' });
+    function initCanvas(w, h) {
+        if(canvas) {
+            canvas.setWidth(w);
+            canvas.setHeight(h);
+            canvas.clear();
+            canvas.backgroundColor = '#ffffff';
+        } else {
+            canvas = new fabric.Canvas('main-canvas', { width: w, height: h, backgroundColor: '#ffffff' });
+            // 監聽選取事件，顯示/隱藏 右上角圖層控制列
+            canvas.on('selection:created', () => document.getElementById('obj-controls').classList.add('active'));
+            canvas.on('selection:updated', () => document.getElementById('obj-controls').classList.add('active'));
+            canvas.on('selection:cleared', () => document.getElementById('obj-controls').classList.remove('active'));
+        }
         
-        // 監聽選取事件，顯示/隱藏 右上角控制列
-        canvas.on('selection:created', () => document.getElementById('obj-controls').classList.add('active'));
-        canvas.on('selection:updated', () => document.getElementById('obj-controls').classList.add('active'));
-        canvas.on('selection:cleared', () => document.getElementById('obj-controls').classList.remove('active'));
+        // 建立防溢出裁切區域 (ClipPath)
+        // 這確保客人上傳的照片不會畫出邊界，完美支援模板系統
+        clipPathObj = new fabric.Rect({
+            left: 0, top: 0,
+            width: w, height: h,
+            absolutePositioned: true
+        });
     }
 
     // 抽屜控制
-    function openSheet(id) {
-        document.getElementById('sheet-overlay').classList.add('active');
-        document.getElementById(id).classList.add('active');
-    }
-    function closeAllSheets() {
-        document.getElementById('sheet-overlay').classList.remove('active');
-        document.querySelectorAll('.bottom-sheet').forEach(s => s.classList.remove('active'));
-    }
+    function openSheet(id) { document.getElementById('sheet-overlay').classList.add('active'); document.getElementById(id).classList.add('active'); }
+    function closeAllSheets() { document.getElementById('sheet-overlay').classList.remove('active'); document.querySelectorAll('.bottom-sheet').forEach(s => s.classList.remove('active')); }
 
-    // 新增元素
+    /* === 畫布新增元素 === */
     function handleImageUpload(e) {
         const file = e.target.files[0];
         if(!file) return;
         const reader = new FileReader();
         reader.onload = function(f) {
             fabric.Image.fromURL(f.target.result, img => {
-                img.scaleToWidth(180);
-                img.set({ left: 30, top: 150 });
+                // 自動縮放到畫布寬度的一半，避免原圖過大
+                img.scaleToWidth(canvas.width * 0.8);
+                // 置中並綁定裁切遮罩
+                img.set({ 
+                    left: canvas.width / 2, 
+                    top: canvas.height / 2, 
+                    originX: 'center', 
+                    originY: 'center',
+                    clipPath: clipPathObj 
+                });
                 canvas.add(img);
                 canvas.setActiveObject(img);
             });
@@ -338,7 +392,7 @@
     function addStickerToCanvas(url) {
         fabric.Image.fromURL(url, img => {
             img.scaleToWidth(80);
-            img.set({ left: 80, top: 200 });
+            img.set({ left: canvas.width / 2, top: canvas.height / 2, originX: 'center', originY: 'center', clipPath: clipPathObj });
             canvas.add(img);
             canvas.setActiveObject(img);
         }, { crossOrigin: 'anonymous' });
@@ -346,7 +400,12 @@
 
     function addText(color) {
         const txt = document.getElementById('text-input').value || "Hello";
-        const textObj = new fabric.Textbox(txt, { left: 40, top: 100, fontSize: 28, fill: color, fontWeight: 'bold' });
+        const textObj = new fabric.Textbox(txt, { 
+            left: canvas.width / 2, top: canvas.height / 2, 
+            originX: 'center', originY: 'center',
+            fontSize: 28, fill: color, fontWeight: 'bold',
+            clipPath: clipPathObj
+        });
         canvas.add(textObj);
         canvas.setActiveObject(textObj);
         document.getElementById('text-input').value = '';
@@ -358,27 +417,39 @@
     function sendBackward() { const obj = canvas.getActiveObject(); if(obj) { canvas.sendBackwards(obj); canvas.renderAll(); } }
     function deleteActiveObject() { const obj = canvas.getActiveObject(); if(obj) canvas.remove(obj); }
 
-    /* === 完成並送單 === */
+    /* === 最終輸出與送單 === */
     async function exportOrder() {
         if(!canvas) return;
         canvas.discardActiveObject();
         canvas.renderAll();
         
-        const printBase64 = canvas.toDataURL({ format: 'png', multiplier: 2 });
-        alert("🔄 訂單處理中...");
+        alert("🔄 正在合成列印用高清圖與預覽圖，請稍候...");
 
+        // 1. 生成給 UV 機列印的生產圖 (無手機框)
+        // 放大倍率確保高解析度，並且保持透明背景
+        const printBase64 = canvas.toDataURL({ format: 'png', multiplier: 3 });
+
+        // 2. 生成帶有手機框的預覽圖 (給客人的 mockup)
         const maskImgEl = document.getElementById('real-phone-mask');
         if (maskImgEl.style.display !== 'none' && maskImgEl.src) {
             fabric.Image.fromURL(maskImgEl.src, async function(maskImg) {
-                maskImg.set({ left: 0, top: 0, width: 240, height: 480, selectable: false });
+                maskImg.set({ 
+                    left: 0, top: 0, 
+                    width: canvas.width, height: canvas.height, 
+                    selectable: false 
+                });
                 canvas.add(maskImg);
                 canvas.renderAll();
                 const mockupBase64 = canvas.toDataURL({ format: 'png', multiplier: 2 });
+                
+                // 生成完畢後把手機框從畫布中移除，保持編輯狀態
                 canvas.remove(maskImg);
                 canvas.renderAll();
+                
                 sendToServer(printBase64, mockupBase64);
             }, { crossOrigin: 'anonymous' });
         } else {
+            // 如果後台沒設定遮罩，就直接傳兩張一樣的圖
             sendToServer(printBase64, printBase64);
         }
     }
@@ -389,15 +460,22 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
-                    print_file: printFile, mockup_file: mockupFile,
-                    model_name: orderContext.modelName, style_name: orderContext.styleName, price: orderContext.price
+                    print_file: printFile, 
+                    mockup_file: mockupFile,
+                    model_name: orderContext.modelName, 
+                    style_name: orderContext.styleName, 
+                    price: 0 // 未來可串接後台價格
                 })
             });
             const result = await res.json();
-            if(res.ok) alert("✅ " + result.msg);
-            else alert("⚠️ 錯誤：" + result.msg);
+            if(res.ok) {
+                alert("✅ 訂單送出成功！可前往後台「訂單管理」查看。");
+                window.location.reload(); // 送單後重整回首頁
+            } else { 
+                alert("⚠️ 錯誤：" + result.msg); 
+            }
         } catch(err) {
-            alert("❌ 連線錯誤！");
+            alert("❌ 連線錯誤，請檢查網路連線！");
         }
     }
 </script>
