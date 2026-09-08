@@ -93,14 +93,13 @@
             <div class="menu-item" onclick="switchMenu('models')"><i class="fa-solid fa-mobile-screen"></i> 品牌及型號</div>
             <div class="menu-item" onclick="switchMenu('styles')"><i class="fa-solid fa-layer-group"></i> 手機殼材質</div>
             <div class="menu-item" onclick="switchMenu('assets')"><i class="fa-solid fa-face-smile"></i> 素材庫 (貼紙)</div>
-            <div class="menu-item" onclick="switchMenu('templates')"><i class="fa-solid fa-border-all"></i> 模板庫 (插槽版型)</div>
+            <div class="menu-item" onclick="switchMenu('templates')"><i class="fa-solid fa-border-all"></i> 模板庫 (版型)</div>
         </div>
     </div>
     <div class="main-container">
         <div class="top-header"><div></div><div class="header-links"><a href="/" target="_blank"><i class="fa-solid fa-eye"></i> 查看前台</a></div></div>
         <div class="content-area">
             
-            <!-- 訂單 -->
             <div id="view-orders" class="view-section active">
                 <h2 class="page-title">訂單管理</h2>
                 <div class="panel">
@@ -111,7 +110,6 @@
                 </div>
             </div>
             
-            <!-- 品牌型號 -->
             <div id="view-models" class="view-section">
                 <h2 class="page-title">手機品牌及型號</h2>
                 <div class="panel">
@@ -127,7 +125,6 @@
                 </div>
             </div>
             
-            <!-- 材質參數 -->
             <div id="view-styles" class="view-section">
                 <h2 class="page-title">手機殼材質 (參數與線圖設定)</h2>
                 <div class="panel">
@@ -136,7 +133,6 @@
                 </div>
             </div>
             
-            <!-- 素材貼紙 -->
             <div id="view-assets" class="view-section">
                 <h2 class="page-title">素材庫 (貼紙)</h2>
                 <div class="panel">
@@ -150,12 +146,11 @@
                 </div>
             </div>
             
-            <!-- 模板庫 (全新開放) -->
             <div id="view-templates" class="view-section">
-                <h2 class="page-title">模板庫 (插槽版型設計)</h2>
+                <h2 class="page-title">模板庫 (綁定機型設計)</h2>
                 <div class="panel">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                        <div style="font-size: 13px; color: var(--text-regular);">設定好模板封面與相片插槽，客人就能一鍵套用。</div>
+                        <div style="font-size: 13px; color: var(--text-regular);">模板必須綁定手機型號，客人在前台選擇該型號時才會顯示對應的模板。</div>
                         <button class="el-btn" onclick="openTemplateModal()"><i class="fa-solid fa-plus"></i> 建立新模板</button>
                     </div>
                     <div class="tabs" id="template-category-tabs"></div>
@@ -199,6 +194,14 @@
             <div class="modal-header"><span id="template-modal-title">建立新模板</span> <button class="el-btn danger" style="padding:4px 8px;" onclick="closeModal('template-modal')"><i class="fa-solid fa-xmark"></i></button></div>
             <div class="modal-body" style="flex:1; overflow-y:auto;">
                 <input type="hidden" id="edit-template-id">
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>綁定手機型號 (重要！)</label>
+                        <select id="input-tpl-model" class="form-control"></select>
+                    </div>
+                </div>
+
                 <div class="form-row">
                     <div class="form-group"><label>模板名稱</label><input type="text" id="input-tpl-name" class="form-control" placeholder="例: Cute Cat 01"></div>
                     <div class="form-group">
@@ -211,7 +214,7 @@
                     <label>模板封面預覽圖 (透明 PNG)</label>
                     <div class="upload-preview-box" onclick="document.getElementById('upload-tpl-thumb').click()">
                         <img id="preview-tpl-thumb" src="">
-                        <div class="placeholder" id="placeholder-tpl-thumb"><i class="fa-solid fa-upload"></i> 上傳模板預覽圖</div>
+                        <div class="placeholder" id="placeholder-tpl-thumb"><i class="fa-solid fa-upload"></i> 上傳模板圖案</div>
                     </div>
                     <input type="file" id="upload-tpl-thumb" style="display:none;" accept="image/png" onchange="handleImageUpload(event, 'tpl-thumb')">
                     <input type="hidden" id="saved-tpl-thumb-url">
@@ -221,9 +224,7 @@
                     相片插槽設定 (Slots)
                     <button class="el-btn outline" style="padding:4px 10px; font-size:12px;" onclick="addTplSlot()"><i class="fa-solid fa-plus"></i> 新增插槽</button>
                 </h4>
-                <div id="tpl-slots-container">
-                    <!-- 動態加入插槽輸入框 -->
-                </div>
+                <div id="tpl-slots-container"></div>
             </div>
             <div class="modal-footer"><button class="el-btn danger" onclick="closeModal('template-modal')">取消</button> <button class="el-btn" onclick="saveTemplate()">儲存模板</button></div>
         </div>
@@ -236,21 +237,21 @@
     let currentAssetCategory = "全部";
     let currentTplCategory = "全部";
     let tempColors = [];
-    let tempSlots = []; // 暫存模板插槽
+    let tempSlots = [];
 
+    // 【防呆機制】：使用 try/catch 包覆每一個 fetch，確保一個出錯不會拖垮全部
     window.onload = async () => {
-        try {
-            const [resShop, resAssets, resOrders, resTemplates] = await Promise.all([ 
-                fetch('/api/shop_data'), fetch('/api/assets'), fetch('/api/admin/get_orders'), fetch('/api/templates') 
-            ]);
-            shopData = (await resShop.json()).data;
-            assetsData = (await resAssets.json()).data;
-            templatesData = (await resTemplates.json()).data;
-            renderOrders((await resOrders.json()).data || []);
-            renderBrands(); renderModels(); renderStyles(); 
-            renderAssetTabs(); renderAssets();
-            renderTemplateTabs(); renderTemplates();
-        } catch(e) { console.error("資料載入異常", e); }
+        try { const res = await fetch('/api/shop_data'); if(res.ok) shopData = (await res.json()).data; } catch(e){}
+        try { const res = await fetch('/api/assets'); if(res.ok) assetsData = (await res.json()).data; } catch(e){}
+        try { const res = await fetch('/api/templates'); if(res.ok) templatesData = (await res.json()).data; } catch(e){}
+        try { 
+            const res = await fetch('/api/admin/get_orders'); 
+            if(res.ok) renderOrders((await res.json()).data || []); 
+        } catch(e){ renderOrders([]); }
+        
+        renderBrands(); renderModels(); renderStyles(); 
+        renderAssetTabs(); renderAssets();
+        renderTemplateTabs(); renderTemplates();
     };
 
     function switchMenu(viewId) {
@@ -270,40 +271,127 @@
     async function syncShopData() { await fetch('/api/admin/save_shop_data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(shopData) }); }
     async function syncTemplates() { await fetch('/api/admin/save_templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(templatesData) }); }
 
-    // 訂單管理
     function renderOrders(orders) {
         const tbody = document.getElementById('order-table-body');
         tbody.innerHTML = '';
         if(orders.length === 0) { tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:30px; color:#999;">目前沒有訂單</td></tr>'; return; }
         orders.forEach(o => {
-            tbody.innerHTML += `<tr><td style="font-weight:bold;">${o.order_id}<br><span style="font-size:12px;color:#888;font-weight:normal;">${o.customer_name}</span></td><td><div style="font-size:12px; color:#888;">型號:</div><div>${o.model}</div><div style="font-size:12px; color:#888; margin-top:4px;">材質:</div><div>${o.style}</div></td><td><img src="${o.mockup_url}" style="height:80px; border-radius:6px; border:1px solid #eee;"></td><td><span style="background:#fff1f0; color:#ff4d4f; padding:4px 10px; border-radius:12px; font-size:12px; font-weight:bold;">${o.status}</span></td><td><a href="${o.print_url}" download="${o.order_id}_print.png" class="el-btn outline" style="text-decoration:none;"><i class="fa-solid fa-download"></i> 下載生產圖</a></td></tr>`;
+            tbody.innerHTML += `<tr><td style="font-weight:bold;">${o.order_id}<br><span style="font-size:12px;color:#888;font-weight:normal;">${o.customer_name}</span></td><td><div style="font-size:12px; color:#888;">型號:</div><div>${o.model}</div><div style="font-size:12px; color:#888; margin-top:4px;">材質:</div><div>${o.style}</div></td><td><img src="${o.mockup_url}" style="height:80px; border-radius:6px; border:1px solid #eee;" loading="lazy"></td><td><span style="background:#fff1f0; color:#ff4d4f; padding:4px 10px; border-radius:12px; font-size:12px; font-weight:bold;">${o.status}</span></td><td><a href="${o.print_url}" download="${o.order_id}_print.png" class="el-btn outline" style="text-decoration:none;"><i class="fa-solid fa-download"></i> 下載生產圖</a></td></tr>`;
         });
     }
 
-    // 品牌與型號與材質 (略, 保持之前邏輯)
-    function renderBrands() { /* 同前 */ }
-    function renderModels() { /* 同前 */ }
-    function renderStyles() { /* 同前 */ }
-    function openBrandModal() { openModal('brand-modal'); }
-    function openModelModal() { 
+    function renderBrands() {
+        const tbody = document.getElementById('brand-table-body');
+        tbody.innerHTML = ''; 
+        shopData.brands.forEach((brand, idx) => {
+            tbody.innerHTML += `<tr><td>${idx + 1}</td><td style="font-weight:bold;">${brand}</td><td><button class="el-btn edit" onclick="openBrandModal('${brand}')"><i class="fa-solid fa-pen"></i></button><button class="el-btn danger" onclick="deleteBrand('${brand}')"><i class="fa-solid fa-trash"></i></button></td></tr>`;
+        });
+    }
+    function openBrandModal(oldName = '') {
+        document.getElementById('brand-modal-title').innerText = oldName ? '編輯品牌' : '新增品牌';
+        document.getElementById('edit-brand-old-name').value = oldName;
+        document.getElementById('input-brand-name').value = oldName;
+        openModal('brand-modal');
+    }
+    function saveBrand() {
+        const oldName = document.getElementById('edit-brand-old-name').value;
+        const newName = document.getElementById('input-brand-name').value.trim();
+        if(!newName) return alert("請輸入品牌");
+        if(oldName) {
+            const idx = shopData.brands.indexOf(oldName);
+            if(idx !== -1) shopData.brands[idx] = newName;
+            shopData.models.forEach(m => { if(m.brand === oldName) m.brand = newName; });
+        } else {
+            if(shopData.brands.includes(newName)) return alert("品牌已存在");
+            shopData.brands.push(newName);
+        }
+        syncShopData(); renderBrands(); renderModels(); closeModal('brand-modal');
+    }
+    function deleteBrand(b) { if(confirm('刪除品牌？')) { shopData.brands = shopData.brands.filter(x => x !== b); syncShopData(); renderBrands(); } }
+
+    function renderModels() {
+        const tbody = document.getElementById('model-table-body');
+        tbody.innerHTML = '';
+        shopData.models.forEach((model, idx) => {
+            tbody.innerHTML += `<tr><td>${idx + 1}</td><td><span style="background:var(--primary-light); color:var(--primary-color); padding:4px 8px; border-radius:4px; font-size:12px;">${model.brand}</span></td><td style="font-weight:bold;">${model.name}</td><td><button class="el-btn edit" onclick="openModelModal('${model.id}')"><i class="fa-solid fa-pen"></i></button><button class="el-btn danger" onclick="deleteModel('${model.id}')"><i class="fa-solid fa-trash"></i></button></td></tr>`;
+        });
+    }
+    function openModelModal(id = '') {
         document.getElementById('input-model-brand').innerHTML = shopData.brands.map(b => `<option value="${b}">${b}</option>`).join('');
+        document.getElementById('model-modal-title').innerText = id ? '編輯型號' : '新增型號';
+        document.getElementById('edit-model-id').value = id;
+        if(id) {
+            const m = shopData.models.find(x => x.id === id);
+            document.getElementById('input-model-brand').value = m.brand;
+            document.getElementById('input-model-name').value = m.name;
+        } else { document.getElementById('input-model-name').value = ''; }
         openModal('model-modal'); 
     }
-    function saveBrand() { /* 同前 */ }
     function saveModel() {
         const brand = document.getElementById('input-model-brand').value;
         const name = document.getElementById('input-model-name').value.trim();
+        const id = document.getElementById('edit-model-id').value;
         if(!name) return alert("請填寫顯示名稱");
-        shopData.models.push({ id: 'm_' + new Date().getTime(), brand, name, status: true });
-        syncShopData(); alert('已儲存'); closeModal('model-modal');
+        if(id) {
+            const m = shopData.models.find(x => x.id === id);
+            m.brand = brand; m.name = name;
+        } else {
+            shopData.models.push({ id: 'm_' + new Date().getTime(), brand, name, status: true });
+        }
+        syncShopData(); renderModels(); closeModal('model-modal');
     }
-    
-    function openStyleModal() { openModal('style-modal'); tempColors = []; renderColorTags(); setPreview('mask',''); setPreview('line',''); }
-    function saveStyle() { /* 同前 */ closeModal('style-modal'); }
+    function deleteModel(id) { if(confirm('刪除型號？')) { shopData.models = shopData.models.filter(m => m.id !== id); syncShopData(); renderModels(); } }
+
+    function renderStyles() {
+        const tbody = document.getElementById('style-table-body');
+        tbody.innerHTML = '';
+        shopData.styles.forEach((style, idx) => {
+            let colorHtml = (style.colors || []).map(c => `<span class="color-tag" style="display:inline-block; margin-right:4px;">${c}</span>`).join('');
+            if(!colorHtml) colorHtml = '<span style="color:#999;">無指定</span>';
+            tbody.innerHTML += `<tr><td>${idx + 1}</td><td style="font-weight:bold;">${style.name}</td><td>${colorHtml}</td><td><button class="el-btn edit" onclick="openStyleModal('${style.id}')"><i class="fa-solid fa-pen"></i> 編輯參數</button><button class="el-btn danger" onclick="deleteStyle('${style.id}')"><i class="fa-solid fa-trash"></i></button></td></tr>`;
+        });
+    }
+    function openStyleModal(id = '') { 
+        document.getElementById('style-modal-title').innerText = id ? '編輯材質' : '新增材質';
+        document.getElementById('edit-style-id').value = id;
+        tempColors = []; 
+        if(id) {
+            const s = shopData.styles.find(x => x.id === id);
+            document.getElementById('input-style-name').value = s.name || '';
+            tempColors = [...(s.colors || [])];
+            setPreview('mask', s.mask_img); setPreview('line', s.line_img);
+            document.getElementById('input-style-x').value = s.print_x || 0; document.getElementById('input-style-y').value = s.print_y || 0;
+            document.getElementById('input-style-w').value = s.print_w || 80; document.getElementById('input-style-h').value = s.print_h || 160;
+        } else {
+            document.getElementById('input-style-name').value = '';
+            setPreview('mask',''); setPreview('line','');
+            document.getElementById('input-style-x').value = 0; document.getElementById('input-style-y').value = 0;
+            document.getElementById('input-style-w').value = 80; document.getElementById('input-style-h').value = 160;
+        }
+        renderColorTags(); openModal('style-modal'); 
+    }
+    function saveStyle() {
+        const oldId = document.getElementById('edit-style-id').value;
+        const name = document.getElementById('input-style-name').value.trim();
+        if(!name) return alert("請填寫材質名稱");
+        const styleData = {
+            id: oldId || 'style_' + new Date().getTime(),
+            name: name, colors: [...tempColors],
+            mask_img: document.getElementById('saved-mask-url').value, line_img: document.getElementById('saved-line-url').value,
+            print_x: parseFloat(document.getElementById('input-style-x').value), print_y: parseFloat(document.getElementById('input-style-y').value),
+            print_w: parseFloat(document.getElementById('input-style-w').value), print_h: parseFloat(document.getElementById('input-style-h').value),
+            status: true
+        };
+        if(oldId) {
+            const idx = shopData.styles.findIndex(x => x.id === oldId);
+            styleData.status = shopData.styles[idx].status; shopData.styles[idx] = styleData;
+        } else { shopData.styles.push(styleData); }
+        syncShopData(); renderStyles(); closeModal('style-modal');
+    }
+    function deleteStyle(id) { if(confirm('刪除材質？')) { shopData.styles = shopData.styles.filter(s => s.id !== id); syncShopData(); renderStyles(); } }
     function addColorTag() { const v = document.getElementById('temp-color-input').value.trim(); if(v && !tempColors.includes(v)) { tempColors.push(v); renderColorTags(); document.getElementById('temp-color-input').value = ''; } }
     function renderColorTags() { document.getElementById('color-tags-container').innerHTML = tempColors.map((c,i) => `<div class="color-tag">${c} <i class="fa-solid fa-xmark" onclick="tempColors.splice(${i},1);renderColorTags()"></i></div>`).join(''); }
 
-    // 圖片上傳 (共用)
     async function handleImageUpload(event, type) {
         const file = event.target.files[0];
         if(!file) return;
@@ -324,21 +412,43 @@
         else { img.style.display = 'none'; p.style.display = 'block'; p.innerHTML = '<i class="fa-solid fa-upload"></i> 上傳圖片'; }
     }
 
-    // 素材庫
-    function renderAssetTabs() { /* 同前 */ }
-    function renderAssets() { /* 同前 */ }
+    function renderAssetTabs() {
+        const container = document.getElementById('asset-category-tabs');
+        container.innerHTML = '';
+        if(!assetsData.categories) assetsData.categories = ["全部"];
+        assetsData.categories.forEach(cat => {
+            const tab = document.createElement('div');
+            tab.className = `tab ${cat === currentAssetCategory ? 'active' : ''}`;
+            tab.innerText = cat;
+            tab.onclick = () => { currentAssetCategory = cat; renderAssetTabs(); renderAssets(); };
+            container.appendChild(tab);
+        });
+    }
+    function renderAssets() {
+        const grid = document.getElementById('asset-grid-body');
+        grid.innerHTML = '';
+        let list = assetsData.stickers || [];
+        if(currentAssetCategory !== "全部") list = list.filter(s => s.category === currentAssetCategory);
+        list.forEach(sticker => { grid.innerHTML += `<div class="asset-card"><button class="asset-del-btn" onclick="deleteSticker('${sticker.id}')"><i class="fa-solid fa-xmark"></i></button><img src="${sticker.url}" loading="lazy"></div>`; });
+    }
     async function uploadStickerBatch(event) {
         const files = event.target.files; if(files.length === 0) return;
         let cat = prompt("輸入分類 (如: 可愛)：", "可愛") || "全部";
         const fd = new FormData(); for(let i=0; i<files.length; i++) fd.append('files', files[i]); fd.append('category', cat);
         const res = await fetch('/api/admin/batch_upload_stickers', { method: 'POST', body: fd });
-        if(res.ok) { assetsData = (await (await fetch('/api/assets')).json()).data; alert("上傳成功！"); }
+        if(res.ok) { assetsData = (await (await fetch('/api/assets')).json()).data; renderAssetTabs(); renderAssets(); alert("上傳成功！"); }
+    }
+    async function deleteSticker(id) {
+        if(!confirm("刪除這張？")) return;
+        assetsData.stickers = assetsData.stickers.filter(s => s.id !== id); renderAssets();
+        fetch('/api/admin/delete_sticker', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({id}) });
     }
 
-    /* === 模板系統 (新功能) === */
+    /* === 模板系統 === */
     function renderTemplateTabs() {
         const container = document.getElementById('template-category-tabs');
         container.innerHTML = '';
+        if(!templatesData.categories) templatesData.categories = ["全部"];
         templatesData.categories.forEach(cat => {
             const tab = document.createElement('div');
             tab.className = `tab ${cat === currentTplCategory ? 'active' : ''}`;
@@ -347,20 +457,25 @@
             container.appendChild(tab);
         });
     }
-
     function renderTemplates() {
         const grid = document.getElementById('template-grid-body');
         grid.innerHTML = '';
-        let list = templatesData.templates;
+        let list = templatesData.templates || [];
         if(currentTplCategory !== "全部") list = list.filter(t => t.category === currentTplCategory);
         list.forEach(tpl => {
-            grid.innerHTML += `<div class="asset-card" style="padding-bottom:30px;"><button class="asset-del-btn" onclick="deleteTemplate('${tpl.id}')"><i class="fa-solid fa-xmark"></i></button><img src="${tpl.thumb_url}" loading="lazy"><div style="font-weight:bold; font-size:14px; margin-top:8px;">${tpl.name}</div><div style="font-size:12px; color:#888;">${tpl.slots.length} 個插槽</div><button class="el-btn outline" style="position:absolute; bottom:5px; left:5px; right:5px; width:calc(100% - 10px); padding:4px;" onclick="openTemplateModal('${tpl.id}')">編輯</button></div>`;
+            const m = shopData.models.find(x => x.id === tpl.model_id);
+            const mName = m ? m.name : '未知型號';
+            grid.innerHTML += `<div class="asset-card" style="padding-bottom:30px;"><button class="asset-del-btn" onclick="deleteTemplate('${tpl.id}')"><i class="fa-solid fa-xmark"></i></button><img src="${tpl.thumb_url}" loading="lazy"><div style="font-weight:bold; font-size:14px; margin-top:8px;">${tpl.name}</div><div style="font-size:11px; color:var(--primary-color); margin-top:4px;">限定: ${mName}</div><button class="el-btn outline" style="position:absolute; bottom:5px; left:5px; right:5px; width:calc(100% - 10px); padding:4px;" onclick="openTemplateModal('${tpl.id}')">編輯</button></div>`;
         });
     }
 
     function openTemplateModal(id = '') {
-        const sel = document.getElementById('input-tpl-category');
-        sel.innerHTML = templatesData.categories.map(c => `<option value="${c}">${c}</option>`).join('');
+        const selCat = document.getElementById('input-tpl-category');
+        selCat.innerHTML = templatesData.categories.map(c => `<option value="${c}">${c}</option>`).join('');
+        
+        // 渲染型號選單
+        const selModel = document.getElementById('input-tpl-model');
+        selModel.innerHTML = shopData.models.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
         
         document.getElementById('template-modal-title').innerText = id ? '編輯模板' : '建立新模板';
         document.getElementById('edit-template-id').value = id;
@@ -369,27 +484,22 @@
         if(id) {
             const t = templatesData.templates.find(x => x.id === id);
             document.getElementById('input-tpl-name').value = t.name;
-            sel.value = t.category;
+            selCat.value = t.category;
+            selModel.value = t.model_id || '';
             setPreview('tpl-thumb', t.thumb_url);
-            tempSlots = JSON.parse(JSON.stringify(t.slots)); // 深拷貝
+            tempSlots = JSON.parse(JSON.stringify(t.slots));
         } else {
             document.getElementById('input-tpl-name').value = '';
             setPreview('tpl-thumb', '');
-            tempSlots = [{ id: 'slot_1', x: 20, y: 50, w: 100, h: 100, rx: 0 }]; // 預設給一個插槽
+            tempSlots = [{ id: 'slot_1', x: 20, y: 50, w: 100, h: 100 }];
         }
-        renderTplSlots();
-        openModal('template-modal');
+        renderTplSlots(); openModal('template-modal');
     }
 
-    function addTplSlot() {
-        tempSlots.push({ id: 'slot_' + (tempSlots.length + 1), x: 0, y: 0, w: 100, h: 100, rx: 0 });
-        renderTplSlots();
-    }
+    function addTplSlot() { tempSlots.push({ id: 'slot_' + (tempSlots.length + 1), x: 0, y: 0, w: 100, h: 100 }); renderTplSlots(); }
     function removeTplSlot(idx) { tempSlots.splice(idx, 1); renderTplSlots(); }
-
     function renderTplSlots() {
-        const container = document.getElementById('tpl-slots-container');
-        container.innerHTML = tempSlots.map((s, idx) => `
+        document.getElementById('tpl-slots-container').innerHTML = tempSlots.map((s, idx) => `
             <div class="slot-item">
                 <i class="fa-solid fa-trash del-slot" onclick="removeTplSlot(${idx})"></i>
                 <div style="font-weight:bold; margin-bottom:10px;">相片插槽 ${idx + 1}</div>
@@ -407,21 +517,16 @@
         const id = document.getElementById('edit-template-id').value;
         const name = document.getElementById('input-tpl-name').value.trim();
         const cat = document.getElementById('input-tpl-category').value;
+        const model_id = document.getElementById('input-tpl-model').value;
         const thumb = document.getElementById('saved-tpl-thumb-url').value;
         
-        if(!name || !thumb) return alert("請填寫名稱並上傳封面圖！");
+        if(!name || !thumb || !model_id) return alert("請填寫名稱、綁定型號並上傳封面圖！");
         
-        const tplData = { id: id || 'tpl_' + new Date().getTime(), name, category: cat, thumb_url: thumb, slots: tempSlots };
-        
-        if(id) {
-            const idx = templatesData.templates.findIndex(x => x.id === id);
-            templatesData.templates[idx] = tplData;
-        } else {
-            templatesData.templates.push(tplData);
-        }
+        const tplData = { id: id || 'tpl_' + new Date().getTime(), name, category: cat, model_id, thumb_url: thumb, slots: tempSlots };
+        if(id) { const idx = templatesData.templates.findIndex(x => x.id === id); templatesData.templates[idx] = tplData; } 
+        else { templatesData.templates.push(tplData); }
         syncTemplates(); renderTemplates(); closeModal('template-modal');
     }
-
     function deleteTemplate(id) {
         if(!confirm("確定要刪除這個模板嗎？")) return;
         templatesData.templates = templatesData.templates.filter(t => t.id !== id);
