@@ -16,7 +16,7 @@ STICKER_DIR = os.path.join(STATIC_DIR, "stickers")
 MATERIAL_DIR = os.path.join(STATIC_DIR, "materials")
 DATA_FILE = "shop_data.json"
 ASSETS_FILE = "assets.json"
-TEMPLATES_FILE = "templates.json" # 新增：專屬模板資料庫
+TEMPLATES_FILE = "templates.json"
 
 for d in [SAVE_DIR, STATIC_DIR, STICKER_DIR, MATERIAL_DIR]:
     if not os.path.exists(d):
@@ -46,8 +46,7 @@ DEFAULT_SHOP_DATA = {
     }]
 }
 DEFAULT_ASSETS = {"stickers": [], "categories": ["全部", "可愛", "Y2K", "文字"]}
-# 預設模板資料結構
-DEFAULT_TEMPLATES = {"templates": [], "categories": ["全部", "貓咪", "狗狗", "情侶", "Y2K", "簡約"]}
+DEFAULT_TEMPLATES = {"templates": [], "categories": ["全部", "熱門"]}
 
 @app.route('/')
 def home(): return send_file('index.html')
@@ -108,7 +107,7 @@ def admin_get_orders():
         return jsonify({"status": "success", "data": orders})
     except Exception as e: return jsonify({"status": "error", "msg": str(e)}), 500
 
-# === 後台管理登入與頁面 ===
+# === 後台管理介面 ===
 @app.route('/admin')
 def admin_page():
     if not session.get('logged_in'): return redirect(url_for('login_page'))
@@ -131,7 +130,7 @@ def login_page():
         </body>
     '''
 
-# === 後台資料儲存 API ===
+# === 資料儲存 API ===
 @app.route('/api/admin/save_shop_data', methods=['POST'])
 def admin_save_shop_data():
     if not session.get('logged_in'): return jsonify({"status": "error"}), 401
