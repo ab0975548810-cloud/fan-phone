@@ -23,15 +23,14 @@
         .page.active { display: flex; }
         @keyframes slideIn { from { transform: translateX(15px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
         
-        /* === 導航列 === */
+        /* 導航列 */
         .top-nav { height: 55px; background: var(--card-bg); display: flex; justify-content: space-between; align-items: center; padding: 0 15px; border-bottom: 1px solid var(--border-color); flex-shrink: 0; z-index: 10; position: sticky; top: 0; }
         .nav-btn { background: none; border: none; font-size: 18px; color: var(--text-main); cursor: pointer; padding: 8px; }
         .title { font-weight: 700; font-size: 16px; }
-        .nav-btn-done { background: var(--primary-color); color: white; border: none; padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: bold; cursor: pointer; }
+        .nav-btn-done { background: var(--primary-color); color: white; border: none; padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 8px rgba(255,133,153,0.3); }
         
         .content { flex: 1; overflow-y: auto; display: flex; flex-direction: column; background: var(--bg-color); }
         
-        /* === 品牌與列表 === */
         .brand-tabs { display: flex; overflow-x: auto; padding: 10px 15px 0 15px; gap: 20px; background: var(--card-bg); white-space: nowrap; scrollbar-width: none; border-bottom: 1px solid var(--border-color); }
         .brand-tabs::-webkit-scrollbar { display: none; }
         .brand-tab { font-size: 14px; font-weight: bold; color: var(--text-muted); cursor: pointer; padding-bottom: 10px; border-bottom: 3px solid transparent; transition: 0.2s; }
@@ -58,29 +57,35 @@
         .canvas-container-wrapper { background: white; border-radius: 35px; box-shadow: 0 10px 25px rgba(0,0,0,0.08); position: relative; overflow: hidden; }
         .phone-mask-img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 50; object-fit: cover; }
         
-        /* 右側控制按鈕群 */
         .control-panel { position: absolute; right: 15px; top: 15px; display: flex; flex-direction: column; gap: 10px; z-index: 60; display: none; }
         .control-panel.active { display: flex; animation: slideInRight 0.2s ease; }
         @keyframes slideInRight { from{ transform:translateX(20px); opacity:0;} to{ transform:translateX(0); opacity:1;} }
         .icon-btn { background: white; border: none; width: 36px; height: 36px; border-radius: 50%; box-shadow: 0 2px 10px rgba(0,0,0,0.1); cursor: pointer; display: flex; justify-content: center; align-items: center; color: var(--text-main); font-size: 14px; }
         
-        /* 底部工具列 */
         .editor-toolbar { display: flex; justify-content: space-around; padding: 12px 0 20px 0; background: var(--card-bg); border-top: 1px solid var(--border-color); z-index: 20; position: sticky; bottom: 0; }
         .tool-btn { display: flex; flex-direction: column; align-items: center; gap: 6px; background: none; border: none; color: var(--text-main); cursor: pointer; font-size: 11px; font-weight: bold; }
         .tool-btn-icon { width: 48px; height: 48px; background: var(--primary-light); color: var(--primary-color); border-radius: 50%; display: flex; justify-content: center; align-items: center; font-size: 20px; transition: 0.2s; }
         .tool-btn:active .tool-btn-icon { transform: scale(0.9); }
 
-        /* === 全螢幕模板選擇頁面 (還原截圖 S__67297404.jpg) === */
+        /* === 全螢幕模板選擇頁 (完美還原 S__67297404.jpg) === */
         .template-page { background: #fff5f7; display: flex; flex-direction: column; height: 100%; }
-        .template-header-text { padding: 15px 20px; text-align: center; color: var(--text-muted); font-size: 14px; }
-        .template-grid-container { padding: 15px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; overflow-y: auto; flex: 1; align-content: start; }
-        .tpl-card { background: white; border-radius: 16px; padding: 10px; display: flex; flex-direction: column; align-items: center; box-shadow: 0 2px 8px rgba(0,0,0,0.03); cursor: pointer; border: 2px solid transparent; transition: 0.2s; }
-        .tpl-card.selected { border-color: var(--primary-color); background: var(--primary-light); }
-        .tpl-card img { width: 100%; aspect-ratio: 1/2; object-fit: contain; margin-bottom: 8px; border-radius: 8px; }
-        .tpl-name { font-size: 12px; font-weight: bold; color: var(--text-main); text-align: center; }
-        .tpl-bottom-action { padding: 15px 20px; background: white; border-top: 1px solid var(--border-color); display: flex; gap: 10px; }
+        .template-header-text { padding: 15px 20px 5px 20px; text-align: left; color: var(--text-muted); font-size: 13px; font-weight: bold; }
+        
+        /* 圓角粉色標籤設計 */
+        .tpl-tabs-wrapper { display: flex; gap: 10px; padding: 10px 20px; overflow-x: auto; scrollbar-width: none; }
+        .tpl-tabs-wrapper::-webkit-scrollbar { display: none; }
+        .tpl-pill { padding: 6px 16px; border-radius: 20px; background: white; color: var(--text-muted); font-size: 13px; font-weight: bold; cursor: pointer; white-space: nowrap; box-shadow: 0 2px 5px rgba(0,0,0,0.03); border: 1px solid #eee; }
+        .tpl-pill.active { background: var(--primary-color); color: white; border-color: var(--primary-color); }
+        
+        .template-grid-container { padding: 15px 20px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; overflow-y: auto; flex: 1; align-content: start; }
+        .tpl-card { background: white; border-radius: 12px; padding: 8px; display: flex; flex-direction: column; align-items: center; box-shadow: 0 3px 10px rgba(0,0,0,0.04); cursor: pointer; border: 2px solid transparent; transition: 0.2s; }
+        .tpl-card.selected { border-color: var(--primary-color); background: var(--primary-light); transform: translateY(-2px); }
+        .tpl-card img { width: 100%; aspect-ratio: 1 / 2; object-fit: cover; border-radius: 6px; margin-bottom: 8px; background: #f0f0f0; }
+        .tpl-name { font-size: 11px; font-weight: bold; color: var(--text-main); text-align: center; }
+        
+        .tpl-bottom-action { padding: 15px 20px 25px 20px; background: white; border-top: 1px solid var(--border-color); display: flex; gap: 15px; }
 
-        /* === 抽屜 (貼紙/文字) === */
+        /* === 抽屜 === */
         .overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 90; display: none; opacity: 0; transition: opacity 0.3s; }
         .overlay.active { display: block; opacity: 1; }
         .bottom-sheet { position: absolute; bottom: -100%; left: 0; width: 100%; height: 50%; background: var(--card-bg); border-radius: 20px 20px 0 0; box-shadow: 0 -4px 20px rgba(0,0,0,0.1); transition: bottom 0.3s cubic-bezier(0.1, 0.8, 0.2, 1); z-index: 100; display: flex; flex-direction: column; }
@@ -94,10 +99,9 @@
         .sticker-item:active { border-color: var(--primary-color); }
         .sticker-item img { max-width: 100%; max-height: 100%; object-fit: contain; }
 
-        /* 隱藏元素 */
         input[type="file"] { display: none; }
         
-        /* 購物車與結帳樣式省略，保持原本 */
+        /* 購物車省略 */
         .cart-item { background: white; border-radius: 12px; padding: 15px; display: flex; gap: 15px; margin: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.02); border: 1px solid var(--border-color); }
         .cart-img { width: 80px; height: 160px; object-fit: contain; background: #f5f5f5; border-radius: 8px; }
         .cart-info { flex: 1; display: flex; flex-direction: column; justify-content: center; }
@@ -110,7 +114,7 @@
 <body>
 <div class="app-container">
 
-    <!-- === 頁面 1 & 2：選型號/材質 === -->
+    <!-- 選型號 -->
     <div id="page-select-model" class="page active">
         <div class="top-nav"><button class="nav-btn"></button><div class="title">選擇手機型號</div><div style="width: 28px;"></div></div>
         <div class="brand-tabs" id="brand-tabs"></div>
@@ -118,6 +122,7 @@
         <div class="bottom-bar"><button class="primary-btn" id="btn-next-to-style" disabled onclick="goToPage('page-select-style')">下一步</button></div>
     </div>
 
+    <!-- 選材質 -->
     <div id="page-select-style" class="page">
         <div class="top-nav"><button class="nav-btn" onclick="goToPage('page-select-model')"><i class="fa-solid fa-chevron-left"></i></button><div class="title">選擇手機殼材質</div><div style="width: 28px;"></div></div>
         <div class="content">
@@ -127,7 +132,7 @@
         <div class="bottom-bar"><button class="primary-btn" id="btn-start-diy" disabled onclick="startDIY()">開始設計</button></div>
     </div>
 
-    <!-- === 頁面 3：DIY 編輯器大魔王 === -->
+    <!-- === DIY 編輯器大魔王 === -->
     <div id="page-editor" class="page">
         <div class="top-nav">
             <button class="nav-btn" onclick="goToPage('page-select-style')"><i class="fa-solid fa-chevron-left"></i></button>
@@ -137,9 +142,7 @@
         
         <div class="workspace">
             <div class="canvas-container-wrapper" id="canvas-wrapper">
-                <!-- 這塊畫布就是實體列印的區域 -->
                 <canvas id="main-canvas"></canvas>
-                <!-- 手機殼預覽圖，永遠在最上層防溢出 -->
                 <img id="real-phone-mask" class="phone-mask-img" src="" alt="">
             </div>
             
@@ -161,19 +164,19 @@
                 <div class="tool-btn-icon"><i class="fa-solid fa-t"></i></div><span>文字</span>
             </button>
             <button class="tool-btn" onclick="openTemplatePage()">
-                <div class="tool-btn-icon" style="background:#fff0f3;"><i class="fa-solid fa-border-all"></i></div><span>套用模板</span>
+                <div class="tool-btn-icon" style="background:#fff0f3;"><i class="fa-solid fa-border-all"></i></div><span>模板</span>
             </button>
         </div>
         
         <input type="file" id="file-uploader" accept="image/*" onchange="handleImageUpload(event)">
+        <!-- 插槽專用上傳 -->
         <input type="file" id="slot-uploader" accept="image/*" onchange="handleSlotUpload(event)">
         
-        <!-- 抽屜區塊 -->
         <div class="overlay" id="sheet-overlay" onclick="closeAllSheets()"></div>
         
         <div class="bottom-sheet" id="sheet-sticker">
             <div class="sheet-header"><span>貼紙庫</span><button class="sheet-close" onclick="closeAllSheets()"><i class="fa-solid fa-xmark"></i></button></div>
-            <div class="brand-tabs" id="sticker-categories"></div>
+            <div class="brand-tabs" id="sticker-categories" style="padding-top:0;"></div>
             <div class="sheet-content"><div class="sticker-grid" id="sticker-grid"></div></div>
         </div>
 
@@ -190,7 +193,7 @@
         </div>
     </div>
 
-    <!-- === 全新：全螢幕選擇模板頁面 (還原截圖 S__67297404.jpg) === -->
+    <!-- === 滿版選擇模板頁 (完美還原 S__67297404.jpg) === -->
     <div id="page-select-template" class="page template-page">
         <div class="top-nav">
             <button class="nav-btn" onclick="goToPage('page-editor')"><i class="fa-solid fa-chevron-left"></i></button>
@@ -198,18 +201,22 @@
             <div style="width: 28px;"></div>
         </div>
         <div class="template-header-text">快速套用喜歡的風格，開始設計吧！</div>
-        <div class="brand-tabs" id="template-categories" style="background:transparent; border:none; padding-bottom:5px;"></div>
         
-        <div id="no-template-msg" style="display:none; text-align:center; padding:40px 20px; color:#999; font-size:14px;">此型號目前沒有專屬模板。</div>
+        <!-- 圓角粉紅標籤 -->
+        <div class="tpl-tabs-wrapper" id="template-categories"></div>
+        
+        <div id="no-template-msg" style="display:none; text-align:center; padding:40px 20px; color:#999; font-size:14px;">此機型目前尚無專屬模板。</div>
+        
+        <!-- 3欄位網格 -->
         <div class="template-grid-container" id="template-grid"></div>
         
         <div class="tpl-bottom-action">
-            <button class="primary-btn" style="background:#f0f2f5; color:var(--text-main); box-shadow:none;" onclick="goToPage('page-editor')">取消</button>
-            <button class="primary-btn" id="btn-apply-tpl" disabled onclick="confirmApplyTemplate()">使用這個模板</button>
+            <button class="primary-btn" style="background:#f0f2f5; color:var(--text-main); box-shadow:none; flex:0.4;" onclick="goToPage('page-editor')">取消</button>
+            <button class="primary-btn" style="flex:1;" id="btn-apply-tpl" disabled onclick="confirmApplyTemplate()">使用這個模板</button>
         </div>
     </div>
 
-    <!-- === 購物車與結帳 === -->
+    <!-- 購物車與結帳 -->
     <div id="page-cart" class="page">
         <div class="top-nav"><button class="nav-btn" onclick="goToPage('page-editor')"><i class="fa-solid fa-chevron-left"></i></button><div class="title">購物車</div><div style="width: 28px;"></div></div>
         <div class="content">
@@ -243,9 +250,10 @@
 </div>
 
 <script>
+    // 預設給空資料，防止 API 慢的時候報錯
     let shopData = { brands: [], models: [], styles: [] };
-    let assetsData = { stickers: [], categories: [] };
-    let templatesData = { templates: [], categories: [] };
+    let assetsData = { stickers: [], categories: ["全部"] };
+    let templatesData = { templates: [], categories: ["全部"] };
     
     let orderContext = { 
         modelId: null, modelName: null, styleId: null, styleName: null, price: 0,
@@ -254,17 +262,17 @@
     
     let canvas, baseClipPath;
     let activeSlot = null; 
-    let selectedTemplateForApply = null; // 暫存使用者在列表中選中的模板
+    let selectedTemplateForApply = null; 
 
-    // 載入資料 (防止API失敗當機)
+    // 【載入資料防呆】
     window.onload = async () => {
         try { const res = await fetch('/api/shop_data'); if(res.ok) shopData = (await res.json()).data; } catch(e){}
         try { const res = await fetch('/api/assets'); if(res.ok) assetsData = (await res.json()).data; } catch(e){}
         try { const res = await fetch('/api/templates'); if(res.ok) templatesData = (await res.json()).data; } catch(e){}
+        
         initUI(); initStickerUI();
     };
 
-    /* === 初始化流程 === */
     function initUI() {
         const brandTabs = document.getElementById('brand-tabs');
         shopData.brands.forEach((brand, idx) => {
@@ -325,7 +333,6 @@
         document.getElementById(pageId).classList.add('active');
     }
 
-    /* === 貼紙庫 === */
     function initStickerUI() {
         const catTabs = document.getElementById('sticker-categories');
         catTabs.innerHTML = '';
@@ -360,7 +367,6 @@
         goToPage('page-editor');
         document.getElementById('editor-title').innerText = `${orderContext.modelName}`;
         
-        // 放大畫布倍率，確保列印品質與操作精準度
         const scaleFactor = 3; 
         const canvasW = orderContext.printW * scaleFactor;
         const canvasH = orderContext.printH * scaleFactor;
@@ -380,11 +386,10 @@
             canvas.on('selection:updated', () => document.getElementById('obj-controls').classList.add('active'));
             canvas.on('selection:cleared', () => document.getElementById('obj-controls').classList.remove('active'));
         }
-        // 建立全域裁切遮罩，防止任何圖案超出畫布
         baseClipPath = new fabric.Rect({ left: 0, top: 0, width: canvasW, height: canvasH, absolutePositioned: true });
     }
 
-    /* === 模板選擇頁面邏輯 (全新) === */
+    /* === 滿版選擇模板頁邏輯 (完美還原) === */
     function openTemplatePage() {
         selectedTemplateForApply = null;
         document.getElementById('btn-apply-tpl').disabled = true;
@@ -393,7 +398,7 @@
         catTabs.innerHTML = '';
         (templatesData.categories || []).forEach((cat, idx) => {
             const tab = document.createElement('div');
-            tab.className = `brand-tab ${idx === 0 ? 'active' : ''}`;
+            tab.className = `tpl-pill ${idx === 0 ? 'active' : ''}`;
             tab.innerText = cat;
             tab.onclick = () => renderTemplates(cat, tab);
             catTabs.appendChild(tab);
@@ -405,14 +410,14 @@
     
     function renderTemplates(category, tabElement) {
         if(tabElement) {
-            document.getElementById('template-categories').querySelectorAll('.brand-tab').forEach(t => t.classList.remove('active'));
+            document.getElementById('template-categories').querySelectorAll('.tpl-pill').forEach(t => t.classList.remove('active'));
             tabElement.classList.add('active');
         }
         const grid = document.getElementById('template-grid');
         const msg = document.getElementById('no-template-msg');
         grid.innerHTML = '';
         
-        // 【核心】強制篩選出與當前選擇型號 ID 相符的模板！
+        // 核心：只顯示當前手機型號的模板
         let filtered = (templatesData.templates || []).filter(t => t.model_id === orderContext.modelId);
         if(category !== "全部") filtered = filtered.filter(t => t.category === category);
         
@@ -435,82 +440,77 @@
         }
     }
 
-    /* === 模板套用與相框插槽 (終極修復版) === */
+    /* === 套用模板與插槽系統 (終極修復) === */
     function confirmApplyTemplate() {
         if(!selectedTemplateForApply) return;
         const tpl = selectedTemplateForApply;
         
-        // 清空畫布準備套用
         canvas.clear();
         canvas.backgroundColor = '#ffffff';
         const scaleFactor = 3;
         
-        // 【修正】：將你在後台設計的模板封面圖，當作「背景圖/相框」真實的加到畫布最上層！
+        // 1. 將模板背景圖載入並設定為不可選擇的相框
         fabric.Image.fromURL(tpl.thumb_url, function(img) {
-            // 縮放模板圖使其填滿畫布
-            const scaleX = canvas.width / img.width;
-            const scaleY = canvas.height / img.height;
-            const scale = Math.max(scaleX, scaleY);
+            const scale = Math.max(canvas.width / img.width, canvas.height / img.height);
             
             img.set({
                 left: canvas.width/2, top: canvas.height/2, originX: 'center', originY: 'center',
                 scaleX: scale, scaleY: scale,
-                selectable: false, evented: false // 鎖定不可移動，且不阻擋滑鼠點擊下方的插槽
+                selectable: false, evented: false 
             });
             
-            // 1. 先畫出可點擊的插槽虛線框
-            tpl.slots.forEach((slot, idx) => {
-                const slotW = parseFloat(slot.w) * scaleFactor;
-                const slotH = parseFloat(slot.h) * scaleFactor;
-                const slotX = parseFloat(slot.x) * scaleFactor;
-                const slotY = parseFloat(slot.y) * scaleFactor;
-                
-                let rect = new fabric.Rect({
-                    left: slotX, top: slotY, width: slotW, height: slotH,
-                    fill: 'rgba(255,255,255,0.7)', stroke: '#ff8599', strokeDashArray: [5, 5], strokeWidth: 2,
-                    selectable: false, hoverCursor: 'pointer', rx: 10, ry: 10
+            // 2. 畫出後台拉好的插槽 (虛線框)
+            if(tpl.slots && tpl.slots.length > 0) {
+                tpl.slots.forEach(slot => {
+                    const slotW = parseFloat(slot.w) * scaleFactor;
+                    const slotH = parseFloat(slot.h) * scaleFactor;
+                    const slotX = parseFloat(slot.x) * scaleFactor;
+                    const slotY = parseFloat(slot.y) * scaleFactor;
+                    
+                    let rect = new fabric.Rect({
+                        left: slotX, top: slotY, width: slotW, height: slotH,
+                        fill: 'rgba(255,255,255,0.8)', stroke: '#ff8599', strokeDashArray: [5, 5], strokeWidth: 2,
+                        selectable: false, hoverCursor: 'pointer', rx: 10, ry: 10
+                    });
+                    
+                    let text = new fabric.Text("點擊\n加入", {
+                        left: slotX + slotW/2, top: slotY + slotH/2, originX: 'center', originY: 'center',
+                        fontSize: 22, fill: '#ff8599', selectable: false, evented: false, fontWeight: 'bold', textAlign: 'center'
+                    });
+                    
+                    // 點擊插槽喚起上傳
+                    rect.on('mousedown', () => {
+                        activeSlot = rect;
+                        document.getElementById('slot-uploader').click();
+                    });
+                    
+                    canvas.add(rect); canvas.add(text);
+                    rect.promptText = text; 
                 });
-                
-                let text = new fabric.Text(`點擊加入\n照片`, {
-                    left: slotX + slotW/2, top: slotY + slotH/2, originX: 'center', originY: 'center',
-                    fontSize: 24, fill: '#ff8599', selectable: false, evented: false, fontWeight: 'bold', textAlign: 'center'
-                });
-                
-                // 點擊插槽喚起上傳
-                rect.on('mousedown', () => {
-                    activeSlot = rect;
-                    document.getElementById('slot-uploader').click();
-                });
-                
-                canvas.add(rect); canvas.add(text);
-                rect.promptText = text; 
-            });
+            }
             
-            // 2. 最後才把模板底圖(相框)疊到最上層！
+            // 3. 把模板相框蓋上去 (確保它在最上層)
             canvas.add(img);
-            // 將相框鎖在最頂層
             img.bringToFront();
-            canvas.templateFrame = img; // 標記為模板相框，方便後續圖層管理
+            canvas.templateFrame = img; 
             
             goToPage('page-editor');
             
         }, { crossOrigin: 'anonymous' });
     }
 
-    // 照片丟入插槽後的處理
+    // 照片丟入插槽 (裁切並移到相框底下)
     function handleSlotUpload(e) {
         const file = e.target.files[0];
         if(!file || !activeSlot) return;
         const reader = new FileReader();
         reader.onload = function(f) {
             fabric.Image.fromURL(f.target.result, img => {
-                // 自動等比例縮放填滿插槽
                 const scaleX = activeSlot.width / img.width;
                 const scaleY = activeSlot.height / img.height;
                 const scale = Math.max(scaleX, scaleY); 
                 img.scale(scale);
                 
-                // 限制照片的顯示範圍(ClipPath)絕對不超出插槽
                 img.set({
                     left: activeSlot.left + activeSlot.width / 2, top: activeSlot.top + activeSlot.height / 2,
                     originX: 'center', originY: 'center',
@@ -522,14 +522,9 @@
                 
                 canvas.add(img);
                 
-                // 【核心圖層邏輯】：把照片放到模板相框的「下一層」
-                if(canvas.templateFrame) {
-                    img.moveTo(canvas.getObjects().indexOf(canvas.templateFrame) - 1);
-                } else {
-                    img.sendToBack(); 
-                }
+                // 丟到底層 (確保在相框下面)
+                img.sendToBack(); 
                 
-                // 移除虛線框跟文字
                 if(activeSlot.promptText) canvas.remove(activeSlot.promptText);
                 canvas.remove(activeSlot);
                 canvas.setActiveObject(img);
@@ -552,12 +547,9 @@
                 img.scaleToWidth(canvas.width * 0.8);
                 img.set({ left: canvas.width / 2, top: canvas.height / 2, originX: 'center', originY: 'center', clipPath: baseClipPath });
                 canvas.add(img); 
-                
-                // 如果有模板相框，新加的照片不能蓋住相框！
-                if(canvas.templateFrame) {
-                    img.moveTo(canvas.getObjects().indexOf(canvas.templateFrame) - 1);
-                }
+                // 新增一般圖片/貼紙時，確保在相框上面 (所以不用 sendToBack)
                 canvas.setActiveObject(img);
+                // 但我們要確定相框永遠不會擋住編輯操作，通常貼紙是蓋在相框上面的
             });
         };
         reader.readAsDataURL(file);
@@ -568,9 +560,7 @@
         fabric.Image.fromURL(url, img => {
             img.scaleToWidth(120);
             img.set({ left: canvas.width / 2, top: canvas.height / 2, originX: 'center', originY: 'center', clipPath: baseClipPath });
-            canvas.add(img);
-            if(canvas.templateFrame) img.moveTo(canvas.getObjects().indexOf(canvas.templateFrame) - 1);
-            canvas.setActiveObject(img);
+            canvas.add(img); canvas.setActiveObject(img);
         }, { crossOrigin: 'anonymous' });
     }
 
@@ -580,21 +570,11 @@
             left: canvas.width / 2, top: canvas.height / 2, originX: 'center', originY: 'center',
             fontSize: 40, fill: color, fontWeight: 'bold', clipPath: baseClipPath
         });
-        canvas.add(textObj); 
-        if(canvas.templateFrame) textObj.moveTo(canvas.getObjects().indexOf(canvas.templateFrame) - 1);
-        canvas.setActiveObject(textObj);
+        canvas.add(textObj); canvas.setActiveObject(textObj);
         document.getElementById('text-input').value = ''; closeAllSheets();
     }
 
-    // 控制圖層時，確保不會蓋住相框
-    function bringForward() { 
-        const obj = canvas.getActiveObject(); 
-        if(obj) { 
-            canvas.bringForward(obj); 
-            if(canvas.templateFrame) canvas.templateFrame.bringToFront(); // 永遠確保相框在最上層
-            canvas.renderAll(); 
-        } 
-    }
+    function bringForward() { const obj = canvas.getActiveObject(); if(obj) { canvas.bringForward(obj); canvas.renderAll(); } }
     function sendBackward() { const obj = canvas.getActiveObject(); if(obj) { canvas.sendBackwards(obj); canvas.renderAll(); } }
     function deleteActiveObject() { const obj = canvas.getActiveObject(); if(obj) canvas.remove(obj); }
 
