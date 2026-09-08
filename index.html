@@ -8,9 +8,12 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
     <style>
         :root { 
-            --primary-color: #ff8599; --primary-light: #ffeef1;
-            --bg-color: #f8f9fa; --card-bg: #ffffff;
-            --text-main: #333333; --text-muted: #888888;
+            --primary-color: #ff8599; 
+            --primary-light: #ffeef1;
+            --bg-color: #f8f9fa; 
+            --card-bg: #ffffff;
+            --text-main: #333333; 
+            --text-muted: #888888;
             --border-color: #f0f0f0; 
         }
         body { margin: 0; padding: 0; font-family: -apple-system, sans-serif; background-color: var(--bg-color); color: var(--text-main); display: flex; justify-content: center; height: 100vh; overflow: hidden; -webkit-tap-highlight-color: transparent; }
@@ -64,8 +67,8 @@
         .tool-btn-icon { width: 48px; height: 48px; background: var(--primary-light); color: var(--primary-color); border-radius: 50%; display: flex; justify-content: center; align-items: center; font-size: 20px; transition: 0.2s; }
         .tool-btn:active .tool-btn-icon { transform: scale(0.9); }
 
-        /* 全螢幕模板選擇頁 */
-        .template-page { background: #fff5f7; display: flex; flex-direction: column; height: 100%; }
+        /* 全螢幕模板選擇頁 (已經把 display: flex 拿掉，解決永久霸屏的 Bug) */
+        .template-page { background: #fff5f7; }
         .template-header-text { padding: 15px 20px 5px 20px; text-align: left; color: var(--text-muted); font-size: 13px; font-weight: bold; }
         
         .tpl-tabs-wrapper { display: flex; gap: 10px; padding: 10px 20px; overflow-x: auto; scrollbar-width: none; }
@@ -101,15 +104,27 @@
         .cart-item { background: white; border-radius: 12px; padding: 15px; display: flex; gap: 15px; margin: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.02); border: 1px solid var(--border-color); }
         .cart-img { width: 80px; height: 160px; object-fit: contain; background: #f5f5f5; border-radius: 8px; }
         .cart-info { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+        .cart-title { font-size: 16px; font-weight: bold; margin-bottom: 5px; }
+        .cart-desc { font-size: 13px; color: var(--text-muted); margin-bottom: 10px; line-height: 1.4; }
+        .cart-price { font-size: 16px; font-weight: bold; color: var(--primary-color); }
+        
         .form-section { background: white; margin-top: 10px; padding: 20px; }
+        .form-title { font-size: 16px; font-weight: bold; margin-bottom: 15px; border-left: 4px solid var(--primary-color); padding-left: 10px; }
         .input-group { margin-bottom: 15px; }
         .input-group label { display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 5px; font-weight: bold; }
-        .input-group input, .input-group select { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; font-size: 15px; outline: none; background: #fafafa; }
+        .input-group input, .input-group select { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; font-size: 15px; outline: none; background: #fafafa; transition: 0.2s; }
+        .input-group input:focus { border-color: var(--primary-color); background: white; }
+        
+        .success-box { text-align: center; padding: 50px 20px; }
+        .success-icon { font-size: 60px; color: #67c23a; margin-bottom: 20px; }
+        .success-title { font-size: 22px; font-weight: bold; margin-bottom: 10px; }
+        .success-desc { font-size: 14px; color: var(--text-muted); margin-bottom: 30px; line-height: 1.5; }
     </style>
 </head>
 <body>
 <div class="app-container">
 
+    <!-- 頁面 1：選擇手機型號 -->
     <div id="page-select-model" class="page active">
         <div class="top-nav"><button class="nav-btn"></button><div class="title">選擇手機型號</div><div style="width: 28px;"></div></div>
         <div class="brand-tabs" id="brand-tabs"></div>
@@ -117,6 +132,7 @@
         <div class="bottom-bar"><button class="primary-btn" id="btn-next-to-style" disabled onclick="goToPage('page-select-style')">下一步</button></div>
     </div>
 
+    <!-- 頁面 2：選擇材質 -->
     <div id="page-select-style" class="page">
         <div class="top-nav"><button class="nav-btn" onclick="goToPage('page-select-model')"><i class="fa-solid fa-chevron-left"></i></button><div class="title">選擇手機殼材質</div><div style="width: 28px;"></div></div>
         <div class="content">
@@ -126,6 +142,7 @@
         <div class="bottom-bar"><button class="primary-btn" id="btn-start-diy" disabled onclick="startDIY()">開始設計</button></div>
     </div>
 
+    <!-- 頁面 3：DIY 編輯器 -->
     <div id="page-editor" class="page">
         <div class="top-nav">
             <button class="nav-btn" onclick="goToPage('page-select-style')"><i class="fa-solid fa-chevron-left"></i></button>
@@ -138,6 +155,7 @@
                 <canvas id="main-canvas"></canvas>
                 <img id="real-phone-mask" class="phone-mask-img" src="" alt="">
             </div>
+            
             <div class="control-panel" id="obj-controls">
                 <button class="icon-btn" onclick="bringForward()"><i class="fa-solid fa-layer-group"></i></button>
                 <button class="icon-btn" onclick="sendBackward()"><i class="fa-solid fa-arrow-down-short-wide"></i></button>
@@ -149,7 +167,6 @@
             <button class="tool-btn" onclick="document.getElementById('file-uploader').click()">
                 <div class="tool-btn-icon"><i class="fa-regular fa-image"></i></div><span>加入照片</span>
             </button>
-            <!-- 貼紙與模板按鈕改為動態重新抓取資料 -->
             <button class="tool-btn" onclick="openStickerSheet()">
                 <div class="tool-btn-icon"><i class="fa-regular fa-face-smile"></i></div><span>貼紙</span>
             </button>
@@ -164,6 +181,7 @@
         <input type="file" id="file-uploader" accept="image/*" onchange="handleImageUpload(event)">
         <input type="file" id="slot-uploader" accept="image/*" onchange="handleSlotUpload(event)">
         
+        <!-- 抽屜 -->
         <div class="overlay" id="sheet-overlay" onclick="closeAllSheets()"></div>
         
         <div class="bottom-sheet" id="sheet-sticker">
@@ -185,11 +203,12 @@
         </div>
     </div>
 
-    <!-- === 全螢幕選擇模板頁 === -->
+    <!-- 頁面：全螢幕選擇模板頁 -->
     <div id="page-select-template" class="page template-page">
         <div class="top-nav">
             <button class="nav-btn" onclick="goToPage('page-editor')"><i class="fa-solid fa-chevron-left"></i></button>
-            <div class="title">選擇模板</div><div style="width: 28px;"></div>
+            <div class="title">選擇模板</div>
+            <div style="width: 28px;"></div>
         </div>
         <div class="template-header-text">快速套用喜歡的風格，開始設計吧！</div>
         <div class="tpl-tabs-wrapper" id="template-categories"></div>
@@ -202,7 +221,7 @@
         </div>
     </div>
 
-    <!-- 購物車與結帳 -->
+    <!-- 購物車 -->
     <div id="page-cart" class="page">
         <div class="top-nav"><button class="nav-btn" onclick="goToPage('page-editor')"><i class="fa-solid fa-chevron-left"></i></button><div class="title">購物車</div><div style="width: 28px;"></div></div>
         <div class="content">
@@ -216,6 +235,7 @@
         <div class="bottom-bar"><button class="primary-btn" onclick="goToPage('page-checkout')">前往結帳</button></div>
     </div>
 
+    <!-- 結帳表單 -->
     <div id="page-checkout" class="page">
         <div class="top-nav"><button class="nav-btn" onclick="goToPage('page-cart')"><i class="fa-solid fa-chevron-left"></i></button><div class="title">填寫收件資訊</div><div style="width: 28px;"></div></div>
         <div class="content">
@@ -225,6 +245,7 @@
         <div class="bottom-bar"><button class="primary-btn" onclick="submitFinalOrder()" id="btn-submit-order">確認送出訂單</button></div>
     </div>
 
+    <!-- 訂單完成 -->
     <div id="page-success" class="page">
         <div class="content" style="background: white; justify-content: center; text-align:center; padding: 50px 20px;">
             <i class="fa-solid fa-circle-check" style="font-size: 60px; color: #67c23a; margin-bottom: 20px;"></i>
@@ -249,7 +270,7 @@
     let activeSlot = null; 
     let selectedTemplateForApply = null; 
 
-    // 初次載入資料
+    // 載入資料 (防止API失敗當機)
     window.onload = async () => {
         try { const res = await fetch('/api/shop_data'); if(res.ok) shopData = (await res.json()).data; } catch(e){}
         initUI(); 
@@ -315,12 +336,9 @@
         document.getElementById(pageId).classList.add('active');
     }
 
-    /* === 貼紙庫 (即時抓取防白屏) === */
+    /* === 貼紙庫 (即時抓取) === */
     async function openStickerSheet() {
-        try {
-            const res = await fetch('/api/assets');
-            if(res.ok) { const json = await res.json(); if(json.data) assetsData = json.data; }
-        } catch(e) {}
+        try { const res = await fetch('/api/assets'); if(res.ok) { const json = await res.json(); if(json.data) assetsData = json.data; } } catch(e) {}
         
         if(!assetsData) assetsData = { stickers: [], categories: ["全部"] };
         if(!assetsData.categories || assetsData.categories.length === 0) assetsData.categories = ["全部"];
@@ -355,6 +373,7 @@
         });
     }
 
+    /* === 畫布初始化 === */
     function startDIY() {
         goToPage('page-editor');
         document.getElementById('editor-title').innerText = `${orderContext.modelName}`;
@@ -381,18 +400,13 @@
         baseClipPath = new fabric.Rect({ left: 0, top: 0, width: canvasW, height: canvasH, absolutePositioned: true });
     }
 
-    /* === 模板選擇頁面 (即時抓取防白屏) === */
+    /* === 模板選擇頁面 (即時抓取) === */
     async function openTemplatePage() {
         selectedTemplateForApply = null;
         document.getElementById('btn-apply-tpl').disabled = true;
         
-        // 核心：每次點擊都去後台要最新資料，保證不當機
-        try {
-            const res = await fetch('/api/templates');
-            if(res.ok) { const json = await res.json(); if(json.data) templatesData = json.data; }
-        } catch(e) { console.warn("模板讀取失敗"); }
+        try { const res = await fetch('/api/templates'); if(res.ok) { const json = await res.json(); if(json.data) templatesData = json.data; } } catch(e) { console.warn("模板讀取失敗"); }
 
-        // 防呆機制：如果 JSON 是空的或壞掉，自動給預設值
         if(!templatesData) templatesData = { templates: [], categories: ["全部"] };
         if(!templatesData.categories || templatesData.categories.length === 0) templatesData.categories = ["全部"];
         if(!templatesData.templates) templatesData.templates = [];
@@ -421,9 +435,7 @@
         grid.innerHTML = '';
         
         let filtered = templatesData.templates || [];
-        // 核心篩選：只顯示當前手機型號的模板
         filtered = filtered.filter(t => t.model_id === orderContext.modelId);
-        
         if(category !== "全部") filtered = filtered.filter(t => t.category === category);
         
         if(filtered.length === 0) {
