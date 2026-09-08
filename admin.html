@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>本福丸訂製 - 後台管理系統</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- 引入 Fabric.js 讓後台也有強大畫布功能 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
     <style>
         :root {
@@ -86,14 +85,17 @@
         /* === 視覺化模板編輯器專用樣式 === */
         .editor-container { width: 100%; height: 500px; background: #eef0f3; border: 1px solid #dcdfe6; border-radius: 8px; position: relative; display: flex; justify-content: center; align-items: center; overflow: hidden; margin-top: 10px; }
         .editor-canvas-wrapper { position: relative; background: white; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
-        .editor-toolbar { padding: 10px; background: white; border: 1px solid #dcdfe6; border-radius: 8px; margin-top: 10px; display: flex; gap: 10px; justify-content: center; }
+        .editor-toolbar { padding: 10px; background: white; border: 1px solid #dcdfe6; border-radius: 8px; margin-top: 10px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
         
-        .switch { position: relative; display: inline-block; width: 44px; height: 22px; }
-        .switch input { opacity: 0; width: 0; height: 0; }
-        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 22px; }
-        .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
-        input:checked + .slider { background-color: var(--primary-color); }
-        input:checked + .slider:before { transform: translateX(22px); }
+        /* 側邊貼紙抽屜 (後台專用) */
+        .admin-sticker-drawer { position: absolute; top: 0; right: -300px; width: 280px; height: 100%; background: white; border-left: 1px solid #dcdfe6; box-shadow: -5px 0 15px rgba(0,0,0,0.05); transition: right 0.3s ease; display: flex; flex-direction: column; z-index: 50; }
+        .admin-sticker-drawer.active { right: 0; }
+        .drawer-header { padding: 15px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; font-weight: bold; background: var(--bg-color); }
+        .drawer-content { flex: 1; overflow-y: auto; padding: 10px; }
+        .admin-sticker-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+        .admin-sticker-item { border: 1px solid #eee; border-radius: 6px; padding: 5px; cursor: pointer; display: flex; justify-content: center; align-items: center; aspect-ratio: 1; transition: 0.1s; }
+        .admin-sticker-item:hover { border-color: var(--primary-color); background: var(--primary-light); }
+        .admin-sticker-item img { max-width: 100%; max-height: 100%; object-fit: contain; }
     </style>
 </head>
 <body>
@@ -161,7 +163,7 @@
                 <h2 class="page-title">視覺化模板庫 (綁定機型設計)</h2>
                 <div class="panel">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                        <div style="font-size: 13px; color: var(--text-regular);">直接在畫布上拖曳產生相片插槽，客人前台就能完美套用。</div>
+                        <div style="font-size: 13px; color: var(--text-regular);">直接在畫布上排版貼紙與設定相片插槽，客人前台就能完美套用。</div>
                         <button class="el-btn" onclick="openTemplateModal()"><i class="fa-solid fa-plus"></i> 建立新視覺模板</button>
                     </div>
                     <div class="tabs" id="template-category-tabs"></div>
@@ -199,45 +201,63 @@
         </div>
     </div>
 
-    <!-- === 全新：視覺化模板編輯彈窗 === -->
+    <!-- === 大升級：帶有貼紙庫的視覺化模板編輯彈窗 === -->
     <div class="modal-overlay" id="template-modal">
-        <div class="modal-box" style="width: 800px; height: 95vh; max-height: none;">
-            <div class="modal-header"><span id="template-modal-title">視覺化模板編輯器</span> <button class="el-btn danger" style="padding:4px 8px;" onclick="closeModal('template-modal')"><i class="fa-solid fa-xmark"></i></button></div>
-            <div class="modal-body" style="display:flex; flex-direction:column;">
+        <div class="modal-box" style="width: 850px; height: 95vh; max-height: none;">
+            <div class="modal-header">
+                <span id="template-modal-title">視覺化模板編輯器</span> 
+                <button class="el-btn danger" style="padding:4px 8px;" onclick="closeModal('template-modal')"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body" style="display:flex; flex-direction:column; position: relative; overflow: hidden; padding: 15px;">
+                
                 <input type="hidden" id="edit-template-id">
                 
                 <div class="form-row" style="flex-shrink:0;">
-                    <div class="form-group">
-                        <label>綁定手機型號</label>
-                        <!-- 選擇型號後，會自動抓取對應的尺寸來建立畫布 -->
-                        <select id="input-tpl-model" class="form-control" onchange="initVisualEditor()"></select>
-                    </div>
+                    <div class="form-group"><label>綁定手機型號</label><select id="input-tpl-model" class="form-control" onchange="initVisualEditor()"></select></div>
                     <div class="form-group"><label>模板名稱</label><input type="text" id="input-tpl-name" class="form-control" placeholder="例: Cute Cat 01"></div>
                     <div class="form-group"><label>所屬分類</label><select id="input-tpl-category" class="form-control"></select></div>
                 </div>
 
-                <!-- 隱藏的上傳按鈕，透過畫布操作喚起 -->
-                <input type="file" id="upload-tpl-bg" style="display:none;" accept="image/png, image/jpeg" onchange="handleTplBgUpload(event)">
-                <input type="hidden" id="saved-tpl-bg-url">
+                <label style="font-size:14px; font-weight:bold; color:var(--text-main);">畫布設計區 (加入插槽或貼紙)</label>
                 
-                <label style="font-size:14px; font-weight:bold; color:var(--text-main);">畫布設計區 (拖曳藍色框框設定插槽範圍)</label>
-                
-                <div class="editor-container" id="visual-editor-container">
+                <!-- 畫布與側邊貼紙庫容器 -->
+                <div class="editor-container" id="visual-editor-container" style="flex:1; margin-top:5px;">
                     <div class="editor-canvas-wrapper" id="visual-canvas-wrapper">
                         <canvas id="visual-canvas"></canvas>
                     </div>
+                    
+                    <!-- 隱藏的貼紙抽屜 -->
+                    <div class="admin-sticker-drawer" id="admin-sticker-drawer">
+                        <div class="drawer-header">
+                            <span>選擇貼紙</span>
+                            <button style="border:none; background:none; cursor:pointer;" onclick="toggleAdminStickers()"><i class="fa-solid fa-xmark"></i></button>
+                        </div>
+                        <div class="tabs" id="admin-sticker-cats" style="padding:5px 10px; margin-bottom:0; font-size:12px; overflow-x:auto;"></div>
+                        <div class="drawer-content">
+                            <div class="admin-sticker-grid" id="admin-sticker-grid-body"></div>
+                        </div>
+                    </div>
                 </div>
                 
+                <!-- 強大的工具列 -->
                 <div class="editor-toolbar" style="flex-shrink:0;">
                     <button class="el-btn outline" onclick="document.getElementById('upload-tpl-bg').click()"><i class="fa-regular fa-image"></i> 更換底圖</button>
-                    <button class="el-btn" onclick="addVisualSlot()"><i class="fa-solid fa-plus"></i> 新增相片插槽</button>
-                    <button class="el-btn danger" onclick="removeSelectedVisualSlot()"><i class="fa-solid fa-trash"></i> 刪除選中插槽</button>
+                    <!-- 新增：打開貼紙庫 -->
+                    <button class="el-btn outline" onclick="toggleAdminStickers()"><i class="fa-regular fa-face-smile"></i> 加入貼紙庫圖片</button>
+                    <button class="el-btn outline" onclick="addVisualText()"><i class="fa-solid fa-t"></i> 加入文字</button>
+                    <div style="width: 1px; background:#ddd; margin:0 5px;"></div>
+                    <button class="el-btn" style="background:#67c23a;" onclick="addVisualSlot()"><i class="fa-solid fa-plus"></i> 新增客人照片插槽</button>
+                    <button class="el-btn danger" onclick="removeSelectedVisualObj()"><i class="fa-solid fa-trash"></i> 刪除選取</button>
                 </div>
+                
+                <input type="file" id="upload-tpl-bg" style="display:none;" accept="image/png, image/jpeg" onchange="handleTplBgUpload(event)">
+                <input type="hidden" id="saved-tpl-bg-url">
+                
                 <div style="font-size: 12px; color: #888; text-align: center; margin-top: 10px;">
-                    請先選擇手機型號，系統會自動建立正確比例的畫布。<br>上傳的底圖將成為前台客人的模板背景，藍色虛線框則為客人可放入照片的有效區域。
+                    藍色虛線框為「客人照片插槽」，其他貼紙或文字會跟底圖一起被存為不可移動的模板！
                 </div>
             </div>
-            <div class="modal-footer"><button class="el-btn danger" onclick="closeModal('template-modal')">取消</button> <button class="el-btn" onclick="saveVisualTemplate()">儲存模板</button></div>
+            <div class="modal-footer"><button class="el-btn danger" onclick="closeModal('template-modal')">取消</button> <button class="el-btn" onclick="saveVisualTemplate()">儲存並生成模板圖</button></div>
         </div>
     </div>
 
@@ -283,82 +303,30 @@
     async function syncTemplates() { await fetch('/api/admin/save_templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(templatesData) }); }
 
     function renderOrders(orders) {
-        const tbody = document.getElementById('order-table-body');
-        tbody.innerHTML = '';
+        const tbody = document.getElementById('order-table-body'); tbody.innerHTML = '';
         if(orders.length === 0) { tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:30px; color:#999;">目前沒有訂單</td></tr>'; return; }
         orders.forEach(o => { tbody.innerHTML += `<tr><td style="font-weight:bold;">${o.order_id}<br><span style="font-size:12px;color:#888;font-weight:normal;">${o.customer_name}</span></td><td><div style="font-size:12px; color:#888;">型號:</div><div>${o.model}</div><div style="font-size:12px; color:#888; margin-top:4px;">材質:</div><div>${o.style}</div></td><td><img src="${o.mockup_url}" style="height:80px; border-radius:6px; border:1px solid #eee;" loading="lazy"></td><td><span style="background:#fff1f0; color:#ff4d4f; padding:4px 10px; border-radius:12px; font-size:12px; font-weight:bold;">${o.status}</span></td><td><a href="${o.print_url}" download="${o.order_id}_print.png" class="el-btn outline" style="text-decoration:none;"><i class="fa-solid fa-download"></i> 下載生產圖</a></td></tr>`; });
     }
 
-    function renderBrands() {
-        const tbody = document.getElementById('brand-table-body'); tbody.innerHTML = ''; 
-        shopData.brands.forEach((brand, idx) => { tbody.innerHTML += `<tr><td>${idx + 1}</td><td style="font-weight:bold;">${brand}</td><td><button class="el-btn edit" onclick="openBrandModal('${brand}')"><i class="fa-solid fa-pen"></i></button><button class="el-btn danger" onclick="deleteBrand('${brand}')"><i class="fa-solid fa-trash"></i></button></td></tr>`; });
-    }
+    /* === 品牌/型號/材質 (維持不變) === */
+    function renderBrands() { const tbody = document.getElementById('brand-table-body'); tbody.innerHTML = ''; shopData.brands.forEach((brand, idx) => { tbody.innerHTML += `<tr><td>${idx + 1}</td><td style="font-weight:bold;">${brand}</td><td><button class="el-btn edit" onclick="openBrandModal('${brand}')"><i class="fa-solid fa-pen"></i></button><button class="el-btn danger" onclick="deleteBrand('${brand}')"><i class="fa-solid fa-trash"></i></button></td></tr>`; }); }
     function openBrandModal(oldName = '') { document.getElementById('brand-modal-title').innerText = oldName ? '編輯品牌' : '新增品牌'; document.getElementById('edit-brand-old-name').value = oldName; document.getElementById('input-brand-name').value = oldName; openModal('brand-modal'); }
-    function saveBrand() {
-        const oldName = document.getElementById('edit-brand-old-name').value;
-        const newName = document.getElementById('input-brand-name').value.trim();
-        if(!newName) return alert("請輸入品牌");
-        if(oldName) { const idx = shopData.brands.indexOf(oldName); if(idx !== -1) shopData.brands[idx] = newName; shopData.models.forEach(m => { if(m.brand === oldName) m.brand = newName; }); } else { if(shopData.brands.includes(newName)) return alert("品牌已存在"); shopData.brands.push(newName); }
-        syncShopData(); renderBrands(); renderModels(); closeModal('brand-modal');
-    }
+    function saveBrand() { const oldName = document.getElementById('edit-brand-old-name').value; const newName = document.getElementById('input-brand-name').value.trim(); if(!newName) return alert("請輸入品牌"); if(oldName) { const idx = shopData.brands.indexOf(oldName); if(idx !== -1) shopData.brands[idx] = newName; shopData.models.forEach(m => { if(m.brand === oldName) m.brand = newName; }); } else { if(shopData.brands.includes(newName)) return alert("品牌已存在"); shopData.brands.push(newName); } syncShopData(); renderBrands(); renderModels(); closeModal('brand-modal'); }
     function deleteBrand(b) { if(confirm('刪除品牌？')) { shopData.brands = shopData.brands.filter(x => x !== b); syncShopData(); renderBrands(); } }
 
-    function renderModels() {
-        const tbody = document.getElementById('model-table-body'); tbody.innerHTML = '';
-        shopData.models.forEach((model, idx) => { tbody.innerHTML += `<tr><td>${idx + 1}</td><td><span style="background:var(--primary-light); color:var(--primary-color); padding:4px 8px; border-radius:4px; font-size:12px;">${model.brand}</span></td><td style="font-weight:bold;">${model.name}</td><td><button class="el-btn edit" onclick="openModelModal('${model.id}')"><i class="fa-solid fa-pen"></i></button><button class="el-btn danger" onclick="deleteModel('${model.id}')"><i class="fa-solid fa-trash"></i></button></td></tr>`; });
-    }
-    function openModelModal(id = '') {
-        document.getElementById('input-model-brand').innerHTML = shopData.brands.map(b => `<option value="${b}">${b}</option>`).join('');
-        document.getElementById('model-modal-title').innerText = id ? '編輯型號' : '新增型號'; document.getElementById('edit-model-id').value = id;
-        if(id) { const m = shopData.models.find(x => x.id === id); document.getElementById('input-model-brand').value = m.brand; document.getElementById('input-model-name').value = m.name; } else { document.getElementById('input-model-name').value = ''; }
-        openModal('model-modal'); 
-    }
-    function saveModel() {
-        const brand = document.getElementById('input-model-brand').value; const name = document.getElementById('input-model-name').value.trim(); const id = document.getElementById('edit-model-id').value;
-        if(!name) return alert("請填寫顯示名稱");
-        if(id) { const m = shopData.models.find(x => x.id === id); m.brand = brand; m.name = name; } else { shopData.models.push({ id: 'm_' + new Date().getTime(), brand, name, status: true }); }
-        syncShopData(); renderModels(); closeModal('model-modal');
-    }
+    function renderModels() { const tbody = document.getElementById('model-table-body'); tbody.innerHTML = ''; shopData.models.forEach((model, idx) => { tbody.innerHTML += `<tr><td>${idx + 1}</td><td><span style="background:var(--primary-light); color:var(--primary-color); padding:4px 8px; border-radius:4px; font-size:12px;">${model.brand}</span></td><td style="font-weight:bold;">${model.name}</td><td><button class="el-btn edit" onclick="openModelModal('${model.id}')"><i class="fa-solid fa-pen"></i></button><button class="el-btn danger" onclick="deleteModel('${model.id}')"><i class="fa-solid fa-trash"></i></button></td></tr>`; }); }
+    function openModelModal(id = '') { document.getElementById('input-model-brand').innerHTML = shopData.brands.map(b => `<option value="${b}">${b}</option>`).join(''); document.getElementById('model-modal-title').innerText = id ? '編輯型號' : '新增型號'; document.getElementById('edit-model-id').value = id; if(id) { const m = shopData.models.find(x => x.id === id); document.getElementById('input-model-brand').value = m.brand; document.getElementById('input-model-name').value = m.name; } else { document.getElementById('input-model-name').value = ''; } openModal('model-modal'); }
+    function saveModel() { const brand = document.getElementById('input-model-brand').value; const name = document.getElementById('input-model-name').value.trim(); const id = document.getElementById('edit-model-id').value; if(!name) return alert("請填寫顯示名稱"); if(id) { const m = shopData.models.find(x => x.id === id); m.brand = brand; m.name = name; } else { shopData.models.push({ id: 'm_' + new Date().getTime(), brand, name, status: true }); } syncShopData(); renderModels(); closeModal('model-modal'); }
     function deleteModel(id) { if(confirm('刪除型號？')) { shopData.models = shopData.models.filter(m => m.id !== id); syncShopData(); renderModels(); } }
 
-    function renderStyles() {
-        const tbody = document.getElementById('style-table-body'); tbody.innerHTML = '';
-        shopData.styles.forEach((style, idx) => {
-            let colorHtml = (style.colors || []).map(c => `<span class="color-tag" style="display:inline-block; margin-right:4px;">${c}</span>`).join('');
-            if(!colorHtml) colorHtml = '<span style="color:#999;">無指定</span>';
-            tbody.innerHTML += `<tr><td>${idx + 1}</td><td style="font-weight:bold;">${style.name}</td><td>${colorHtml}</td><td><button class="el-btn edit" onclick="openStyleModal('${style.id}')"><i class="fa-solid fa-pen"></i> 編輯參數</button><button class="el-btn danger" onclick="deleteStyle('${style.id}')"><i class="fa-solid fa-trash"></i></button></td></tr>`;
-        });
-    }
-    function openStyleModal(id = '') { 
-        document.getElementById('style-modal-title').innerText = id ? '編輯材質' : '新增材質'; document.getElementById('edit-style-id').value = id; tempColors = []; 
-        if(id) {
-            const s = shopData.styles.find(x => x.id === id); document.getElementById('input-style-name').value = s.name || ''; tempColors = [...(s.colors || [])];
-            setPreview('mask', s.mask_img); setPreview('line', s.line_img);
-            document.getElementById('input-style-x').value = s.print_x || 0; document.getElementById('input-style-y').value = s.print_y || 0;
-            document.getElementById('input-style-w').value = s.print_w || 80; document.getElementById('input-style-h').value = s.print_h || 160;
-        } else {
-            document.getElementById('input-style-name').value = ''; setPreview('mask',''); setPreview('line','');
-            document.getElementById('input-style-x').value = 0; document.getElementById('input-style-y').value = 0;
-            document.getElementById('input-style-w').value = 80; document.getElementById('input-style-h').value = 160;
-        }
-        renderColorTags(); openModal('style-modal'); 
-    }
-    function saveStyle() {
-        const oldId = document.getElementById('edit-style-id').value; const name = document.getElementById('input-style-name').value.trim();
-        if(!name) return alert("請填寫材質名稱");
-        const styleData = {
-            id: oldId || 'style_' + new Date().getTime(), name: name, colors: [...tempColors],
-            mask_img: document.getElementById('saved-mask-url').value, line_img: document.getElementById('saved-line-url').value,
-            print_x: parseFloat(document.getElementById('input-style-x').value), print_y: parseFloat(document.getElementById('input-style-y').value),
-            print_w: parseFloat(document.getElementById('input-style-w').value), print_h: parseFloat(document.getElementById('input-style-h').value), status: true
-        };
-        if(oldId) { const idx = shopData.styles.findIndex(x => x.id === oldId); styleData.status = shopData.styles[idx].status; shopData.styles[idx] = styleData; } else { shopData.styles.push(styleData); }
-        syncShopData(); renderStyles(); closeModal('style-modal');
-    }
+    function renderStyles() { const tbody = document.getElementById('style-table-body'); tbody.innerHTML = ''; shopData.styles.forEach((style, idx) => { let colorHtml = (style.colors || []).map(c => `<span class="color-tag" style="display:inline-block; margin-right:4px;">${c}</span>`).join(''); if(!colorHtml) colorHtml = '<span style="color:#999;">無指定</span>'; tbody.innerHTML += `<tr><td>${idx + 1}</td><td style="font-weight:bold;">${style.name}</td><td>${colorHtml}</td><td><button class="el-btn edit" onclick="openStyleModal('${style.id}')"><i class="fa-solid fa-pen"></i> 編輯參數</button><button class="el-btn danger" onclick="deleteStyle('${style.id}')"><i class="fa-solid fa-trash"></i></button></td></tr>`; }); }
+    function openStyleModal(id = '') { document.getElementById('style-modal-title').innerText = id ? '編輯材質' : '新增材質'; document.getElementById('edit-style-id').value = id; tempColors = []; if(id) { const s = shopData.styles.find(x => x.id === id); document.getElementById('input-style-name').value = s.name || ''; tempColors = [...(s.colors || [])]; setPreview('mask', s.mask_img); setPreview('line', s.line_img); document.getElementById('input-style-x').value = s.print_x || 0; document.getElementById('input-style-y').value = s.print_y || 0; document.getElementById('input-style-w').value = s.print_w || 80; document.getElementById('input-style-h').value = s.print_h || 160; } else { document.getElementById('input-style-name').value = ''; setPreview('mask',''); setPreview('line',''); document.getElementById('input-style-x').value = 0; document.getElementById('input-style-y').value = 0; document.getElementById('input-style-w').value = 80; document.getElementById('input-style-h').value = 160; } renderColorTags(); openModal('style-modal'); }
+    function saveStyle() { const oldId = document.getElementById('edit-style-id').value; const name = document.getElementById('input-style-name').value.trim(); if(!name) return alert("請填寫材質名稱"); const styleData = { id: oldId || 'style_' + new Date().getTime(), name: name, colors: [...tempColors], mask_img: document.getElementById('saved-mask-url').value, line_img: document.getElementById('saved-line-url').value, print_x: parseFloat(document.getElementById('input-style-x').value), print_y: parseFloat(document.getElementById('input-style-y').value), print_w: parseFloat(document.getElementById('input-style-w').value), print_h: parseFloat(document.getElementById('input-style-h').value), status: true }; if(oldId) { const idx = shopData.styles.findIndex(x => x.id === oldId); styleData.status = shopData.styles[idx].status; shopData.styles[idx] = styleData; } else { shopData.styles.push(styleData); } syncShopData(); renderStyles(); closeModal('style-modal'); }
     function deleteStyle(id) { if(confirm('刪除材質？')) { shopData.styles = shopData.styles.filter(s => s.id !== id); syncShopData(); renderStyles(); } }
     function addColorTag() { const v = document.getElementById('temp-color-input').value.trim(); if(v && !tempColors.includes(v)) { tempColors.push(v); renderColorTags(); document.getElementById('temp-color-input').value = ''; } }
     function renderColorTags() { document.getElementById('color-tags-container').innerHTML = tempColors.map((c,i) => `<div class="color-tag">${c} <i class="fa-solid fa-xmark" onclick="tempColors.splice(${i},1);renderColorTags()"></i></div>`).join(''); }
 
+    /* === 貼紙與上傳 === */
     async function handleImageUpload(event, type) {
         const file = event.target.files[0]; if(!file) return;
         const formData = new FormData(); formData.append('file', file); formData.append('type', 'material');
@@ -366,18 +334,14 @@
         try { const res = await fetch('/api/admin/upload_image', { method: 'POST', body: formData }); const result = await res.json(); if(res.ok) setPreview(type, result.url); } catch(e) { alert("連線錯誤"); setPreview(type, ''); }
     }
     function setPreview(type, url) {
-        document.getElementById(`saved-${type}-url`).value = url;
-        const img = document.getElementById(`preview-${type}`); const p = document.getElementById(`placeholder-${type}`);
+        document.getElementById(`saved-${type}-url`).value = url; const img = document.getElementById(`preview-${type}`); const p = document.getElementById(`placeholder-${type}`);
         if(url) { img.src = url; img.style.display = 'block'; p.style.display = 'none'; } else { img.style.display = 'none'; p.style.display = 'block'; p.innerHTML = '<i class="fa-solid fa-upload"></i> 上傳圖片'; }
     }
 
     function renderAssetTabs() {
         const container = document.getElementById('asset-category-tabs'); container.innerHTML = '';
         if(!assetsData.categories) assetsData.categories = ["全部"];
-        assetsData.categories.forEach(cat => {
-            const tab = document.createElement('div'); tab.className = `tab ${cat === currentAssetCategory ? 'active' : ''}`; tab.innerText = cat;
-            tab.onclick = () => { currentAssetCategory = cat; renderAssetTabs(); renderAssets(); }; container.appendChild(tab);
-        });
+        assetsData.categories.forEach(cat => { const tab = document.createElement('div'); tab.className = `tab ${cat === currentAssetCategory ? 'active' : ''}`; tab.innerText = cat; tab.onclick = () => { currentAssetCategory = cat; renderAssetTabs(); renderAssets(); }; container.appendChild(tab); });
     }
     function renderAssets() {
         const grid = document.getElementById('asset-grid-body'); grid.innerHTML = '';
@@ -393,7 +357,10 @@
     }
     async function deleteSticker(id) { if(!confirm("刪除這張？")) return; assetsData.stickers = assetsData.stickers.filter(s => s.id !== id); renderAssets(); fetch('/api/admin/delete_sticker', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({id}) }); }
 
-    /* === 全新：視覺化模板編輯器邏輯 === */
+
+    /* ========================================= */
+    /* === 視覺化模板編輯器邏輯 (支援貼紙與匯出) === */
+    /* ========================================= */
     function renderTemplateTabs() {
         const container = document.getElementById('template-category-tabs'); container.innerHTML = '';
         if(!templatesData.categories) templatesData.categories = ["全部"];
@@ -426,8 +393,10 @@
             document.getElementById('input-tpl-name').value = t.name;
             selCat.value = t.category;
             selModel.value = t.model_id || '';
-            document.getElementById('saved-tpl-bg-url').value = t.thumb_url;
-            initVisualEditor(t.slots, t.thumb_url);
+            document.getElementById('saved-tpl-bg-url').value = t.thumb_url; // 舊的底圖路徑（做為參考）
+            
+            // 將畫布還原
+            initVisualEditor(t.slots, t.objects_json, t.thumb_url);
         } else {
             document.getElementById('input-tpl-name').value = '';
             document.getElementById('saved-tpl-bg-url').value = '';
@@ -436,13 +405,10 @@
         openModal('template-modal');
     }
 
-    // 初始化/切換型號時重繪畫布
-    function initVisualEditor(existingSlots = [], bgUrl = '') {
+    function initVisualEditor(existingSlots = [], existingObjectsJson = null, fallbackBgUrl = '') {
         const modelId = document.getElementById('input-tpl-model').value;
         if(!modelId) return;
         
-        // 抓取該型號第一個材質的 W 和 H 來當作標準畫布大小
-        // 如果沒有設定，預設為 80 x 160
         let baseW = 80, baseH = 160;
         if(shopData.styles && shopData.styles.length > 0) {
             baseW = parseFloat(shopData.styles[0].print_w) || 80;
@@ -460,35 +426,54 @@
             visualCanvas.setWidth(tplCanvasW);
             visualCanvas.setHeight(tplCanvasH);
             visualCanvas.clear();
+            visualCanvas.backgroundColor = '#ffffff';
         } else {
-            visualCanvas = new fabric.Canvas('visual-canvas', { width: tplCanvasW, height: tplCanvasH, backgroundColor: '#ffffff' });
+            visualCanvas = new fabric.Canvas('visual-canvas', { width: tplCanvasW, height: tplCanvasH, backgroundColor: '#ffffff', preserveObjectStacking: true });
         }
         
-        // 畫出既有的背景與插槽
-        if(bgUrl) {
-            fabric.Image.fromURL(bgUrl, img => {
+        // 1. 如果有儲存好的 fabric JSON，直接還原所有貼紙跟底圖！
+        if(existingObjectsJson) {
+            visualCanvas.loadFromJSON(existingObjectsJson, function() {
+                visualCanvas.renderAll();
+                
+                // 標記一下哪些是背景圖 (不可移動)
+                visualCanvas.getObjects().forEach(obj => {
+                    if(obj.isTplBg) { obj.selectable = false; obj.evented = false; visualCanvas.sendToBack(obj); }
+                });
+                
+                // 2. 畫上插槽 (插槽不跟著 JSON 存，而是獨立存放)
+                drawSlots(existingSlots);
+            });
+        } 
+        // 如果沒有 JSON 但是有舊版 fallback 的底圖
+        else if (fallbackBgUrl) {
+            fabric.Image.fromURL(fallbackBgUrl, img => {
                 const scale = Math.max(tplCanvasW / img.width, tplCanvasH / img.height);
-                img.set({ left: tplCanvasW/2, top: tplCanvasH/2, originX: 'center', originY: 'center', scaleX: scale, scaleY: scale, selectable: false, evented: false, opacity: 0.8 });
+                img.set({ left: tplCanvasW/2, top: tplCanvasH/2, originX: 'center', originY: 'center', scaleX: scale, scaleY: scale, selectable: false, evented: false });
+                img.isTplBg = true;
                 visualCanvas.add(img);
                 visualCanvas.sendToBack(img);
-                visualCanvas.tplBgImage = img;
+                
+                drawSlots(existingSlots);
             }, { crossOrigin: 'anonymous' });
         }
-        
-        existingSlots.forEach(slot => {
+    }
+
+    function drawSlots(slots) {
+        slots.forEach(slot => {
             let rect = new fabric.Rect({
                 left: slot.x * VISUAL_SCALE, top: slot.y * VISUAL_SCALE,
                 width: slot.w * VISUAL_SCALE, height: slot.h * VISUAL_SCALE,
                 fill: 'rgba(64, 158, 255, 0.2)', stroke: '#409EFF', strokeDashArray: [5, 5], strokeWidth: 2,
-                cornerColor: '#409EFF', cornerSize: 10, transparentCorners: false,
-                rx: 10, ry: 10
+                cornerColor: '#409EFF', cornerSize: 10, transparentCorners: false, rx: 10, ry: 10
             });
-            rect.isSlot = true; // 標記為插槽物件
+            rect.isSlot = true; // 標記為插槽
             visualCanvas.add(rect);
+            visualCanvas.bringToFront(rect);
         });
     }
 
-    // 處理上傳底圖
+    // 後台上傳新的全版底圖
     async function handleTplBgUpload(event) {
         const file = event.target.files[0];
         if(!file) return;
@@ -497,68 +482,176 @@
             const res = await fetch('/api/admin/upload_image', { method: 'POST', body: formData });
             const result = await res.json();
             if(res.ok) {
-                document.getElementById('saved-tpl-bg-url').value = result.url;
-                if(visualCanvas.tplBgImage) visualCanvas.remove(visualCanvas.tplBgImage);
+                // 移除舊底圖
+                visualCanvas.getObjects().forEach(obj => { if(obj.isTplBg) visualCanvas.remove(obj); });
                 
                 fabric.Image.fromURL(result.url, img => {
                     const scale = Math.max(tplCanvasW / img.width, tplCanvasH / img.height);
-                    img.set({ left: tplCanvasW/2, top: tplCanvasH/2, originX: 'center', originY: 'center', scaleX: scale, scaleY: scale, selectable: false, evented: false, opacity: 0.8 });
+                    img.set({ left: tplCanvasW/2, top: tplCanvasH/2, originX: 'center', originY: 'center', scaleX: scale, scaleY: scale, selectable: false, evented: false });
+                    img.isTplBg = true;
                     visualCanvas.add(img);
                     visualCanvas.sendToBack(img);
-                    visualCanvas.tplBgImage = img;
                 }, { crossOrigin: 'anonymous' });
             }
         } catch(e) { alert("上傳失敗"); }
     }
 
+    // 加入客製化插槽
     function addVisualSlot() {
         let rect = new fabric.Rect({
             left: tplCanvasW/2 - 40, top: tplCanvasH/2 - 40,
             width: 80, height: 80,
             fill: 'rgba(64, 158, 255, 0.2)', stroke: '#409EFF', strokeDashArray: [5, 5], strokeWidth: 2,
-            cornerColor: '#409EFF', cornerSize: 10, transparentCorners: false,
-            rx: 10, ry: 10
+            cornerColor: '#409EFF', cornerSize: 10, transparentCorners: false, rx: 10, ry: 10
         });
         rect.isSlot = true;
         visualCanvas.add(rect);
         visualCanvas.setActiveObject(rect);
+        visualCanvas.bringToFront(rect);
     }
-
-    function removeSelectedVisualSlot() {
+    
+    // 移除畫布上的選取物件 (貼紙或插槽)
+    function removeSelectedVisualObj() {
         const active = visualCanvas.getActiveObject();
-        if(active && active.isSlot) { visualCanvas.remove(active); }
+        if(active) visualCanvas.remove(active);
     }
 
-    function saveVisualTemplate() {
+    // 加入文字裝飾
+    function addVisualText() {
+        const txt = prompt("輸入文字:", "Cute");
+        if(txt) {
+            const textObj = new fabric.Textbox(txt, { left: tplCanvasW/2, top: tplCanvasH/2, originX: 'center', originY: 'center', fontSize: 30, fill: '#333', fontWeight: 'bold' });
+            visualCanvas.add(textObj);
+            visualCanvas.setActiveObject(textObj);
+        }
+    }
+
+    // === 控制貼紙抽屜 ===
+    function toggleAdminStickers() {
+        const drawer = document.getElementById('admin-sticker-drawer');
+        drawer.classList.toggle('active');
+        if(drawer.classList.contains('active')) renderAdminStickerTabs();
+    }
+
+    function renderAdminStickerTabs() {
+        const catTabs = document.getElementById('admin-sticker-cats');
+        catTabs.innerHTML = '';
+        (assetsData.categories || []).forEach((cat, idx) => {
+            const tab = document.createElement('div');
+            tab.className = `tab ${idx === 0 ? 'active' : ''}`;
+            tab.innerText = cat;
+            tab.onclick = () => renderAdminStickers(cat, tab);
+            catTabs.appendChild(tab);
+        });
+        if(assetsData.categories && assetsData.categories.length > 0) renderAdminStickers(assetsData.categories[0], catTabs.firstChild);
+    }
+
+    function renderAdminStickers(category, tabElement) {
+        if(tabElement) {
+            document.getElementById('admin-sticker-cats').querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            tabElement.classList.add('active');
+        }
+        const grid = document.getElementById('admin-sticker-grid-body');
+        grid.innerHTML = '';
+        let filtered = category === "全部" ? (assetsData.stickers || []) : (assetsData.stickers || []).filter(s => s.category === category);
+        filtered.forEach(sticker => {
+            const item = document.createElement('div');
+            item.className = 'admin-sticker-item';
+            item.innerHTML = `<img src="${sticker.url}" loading="lazy">`;
+            item.onclick = () => { addStickerToVisualCanvas(sticker.url); };
+            grid.appendChild(item);
+        });
+    }
+
+    function addStickerToVisualCanvas(url) {
+        fabric.Image.fromURL(url, img => {
+            img.scaleToWidth(80);
+            img.set({ left: tplCanvasW / 2, top: tplCanvasH / 2, originX: 'center', originY: 'center' });
+            visualCanvas.add(img);
+            visualCanvas.setActiveObject(img);
+        }, { crossOrigin: 'anonymous' });
+    }
+
+    // === 儲存並輸出真正的模板圖 ===
+    async function saveVisualTemplate() {
         const id = document.getElementById('edit-template-id').value;
         const name = document.getElementById('input-tpl-name').value.trim();
         const cat = document.getElementById('input-tpl-category').value;
         const model_id = document.getElementById('input-tpl-model').value;
-        const bg_url = document.getElementById('saved-tpl-bg-url').value;
         
-        if(!name || !bg_url || !model_id) return alert("請填寫名稱、選擇型號並上傳底圖！");
+        if(!name || !model_id) return alert("請填寫名稱並選擇綁定型號！");
         
-        // 從畫布中提取所有插槽的座標並還原回真實比例
+        // 1. 抓取所有的藍色插槽，計算真實座標
         let extractedSlots = [];
+        let slotObjects = []; // 暫存畫布上的插槽物件，等下要隱藏
+        
         visualCanvas.getObjects().forEach(obj => {
             if(obj.isSlot) {
-                // Fabric.js 縮放時會改變 scaleX, scaleY，需換算回真實寬高
                 const realW = obj.width * obj.scaleX;
                 const realH = obj.height * obj.scaleY;
                 extractedSlots.push({
                     id: 'slot_' + new Date().getTime() + Math.random(),
-                    x: obj.left / VISUAL_SCALE,
-                    y: obj.top / VISUAL_SCALE,
-                    w: realW / VISUAL_SCALE,
-                    h: realH / VISUAL_SCALE
+                    x: obj.left / VISUAL_SCALE, y: obj.top / VISUAL_SCALE,
+                    w: realW / VISUAL_SCALE, h: realH / VISUAL_SCALE
                 });
+                slotObjects.push(obj);
             }
         });
         
-        const tplData = { id: id || 'tpl_' + new Date().getTime(), name, category: cat, model_id, thumb_url: bg_url, slots: extractedSlots };
-        if(id) { const idx = templatesData.templates.findIndex(x => x.id === id); templatesData.templates[idx] = tplData; } 
-        else { templatesData.templates.push(tplData); }
-        syncTemplates(); renderTemplates(); closeModal('template-modal');
+        // 2. 【核心機制】：將畫布上的「插槽框」暫時隱藏，只把「底圖+貼紙+文字」輸出成一張乾淨的透明底圖！
+        visualCanvas.discardActiveObject();
+        slotObjects.forEach(obj => obj.set('opacity', 0));
+        visualCanvas.renderAll();
+        
+        // 輸出成高品質的 base64 圖片
+        const finalTplBase64 = visualCanvas.toDataURL({ format: 'png', multiplier: 2 });
+        
+        // 將插槽恢復顯示 (如果不恢復，下次打開會看不到)
+        slotObjects.forEach(obj => obj.set('opacity', 1));
+        visualCanvas.renderAll();
+        
+        // 同時把整個畫布的 Fabric 狀態存下來，方便下次編輯
+        const objectsJson = visualCanvas.toJSON(['isSlot', 'isTplBg']);
+        
+        // 3. 上傳這張合成好的 Base64 成為正式的模板背景圖
+        document.getElementById('template-modal-title').innerText = "上傳合成圖中，請稍候...";
+        
+        try {
+            // 將 base64 轉成檔案上傳
+            const res = await fetch(finalTplBase64);
+            const blob = await res.blob();
+            const formData = new FormData();
+            formData.append('file', blob, `tpl_${new Date().getTime()}.png`);
+            formData.append('type', 'template');
+            
+            const uploadRes = await fetch('/api/admin/upload_image', { method: 'POST', body: formData });
+            const uploadResult = await uploadRes.json();
+            
+            if(uploadRes.ok) {
+                const finalUrl = uploadResult.url;
+                
+                const tplData = { 
+                    id: id || 'tpl_' + new Date().getTime(), 
+                    name, category: cat, model_id, 
+                    thumb_url: finalUrl, // 存入合成後的圖片網址
+                    slots: extractedSlots,
+                    objects_json: objectsJson // 存入 Fabric 狀態
+                };
+                
+                if(id) { const idx = templatesData.templates.findIndex(x => x.id === id); templatesData.templates[idx] = tplData; } 
+                else { templatesData.templates.push(tplData); }
+                
+                syncTemplates(); 
+                renderTemplates(); 
+                closeModal('template-modal');
+                document.getElementById('template-modal-title').innerText = "視覺化模板編輯器";
+            } else {
+                alert("圖片儲存失敗");
+            }
+        } catch(e) {
+            console.error(e);
+            alert("合成圖片上傳失敗");
+        }
     }
 
     function deleteTemplate(id) {
