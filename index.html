@@ -1,765 +1,128 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>CaseDIY - 客製專屬手機殼</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
-    <style>
-        :root { 
-            --primary-color: #ff8599; 
-            --primary-light: #ffeef1;
-            --bg-color: #fff9fa; /* 更柔和的粉白背景 */
-            --card-bg: #ffffff;
-            --text-main: #333333; 
-            --text-muted: #888888;
-            --border-color: #f0f0f0; 
-        }
-        body { margin: 0; padding: 0; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background-color: #f0f2f5; color: var(--text-main); display: flex; justify-content: center; height: 100vh; overflow: hidden; -webkit-tap-highlight-color: transparent; }
-        .app-container { width: 100%; max-width: 500px; background: var(--bg-color); display: flex; flex-direction: column; height: 100%; position: relative; overflow: hidden; box-shadow: 0 0 20px rgba(0,0,0,0.05); }
-        
-        .page { display: none; flex-direction: column; height: 100%; position: absolute; top:0; left:0; width:100%; background: var(--bg-color); animation: slideIn 0.3s ease forwards; overflow-y: auto; padding-bottom: 60px; /* 留給底部導航空間 */ }
-        .page.active { display: flex; }
-        @keyframes slideIn { from { transform: translateX(15px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-        
-        /* 導航列 */
-        .top-nav { height: 55px; background: var(--card-bg); display: flex; justify-content: space-between; align-items: center; padding: 0 15px; border-bottom: 1px solid var(--border-color); flex-shrink: 0; z-index: 10; position: sticky; top: 0; }
-        .nav-btn { background: none; border: none; font-size: 20px; color: var(--text-main); cursor: pointer; padding: 8px; }
-        .title { font-weight: 800; font-size: 16px; }
-        .nav-btn-done { background: var(--primary-color); color: white; border: none; padding: 6px 16px; border-radius: 20px; font-size: 13px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 8px rgba(255,133,153,0.3); }
-        
-        .content { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
-        
-        /* === App 底部導航列 === */
-        .app-bottom-nav { height: 60px; background: rgba(255,255,255,0.95); backdrop-filter: blur(10px); border-top: 1px solid var(--border-color); display: flex; justify-content: space-around; align-items: center; position: absolute; bottom: 0; width: 100%; z-index: 100; transition: transform 0.3s; }
-        .nav-tab { display: flex; flex-direction: column; align-items: center; gap: 4px; color: #bbbbbb; font-size: 10px; cursor: pointer; flex: 1; }
-        .nav-tab.active { color: var(--primary-color); font-weight: bold; }
-        .nav-tab i { font-size: 20px; }
-        .app-bottom-nav.hidden { transform: translateY(100%); }
-
-        /* === 首頁專屬樣式 === */
-        .home-logo { text-align: center; padding: 15px 0; font-size: 26px; font-weight: 900; color: var(--text-main); display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 10px; }
-        .home-logo img { width: 32px; }
-        .home-subtitle { text-align: center; font-size: 13px; color: var(--text-muted); margin-bottom: 20px; font-weight: bold; }
-        
-        .hero-banner { background: linear-gradient(135deg, #ffeef1, #ffdbe2); border-radius: 20px; height: 180px; margin: 0 15px 20px 15px; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; box-shadow: 0 5px 15px rgba(255,133,153,0.15); }
-        .hero-banner-text { font-size: 28px; font-weight: 900; color: var(--primary-color); z-index: 2; text-align: center; text-shadow: 2px 2px 0px white; }
-        .hero-banner-sub { font-size: 13px; background: white; padding: 5px 12px; border-radius: 20px; color: #ff8599; margin-top: 8px; display: inline-block; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
-
-        .btn-start-diy { background: var(--primary-color); color: white; border: none; height: 75px; border-radius: 20px; margin: 0 15px 20px 15px; display: flex; justify-content: space-between; align-items: center; padding: 0 25px; box-shadow: 0 6px 20px rgba(255,133,153,0.35); cursor: pointer; transition: transform 0.1s; }
-        .btn-start-diy:active { transform: scale(0.97); }
-        .btn-start-diy .text-area { text-align: left; }
-        .btn-start-diy .main-title { font-size: 20px; font-weight: 900; display: flex; align-items: center; gap: 10px; }
-        .btn-start-diy .sub-title { font-size: 12px; opacity: 0.9; margin-top: 4px; }
-        
-        .shortcut-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin: 0 15px 20px 15px; }
-        .shortcut-card { background: white; border-radius: 16px; padding: 15px; display: flex; align-items: center; gap: 12px; box-shadow: 0 3px 10px rgba(0,0,0,0.03); cursor: pointer; border: 1px solid transparent; transition: 0.1s; }
-        .shortcut-card:active { border-color: var(--primary-color); }
-        .shortcut-icon { width: 42px; height: 42px; background: #f5f6f8; border-radius: 12px; display: flex; justify-content: center; align-items: center; font-size: 18px; color: #444; }
-        
-        .series-banner { background: #fff0f3; border-radius: 16px; margin: 0 15px 20px 15px; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
-
-        /* === 品牌與型號 === */
-        .brand-tabs { display: flex; overflow-x: auto; padding: 10px 15px 0 15px; gap: 20px; background: var(--card-bg); white-space: nowrap; scrollbar-width: none; border-bottom: 1px solid var(--border-color); }
-        .brand-tabs::-webkit-scrollbar { display: none; }
-        .brand-tab { font-size: 14px; font-weight: bold; color: var(--text-muted); cursor: pointer; padding-bottom: 10px; border-bottom: 3px solid transparent; transition: 0.2s; }
-        .brand-tab.active { color: var(--primary-color); border-bottom-color: var(--primary-color); }
-        .model-list-container { padding: 15px; flex: 1; background: var(--card-bg); }
-        .model-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
-        .model-btn { background: var(--bg-color); border: 2px solid transparent; border-radius: 12px; padding: 14px 10px; text-align: center; font-size: 14px; font-weight: bold; cursor: pointer; transition: 0.2s; }
-        .model-btn.selected { background: var(--primary-light); border-color: var(--primary-color); color: var(--primary-color); }
-
-        /* === 全新：網格化手機殼款式 === */
-        .style-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; padding: 15px; background: var(--card-bg); }
-        .style-card-new { background: white; border: 2px solid var(--border-color); border-radius: 16px; padding: 15px 10px; display: flex; flex-direction: column; align-items: center; cursor: pointer; transition: 0.2s; position: relative; }
-        .style-card-new.selected { border-color: var(--primary-color); background: var(--primary-light); }
-        .style-card-new img { width: 85%; aspect-ratio: 1/2; object-fit: contain; margin-bottom: 12px; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.05)); }
-        .style-card-new .style-name { font-size: 13px; font-weight: bold; text-align: center; color: var(--text-main); }
-        
-        .bottom-bar { padding: 10px 15px 20px 15px; background: var(--card-bg); border-top: 1px solid var(--border-color); z-index: 10; position: sticky; bottom: 0; }
-        .primary-btn { width: 100%; background: var(--primary-color); color: white; border: none; padding: 14px; border-radius: 30px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 10px rgba(255,133,153,0.3); transition: transform 0.1s; }
-        .primary-btn:active { transform: scale(0.98); }
-        .primary-btn:disabled { background: #ddd; box-shadow: none; cursor: not-allowed; }
-        
-        /* === DIY 編輯器 === */
-        .workspace { flex: 1; background: #f5f6f8; display: flex; justify-content: center; align-items: center; position: relative; overflow: hidden; padding: 20px 0; }
-        .canvas-container-wrapper { background: white; border-radius: 35px; box-shadow: 0 10px 25px rgba(0,0,0,0.08); position: relative; overflow: hidden; }
-        .phone-mask-img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 50; object-fit: cover; }
-        
-        .control-panel { position: absolute; right: 15px; top: 15px; display: flex; flex-direction: column; gap: 10px; z-index: 60; display: none; }
-        .control-panel.active { display: flex; animation: slideInRight 0.2s ease; }
-        @keyframes slideInRight { from{ transform:translateX(20px); opacity:0;} to{ transform:translateX(0); opacity:1;} }
-        .icon-btn { background: white; border: none; width: 38px; height: 38px; border-radius: 50%; box-shadow: 0 2px 10px rgba(0,0,0,0.1); cursor: pointer; display: flex; justify-content: center; align-items: center; color: var(--text-main); font-size: 15px; }
-        
-        .editor-toolbar { display: flex; justify-content: space-around; padding: 12px 0 20px 0; background: var(--card-bg); border-top: 1px solid var(--border-color); z-index: 20; position: sticky; bottom: 0; }
-        .tool-btn { display: flex; flex-direction: column; align-items: center; gap: 6px; background: none; border: none; color: var(--text-main); cursor: pointer; font-size: 11px; font-weight: bold; }
-        .tool-btn-icon { width: 48px; height: 48px; background: var(--primary-light); color: var(--primary-color); border-radius: 50%; display: flex; justify-content: center; align-items: center; font-size: 20px; transition: 0.2s; }
-        .tool-btn:active .tool-btn-icon { transform: scale(0.9); }
-
-        /* === 滿版選擇模板頁 === */
-        .template-page { background: #fff5f7; }
-        .template-header-text { padding: 15px 20px 5px 20px; text-align: left; color: var(--text-muted); font-size: 13px; font-weight: bold; }
-        
-        .tpl-tabs-wrapper { display: flex; gap: 10px; padding: 10px 20px; overflow-x: auto; scrollbar-width: none; }
-        .tpl-tabs-wrapper::-webkit-scrollbar { display: none; }
-        .tpl-pill { padding: 6px 16px; border-radius: 20px; background: white; color: var(--text-muted); font-size: 13px; font-weight: bold; cursor: pointer; white-space: nowrap; box-shadow: 0 2px 5px rgba(0,0,0,0.03); border: 1px solid #eee; }
-        .tpl-pill.active { background: var(--primary-color); color: white; border-color: var(--primary-color); }
-        
-        .template-grid-container { padding: 15px 20px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; overflow-y: auto; flex: 1; align-content: start; }
-        .tpl-card { background: white; border-radius: 12px; padding: 8px; display: flex; flex-direction: column; align-items: center; box-shadow: 0 3px 10px rgba(0,0,0,0.04); cursor: pointer; border: 2px solid transparent; transition: 0.2s; }
-        .tpl-card.selected { border-color: var(--primary-color); background: var(--primary-light); transform: translateY(-2px); }
-        .tpl-card img { width: 100%; aspect-ratio: 1 / 2; object-fit: cover; border-radius: 6px; margin-bottom: 8px; background: #f0f0f0; }
-        .tpl-name { font-size: 11px; font-weight: bold; color: var(--text-main); text-align: center; }
-        
-        .tpl-bottom-action { padding: 15px 20px 25px 20px; background: white; border-top: 1px solid var(--border-color); display: flex; gap: 15px; }
-
-        /* === 抽屜 === */
-        .overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 90; display: none; opacity: 0; transition: opacity 0.3s; }
-        .overlay.active { display: block; opacity: 1; }
-        .bottom-sheet { position: absolute; bottom: -100%; left: 0; width: 100%; height: 50%; background: var(--card-bg); border-radius: 20px 20px 0 0; box-shadow: 0 -4px 20px rgba(0,0,0,0.1); transition: bottom 0.3s cubic-bezier(0.1, 0.8, 0.2, 1); z-index: 100; display: flex; flex-direction: column; }
-        .bottom-sheet.active { bottom: 0; }
-        .sheet-header { padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); font-weight: bold; }
-        .sheet-close { background: none; border: none; font-size: 20px; color: var(--text-muted); cursor: pointer; }
-        .sheet-content { flex: 1; overflow-y: auto; padding: 15px; }
-        
-        .sticker-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-        .sticker-item { background: var(--bg-color); border-radius: 12px; padding: 10px; display: flex; justify-content: center; align-items: center; cursor: pointer; aspect-ratio: 1; border: 1px solid transparent; }
-        .sticker-item:active { border-color: var(--primary-color); }
-        .sticker-item img { max-width: 100%; max-height: 100%; object-fit: contain; }
-
-        input[type="file"] { display: none; }
-        
-        /* === 購物車與結帳 === */
-        .cart-item { background: white; border-radius: 16px; padding: 15px; display: flex; gap: 15px; margin: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); border: 1px solid var(--border-color); }
-        .cart-img { width: 90px; height: 180px; object-fit: contain; background: #f5f5f5; border-radius: 10px; }
-        .cart-info { flex: 1; display: flex; flex-direction: column; justify-content: center; }
-        .cart-title { font-size: 18px; font-weight: 900; margin-bottom: 5px; }
-        .cart-desc { font-size: 13px; color: var(--text-muted); margin-bottom: 10px; line-height: 1.5; font-weight: bold; }
-        .cart-price { font-size: 18px; font-weight: 900; color: var(--primary-color); }
-        
-        .form-section { background: white; margin-top: 10px; padding: 25px 20px; border-radius: 16px; margin: 0 15px 15px 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.02); }
-        .form-title { font-size: 16px; font-weight: 900; margin-bottom: 20px; border-left: 5px solid var(--primary-color); padding-left: 10px; }
-        .input-group { margin-bottom: 15px; }
-        .input-group label { display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 6px; font-weight: bold; }
-        .input-group input, .input-group select { width: 100%; padding: 14px; border: 1px solid #e0e0e0; border-radius: 10px; box-sizing: border-box; font-size: 15px; outline: none; background: #fafafa; transition: 0.2s; font-weight: bold; }
-        .input-group input:focus { border-color: var(--primary-color); background: white; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>本福丸訂製手機殼</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+<style>
+:root{--pink:#ff6f9a;--pink2:#ff9bb7;--soft:#fff2f6;--soft2:#ffe7ef;--ink:#2f2a2c;--muted:#8f858a;--line:#f1e7eb;--white:#fff;--green:#48bd7a;--shadow:0 10px 30px rgba(176,76,108,.10)}
+*{box-sizing:border-box}html,body{margin:0;height:100%;font-family:-apple-system,BlinkMacSystemFont,"PingFang TC","Noto Sans TC",sans-serif;color:var(--ink);background:#f5f3f4}.app{width:100%;max-width:460px;height:100dvh;margin:auto;background:#fffafc;position:relative;overflow:hidden;box-shadow:0 0 30px rgba(0,0,0,.08)}button,input,select{font:inherit}.page{position:absolute;inset:0;display:none;flex-direction:column;background:#fffafc;overflow:hidden}.page.active{display:flex}.scroll{flex:1;overflow:auto;-webkit-overflow-scrolling:touch}.top{height:58px;display:flex;align-items:center;gap:10px;padding:0 14px;background:rgba(255,255,255,.96);border-bottom:1px solid var(--line);position:relative;z-index:20}.top .back,.top .icon{width:36px;height:36px;border:0;background:#fff;border-radius:50%;display:grid;place-items:center;color:#2f2a2c}.top h1{font-size:16px;margin:0;flex:1;text-align:center;font-weight:800}.done{border:0;background:var(--pink);color:#fff;border-radius:20px;padding:8px 15px;font-weight:800}.pill{border:1px solid var(--line);background:#fff;border-radius:999px;padding:7px 13px;font-size:12px;font-weight:700;color:#777;white-space:nowrap}.pill.active{background:var(--pink);border-color:var(--pink);color:#fff}.primary{border:0;background:linear-gradient(135deg,var(--pink),#ff4f87);color:#fff;border-radius:999px;padding:15px 22px;font-weight:900;box-shadow:0 8px 18px rgba(255,111,154,.28)}.primary:disabled{background:#ddd;box-shadow:none}.ghost{border:1px solid #ffc0d2;background:#fff;color:var(--pink);border-radius:999px;padding:13px 20px;font-weight:800}.section-title{font-size:16px;font-weight:900;margin:18px 18px 10px}.sub{font-size:12px;color:var(--muted)}
+/* home */
+.home-head{padding:18px 18px 8px;display:flex;align-items:center;justify-content:space-between}.brandmark{display:flex;align-items:center;gap:8px;font-size:22px;font-weight:950}.cat-logo{width:34px;height:34px;border-radius:12px;background:linear-gradient(135deg,#ffdbe7,#fff);display:grid;place-items:center;font-size:21px;border:1px solid #ffd2e0}.hero{margin:8px 16px 14px;background:linear-gradient(145deg,#fff0f5 0%,#ffdfe9 65%,#fff 100%);border-radius:28px;min-height:220px;padding:22px;position:relative;overflow:hidden;box-shadow:var(--shadow)}.hero h2{font-size:29px;line-height:1.15;margin:6px 0 8px}.hero p{font-size:13px;color:#7d7075;max-width:220px;line-height:1.6}.hero .phone-art{position:absolute;right:17px;bottom:8px;width:125px;height:180px;border-radius:28px;border:5px solid #fff;background:linear-gradient(180deg,#fff,#ffd8e4);box-shadow:0 12px 22px rgba(108,70,80,.18);transform:rotate(8deg);display:flex;align-items:center;justify-content:center;font-size:58px}.hero .phone-art:before{content:"";position:absolute;left:12px;top:11px;width:38px;height:38px;border-radius:13px;background:#d9d6d8;box-shadow:15px 0 0 #e7e4e5}.hero .doodle{position:absolute;color:#ff97b5;font-size:24px}.home-cta{margin:0 16px 14px;width:calc(100% - 32px);display:flex;justify-content:space-between;align-items:center;border:0;padding:18px 20px;border-radius:18px;background:linear-gradient(135deg,#ff7da5,#ff5f91);color:white;box-shadow:0 8px 20px rgba(255,90,140,.25);text-align:left}.home-cta strong{display:block;font-size:17px}.home-cta small{opacity:.9}.features{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:0 16px 14px}.feat{background:#fff;border:1px solid var(--line);border-radius:16px;padding:11px 6px;text-align:center;font-size:11px;font-weight:700}.feat i{display:block;font-size:17px;color:var(--pink);margin-bottom:6px}.quick{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 16px 12px}.quick-card{padding:15px;border-radius:18px;background:#fff;border:1px solid var(--line);box-shadow:0 4px 13px rgba(0,0,0,.03);display:flex;align-items:center;gap:10px}.quick-icon{width:42px;height:42px;border-radius:13px;background:var(--soft);display:grid;place-items:center;color:var(--pink)}.bottomnav{height:65px;background:rgba(255,255,255,.97);border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-around;position:relative;z-index:40}.bn{border:0;background:none;color:#aaa;font-size:10px;display:flex;flex-direction:column;gap:5px;align-items:center}.bn i{font-size:18px}.bn.active{color:var(--pink);font-weight:800}
+/* model */
+.search{margin:12px 16px;background:#f5f3f4;border-radius:14px;padding:12px 14px;color:#aaa;display:flex;gap:8px;align-items:center}.brand-row,.cat-row{display:flex;gap:8px;overflow:auto;padding:2px 16px 12px;scrollbar-width:none}.brand-row::-webkit-scrollbar,.cat-row::-webkit-scrollbar{display:none}.model-list{background:#fff;border-radius:20px 20px 0 0;padding:4px 16px 110px}.model-group{border-bottom:1px solid var(--line)}.model-group-title{font-weight:900;padding:16px 2px 9px}.model-item{display:flex;align-items:center;padding:12px 2px;border-top:1px solid #f7f1f3;cursor:pointer}.model-item span{flex:1}.model-item.selected{color:var(--pink);font-weight:800}.bottom-action{position:absolute;left:0;right:0;bottom:0;padding:12px 16px calc(12px + env(safe-area-inset-bottom));background:rgba(255,255,255,.96);border-top:1px solid var(--line)}.bottom-action .primary{width:100%}
+/* styles */
+.style-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:8px 16px 110px}.style-card{background:#fff;border:2px solid transparent;border-radius:20px;padding:12px;box-shadow:0 6px 18px rgba(0,0,0,.04);text-align:center;position:relative}.style-card.selected{border-color:var(--pink);background:#fff8fa}.style-card img,.style-placeholder{width:100%;height:160px;object-fit:contain;border-radius:14px;background:linear-gradient(145deg,#f7f4f5,#fff);display:grid;place-items:center}.style-placeholder i{font-size:64px;color:#aaa}.style-name{font-weight:850;font-size:13px;margin-top:9px}.price{font-size:12px;color:var(--pink);font-weight:800;margin-top:3px}
+/* template */
+.tpl-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:11px;padding:6px 14px 110px}.tpl-card{background:#fff;border-radius:18px;padding:8px;border:2px solid transparent;box-shadow:0 4px 15px rgba(0,0,0,.04)}.tpl-card.selected{border-color:var(--pink)}.tpl-card img{width:100%;height:220px;object-fit:cover;border-radius:13px;background:#f2f2f2}.tpl-card .name{font-size:12px;font-weight:800;padding:8px 3px 2px}.tpl-empty{grid-column:1/-1;text-align:center;color:#aaa;padding:60px 10px}
+/* editor */
+.editor-head-meta{display:flex;gap:5px;align-items:center;justify-content:center;font-size:12px}.mini-badge{background:#f7f2f4;border-radius:999px;padding:5px 8px}.workspace{flex:1;min-height:0;background:linear-gradient(#f7f6f7,#f2eff1);display:grid;place-items:center;position:relative;overflow:hidden}.canvas-shell{position:relative;border-radius:34px;overflow:hidden;background-image:linear-gradient(45deg,#eee 25%,transparent 25%),linear-gradient(-45deg,#eee 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#eee 75%),linear-gradient(-45deg,transparent 75%,#eee 75%);background-size:16px 16px;background-position:0 0,0 8px,8px -8px,-8px 0;box-shadow:0 13px 30px rgba(0,0,0,.14)}.phone-mask{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none;z-index:30}.editor-actions{display:flex;gap:8px;position:absolute;left:14px;bottom:12px;z-index:50}.round{width:38px;height:38px;border-radius:50%;background:white;border:1px solid var(--line);box-shadow:0 4px 12px rgba(0,0,0,.08)}.toolbar{height:82px;background:#fff;border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(5,1fr);padding:8px 6px calc(8px + env(safe-area-inset-bottom));z-index:20}.tool{border:0;background:none;font-size:10px;font-weight:800;color:#555}.tool .ico{width:42px;height:42px;border-radius:14px;background:var(--soft);color:var(--pink);display:grid;place-items:center;margin:auto auto 4px;font-size:18px}.side-controls{position:absolute;right:12px;top:12px;display:none;gap:6px;flex-direction:column;z-index:40}.side-controls.show{display:flex}
+/* sheets */
+.overlay{position:absolute;inset:0;background:rgba(0,0,0,.32);z-index:70;display:none}.overlay.show{display:block}.sheet{position:absolute;left:0;right:0;bottom:-72%;height:62%;background:#fff;border-radius:24px 24px 0 0;z-index:80;transition:.25s;display:flex;flex-direction:column}.sheet.show{bottom:0}.sheet-head{height:55px;padding:0 17px;display:flex;align-items:center;border-bottom:1px solid var(--line);font-weight:900}.sheet-head span{flex:1}.sheet-content{flex:1;overflow:auto;padding:14px}.upload-box{border:1.5px dashed #ffc2d4;border-radius:18px;padding:18px;background:#fff7fa;text-align:center}.upload-box .big{font-size:33px;color:var(--pink);margin-bottom:8px}.seg{display:flex;background:#f4f2f3;border-radius:14px;padding:4px;margin-bottom:14px}.seg button{flex:1;border:0;background:transparent;padding:9px;border-radius:11px;font-weight:800;color:#888}.seg button.active{background:#fff;color:var(--pink);box-shadow:0 2px 8px rgba(0,0,0,.05)}.sticker-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:9px}.sticker-item{aspect-ratio:1;background:#fff8fa;border:1px solid var(--line);border-radius:15px;display:grid;place-items:center;padding:8px}.sticker-item img{max-width:100%;max-height:100%}.layer-row{display:flex;align-items:center;gap:9px;padding:10px;border-bottom:1px solid #f5edef}.layer-thumb{width:34px;height:34px;border-radius:9px;background:#fff2f6;display:grid;place-items:center;color:var(--pink)}.layer-row .name{flex:1;font-size:12px}.adjust-row{margin:16px 0}.adjust-row input{width:100%;accent-color:var(--pink)}
+/* preview/works/cart */
+.preview-wrap{padding:20px;display:grid;place-items:center}.preview-phone{width:245px;height:490px;border-radius:46px;background:#222;padding:8px;box-shadow:0 18px 35px rgba(0,0,0,.24);position:relative}.preview-phone img{width:100%;height:100%;object-fit:cover;border-radius:38px;background:#fff}.preview-phone:before{content:"";position:absolute;width:78px;height:78px;left:17px;top:17px;border-radius:26px;background:#2b2b2b;box-shadow:27px 0 0 #2b2b2b,0 27px 0 #2b2b2b}.view-thumbs{display:flex;gap:10px;justify-content:center}.view-thumb{width:65px;height:80px;border:1px solid var(--line);border-radius:13px;background:#fff;display:grid;place-items:center;font-size:11px}.works-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 14px 90px}.work-card{background:#fff;border:1px solid var(--line);border-radius:17px;padding:8px}.work-card img{width:100%;height:180px;object-fit:contain;border-radius:12px;background:#fafafa}.work-card .meta{font-size:11px;color:#888}.work-actions{display:flex;gap:6px;margin-top:7px}.work-actions button{flex:1;border:0;background:#fff1f5;color:var(--pink);border-radius:9px;padding:7px;font-size:11px;font-weight:800}.cart-card{margin:14px;background:#fff;border:1px solid var(--line);border-radius:18px;padding:12px;display:flex;gap:12px}.cart-card img{width:86px;height:150px;object-fit:contain;background:#fafafa;border-radius:12px}.cart-card .info{flex:1}.sum-card{margin:0 14px;background:#fff;border:1px solid var(--line);border-radius:18px;padding:16px}.sum-line{display:flex;justify-content:space-between;padding:7px 0;font-size:13px}.sum-line.total{font-size:18px;font-weight:900;border-top:1px solid var(--line);margin-top:7px;padding-top:14px}.form-card{margin:12px 14px;background:#fff;border:1px solid var(--line);border-radius:18px;padding:16px}.field{margin-bottom:12px}.field label{display:block;font-size:12px;color:#777;font-weight:800;margin-bottom:6px}.field input,.field select{width:100%;border:1px solid var(--line);background:#faf8f9;border-radius:12px;padding:12px}.success{display:grid;place-items:center;text-align:center;padding:60px 24px}.success-cat{font-size:85px;filter:drop-shadow(0 8px 12px rgba(255,111,154,.16))}.toast{position:absolute;left:50%;bottom:90px;transform:translateX(-50%) translateY(20px);background:#2e292b;color:#fff;padding:10px 16px;border-radius:999px;font-size:12px;opacity:0;pointer-events:none;transition:.25s;z-index:200;white-space:nowrap}.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+@media(min-width:800px){body{padding:20px}.app{height:calc(100dvh - 40px);border-radius:30px}}
+</style>
 </head>
 <body>
-<div class="app-container">
-
-    <!-- === 全新首頁 (page-home) === -->
-    <div id="page-home" class="page active">
-        <div class="home-logo">
-            <i class="fa-solid fa-wand-magic-sparkles" style="color:var(--primary-color);"></i> CaseDIY
-        </div>
-        <div class="home-subtitle">把喜歡的照片，變成專屬手機殼 ♡</div>
-
-        <div class="content">
-            <div class="hero-banner">
-                <div class="hero-banner-text">DIY 手機殼<br><span class="hero-banner-sub">客製專屬，讓可愛一直陪著你！</span></div>
-            </div>
-
-            <button class="btn-start-diy" onclick="goToPage('page-select-model')">
-                <div class="text-area">
-                    <div class="main-title"><i class="fa-solid fa-mobile-screen"></i> 開始製作</div>
-                    <div class="sub-title">選手機型號，設計你的手機殼</div>
-                </div>
-                <i class="fa-solid fa-chevron-right" style="font-size:20px; font-weight:bold;"></i>
-            </button>
-
-            <div class="shortcut-grid">
-                <div class="shortcut-card" onclick="goToPage('page-select-model')">
-                    <div class="shortcut-icon" style="color:#ff8599;"><i class="fa-solid fa-border-all"></i></div>
-                    <div><div style="font-weight:bold; font-size:14px; color:#333;">熱門模板</div><div style="font-size:11px; color:#999; margin-top:2px;">超多可愛風格</div></div>
-                </div>
-                <div class="shortcut-card" onclick="alert('我的作品即將開放！')">
-                    <div class="shortcut-icon" style="color:#4a90e2;"><i class="fa-regular fa-folder-open"></i></div>
-                    <div><div style="font-weight:bold; font-size:14px; color:#333;">我的作品</div><div style="font-size:11px; color:#999; margin-top:2px;">保存你的設計</div></div>
-                </div>
-            </div>
-            
-            <div class="series-banner" onclick="goToPage('page-select-model')">
-                <div>
-                    <div style="font-weight:900; font-size:16px; color:#333;">可愛貓咪系列</div>
-                    <div style="font-size:12px; color:#ff8599; margin-top:4px; font-weight:bold;">讓你的手機殼充滿療癒感！</div>
-                </div>
-                <i class="fa-solid fa-heart" style="color:var(--primary-color); font-size:28px;"></i>
-            </div>
-        </div>
+<div class="app">
+  <div id="page-home" class="page active">
+    <div class="scroll">
+      <div class="home-head"><div class="brandmark"><div class="cat-logo">🐱</div><span>本福丸訂製</span></div><button class="icon" onclick="toast('目前沒有新通知')"><i class="fa-regular fa-bell"></i></button></div>
+      <div class="hero"><span class="doodle" style="left:17px;top:17px">♡</span><span class="doodle" style="right:25px;top:23px">✦</span><h2>客製手機殼<br>把喜歡的瞬間<br>隨身帶著走 ♡</h2><p>選型號、挑殼款、套模板，再放上自己的照片與貼紙。</p><div class="phone-art">🐱</div></div>
+      <button class="home-cta" onclick="go('page-model')"><span><strong><i class="fa-regular fa-image"></i> 開始製作</strong><small>選手機型號，設計你的手機殼</small></span><i class="fa-solid fa-chevron-right"></i></button>
+      <div class="features"><div class="feat"><i class="fa-solid fa-print"></i>高品質印刷</div><div class="feat"><i class="fa-solid fa-shield-heart"></i>安心製作</div><div class="feat"><i class="fa-solid fa-wand-magic-sparkles"></i>自由設計</div></div>
+      <div class="quick"><div class="quick-card" onclick="go('page-model')"><div class="quick-icon"><i class="fa-regular fa-images"></i></div><div><b>精選模板</b><div class="sub">快速套版</div></div></div><div class="quick-card" onclick="showWorks()"><div class="quick-icon"><i class="fa-regular fa-folder-open"></i></div><div><b>我的作品</b><div class="sub">保存設計</div></div></div></div>
+      <div class="quick"><div class="quick-card" onclick="go('page-model')"><div class="quick-icon"><i class="fa-solid fa-heart"></i></div><div><b>可愛貼紙</b><div class="sub">自由搭配</div></div></div><div class="quick-card" onclick="toast('先選一款手機殼開始吧')"><div class="quick-icon"><i class="fa-solid fa-palette"></i></div><div><b>設計靈感</b><div class="sub">粉白系風格</div></div></div></div>
     </div>
+    <nav class="bottomnav"><button class="bn active" onclick="go('page-home')"><i class="fa-solid fa-house"></i>首頁</button><button class="bn" onclick="go('page-model')"><i class="fa-regular fa-images"></i>模板</button><button class="bn" onclick="showWorks()"><i class="fa-regular fa-folder-open"></i>作品</button><button class="bn" onclick="goCart()"><i class="fa-solid fa-cart-shopping"></i>購物車</button><button class="bn" onclick="toast('會員功能可在下一階段接上')"><i class="fa-regular fa-user"></i>會員</button></nav>
+  </div>
 
-    <!-- 頁面：選擇手機型號 -->
-    <div id="page-select-model" class="page">
-        <div class="top-nav"><button class="nav-btn" onclick="goToPage('page-home')"><i class="fa-solid fa-chevron-left"></i></button><div class="title">選擇手機型號</div><div style="width: 28px;"></div></div>
-        <div class="brand-tabs" id="brand-tabs"></div>
-        <div class="content"><div class="model-list-container"><div class="model-grid" id="model-grid"></div></div></div>
-        <div class="bottom-bar"><button class="primary-btn" id="btn-next-to-style" disabled onclick="goToPage('page-select-style')">下一步</button></div>
-    </div>
+  <div id="page-model" class="page"><div class="top"><button class="back" onclick="go('page-home')"><i class="fa-solid fa-chevron-left"></i></button><h1>選擇手機型號</h1><div style="width:36px"></div></div><div class="scroll"><div class="search"><i class="fa-solid fa-magnifying-glass"></i><input id="model-search" placeholder="搜尋手機型號（例如 iPhone 15）" oninput="renderModels()" style="border:0;background:transparent;outline:0;width:100%"></div><div id="brand-row" class="brand-row"></div><div id="model-list" class="model-list"></div></div><div class="bottom-action"><button id="model-next" class="primary" disabled onclick="go('page-style')">下一步</button></div></div>
 
-    <!-- 頁面：選擇手機殼款式 (大升級為網格) -->
-    <div id="page-select-style" class="page">
-        <div class="top-nav"><button class="nav-btn" onclick="goToPage('page-select-model')"><i class="fa-solid fa-chevron-left"></i></button><div class="title">選擇手機殼款式</div><div style="width: 28px;"></div></div>
-        <div class="content">
-            <div style="text-align: center; padding: 20px 0 10px 0; font-size: 14px; font-weight: bold; color: var(--text-muted);">
-                已選型號：<span id="display-selected-model" style="color: var(--primary-color);"></span>
-            </div>
-            <!-- 全新網格區塊 -->
-            <div class="style-grid" id="style-grid"></div>
-        </div>
-        <div class="bottom-bar"><button class="primary-btn" id="btn-start-diy" disabled onclick="startDIY()">下一步</button></div>
-    </div>
+  <div id="page-style" class="page"><div class="top"><button class="back" onclick="go('page-model')"><i class="fa-solid fa-chevron-left"></i></button><h1>選擇手機殼款式</h1><div style="width:36px"></div></div><div class="scroll"><div style="text-align:center;padding:14px" class="sub">已選：<b id="chosen-model" style="color:var(--pink)"></b></div><div id="style-grid" class="style-grid"></div></div><div class="bottom-action"><button id="style-next" class="primary" disabled onclick="openTemplatesFromStyle()">下一步</button></div></div>
 
-    <!-- 頁面：DIY 編輯器大魔王 -->
-    <div id="page-editor" class="page">
-        <div class="top-nav">
-            <button class="nav-btn" onclick="goToPage('page-select-style')"><i class="fa-solid fa-chevron-left"></i></button>
-            <div class="title" id="editor-title" style="font-size:14px;"></div>
-            <button class="nav-btn-done" onclick="exportToCart()">完成</button>
-        </div>
-        
-        <div class="workspace">
-            <div class="canvas-container-wrapper" id="canvas-wrapper">
-                <canvas id="main-canvas"></canvas>
-                <img id="real-phone-mask" class="phone-mask-img" src="" alt="">
-            </div>
-            
-            <div class="control-panel" id="obj-controls">
-                <button class="icon-btn" onclick="bringForward()"><i class="fa-solid fa-layer-group"></i></button>
-                <button class="icon-btn" onclick="sendBackward()"><i class="fa-solid fa-arrow-down-short-wide"></i></button>
-                <button class="icon-btn" onclick="deleteActiveObject()" style="color: red;"><i class="fa-solid fa-trash-can"></i></button>
-            </div>
-        </div>
+  <div id="page-template" class="page"><div class="top"><button class="back" onclick="go('page-style')"><i class="fa-solid fa-chevron-left"></i></button><h1>選擇模板</h1><div style="width:36px"></div></div><div class="scroll"><div class="section-title">快速套用喜歡的風格 <span class="sub">也可以直接跳過</span></div><div id="tpl-cats" class="cat-row"></div><div id="tpl-grid" class="tpl-grid"></div></div><div class="bottom-action" style="display:flex;gap:8px"><button class="ghost" style="flex:.45" onclick="startEditor(false)">跳過</button><button id="tpl-next" class="primary" style="flex:1" disabled onclick="startEditor(true)">使用這個模板</button></div></div>
 
-        <div class="editor-toolbar">
-            <button class="tool-btn" onclick="document.getElementById('file-uploader').click()"><div class="tool-btn-icon"><i class="fa-regular fa-image"></i></div><span>照片</span></button>
-            <button class="tool-btn" onclick="openStickerSheet()"><div class="tool-btn-icon"><i class="fa-regular fa-face-smile"></i></div><span>貼紙</span></button>
-            <button class="tool-btn" onclick="openSheet('sheet-text')"><div class="tool-btn-icon"><i class="fa-solid fa-t"></i></div><span>文字</span></button>
-            <button class="tool-btn" onclick="openTemplatePage()"><div class="tool-btn-icon" style="background:#fff0f3;"><i class="fa-solid fa-border-all"></i></div><span>模板</span></button>
-        </div>
-        
-        <input type="file" id="file-uploader" accept="image/*" onchange="handleImageUpload(event)">
-        <input type="file" id="slot-uploader" accept="image/*" onchange="handleSlotUpload(event)">
-        
-        <div class="overlay" id="sheet-overlay" onclick="closeAllSheets()"></div>
-        
-        <div class="bottom-sheet" id="sheet-sticker">
-            <div class="sheet-header"><span>貼紙庫</span><button class="sheet-close" onclick="closeAllSheets()"><i class="fa-solid fa-xmark"></i></button></div>
-            <div class="brand-tabs" id="sticker-categories" style="padding-top:0;"></div>
-            <div class="sheet-content"><div class="sticker-grid" id="sticker-grid"></div></div>
-        </div>
+  <div id="page-editor" class="page"><div class="top"><button class="back" onclick="go('page-template')"><i class="fa-solid fa-chevron-left"></i></button><div class="editor-head-meta"><span class="mini-badge" id="editor-model"></span><span class="mini-badge" id="editor-style"></span></div><button class="done" onclick="openPreview()">完成</button></div><div class="workspace"><div id="canvas-shell" class="canvas-shell"><canvas id="main-canvas"></canvas><img id="phone-mask" class="phone-mask" alt=""></div><div class="editor-actions"><button class="round" onclick="canvas&&canvas.undo?canvas.undo():toast('目前版本使用物件調整')"><i class="fa-solid fa-arrow-rotate-left"></i></button><button class="round" onclick="openLayerSheet()"><i class="fa-solid fa-layer-group"></i></button></div><div id="side-controls" class="side-controls"><button class="round" onclick="bringForward()"><i class="fa-solid fa-arrow-up"></i></button><button class="round" onclick="sendBackward()"><i class="fa-solid fa-arrow-down"></i></button><button class="round" onclick="deleteActive()" style="color:#e74c3c"><i class="fa-solid fa-trash"></i></button></div></div><div class="toolbar"><button class="tool" onclick="openSheet('sheet-upload')"><div class="ico"><i class="fa-regular fa-image"></i></div>上傳圖片</button><button class="tool" onclick="openStickerSheet()"><div class="ico"><i class="fa-regular fa-face-smile"></i></div>貼紙</button><button class="tool" onclick="openMaterialSheet()"><div class="ico"><i class="fa-solid fa-shapes"></i></div>素材</button><button class="tool" onclick="openSheet('sheet-text')"><div class="ico"><i class="fa-solid fa-t"></i></div>文字</button><button class="tool" onclick="openTemplatesInEditor()"><div class="ico"><i class="fa-regular fa-images"></i></div>模板</button></div><input id="photo-input" type="file" accept="image/*" multiple hidden onchange="uploadPhotos(event)"><input id="slot-input" type="file" accept="image/*" hidden onchange="uploadSlotPhoto(event)"></div>
 
-        <div class="bottom-sheet" id="sheet-text">
-            <div class="sheet-header"><span>新增文字</span><button class="sheet-close" onclick="closeAllSheets()"><i class="fa-solid fa-xmark"></i></button></div>
-            <div class="sheet-content" style="display:flex; flex-direction:column; gap:15px;">
-                <input type="text" id="text-input" placeholder="輸入你想寫的字..." style="padding:15px; border:1px solid #ddd; border-radius:10px; font-size:16px;">
-                <div style="display:flex; gap:10px;">
-                    <button class="icon-btn" style="background:#333; color:white; width:40px; height:40px;" onclick="addText('#333333')">A</button>
-                    <button class="icon-btn" style="background:#ff8599; color:white; width:40px; height:40px;" onclick="addText('#ff8599')">A</button>
-                    <button class="icon-btn" style="background:#4a90e2; color:white; width:40px; height:40px;" onclick="addText('#4a90e2')">A</button>
-                </div>
-            </div>
-        </div>
-    </div>
+  <div id="page-preview" class="page"><div class="top"><button class="back" onclick="go('page-editor')"><i class="fa-solid fa-chevron-left"></i></button><h1>設計預覽</h1><div style="width:36px"></div></div><div class="scroll"><div class="preview-wrap"><div class="preview-phone"><img id="preview-image"></div></div><div class="view-thumbs"><div class="view-thumb">正面</div><div class="view-thumb">側面</div><div class="view-thumb">背面</div></div><div style="padding:18px"><button class="primary" style="width:100%" onclick="saveWorkAndCart()">儲存作品並加入購物車</button></div></div></div>
 
-    <!-- 頁面：全螢幕選擇模板頁 -->
-    <div id="page-select-template" class="page template-page">
-        <div class="top-nav">
-            <button class="nav-btn" onclick="goToPage('page-editor')"><i class="fa-solid fa-chevron-left"></i></button>
-            <div class="title">選擇模板</div><div style="width: 28px;"></div>
-        </div>
-        <div class="template-header-text">快速套用喜歡的風格，開始設計吧！</div>
-        <div class="tpl-tabs-wrapper" id="template-categories"></div>
-        <div id="no-template-msg" style="display:none; text-align:center; padding:40px 20px; color:#999; font-size:14px;">此機型目前尚無專屬模板。</div>
-        <div class="template-grid-container" id="template-grid"></div>
-        
-        <div class="tpl-bottom-action">
-            <button class="primary-btn" style="background:#f0f2f5; color:var(--text-main); box-shadow:none; flex:0.4;" onclick="goToPage('page-editor')">取消</button>
-            <button class="primary-btn" style="flex:1;" id="btn-apply-tpl" disabled onclick="confirmApplyTemplate()">使用這個模板</button>
-        </div>
-    </div>
+  <div id="page-works" class="page"><div class="top"><button class="back" onclick="go('page-home')"><i class="fa-solid fa-chevron-left"></i></button><h1>我的作品</h1><button class="icon" onclick="renderWorks()"><i class="fa-solid fa-rotate"></i></button></div><div class="cat-row"><button class="pill active">全部</button><button class="pill">進行中</button><button class="pill">已完成</button></div><div class="scroll"><div id="works-grid" class="works-grid"></div></div><nav class="bottomnav"><button class="bn" onclick="go('page-home')"><i class="fa-solid fa-house"></i>首頁</button><button class="bn" onclick="go('page-model')"><i class="fa-regular fa-images"></i>模板</button><button class="bn active"><i class="fa-regular fa-folder-open"></i>作品</button><button class="bn" onclick="goCart()"><i class="fa-solid fa-cart-shopping"></i>購物車</button><button class="bn"><i class="fa-regular fa-user"></i>會員</button></nav></div>
 
-    <!-- 購物車與結帳 -->
-    <div id="page-cart" class="page" style="background:var(--bg-color);">
-        <div class="top-nav"><button class="nav-btn" onclick="goToPage('page-editor')"><i class="fa-solid fa-chevron-left"></i></button><div class="title">購物車</div><div style="width: 28px;"></div></div>
-        <div class="content">
-            <div class="cart-item">
-                <img id="cart-preview-img" class="cart-img" src="">
-                <div class="cart-info">
-                    <div class="cart-title">客製專屬手機殼</div>
-                    <div class="cart-desc" id="cart-desc-text"></div>
-                    <div class="cart-price" id="cart-price-text">NT$ 0</div>
-                </div>
-            </div>
-            
-            <div style="background: white; border-radius: 16px; padding: 20px; margin: 0 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.02); border: 1px solid var(--border-color);">
-                <div style="display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 12px; font-weight:bold;"><span>商品總計</span><span id="summary-price">NT$ 0</span></div>
-                <div style="display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 15px; font-weight:bold;"><span>運費</span><span>NT$ 60</span></div>
-                <div style="display: flex; justify-content: space-between; font-size: 18px; font-weight: 900; padding-top: 15px; border-top: 1px solid var(--border-color);"><span>應付總額</span><span style="color: var(--primary-color);" id="total-price">NT$ 0</span></div>
-            </div>
-        </div>
-        <div class="bottom-bar"><button class="primary-btn" onclick="goToPage('page-checkout')">前往結帳</button></div>
-    </div>
+  <div id="page-cart" class="page"><div class="top"><button class="back" onclick="go('page-preview')"><i class="fa-solid fa-chevron-left"></i></button><h1>購物車</h1><div style="width:36px"></div></div><div class="scroll"><div class="cart-card"><img id="cart-image"><div class="info"><b>客製手機殼</b><div id="cart-desc" class="sub" style="margin:7px 0"></div><div id="cart-price" style="color:var(--pink);font-weight:900;font-size:18px"></div></div></div><div class="sum-card"><div class="sum-line"><span>商品金額</span><span id="sum-price"></span></div><div class="sum-line"><span>運費</span><span>NT$ 60</span></div><div class="sum-line total"><span>合計</span><span id="sum-total" style="color:var(--pink)"></span></div></div></div><div class="bottom-action"><button class="primary" onclick="go('page-checkout')">前往結帳</button></div></div>
 
-    <div id="page-checkout" class="page" style="background:var(--bg-color);">
-        <div class="top-nav"><button class="nav-btn" onclick="goToPage('page-cart')"><i class="fa-solid fa-chevron-left"></i></button><div class="title">填寫收件資訊</div><div style="width: 28px;"></div></div>
-        <div class="content">
-            <div class="form-section"><div class="form-title">收件人資料</div><div class="input-group"><label>真實姓名</label><input type="text" id="form-name" placeholder="請填寫本名"></div><div class="input-group"><label>手機號碼</label><input type="tel" id="form-phone" placeholder="例如: 0912345678"></div></div>
-            <div class="form-section"><div class="form-title">配送與付款方式</div><div class="input-group"><label>付款方式</label><select id="form-payment"><option value="超商取貨付款">超商取貨付款</option></select></div><div class="input-group"><label>取件門市或地址</label><input type="text" id="form-address" placeholder="請填寫超商店名或宅配地址"></div></div>
-        </div>
-        <div class="bottom-bar"><button class="primary-btn" onclick="submitFinalOrder()" id="btn-submit-order">確認送出訂單</button></div>
-    </div>
+  <div id="page-checkout" class="page"><div class="top"><button class="back" onclick="go('page-cart')"><i class="fa-solid fa-chevron-left"></i></button><h1>結帳</h1><div style="width:36px"></div></div><div class="scroll"><div class="form-card"><b>收件資訊</b><div class="field"><label>姓名</label><input id="form-name" placeholder="請填寫姓名"></div><div class="field"><label>手機</label><input id="form-phone" placeholder="0912 345 678"></div><div class="field"><label>取件門市 / 地址</label><input id="form-address" placeholder="請輸入地址或超商門市"></div></div><div class="form-card"><b>付款方式</b><div class="field"><select id="form-payment"><option>超商取貨付款</option><option>銀行轉帳</option><option>LINE Pay</option></select></div></div><div class="sum-card"><div class="sum-line"><span>商品金額</span><span id="checkout-price"></span></div><div class="sum-line"><span>運費</span><span>NT$ 60</span></div><div class="sum-line total"><span>合計</span><span id="checkout-total" style="color:var(--pink)"></span></div></div></div><div class="bottom-action"><button id="submit-order" class="primary" onclick="submitOrder()">確認下單</button></div></div>
 
-    <div id="page-success" class="page">
-        <div class="content" style="background: white; justify-content: center; text-align:center; padding: 50px 20px;">
-            <i class="fa-solid fa-circle-check" style="font-size: 70px; color: #67c23a; margin-bottom: 20px;"></i>
-            <div style="font-size: 24px; font-weight: 900; margin-bottom: 10px;">訂單已成立！</div>
-            <div style="font-size: 14px; color: var(--text-muted); margin-bottom: 40px; line-height: 1.6; font-weight:bold;">感謝您的支持，我們將盡快為您製作。<br><br>訂單編號：<br><span id="success-order-id" style="font-size:18px; color:var(--primary-color);"></span></div>
-            <button class="primary-btn" style="margin: 0 20px; width: auto;" onclick="window.location.reload()">回到首頁</button>
-        </div>
-    </div>
+  <div id="page-success" class="page"><div class="scroll success"><div><div class="success-cat">😺</div><h2>訂單已完成！</h2><p class="sub" style="line-height:1.7">感謝你的支持，我們正在準備你的專屬手機殼 ♡</p><div class="sum-card" style="min-width:280px;text-align:left"><div class="sum-line"><span>訂單編號</span><b id="success-id"></b></div><div class="sum-line"><span>訂單金額</span><b id="success-total"></b></div></div><div style="display:grid;gap:8px;margin-top:18px"><button class="primary" onclick="showWorks()">查看我的作品</button><button class="ghost" onclick="location.reload()">繼續製作</button></div></div></div></div>
 
-    <!-- === 全新：底部常駐 App 導航列 === -->
-    <div class="app-bottom-nav" id="app-bottom-nav">
-        <div class="nav-tab active" onclick="goToPage('page-home')"><i class="fa-solid fa-house"></i><span>首頁</span></div>
-        <div class="nav-tab" onclick="goToPage('page-select-model')"><i class="fa-solid fa-border-all"></i><span>模板</span></div>
-        <div class="nav-tab" onclick="alert('購物車功能準備中')"><i class="fa-solid fa-cart-shopping"></i><span>購物車</span></div>
-        <div class="nav-tab" onclick="alert('會員中心開發中')"><i class="fa-regular fa-user"></i><span>會員</span></div>
-    </div>
+  <div id="overlay" class="overlay" onclick="closeSheets()"></div>
+  <div id="sheet-upload" class="sheet"><div class="sheet-head"><span>上傳圖片</span><button class="icon" onclick="closeSheets()"><i class="fa-solid fa-xmark"></i></button></div><div class="sheet-content"><div class="seg"><button class="active" onclick="setUploadMode('local',this)">本地上傳</button><button onclick="setUploadMode('ai',this)">AI 去背</button></div><div id="upload-local-panel"><div class="upload-box" onclick="document.getElementById('photo-input').click()"><div class="big"><i class="fa-regular fa-image"></i></div><b>選擇圖片（可多選）</b><p class="sub">支援 JPG / PNG / HEIC，建議使用高解析度照片</p><button class="primary" type="button">選擇圖片</button></div></div><div id="upload-ai-panel" style="display:none"><div class="upload-box"><div class="big"><i class="fa-solid fa-wand-magic-sparkles"></i></div><b>AI 智能去背</b><p class="sub">MVP 已保留獨立 API 介面；尚未設定 AI 服務時會使用模擬模式，不會破壞原圖。</p><button class="primary" type="button" onclick="simulateBgRemoval()">對目前選取圖片執行 AI 去背</button></div></div></div></div>
+  <div id="sheet-sticker" class="sheet"><div class="sheet-head"><span>貼紙庫</span><button class="icon" onclick="closeSheets()"><i class="fa-solid fa-xmark"></i></button></div><div id="sticker-cats" class="cat-row"></div><div class="sheet-content"><div id="sticker-grid" class="sticker-grid"></div></div></div>
+  <div id="sheet-material" class="sheet"><div class="sheet-head"><span>素材</span><button class="icon" onclick="closeSheets()"><i class="fa-solid fa-xmark"></i></button></div><div class="sheet-content"><div class="sticker-grid" id="material-grid"></div></div></div>
+  <div id="sheet-text" class="sheet"><div class="sheet-head"><span>文字</span><button class="icon" onclick="closeSheets()"><i class="fa-solid fa-xmark"></i></button></div><div class="sheet-content"><div class="field"><label>輸入文字</label><input id="text-input" placeholder="例如：Good Day ♡"></div><div class="field"><label>字體大小</label><input id="text-size" type="range" min="20" max="90" value="42" style="width:100%;accent-color:var(--pink)"></div><div style="display:flex;gap:8px"><button class="pill" onclick="addText('#333333')">黑色</button><button class="pill active" onclick="addText('#ff6f9a')">粉色</button><button class="pill" onclick="addText('#7c6df2')">紫色</button></div></div></div>
+  <div id="sheet-layer" class="sheet"><div class="sheet-head"><span>圖層與調整</span><button class="icon" onclick="closeSheets()"><i class="fa-solid fa-xmark"></i></button></div><div class="sheet-content"><div id="layer-list"></div><div class="adjust-row"><b style="font-size:12px">不透明度</b><input id="opacity-range" type="range" min="10" max="100" value="100" oninput="changeOpacity(this.value)"></div><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px"><button class="ghost" onclick="bringForward()">向上</button><button class="ghost" onclick="sendBackward()">向下</button><button class="ghost" onclick="duplicateActive()">複製</button><button class="ghost" onclick="deleteActive()">刪除</button><button class="ghost" onclick="flipActive('x')">左右翻轉</button><button class="ghost" onclick="flipActive('y')">上下翻轉</button><button class="ghost" onclick="rotateActive(-15)">↺ 15°</button><button class="ghost" onclick="rotateActive(15)">↻ 15°</button></div></div></div>
+  <div id="toast" class="toast"></div>
 </div>
-
 <script>
-    let shopData = { brands: [], models: [], styles: [] };
-    let assetsData = { stickers: [], categories: ["全部"] };
-    let templatesData = { templates: [], categories: ["全部"] };
-    
-    let orderContext = { 
-        modelId: null, modelName: null, styleId: null, styleName: null, price: 0,
-        maskUrl: null, printW: 80, printH: 160, printBase64: null, mockupBase64: null
-    };
-    
-    let canvas, baseClipPath;
-    let activeSlot = null; 
-    let selectedTemplateForApply = null; 
+let shopData={brands:[],models:[],styles:[]},assetsData={stickers:[],categories:['全部']},templatesData={templates:[],categories:['全部']};
+let ctx={modelId:null,modelName:null,styleId:null,styleName:null,price:390,maskUrl:'',printW:80,printH:160,printBase64:null,mockupBase64:null};
+let activeBrand=null,selectedTpl=null,canvas=null,baseClip=null,activeSlot=null;
+const $=id=>document.getElementById(id);
+window.addEventListener('load',loadAll);
+async function loadAll(){try{let r=await fetch('/api/shop_data');shopData=(await r.json()).data||shopData}catch(e){};try{let r=await fetch('/api/assets');assetsData=(await r.json()).data||assetsData}catch(e){};try{let r=await fetch('/api/templates');templatesData=(await r.json()).data||templatesData}catch(e){};renderBrands();renderStyles();}
+function go(id){document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));$(id).classList.add('active');}
+function toast(msg){let t=$('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1800)}
+function renderBrands(){let box=$('brand-row');box.innerHTML='';let brands=shopData.brands||[];activeBrand=activeBrand||brands[0];brands.forEach(b=>{let x=document.createElement('button');x.className='pill'+(b===activeBrand?' active':'');x.textContent=b;x.onclick=()=>{activeBrand=b;renderBrands();renderModels()};box.appendChild(x)});renderModels()}
+function seriesName(name){let m=name.match(/iPhone\s+(\d+)/i);return m?'iPhone '+m[1]+' 系列':'其他型號'}
+function renderModels(){let q=($('model-search')?.value||'').trim().toLowerCase(),list=(shopData.models||[]).filter(m=>m.status!==false&&(!activeBrand||m.brand===activeBrand)&&(!q||m.name.toLowerCase().includes(q)));let groups={};list.forEach(m=>(groups[seriesName(m.name)]??=[]).push(m));let box=$('model-list');box.innerHTML='';Object.entries(groups).forEach(([g,arr])=>{let wrap=document.createElement('div');wrap.className='model-group';wrap.innerHTML=`<div class="model-group-title">${g}</div>`;arr.forEach(m=>{let row=document.createElement('div');row.className='model-item'+(ctx.modelId===m.id?' selected':'');row.innerHTML=`<i class="fa-regular fa-mobile-screen-button" style="width:26px;color:#aaa"></i><span>${m.name}</span><i class="fa-solid fa-chevron-right" style="font-size:11px;color:#bbb"></i>`;row.onclick=()=>{ctx.modelId=m.id;ctx.modelName=m.name;$('chosen-model').textContent=m.name;$('model-next').disabled=false;renderModels()};wrap.appendChild(row)});box.appendChild(wrap)});if(!list.length)box.innerHTML='<div style="padding:40px;text-align:center;color:#aaa">找不到符合的型號</div>'}
+function renderStyles(){let box=$('style-grid');box.innerHTML='';(shopData.styles||[]).filter(s=>s.status!==false).forEach(s=>{let card=document.createElement('div');card.className='style-card'+(ctx.styleId===s.id?' selected':'');card.innerHTML=s.mask_img?`<img src="${s.mask_img}" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><div class="style-placeholder" style="display:none"><i class="fa-regular fa-mobile-screen"></i></div>`:`<div class="style-placeholder"><i class="fa-regular fa-mobile-screen"></i></div>`;card.innerHTML+=`<div class="style-name">${s.name}</div><div class="price">NT$ ${parseInt(s.price)||390}</div>`;card.onclick=()=>{ctx.styleId=s.id;ctx.styleName=s.name;ctx.price=parseInt(s.price)||390;ctx.maskUrl=s.mask_img||'';ctx.printW=parseFloat(s.print_w)||80;ctx.printH=parseFloat(s.print_h)||160;$('style-next').disabled=false;renderStyles()};box.appendChild(card)})}
+function openTemplatesFromStyle(){selectedTpl=null;renderTplCats();renderTemplates();go('page-template')}
+function renderTplCats(){let cats=['全部',...(templatesData.categories||[]).filter(c=>c!=='全部')];$('tpl-cats').innerHTML='';cats.forEach((c,i)=>{let b=document.createElement('button');b.className='pill'+(i===0?' active':'');b.textContent=c;b.onclick=()=>{document.querySelectorAll('#tpl-cats .pill').forEach(x=>x.classList.remove('active'));b.classList.add('active');renderTemplates(c)};$('tpl-cats').appendChild(b)})}
+function renderTemplates(cat='全部'){let list=(templatesData.templates||[]).filter(t=>t.model_id===ctx.modelId&&(!t.case_style_id||t.case_style_id===ctx.styleId));if(cat!=='全部')list=list.filter(t=>t.category===cat);let box=$('tpl-grid');box.innerHTML='';if(!list.length){box.innerHTML='<div class="tpl-empty">這個型號目前還沒有模板，可以直接跳過自己設計 ♡</div>';return}list.forEach(t=>{let c=document.createElement('div');c.className='tpl-card'+(selectedTpl?.id===t.id?' selected':'');c.innerHTML=`<img src="${t.thumb_url||''}"><div class="name">${t.name}</div>`;c.onclick=()=>{selectedTpl=t;$('tpl-next').disabled=false;renderTemplates(cat)};box.appendChild(c)})}
+function startEditor(apply){go('page-editor');$('editor-model').textContent=ctx.modelName||'';$('editor-style').textContent=ctx.styleName||'';initCanvas();if(apply&&selectedTpl)applyTemplate(selectedTpl)}
+function initCanvas(){let scale=3,w=Math.round(ctx.printW*scale),h=Math.round(ctx.printH*scale),maxH=Math.min(window.innerHeight-180,560),ratio=Math.min(1,maxH/h,(window.innerWidth-60)/w);$('canvas-shell').style.width=(w*ratio)+'px';$('canvas-shell').style.height=(h*ratio)+'px';let mask=$('phone-mask');mask.src=ctx.maskUrl||'';mask.style.display=ctx.maskUrl?'block':'none';if(canvas){canvas.dispose();canvas=null}canvas=new fabric.Canvas('main-canvas',{width:w,height:h,backgroundColor:'rgba(255,255,255,0)',preserveObjectStacking:true,selection:true});canvas.wrapperEl.style.transformOrigin='top left';canvas.wrapperEl.style.transform=`scale(${ratio})`;canvas.wrapperEl.style.position='absolute';canvas.wrapperEl.style.left='0';canvas.wrapperEl.style.top='0';baseClip=new fabric.Rect({left:0,top:0,width:w,height:h,absolutePositioned:true});canvas.on('selection:created',syncSelection);canvas.on('selection:updated',syncSelection);canvas.on('selection:cleared',()=>{$('side-controls').classList.remove('show')});canvas.on('object:modified',renderLayerList)}
+function syncSelection(){ $('side-controls').classList.add('show');let o=canvas.getActiveObject();$('opacity-range').value=Math.round((o?.opacity??1)*100);renderLayerList() }
+function applyTemplate(tpl){canvas.clear();canvas.backgroundColor='rgba(255,255,255,0)';fabric.Image.fromURL(tpl.thumb_url,img=>{let sc=Math.max(canvas.width/img.width,canvas.height/img.height);img.set({left:canvas.width/2,top:canvas.height/2,originX:'center',originY:'center',scaleX:sc,scaleY:sc,selectable:false,evented:false,role:'template'});(tpl.slots||[]).forEach(slot=>{let r=new fabric.Rect({left:+slot.x*3,top:+slot.y*3,width:+slot.w*3,height:+slot.h*3,fill:'rgba(255,255,255,.55)',stroke:'#ff6f9a',strokeDashArray:[8,6],strokeWidth:2,rx:12,ry:12,selectable:false,hoverCursor:'pointer',role:'slot'});let tx=new fabric.Text('點擊加入',{left:r.left+r.width/2,top:r.top+r.height/2,originX:'center',originY:'center',fontSize:20,fill:'#ff6f9a',fontWeight:'bold',selectable:false,evented:false,role:'guide'});r.promptText=tx;r.on('mousedown',()=>{activeSlot=r;$('slot-input').click()});canvas.add(r,tx)});canvas.add(img);img.bringToFront();canvas.templateFrame=img;canvas.renderAll()}, {crossOrigin:'anonymous'})}
+function openSheet(id){$('overlay').classList.add('show');document.querySelectorAll('.sheet').forEach(s=>s.classList.remove('show'));$(id).classList.add('show')}
+function closeSheets(){$('overlay').classList.remove('show');document.querySelectorAll('.sheet').forEach(s=>s.classList.remove('show'))}
+function addPhotoFile(f){if(!f)return;let r=new FileReader();r.onload=ev=>fabric.Image.fromURL(ev.target.result,img=>{img.scaleToWidth(canvas.width*.72);img.set({left:canvas.width/2,top:canvas.height/2,originX:'center',originY:'center',clipPath:baseClip,role:'photo',originalName:f.name});canvas.add(img);if(canvas.templateFrame)img.moveTo(Math.max(0,canvas.getObjects().indexOf(canvas.templateFrame)-1));canvas.setActiveObject(img);canvas.renderAll();renderLayerList();});r.readAsDataURL(f)}
+function uploadPhotos(e){let files=[...(e.target.files||[])];if(!files.length)return;files.forEach(addPhotoFile);e.target.value='';closeSheets()}
+function setUploadMode(mode,btn){document.querySelectorAll('#sheet-upload .seg button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');$('upload-local-panel').style.display=mode==='local'?'block':'none';$('upload-ai-panel').style.display=mode==='ai'?'block':'none'}
+async function simulateBgRemoval(){let o=canvas?.getActiveObject();if(!o||o.type!=='image'){toast('請先選取一張圖片');return}try{let r=await fetch('/api/ai/remove-background',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'preview'})});let j=await r.json();o.set({aiBackgroundRemoved:true});o.set('shadow',new fabric.Shadow({color:'rgba(255,111,154,.25)',blur:8,offsetX:0,offsetY:0}));canvas.renderAll();toast(j.msg||'AI 去背模擬完成（已保留 API 介面）')}catch(e){o.set({aiBackgroundRemoved:true});canvas.renderAll();toast('AI 去背模擬完成')}}
+function uploadSlotPhoto(e){let f=e.target.files[0];if(!f||!activeSlot)return;let slot=activeSlot,r=new FileReader();r.onload=ev=>fabric.Image.fromURL(ev.target.result,img=>{let sc=Math.max(slot.width/img.width,slot.height/img.height);img.scale(sc);img.set({left:slot.left+slot.width/2,top:slot.top+slot.height/2,originX:'center',originY:'center',clipPath:new fabric.Rect({left:slot.left,top:slot.top,width:slot.width,height:slot.height,absolutePositioned:true,rx:12,ry:12}),role:'slot-photo'});canvas.add(img);let frameIndex=canvas.templateFrame?canvas.getObjects().indexOf(canvas.templateFrame):canvas.getObjects().length;img.moveTo(Math.max(0,frameIndex-1));if(slot.promptText)canvas.remove(slot.promptText);canvas.remove(slot);canvas.setActiveObject(img);activeSlot=null;canvas.renderAll();renderLayerList()});r.readAsDataURL(f);e.target.value=''}
+async function openStickerSheet(){try{let r=await fetch('/api/assets');assetsData=(await r.json()).data||assetsData}catch(e){};let cats=['全部',...(assetsData.categories||[]).filter(c=>c!=='全部')];$('sticker-cats').innerHTML='';cats.forEach((c,i)=>{let b=document.createElement('button');b.className='pill'+(i===0?' active':'');b.textContent=c;b.onclick=()=>{document.querySelectorAll('#sticker-cats .pill').forEach(x=>x.classList.remove('active'));b.classList.add('active');renderStickers(c)};$('sticker-cats').appendChild(b)});renderStickers('全部');openSheet('sheet-sticker')}
+function renderStickers(cat){let list=(assetsData.stickers||[]);if(cat!=='全部')list=list.filter(s=>s.category===cat);$('sticker-grid').innerHTML='';if(!list.length){let demo=['♡','🎀','🍒','🌸','🐱','⭐','🦋','💗'];demo.forEach(x=>{let d=document.createElement('div');d.className='sticker-item';d.style.fontSize='32px';d.textContent=x;d.onclick=()=>addEmoji(x);$('sticker-grid').appendChild(d)});return}list.forEach(s=>{let d=document.createElement('div');d.className='sticker-item';d.innerHTML=`<img src="${s.url}">`;d.onclick=()=>addSticker(s.url);$('sticker-grid').appendChild(d)})}
+function addSticker(url){fabric.Image.fromURL(url,img=>{img.scaleToWidth(115);img.set({left:canvas.width/2,top:canvas.height/2,originX:'center',originY:'center',clipPath:baseClip,role:'sticker'});canvas.add(img);if(canvas.templateFrame)img.moveTo(canvas.getObjects().indexOf(canvas.templateFrame)-1);canvas.setActiveObject(img);closeSheets();renderLayerList()}, {crossOrigin:'anonymous'})}
+function addEmoji(x){let t=new fabric.Text(x,{fontSize:60,left:canvas.width/2,top:canvas.height/2,originX:'center',originY:'center',clipPath:baseClip,role:'sticker'});canvas.add(t);canvas.setActiveObject(t);closeSheets();renderLayerList()}
+function openMaterialSheet(){let mats=['♡','✦','○','▢','🎀','🌸','🍒','✨','💬','🌈','⭐','🦋'];$('material-grid').innerHTML='';mats.forEach(x=>{let d=document.createElement('div');d.className='sticker-item';d.style.fontSize='30px';d.textContent=x;d.onclick=()=>addEmoji(x);$('material-grid').appendChild(d)});openSheet('sheet-material')}
+function addText(color){let txt=$('text-input').value.trim()||'Good Day ♡',sz=+$('text-size').value;let t=new fabric.Textbox(txt,{left:canvas.width/2,top:canvas.height/2,originX:'center',originY:'center',fontSize:sz,fill:color,fontWeight:'700',fontFamily:'Arial',textAlign:'center',clipPath:baseClip,role:'text'});canvas.add(t);if(canvas.templateFrame)t.moveTo(canvas.getObjects().indexOf(canvas.templateFrame)-1);canvas.setActiveObject(t);$('text-input').value='';closeSheets();renderLayerList()}
 
-    window.onload = async () => {
-        try { const res = await fetch('/api/shop_data'); if(res.ok) shopData = (await res.json()).data; } catch(e){}
-        initUI(); 
-    };
+function addAdvancedText(){let txt=$('text-input').value.trim()||'Good Day ♡';let sz=+$('text-size').value;let color=$('text-color')?.value||'#ff6f9a';let font=$('text-font')?.value||'Arial';let t=new fabric.Textbox(txt,{left:canvas.width/2,top:canvas.height/2,originX:'center',originY:'center',fontSize:sz,fill:color,fontWeight:$('text-bold')?.checked?'700':'400',fontStyle:$('text-italic')?.checked?'italic':'normal',fontFamily:font,textAlign:'center',clipPath:baseClip,role:'text'});canvas.add(t);if(canvas.templateFrame)t.moveTo(canvas.getObjects().indexOf(canvas.templateFrame)-1);canvas.setActiveObject(t);$('text-input').value='';closeSheets();renderLayerList()}
+function flipActive(axis){let o=canvas?.getActiveObject();if(!o)return;if(axis==='x')o.set('flipX',!o.flipX);else o.set('flipY',!o.flipY);canvas.renderAll()}
+function rotateActive(deg){let o=canvas?.getActiveObject();if(!o)return;o.rotate((o.angle||0)+deg);canvas.renderAll()}
+function moveToTop(){let o=canvas?.getActiveObject();if(!o)return;o.bringToFront();if(canvas.templateFrame)canvas.templateFrame.bringToFront();canvas.renderAll();renderLayerList()}
+function moveToBottom(){let o=canvas?.getActiveObject();if(!o)return;o.sendToBack();canvas.renderAll();renderLayerList()}
 
-    function initUI() {
-        const brandTabs = document.getElementById('brand-tabs');
-        shopData.brands.forEach((brand, idx) => {
-            const tab = document.createElement('div');
-            tab.className = `brand-tab ${idx === 0 ? 'active' : ''}`;
-            tab.innerText = brand;
-            tab.onclick = () => selectBrand(brand, tab);
-            brandTabs.appendChild(tab);
-        });
-        
-        // 渲染成網格圖片卡片
-        const styleGrid = document.getElementById('style-grid');
-        shopData.styles.filter(s => s.status).forEach(style => {
-            const card = document.createElement('div');
-            card.className = 'style-card-new';
-            card.onclick = () => selectStyle(style, card);
-            
-            // 如果沒有遮罩圖，給一張預設的手機圖示
-            const imgUrl = style.mask_img || 'https://cdn-icons-png.flaticon.com/512/3436/3436094.png';
-            
-            card.innerHTML = `
-                <img src="${imgUrl}">
-                <div class="style-name">${style.name}</div>
-            `;
-            styleGrid.appendChild(card);
-        });
-        
-        if(shopData.brands.length > 0) selectBrand(shopData.brands[0], brandTabs.firstChild);
-    }
-
-    function selectBrand(brand, tabElement) {
-        document.querySelectorAll('.brand-tab').forEach(t => t.classList.remove('active'));
-        if(tabElement) tabElement.classList.add('active');
-        const modelGrid = document.getElementById('model-grid');
-        modelGrid.innerHTML = '';
-        shopData.models.filter(m => m.brand === brand && m.status).forEach(model => {
-            const btn = document.createElement('div');
-            btn.className = 'model-btn';
-            if(orderContext.modelId === model.id) btn.classList.add('selected');
-            btn.innerText = model.name;
-            btn.onclick = () => selectModel(model, btn);
-            modelGrid.appendChild(btn);
-        });
-    }
-
-    function selectModel(model, btnElement) {
-        orderContext.modelId = model.id; orderContext.modelName = model.name;
-        document.querySelectorAll('.model-btn').forEach(b => b.classList.remove('selected'));
-        btnElement.classList.add('selected');
-        document.getElementById('btn-next-to-style').disabled = false;
-        document.getElementById('display-selected-model').innerText = model.name;
-    }
-
-    function selectStyle(style, cardElement) {
-        orderContext.styleId = style.id; orderContext.styleName = style.name;
-        orderContext.price = style.price || 390;
-        orderContext.maskUrl = style.mask_img;
-        orderContext.printW = parseFloat(style.print_w) || 80;
-        orderContext.printH = parseFloat(style.print_h) || 160;
-
-        document.querySelectorAll('.style-card-new').forEach(c => c.classList.remove('selected'));
-        cardElement.classList.add('selected');
-        document.getElementById('btn-start-diy').disabled = false;
-    }
-
-    // 控制頁面切換與底部導航顯示隱藏
-    function goToPage(pageId) {
-        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-        document.getElementById(pageId).classList.add('active');
-        
-        // 在編輯器、購物車、結帳時隱藏底部選單，給予最大操作空間
-        const bottomNav = document.getElementById('app-bottom-nav');
-        if(['page-editor', 'page-cart', 'page-checkout', 'page-success'].includes(pageId)) {
-            bottomNav.classList.add('hidden');
-        } else {
-            bottomNav.classList.remove('hidden');
-        }
-        
-        // 更新 Bottom Nav 狀態
-        document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
-        if(pageId === 'page-home') document.querySelectorAll('.nav-tab')[0].classList.add('active');
-        if(pageId === 'page-select-model') document.querySelectorAll('.nav-tab')[1].classList.add('active');
-    }
-
-    /* === 貼紙庫 (即時抓取) === */
-    async function openStickerSheet() {
-        try { const res = await fetch('/api/assets'); if(res.ok) { const json = await res.json(); if(json.data) assetsData = json.data; } } catch(e) {}
-        
-        if(!assetsData) assetsData = { stickers: [], categories: ["全部"] };
-        if(!assetsData.categories || assetsData.categories.length === 0) assetsData.categories = ["全部"];
-        
-        const catTabs = document.getElementById('sticker-categories');
-        catTabs.innerHTML = '';
-        assetsData.categories.forEach((cat, idx) => {
-            const tab = document.createElement('div');
-            tab.className = `brand-tab ${idx === 0 ? 'active' : ''}`;
-            tab.innerText = cat;
-            tab.onclick = () => renderStickers(cat, tab);
-            catTabs.appendChild(tab);
-        });
-        renderStickers(assetsData.categories[0], catTabs.firstChild);
-        openSheet('sheet-sticker');
-    }
-
-    function renderStickers(category, tabElement) {
-        if(tabElement) {
-            document.getElementById('sticker-categories').querySelectorAll('.brand-tab').forEach(t => t.classList.remove('active'));
-            tabElement.classList.add('active');
-        }
-        const grid = document.getElementById('sticker-grid');
-        grid.innerHTML = '';
-        let filtered = category === "全部" ? (assetsData.stickers || []) : (assetsData.stickers || []).filter(s => s.category === category);
-        filtered.forEach(sticker => {
-            const item = document.createElement('div');
-            item.className = 'sticker-item';
-            item.innerHTML = `<img src="${sticker.url}" loading="lazy">`;
-            item.onclick = () => { addStickerToCanvas(sticker.url); closeAllSheets(); };
-            grid.appendChild(item);
-        });
-    }
-
-    /* === 畫布初始化 === */
-    function startDIY() {
-        goToPage('page-editor');
-        document.getElementById('editor-title').innerText = `${orderContext.modelName}`;
-        
-        const scaleFactor = 3; 
-        const canvasW = orderContext.printW * scaleFactor;
-        const canvasH = orderContext.printH * scaleFactor;
-        
-        const wrapper = document.getElementById('canvas-wrapper');
-        wrapper.style.width = `${canvasW}px`; wrapper.style.height = `${canvasH}px`;
-        
-        const maskImg = document.getElementById('real-phone-mask');
-        if (orderContext.maskUrl) { maskImg.src = orderContext.maskUrl; maskImg.style.display = 'block'; } 
-        else { maskImg.style.display = 'none'; }
-
-        if(canvas) {
-            canvas.setWidth(canvasW); canvas.setHeight(canvasH); canvas.clear(); canvas.backgroundColor = '#ffffff';
-        } else {
-            canvas = new fabric.Canvas('main-canvas', { width: canvasW, height: canvasH, backgroundColor: '#ffffff', preserveObjectStacking: true });
-            canvas.on('selection:created', () => document.getElementById('obj-controls').classList.add('active'));
-            canvas.on('selection:updated', () => document.getElementById('obj-controls').classList.add('active'));
-            canvas.on('selection:cleared', () => document.getElementById('obj-controls').classList.remove('active'));
-        }
-        baseClipPath = new fabric.Rect({ left: 0, top: 0, width: canvasW, height: canvasH, absolutePositioned: true });
-    }
-
-    /* === 模板選擇頁面 (即時抓取) === */
-    async function openTemplatePage() {
-        selectedTemplateForApply = null;
-        document.getElementById('btn-apply-tpl').disabled = true;
-        
-        try { const res = await fetch('/api/templates'); if(res.ok) { const json = await res.json(); if(json.data) templatesData = json.data; } } catch(e) { console.warn("模板讀取失敗"); }
-
-        if(!templatesData) templatesData = { templates: [], categories: ["全部"] };
-        if(!templatesData.categories || templatesData.categories.length === 0) templatesData.categories = ["全部"];
-        if(!templatesData.templates) templatesData.templates = [];
-        
-        const catTabs = document.getElementById('template-categories');
-        catTabs.innerHTML = '';
-        templatesData.categories.forEach((cat, idx) => {
-            const tab = document.createElement('div');
-            tab.className = `tpl-pill ${idx === 0 ? 'active' : ''}`;
-            tab.innerText = cat;
-            tab.onclick = () => renderTemplates(cat, tab);
-            catTabs.appendChild(tab);
-        });
-        
-        renderTemplates(templatesData.categories[0], catTabs.firstChild);
-        goToPage('page-select-template');
-    }
-    
-    function renderTemplates(category, tabElement) {
-        if(tabElement) {
-            document.getElementById('template-categories').querySelectorAll('.tpl-pill').forEach(t => t.classList.remove('active'));
-            tabElement.classList.add('active');
-        }
-        const grid = document.getElementById('template-grid');
-        const msg = document.getElementById('no-template-msg');
-        grid.innerHTML = '';
-        
-        let filtered = templatesData.templates || [];
-        filtered = filtered.filter(t => t.model_id === orderContext.modelId);
-        if(category !== "全部") filtered = filtered.filter(t => t.category === category);
-        
-        if(filtered.length === 0) {
-            msg.style.display = 'block';
-        } else {
-            msg.style.display = 'none';
-            filtered.forEach(tpl => {
-                const item = document.createElement('div');
-                item.className = 'tpl-card';
-                item.innerHTML = `<img src="${tpl.thumb_url}" loading="lazy"><div class="tpl-name">${tpl.name}</div>`;
-                item.onclick = () => {
-                    document.querySelectorAll('.tpl-card').forEach(c => c.classList.remove('selected'));
-                    item.classList.add('selected');
-                    selectedTemplateForApply = tpl;
-                    document.getElementById('btn-apply-tpl').disabled = false;
-                };
-                grid.appendChild(item);
-            });
-        }
-    }
-
-    /* === 套用模板與插槽系統 === */
-    function confirmApplyTemplate() {
-        if(!selectedTemplateForApply) return;
-        const tpl = selectedTemplateForApply;
-        
-        canvas.clear();
-        canvas.backgroundColor = '#ffffff';
-        const scaleFactor = 3;
-        
-        fabric.Image.fromURL(tpl.thumb_url, function(img) {
-            const scale = Math.max(canvas.width / img.width, canvas.height / img.height);
-            
-            img.set({
-                left: canvas.width/2, top: canvas.height/2, originX: 'center', originY: 'center',
-                scaleX: scale, scaleY: scale,
-                selectable: false, evented: false 
-            });
-            
-            if(tpl.slots && tpl.slots.length > 0) {
-                tpl.slots.forEach(slot => {
-                    const slotW = parseFloat(slot.w) * scaleFactor;
-                    const slotH = parseFloat(slot.h) * scaleFactor;
-                    const slotX = parseFloat(slot.x) * scaleFactor;
-                    const slotY = parseFloat(slot.y) * scaleFactor;
-                    
-                    let rect = new fabric.Rect({
-                        left: slotX, top: slotY, width: slotW, height: slotH,
-                        fill: 'rgba(255,255,255,0.8)', stroke: '#ff8599', strokeDashArray: [5, 5], strokeWidth: 2,
-                        selectable: false, hoverCursor: 'pointer', rx: 10, ry: 10
-                    });
-                    
-                    let text = new fabric.Text("點擊\n加入", {
-                        left: slotX + slotW/2, top: slotY + slotH/2, originX: 'center', originY: 'center',
-                        fontSize: 22, fill: '#ff8599', selectable: false, evented: false, fontWeight: 'bold', textAlign: 'center'
-                    });
-                    
-                    rect.on('mousedown', () => {
-                        activeSlot = rect;
-                        document.getElementById('slot-uploader').click();
-                    });
-                    
-                    canvas.add(rect); canvas.add(text);
-                    rect.promptText = text; 
-                });
-            }
-            
-            canvas.add(img);
-            img.bringToFront();
-            canvas.templateFrame = img; 
-            
-            goToPage('page-editor');
-            
-        }, { crossOrigin: 'anonymous' });
-    }
-
-    function handleSlotUpload(e) {
-        const file = e.target.files[0];
-        if(!file || !activeSlot) return;
-        const reader = new FileReader();
-        reader.onload = function(f) {
-            fabric.Image.fromURL(f.target.result, img => {
-                const scaleX = activeSlot.width / img.width;
-                const scaleY = activeSlot.height / img.height;
-                const scale = Math.max(scaleX, scaleY); 
-                img.scale(scale);
-                
-                img.set({
-                    left: activeSlot.left + activeSlot.width / 2, top: activeSlot.top + activeSlot.height / 2,
-                    originX: 'center', originY: 'center',
-                    clipPath: new fabric.Rect({
-                        left: activeSlot.left, top: activeSlot.top, width: activeSlot.width, height: activeSlot.height,
-                        absolutePositioned: true, rx: 10, ry: 10
-                    })
-                });
-                
-                canvas.add(img);
-                img.sendToBack(); 
-                
-                if(activeSlot.promptText) canvas.remove(activeSlot.promptText);
-                canvas.remove(activeSlot);
-                canvas.setActiveObject(img);
-                activeSlot = null; 
-            });
-        };
-        reader.readAsDataURL(file);
-        e.target.value = '';
-    }
-
-    function openSheet(id) { document.getElementById('sheet-overlay').classList.add('active'); document.getElementById(id).classList.add('active'); }
-    function closeAllSheets() { document.getElementById('sheet-overlay').classList.remove('active'); document.querySelectorAll('.bottom-sheet').forEach(s => s.classList.remove('active')); }
-
-    function handleImageUpload(e) {
-        const file = e.target.files[0];
-        if(!file) return;
-        const reader = new FileReader();
-        reader.onload = function(f) {
-            fabric.Image.fromURL(f.target.result, img => {
-                img.scaleToWidth(canvas.width * 0.8);
-                img.set({ left: canvas.width / 2, top: canvas.height / 2, originX: 'center', originY: 'center', clipPath: baseClipPath });
-                canvas.add(img); 
-                if(canvas.templateFrame) img.moveTo(canvas.getObjects().indexOf(canvas.templateFrame) - 1);
-                canvas.setActiveObject(img);
-            });
-        };
-        reader.readAsDataURL(file);
-        e.target.value = '';
-    }
-
-    function addStickerToCanvas(url) {
-        fabric.Image.fromURL(url, img => {
-            img.scaleToWidth(120);
-            img.set({ left: canvas.width / 2, top: canvas.height / 2, originX: 'center', originY: 'center', clipPath: baseClipPath });
-            canvas.add(img); 
-            if(canvas.templateFrame) img.moveTo(canvas.getObjects().indexOf(canvas.templateFrame) - 1);
-            canvas.setActiveObject(img);
-        }, { crossOrigin: 'anonymous' });
-    }
-
-    function addText(color) {
-        const txt = document.getElementById('text-input').value || "Hello";
-        const textObj = new fabric.Textbox(txt, { 
-            left: canvas.width / 2, top: canvas.height / 2, originX: 'center', originY: 'center',
-            fontSize: 40, fill: color, fontWeight: 'bold', clipPath: baseClipPath
-        });
-        canvas.add(textObj); 
-        if(canvas.templateFrame) textObj.moveTo(canvas.getObjects().indexOf(canvas.templateFrame) - 1);
-        canvas.setActiveObject(textObj);
-        document.getElementById('text-input').value = ''; closeAllSheets();
-    }
-
-    function bringForward() { 
-        const obj = canvas.getActiveObject(); 
-        if(obj) { 
-            canvas.bringForward(obj); 
-            if(canvas.templateFrame) canvas.templateFrame.bringToFront(); 
-            canvas.renderAll(); 
-        } 
-    }
-    function sendBackward() { const obj = canvas.getActiveObject(); if(obj) { canvas.sendBackwards(obj); canvas.renderAll(); } }
-    function deleteActiveObject() { const obj = canvas.getActiveObject(); if(obj) canvas.remove(obj); }
-
-    /* === 輸出購物車 === */
-    async function exportToCart() {
-        if(!canvas) return;
-        canvas.discardActiveObject(); canvas.renderAll();
-        orderContext.printBase64 = canvas.toDataURL({ format: 'png', multiplier: 3 });
-
-        const maskImgEl = document.getElementById('real-phone-mask');
-        if (maskImgEl.style.display !== 'none' && maskImgEl.src) {
-            fabric.Image.fromURL(maskImgEl.src, function(maskImg) {
-                maskImg.set({ left: 0, top: 0, width: canvas.width, height: canvas.height, selectable: false });
-                canvas.add(maskImg); canvas.renderAll();
-                orderContext.mockupBase64 = canvas.toDataURL({ format: 'png', multiplier: 1.5 });
-                canvas.remove(maskImg); canvas.renderAll();
-                showCartPage();
-            }, { crossOrigin: 'anonymous' });
-        } else {
-            orderContext.mockupBase64 = orderContext.printBase64;
-            showCartPage();
-        }
-    }
-
-    function showCartPage() {
-        document.getElementById('cart-preview-img').src = orderContext.mockupBase64;
-        document.getElementById('cart-desc-text').innerHTML = `適用機型：${orderContext.modelName}<br>材質：${orderContext.styleName}`;
-        const price = parseInt(orderContext.price) || 390;
-        const shipping = 60;
-        const total = price + shipping;
-        document.getElementById('cart-price-text').innerText = `NT$ ${price}`;
-        document.getElementById('summary-price').innerText = `NT$ ${price}`;
-        document.getElementById('total-price').innerText = `NT$ ${total}`;
-        goToPage('page-cart');
-    }
-
-    async function submitFinalOrder() {
-        const name = document.getElementById('form-name').value.trim();
-        const phone = document.getElementById('form-phone').value.trim();
-        const address = document.getElementById('form-address').value.trim();
-        const payment = document.getElementById('form-payment').value;
-        
-        if(!name || !phone || !address) return alert("請完整填寫收件人姓名、電話與地址門市！");
-        
-        document.getElementById('btn-submit-order').innerText = "訂單處理中...";
-        document.getElementById('btn-submit-order').disabled = true;
-
-        try {
-            const res = await fetch('/api/create_order', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    print_file: orderContext.printBase64, mockup_file: orderContext.mockupBase64,
-                    model_name: orderContext.modelName, style_name: orderContext.styleName, price: orderContext.price,
-                    customer_name: name, customer_phone: phone, address: address, payment_method: payment
-                })
-            });
-            const result = await res.json();
-            if(res.ok) {
-                document.getElementById('success-order-id').innerText = result.order_id;
-                goToPage('page-success');
-            } else { 
-                alert("⚠️ 錯誤：" + result.msg); 
-                document.getElementById('btn-submit-order').innerText = "確認送出訂單"; document.getElementById('btn-submit-order').disabled = false;
-            }
-        } catch(err) {
-            alert("❌ 連線錯誤！");
-            document.getElementById('btn-submit-order').innerText = "確認送出訂單"; document.getElementById('btn-submit-order').disabled = false;
-        }
-    }
+function bringForward(){let o=canvas?.getActiveObject();if(o){canvas.bringForward(o);if(canvas.templateFrame)canvas.templateFrame.bringToFront();canvas.renderAll();renderLayerList()}}
+function sendBackward(){let o=canvas?.getActiveObject();if(o){canvas.sendBackwards(o);canvas.renderAll();renderLayerList()}}
+function deleteActive(){let o=canvas?.getActiveObject();if(o){canvas.remove(o);canvas.discardActiveObject();canvas.renderAll();renderLayerList()}}
+function duplicateActive(){let o=canvas?.getActiveObject();if(!o)return;o.clone(c=>{c.set({left:(o.left||0)+20,top:(o.top||0)+20});canvas.add(c);canvas.setActiveObject(c);canvas.renderAll();renderLayerList()})}
+function changeOpacity(v){let o=canvas?.getActiveObject();if(o){o.set('opacity',v/100);canvas.renderAll()}}
+function openLayerSheet(){renderLayerList();openSheet('sheet-layer')}
+function renderLayerList(){if(!canvas||!$('layer-list'))return;let objs=[...canvas.getObjects()].filter(o=>o.role!=='guide'&&o.role!=='slot').reverse();$('layer-list').innerHTML='';objs.forEach((o,i)=>{let row=document.createElement('div');row.className='layer-row';let n=o.role==='text'?'文字':o.role==='photo'||o.role==='slot-photo'?'圖片':o.role==='sticker'?'貼紙':o.role==='template'?'模板':'物件';row.innerHTML=`<div class="layer-thumb"><i class="fa-solid fa-layer-group"></i></div><div class="name">${n}</div><i class="fa-solid fa-grip-lines" style="color:#bbb"></i>`;row.onclick=()=>{if(o.selectable!==false){canvas.setActiveObject(o);canvas.renderAll();syncSelection()}};$('layer-list').appendChild(row)})}
+function openTemplatesInEditor(){closeSheets();selectedTpl=null;renderTplCats();renderTemplates();$('tpl-next').disabled=true;go('page-template')}
+function openPreview(){if(!canvas)return;canvas.discardActiveObject();canvas.renderAll();ctx.printBase64=canvas.toDataURL({format:'png',multiplier:2});let mask=$('phone-mask');if(mask.style.display!=='none'&&mask.src){fabric.Image.fromURL(mask.src,m=>{m.set({left:0,top:0,width:canvas.width,height:canvas.height,selectable:false,evented:false});canvas.add(m);ctx.mockupBase64=canvas.toDataURL({format:'png',multiplier:1.2});canvas.remove(m);finishPreview()}, {crossOrigin:'anonymous'})}else{ctx.mockupBase64=ctx.printBase64;finishPreview()}}
+function finishPreview(){$('preview-image').src=ctx.mockupBase64;go('page-preview')}
+function saveWorkAndCart(){let works=JSON.parse(localStorage.getItem('caseme_works')||'[]');let item={id:'work_'+Date.now(),name:ctx.modelName+' '+ctx.styleName,date:new Date().toLocaleDateString('zh-TW'),preview:ctx.mockupBase64,design:canvas.toJSON(['role','aiBackgroundRemoved','originalName']),ctx:{...ctx}};works.unshift(item);localStorage.setItem('caseme_works',JSON.stringify(works.slice(0,30)));goCart()}
+function showWorks(){renderWorks();go('page-works')}
+function renderWorks(){let works=JSON.parse(localStorage.getItem('caseme_works')||'[]'),box=$('works-grid');box.innerHTML='';if(!works.length){box.innerHTML='<div style="grid-column:1/-1;text-align:center;color:#aaa;padding:60px 20px">還沒有作品，先去設計第一個手機殼吧 ♡</div>';return}works.forEach(w=>{let c=document.createElement('div');c.className='work-card';c.innerHTML=`<img src="${w.preview}"><b style="font-size:12px">${w.name}</b><div class="meta">${w.date}</div><div class="work-actions"><button onclick="editWork('${w.id}',event)">編輯</button><button onclick="duplicateWork('${w.id}',event)">複製</button><button onclick="deleteWork('${w.id}',event)">刪除</button></div>`;box.appendChild(c)})}
+function editWork(id,e){e?.stopPropagation();let w=JSON.parse(localStorage.getItem('caseme_works')||'[]').find(x=>x.id===id);if(!w)return;ctx={...ctx,...w.ctx};go('page-editor');$('editor-model').textContent=ctx.modelName||'';$('editor-style').textContent=ctx.styleName||'';initCanvas();setTimeout(()=>{canvas.loadFromJSON(w.design,()=>{canvas.getObjects().forEach(o=>{if(o.role==='template'){o.selectable=false;o.evented=false;canvas.templateFrame=o}});canvas.renderAll();renderLayerList()})},30)}
+function duplicateWork(id,e){e?.stopPropagation();let works=JSON.parse(localStorage.getItem('caseme_works')||'[]'),w=works.find(x=>x.id===id);if(!w)return;let copy=JSON.parse(JSON.stringify(w));copy.id='work_'+Date.now();copy.name=w.name+' 複製';copy.date=new Date().toLocaleDateString('zh-TW');works.unshift(copy);localStorage.setItem('caseme_works',JSON.stringify(works.slice(0,30)));renderWorks()}
+function deleteWork(id,e){e.stopPropagation();let works=JSON.parse(localStorage.getItem('caseme_works')||'[]').filter(w=>w.id!==id);localStorage.setItem('caseme_works',JSON.stringify(works));renderWorks()}
+function goCart(){if(!ctx.mockupBase64){toast('請先完成一個設計');return}$('cart-image').src=ctx.mockupBase64;$('cart-desc').innerHTML=`${ctx.modelName}<br>${ctx.styleName}`;let p=parseInt(ctx.price)||390,t=p+60;$('cart-price').textContent='NT$ '+p;$('sum-price').textContent='NT$ '+p;$('sum-total').textContent='NT$ '+t;$('checkout-price').textContent='NT$ '+p;$('checkout-total').textContent='NT$ '+t;go('page-cart')}
+async function submitOrder(){let name=$('form-name').value.trim(),phone=$('form-phone').value.trim(),address=$('form-address').value.trim(),payment=$('form-payment').value;if(!name||!phone||!address){toast('請完整填寫收件資訊');return}let btn=$('submit-order');btn.disabled=true;btn.textContent='訂單處理中...';try{let r=await fetch('/api/create_order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({print_file:ctx.printBase64,mockup_file:ctx.mockupBase64,model_id:ctx.modelId,style_id:ctx.styleId,model_name:ctx.modelName,style_name:ctx.styleName,price:ctx.price,customer_name:name,customer_phone:phone,address,payment_method:payment,design_json:canvas?canvas.toJSON(['role','aiBackgroundRemoved','originalName']):null})});let j=await r.json();if(!r.ok)throw new Error(j.msg||'送單失敗');$('success-id').textContent=j.order_id;$('success-total').textContent='NT$ '+((parseInt(ctx.price)||390)+60);go('page-success')}catch(e){toast('送單失敗：'+e.message);btn.disabled=false;btn.textContent='確認下單'}}
 </script>
-</body>
-</html>
+</body></html>

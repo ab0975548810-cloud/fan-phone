@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_file, session, redirect, url_for
+from flask import Flask, request, jsonify, send_file, session, redirect, url_for, send_from_directory
 import os
 import json
 import time
@@ -6,8 +6,11 @@ import base64
 import uuid
 
 app = Flask(__name__)
-app.secret_key = 'fan_super_secret_key_2026' 
-ADMIN_PASSWORD = "fan123"
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'dev_only_change_me')
+ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'fan123')
+app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
 # === 系統資料夾架構 ===
 SAVE_DIR = "orders"
@@ -38,12 +41,37 @@ def save_json(filepath, data):
         json.dump(data, f, ensure_ascii=False, indent=4)
 
 DEFAULT_SHOP_DATA = {
-    "brands": ["蘋果"],
-    "models": [{"id": "model_apple_ip17pm", "brand": "蘋果", "name": "iPhone 17 Pro Max", "status": True}],
-    "styles": [{
-        "id": "style_clear_01", "name": "氣囊防摔透明殼", "colors": ["透明"], "status": True,
-        "print_x": 0, "print_y": 0, "print_w": 80, "print_h": 160, "mask_img": "", "line_img": ""
-    }]
+    "brands": ["Apple", "Samsung", "Google", "OPPO"],
+    "models": [
+        {"id":"model_apple_11","brand":"Apple","name":"iPhone 11","status":True},
+        {"id":"model_apple_11_pro","brand":"Apple","name":"iPhone 11 Pro","status":True},
+        {"id":"model_apple_11_pro_max","brand":"Apple","name":"iPhone 11 Pro Max","status":True},
+        {"id":"model_apple_12","brand":"Apple","name":"iPhone 12","status":True},
+        {"id":"model_apple_12_pro","brand":"Apple","name":"iPhone 12 Pro","status":True},
+        {"id":"model_apple_12_pro_max","brand":"Apple","name":"iPhone 12 Pro Max","status":True},
+        {"id":"model_apple_13","brand":"Apple","name":"iPhone 13","status":True},
+        {"id":"model_apple_13_pro","brand":"Apple","name":"iPhone 13 Pro","status":True},
+        {"id":"model_apple_13_pro_max","brand":"Apple","name":"iPhone 13 Pro Max","status":True},
+        {"id":"model_apple_14","brand":"Apple","name":"iPhone 14","status":True},
+        {"id":"model_apple_14_pro","brand":"Apple","name":"iPhone 14 Pro","status":True},
+        {"id":"model_apple_14_pro_max","brand":"Apple","name":"iPhone 14 Pro Max","status":True},
+        {"id":"model_apple_15","brand":"Apple","name":"iPhone 15","status":True},
+        {"id":"model_apple_15_pro","brand":"Apple","name":"iPhone 15 Pro","status":True},
+        {"id":"model_apple_15_pro_max","brand":"Apple","name":"iPhone 15 Pro Max","status":True},
+        {"id":"model_apple_16","brand":"Apple","name":"iPhone 16","status":True},
+        {"id":"model_apple_16_pro","brand":"Apple","name":"iPhone 16 Pro","status":True},
+        {"id":"model_apple_16_pro_max","brand":"Apple","name":"iPhone 16 Pro Max","status":True},
+        {"id":"model_apple_17","brand":"Apple","name":"iPhone 17","status":True},
+        {"id":"model_apple_17_pro","brand":"Apple","name":"iPhone 17 Pro","status":True},
+        {"id":"model_apple_17_pro_max","brand":"Apple","name":"iPhone 17 Pro Max","status":True}
+    ],
+    "styles": [
+        {"id":"style_clear","name":"透明殼","colors":["透明"],"price":390,"status":True,"print_x":0,"print_y":0,"print_w":80,"print_h":160,"mask_img":"","line_img":""},
+        {"id":"style_black","name":"黑邊殼","colors":["黑"],"price":450,"status":True,"print_x":0,"print_y":0,"print_w":80,"print_h":160,"mask_img":"","line_img":""},
+        {"id":"style_color","name":"彩色邊框","colors":["粉","藍","紫"],"price":490,"status":True,"print_x":0,"print_y":0,"print_w":80,"print_h":160,"mask_img":"","line_img":""},
+        {"id":"style_armor","name":"防摔殼","colors":["透明","黑"],"price":520,"status":True,"print_x":0,"print_y":0,"print_w":80,"print_h":160,"mask_img":"","line_img":""},
+        {"id":"style_magsafe","name":"磁吸殼","colors":["透明"],"price":580,"status":True,"print_x":0,"print_y":0,"print_w":80,"print_h":160,"mask_img":"","line_img":""}
+    ]
 }
 DEFAULT_ASSETS = {"stickers": [], "categories": ["全部", "可愛", "Y2K", "文字"]}
 DEFAULT_TEMPLATES = {"templates": [], "categories": ["全部", "熱門"]}
@@ -62,6 +90,11 @@ def get_assets(): return jsonify({"status": "success", "data": load_json(ASSETS_
 def get_templates(): return jsonify({"status": "success", "data": load_json(TEMPLATES_FILE, DEFAULT_TEMPLATES)})
 
 # === 訂單系統 API ===
+@app.route('/api/ai/remove-background', methods=['POST'])
+def ai_remove_background():
+    # MVP 模擬介面：保留獨立 API，日後可在這裡串接 remove.bg / 自建模型。
+    return jsonify({"status": "success", "simulated": True, "msg": "AI 去背目前為模擬模式；API 介面已保留"})
+
 @app.route('/api/create_order', methods=['POST'])
 def create_order():
     try:
@@ -71,14 +104,14 @@ def create_order():
         
         model_name = data.get('model_name', 'Unknown')
         style_name = data.get('style_name', 'Unknown')
-        price = data.get('price', 0)
+        price = int(data.get('price') or 390)
         customer_name = data.get('customer_name', '未提供')
         customer_phone = data.get('customer_phone', '未提供')
         address = data.get('address', '未提供')
         payment_method = data.get('payment_method', '貨到付款')
         
         timestamp = int(time.time())
-        order_id = f"{time.strftime('%Y%m%d%H%M%S')}"
+        order_id = f"{time.strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:4].upper()}"
         
         with open(os.path.join(SAVE_DIR, f"{order_id}_print.png"), 'wb') as f: f.write(print_data)
         with open(os.path.join(SAVE_DIR, f"{order_id}_mockup.png"), 'wb') as f: f.write(mockup_data)
@@ -87,6 +120,7 @@ def create_order():
             "order_id": order_id, "model": model_name, "style": style_name, "price": price,
             "customer_name": customer_name, "customer_phone": customer_phone, "address": address, "payment_method": payment_method,
             "status": "待處理", "time": timestamp,
+            "design_json": data.get("design_json"),
             "print_url": f"/orders/{order_id}_print.png", "mockup_url": f"/orders/{order_id}_mockup.png"
         }
         with open(os.path.join(SAVE_DIR, f"{order_id}_info.json"), 'w', encoding='utf-8') as f:
@@ -202,7 +236,10 @@ def admin_delete_sticker():
     except Exception as e: return jsonify({"status": "error", "msg": str(e)}), 500
 
 @app.route('/orders/<path:filename>')
-def custom_static_orders(filename): return send_file(os.path.join(SAVE_DIR, filename))
+def custom_static_orders(filename):
+    if not filename.lower().endswith(('.png','.jpg','.jpeg','.webp')):
+        return 'Access denied', 403
+    return send_from_directory(SAVE_DIR, filename)
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 8080))

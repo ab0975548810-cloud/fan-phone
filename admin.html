@@ -96,7 +96,22 @@
         .admin-sticker-item { border: 1px solid #eee; border-radius: 6px; padding: 5px; cursor: pointer; display: flex; justify-content: center; align-items: center; aspect-ratio: 1; transition: 0.1s; }
         .admin-sticker-item:hover { border-color: var(--primary-color); background: var(--primary-light); }
         .admin-sticker-item img { max-width: 100%; max-height: 100%; object-fit: contain; }
-    </style>
+    
+        /* Pink/white production UI polish */
+        body{background:#fff8fb;}
+        .sidebar{background:linear-gradient(180deg,#fff,#fff8fb);}
+        .logo-area{font-size:21px;}
+        .top-header{background:rgba(255,255,255,.96);backdrop-filter:blur(12px);}
+        .panel{border-color:#f6e5eb;border-radius:18px;box-shadow:0 10px 28px rgba(190,90,120,.07);}
+        .el-btn{border-radius:999px;padding:9px 16px;}
+        .el-btn.edit{background:#ff8daf;}
+        .el-table th{background:#fff1f6;}
+        .asset-card{border-radius:16px;background:#fffafb;}
+        .modal-box{border-radius:22px;}
+        .modal-header{background:linear-gradient(90deg,#fff0f5,#ffe5ee);}
+        .form-control{border-radius:12px;background:#fffdfd;}
+        @media(max-width:850px){.sidebar{width:78px}.logo-area{font-size:0}.logo-area i{font-size:24px;margin:0}.menu-item{padding:16px 20px;font-size:0}.menu-item i{font-size:20px}.content-area{padding:14px}.panel{padding:14px}.modal-box{width:94vw!important}.el-table{font-size:12px}}
+</style>
 </head>
 <body>
     <div class="sidebar">
@@ -142,7 +157,7 @@
                 <h2 class="page-title">手機殼材質 (參數與線圖設定)</h2>
                 <div class="panel">
                     <button class="el-btn" style="margin-bottom: 20px;" onclick="openStyleModal()"><i class="fa-solid fa-plus"></i> 新增材質</button>
-                    <table class="el-table"><thead><tr><th width="50">序號</th><th>材質名稱</th><th>顏色庫</th><th width="160">操作</th></tr></thead><tbody id="style-table-body"></tbody></table>
+                    <table class="el-table"><thead><tr><th width="50">序號</th><th>材質名稱</th><th>售價</th><th>顏色庫</th><th width="160">操作</th></tr></thead><tbody id="style-table-body"></tbody></table>
                 </div>
             </div>
             
@@ -183,6 +198,7 @@
             <div class="modal-body">
                 <input type="hidden" id="edit-style-id">
                 <div class="form-group"><label>材質名稱 (例如: 撞色磁吸殼)</label><input type="text" id="input-style-name" class="form-control"></div>
+                <div class="form-group"><label>售價 (NT$)</label><input type="number" id="input-style-price" class="form-control" value="390" min="1"></div>
                 <div class="form-group"><label>材質顏色支援</label><div style="display:flex; gap:10px;"><input type="text" id="temp-color-input" class="form-control" placeholder="輸入顏色 (如: 鈦金屬)" style="flex:1;"><button class="el-btn outline" onclick="addColorTag()">加入顏色</button></div><div class="color-tags-container" id="color-tags-container"></div></div>
                 <h4 style="margin-top: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; color:var(--primary-color);">圖檔上傳設定</h4>
                 <div class="form-row">
@@ -319,9 +335,9 @@
     function saveModel() { const brand = document.getElementById('input-model-brand').value; const name = document.getElementById('input-model-name').value.trim(); const id = document.getElementById('edit-model-id').value; if(!name) return alert("請填寫顯示名稱"); if(id) { const m = shopData.models.find(x => x.id === id); m.brand = brand; m.name = name; } else { shopData.models.push({ id: 'm_' + new Date().getTime(), brand, name, status: true }); } syncShopData(); renderModels(); closeModal('model-modal'); }
     function deleteModel(id) { if(confirm('刪除型號？')) { shopData.models = shopData.models.filter(m => m.id !== id); syncShopData(); renderModels(); } }
 
-    function renderStyles() { const tbody = document.getElementById('style-table-body'); tbody.innerHTML = ''; shopData.styles.forEach((style, idx) => { let colorHtml = (style.colors || []).map(c => `<span class="color-tag" style="display:inline-block; margin-right:4px;">${c}</span>`).join(''); if(!colorHtml) colorHtml = '<span style="color:#999;">無指定</span>'; tbody.innerHTML += `<tr><td>${idx + 1}</td><td style="font-weight:bold;">${style.name}</td><td>${colorHtml}</td><td><button class="el-btn edit" onclick="openStyleModal('${style.id}')"><i class="fa-solid fa-pen"></i> 編輯參數</button><button class="el-btn danger" onclick="deleteStyle('${style.id}')"><i class="fa-solid fa-trash"></i></button></td></tr>`; }); }
-    function openStyleModal(id = '') { document.getElementById('style-modal-title').innerText = id ? '編輯材質' : '新增材質'; document.getElementById('edit-style-id').value = id; tempColors = []; if(id) { const s = shopData.styles.find(x => x.id === id); document.getElementById('input-style-name').value = s.name || ''; tempColors = [...(s.colors || [])]; setPreview('mask', s.mask_img); setPreview('line', s.line_img); document.getElementById('input-style-x').value = s.print_x || 0; document.getElementById('input-style-y').value = s.print_y || 0; document.getElementById('input-style-w').value = s.print_w || 80; document.getElementById('input-style-h').value = s.print_h || 160; } else { document.getElementById('input-style-name').value = ''; setPreview('mask',''); setPreview('line',''); document.getElementById('input-style-x').value = 0; document.getElementById('input-style-y').value = 0; document.getElementById('input-style-w').value = 80; document.getElementById('input-style-h').value = 160; } renderColorTags(); openModal('style-modal'); }
-    function saveStyle() { const oldId = document.getElementById('edit-style-id').value; const name = document.getElementById('input-style-name').value.trim(); if(!name) return alert("請填寫材質名稱"); const styleData = { id: oldId || 'style_' + new Date().getTime(), name: name, colors: [...tempColors], mask_img: document.getElementById('saved-mask-url').value, line_img: document.getElementById('saved-line-url').value, print_x: parseFloat(document.getElementById('input-style-x').value), print_y: parseFloat(document.getElementById('input-style-y').value), print_w: parseFloat(document.getElementById('input-style-w').value), print_h: parseFloat(document.getElementById('input-style-h').value), status: true }; if(oldId) { const idx = shopData.styles.findIndex(x => x.id === oldId); styleData.status = shopData.styles[idx].status; shopData.styles[idx] = styleData; } else { shopData.styles.push(styleData); } syncShopData(); renderStyles(); closeModal('style-modal'); }
+    function renderStyles() { const tbody = document.getElementById('style-table-body'); tbody.innerHTML = ''; shopData.styles.forEach((style, idx) => { let colorHtml = (style.colors || []).map(c => `<span class="color-tag" style="display:inline-block; margin-right:4px;">${c}</span>`).join(''); if(!colorHtml) colorHtml = '<span style="color:#999;">無指定</span>'; tbody.innerHTML += `<tr><td>${idx + 1}</td><td style="font-weight:bold;">${style.name}</td><td style="font-weight:900;color:var(--primary-color);">NT$ ${parseInt(style.price)||390}</td><td>${colorHtml}</td><td><button class="el-btn edit" onclick="openStyleModal('${style.id}')"><i class="fa-solid fa-pen"></i> 編輯</button><button class="el-btn danger" onclick="deleteStyle('${style.id}')"><i class="fa-solid fa-trash"></i></button></td></tr>`; }); }
+    function openStyleModal(id = '') { document.getElementById('style-modal-title').innerText = id ? '編輯材質' : '新增材質'; document.getElementById('edit-style-id').value = id; tempColors = []; if(id) { const s = shopData.styles.find(x => x.id === id); document.getElementById('input-style-name').value = s.name || ''; document.getElementById('input-style-price').value = parseInt(s.price) || 390; tempColors = [...(s.colors || [])]; setPreview('mask', s.mask_img); setPreview('line', s.line_img); document.getElementById('input-style-x').value = s.print_x || 0; document.getElementById('input-style-y').value = s.print_y || 0; document.getElementById('input-style-w').value = s.print_w || 80; document.getElementById('input-style-h').value = s.print_h || 160; } else { document.getElementById('input-style-name').value = ''; document.getElementById('input-style-price').value = 390; setPreview('mask',''); setPreview('line',''); document.getElementById('input-style-x').value = 0; document.getElementById('input-style-y').value = 0; document.getElementById('input-style-w').value = 80; document.getElementById('input-style-h').value = 160; } renderColorTags(); openModal('style-modal'); }
+    function saveStyle() { const oldId = document.getElementById('edit-style-id').value; const name = document.getElementById('input-style-name').value.trim(); if(!name) return alert("請填寫材質名稱"); const styleData = { id: oldId || 'style_' + new Date().getTime(), name: name, price: parseInt(document.getElementById('input-style-price').value) || 390, colors: [...tempColors], mask_img: document.getElementById('saved-mask-url').value, line_img: document.getElementById('saved-line-url').value, print_x: parseFloat(document.getElementById('input-style-x').value), print_y: parseFloat(document.getElementById('input-style-y').value), print_w: parseFloat(document.getElementById('input-style-w').value), print_h: parseFloat(document.getElementById('input-style-h').value), status: true }; if(oldId) { const idx = shopData.styles.findIndex(x => x.id === oldId); styleData.status = shopData.styles[idx].status; shopData.styles[idx] = styleData; } else { shopData.styles.push(styleData); } syncShopData(); renderStyles(); closeModal('style-modal'); }
     function deleteStyle(id) { if(confirm('刪除材質？')) { shopData.styles = shopData.styles.filter(s => s.id !== id); syncShopData(); renderStyles(); } }
     function addColorTag() { const v = document.getElementById('temp-color-input').value.trim(); if(v && !tempColors.includes(v)) { tempColors.push(v); renderColorTags(); document.getElementById('temp-color-input').value = ''; } }
     function renderColorTags() { document.getElementById('color-tags-container').innerHTML = tempColors.map((c,i) => `<div class="color-tag">${c} <i class="fa-solid fa-xmark" onclick="tempColors.splice(${i},1);renderColorTags()"></i></div>`).join(''); }
