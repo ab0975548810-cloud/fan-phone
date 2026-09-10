@@ -299,7 +299,7 @@
         renderBrands(); renderModels(); renderStyles(); 
         renderAssetTabs(); renderAssets();
         renderTemplateTabs(); renderTemplates();
-        setInterval(() => { if(!document.hidden) refreshOrders(); }, 8000);
+        setInterval(() => { if(!document.hidden) refreshOrders(); }, 20000);
     };
 
     function switchMenu(viewId) {
@@ -321,21 +321,25 @@
     async function syncTemplates() { await fetch('/api/admin/save_templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(templatesData) }); }
 
     async function refreshOrders(){
+        const tbody = document.getElementById('order-table-body');
         try{
             const res = await fetch('/api/admin/get_orders?ts=' + Date.now(), { cache: 'no-store' });
-            if(!res.ok) throw new Error('HTTP ' + res.status);
-            const data = await res.json();
+            let data = {};
+            try { data = await res.json(); } catch(e) {}
+            if(!res.ok || data.status === 'error') throw new Error(data.msg || ('HTTP ' + res.status));
             renderOrders(data.data || []);
         }catch(e){
             console.error('refreshOrders', e);
-            renderOrders([]);
+            tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:30px;color:#e94c61;font-weight:bold;">訂單讀取失敗：${escapeHtmlAdmin(e.message || '未知錯誤')}<br><span style="font-size:12px;color:#999;font-weight:normal;">請檢查 Supabase / Zeabur 環境設定，不再把錯誤偽裝成「沒有訂單」。</span></td></tr>`;
         }
     }
+
+    function escapeHtmlAdmin(v){ return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
     function renderOrders(orders) {
         const tbody = document.getElementById('order-table-body'); tbody.innerHTML = '';
         if(orders.length === 0) { tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:30px; color:#999;">目前沒有訂單</td></tr>'; return; }
-        orders.forEach(o => { tbody.innerHTML += `<tr><td style="font-weight:bold;">${o.order_id}<br><span style="font-size:12px;color:#888;font-weight:normal;">${o.customer_name}</span></td><td><div style="font-size:12px; color:#888;">型號:</div><div>${o.model}</div><div style="font-size:12px; color:#888; margin-top:4px;">材質:</div><div>${o.style}</div></td><td><img src="${o.mockup_url}" style="height:80px; border-radius:6px; border:1px solid #eee;" loading="lazy"></td><td><span style="background:#fff1f0; color:#ff4d4f; padding:4px 10px; border-radius:12px; font-size:12px; font-weight:bold;">${o.status}</span></td><td><a href="${o.print_url}" download="${o.order_id}_print.png" class="el-btn outline" style="text-decoration:none;"><i class="fa-solid fa-download"></i> 下載生產圖</a></td></tr>`; });
+        orders.forEach(o => { const total = Number(o.total || ((o.price || 0) * (o.quantity || 1))); tbody.innerHTML += `<tr><td style="font-weight:bold;">${escapeHtmlAdmin(o.order_id)}<br><span style="font-size:12px;color:#888;font-weight:normal;">${escapeHtmlAdmin(o.customer_name)}</span></td><td><div style="font-size:12px; color:#888;">型號:</div><div>${escapeHtmlAdmin(o.model)}</div><div style="font-size:12px; color:#888; margin-top:4px;">材質:</div><div>${escapeHtmlAdmin(o.style)}</div><div style="font-size:12px;color:#888;margin-top:6px;">${escapeHtmlAdmin(o.payment_method || '')} ・ ${o.quantity || 1} 件 ・ NT$ ${total.toLocaleString()}</div></td><td>${o.mockup_url ? `<img src="${o.mockup_url}" style="height:80px;border-radius:6px;border:1px solid #eee;" loading="lazy">` : '<span style="color:#aaa">無預覽</span>'}</td><td><span style="background:#fff1f0; color:#ff4d4f; padding:4px 10px; border-radius:12px; font-size:12px; font-weight:bold;">${escapeHtmlAdmin(o.status)}</span></td><td>${o.print_url ? `<a href="${o.print_url}" target="_blank" class="el-btn outline" style="text-decoration:none;"><i class="fa-solid fa-download"></i> 下載生產圖</a>` : '<span style="color:#aaa">無檔案</span>'}</td></tr>`; });
     }
 
     /* === 品牌/型號/材質 (維持不變) === */
