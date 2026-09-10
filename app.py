@@ -105,6 +105,8 @@ def create_order():
         model_name = data.get('model_name', 'Unknown')
         style_name = data.get('style_name', 'Unknown')
         price = int(data.get('price') or 390)
+        quantity = max(1, min(99, int(data.get('quantity') or 1)))
+        total = price * quantity
         customer_name = data.get('customer_name', '未提供')
         customer_phone = data.get('customer_phone', '未提供')
         address = data.get('address', '未提供')
@@ -117,7 +119,7 @@ def create_order():
         with open(os.path.join(SAVE_DIR, f"{order_id}_mockup.png"), 'wb') as f: f.write(mockup_data)
             
         order_info = {
-            "order_id": order_id, "model": model_name, "style": style_name, "price": price,
+            "order_id": order_id, "model": model_name, "style": style_name, "price": price, "quantity": quantity, "total": total,
             "customer_name": customer_name, "customer_phone": customer_phone, "address": address, "payment_method": payment_method,
             "status": "待處理", "time": timestamp,
             "design_json": data.get("design_json"),
