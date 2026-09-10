@@ -140,7 +140,9 @@ def admin_get_orders():
             if filename.endswith("_info.json"):
                 with open(os.path.join(SAVE_DIR, filename), 'r', encoding='utf-8') as f: orders.append(json.load(f))
         orders.sort(key=lambda x: x.get('time', 0), reverse=True)
-        return jsonify({"status": "success", "data": orders})
+        resp = jsonify({"status": "success", "data": orders})
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        return resp
     except Exception as e: return jsonify({"status": "error", "msg": str(e)}), 500
 
 # === 後台管理介面 ===

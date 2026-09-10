@@ -129,7 +129,7 @@
         <div class="content-area">
             
             <div id="view-orders" class="view-section active">
-                <h2 class="page-title">訂單管理</h2>
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;"><h2 class="page-title" style="margin-bottom:20px;">訂單管理</h2><button class="el-btn outline" onclick="refreshOrders()"><i class="fa-solid fa-rotate"></i> 重新整理</button></div>
                 <div class="panel">
                     <table class="el-table">
                         <thead><tr><th>訂單編號</th><th>定制資訊 (型號/材質)</th><th>效果預覽圖</th><th>狀態</th><th width="150">操作</th></tr></thead>
@@ -294,11 +294,12 @@
         try { const res = await fetch('/api/shop_data'); if(res.ok) shopData = (await res.json()).data; } catch(e){}
         try { const res = await fetch('/api/assets'); if(res.ok) assetsData = (await res.json()).data; } catch(e){}
         try { const res = await fetch('/api/templates'); if(res.ok) templatesData = (await res.json()).data; } catch(e){}
-        try { const res = await fetch('/api/admin/get_orders'); if(res.ok) renderOrders((await res.json()).data || []); } catch(e){ renderOrders([]); }
+        await refreshOrders();
         
         renderBrands(); renderModels(); renderStyles(); 
         renderAssetTabs(); renderAssets();
         renderTemplateTabs(); renderTemplates();
+        setInterval(() => { if(!document.hidden) refreshOrders(); }, 8000);
     };
 
     function switchMenu(viewId) {
@@ -306,6 +307,7 @@
         event.currentTarget.classList.add('active');
         document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
         document.getElementById('view-' + viewId).classList.add('active');
+        if(viewId === 'orders') refreshOrders();
     }
     function switchTab(showId, hideId) {
         document.querySelectorAll('.panel .tabs:first-child .tab').forEach(el => el.classList.remove('active'));
@@ -317,6 +319,18 @@
     function closeModal(id) { document.getElementById(id).classList.remove('active'); }
     async function syncShopData() { await fetch('/api/admin/save_shop_data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(shopData) }); }
     async function syncTemplates() { await fetch('/api/admin/save_templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(templatesData) }); }
+
+    async function refreshOrders(){
+        try{
+            const res = await fetch('/api/admin/get_orders?ts=' + Date.now(), { cache: 'no-store' });
+            if(!res.ok) throw new Error('HTTP ' + res.status);
+            const data = await res.json();
+            renderOrders(data.data || []);
+        }catch(e){
+            console.error('refreshOrders', e);
+            renderOrders([]);
+        }
+    }
 
     function renderOrders(orders) {
         const tbody = document.getElementById('order-table-body'); tbody.innerHTML = '';
