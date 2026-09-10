@@ -44,8 +44,14 @@ SUPABASE_PRIVATE_BUCKET = os.environ.get('SUPABASE_PRIVATE_BUCKET', 'case-privat
 USE_SUPABASE = bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY and create_client)
 SUPABASE = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) if USE_SUPABASE else None
 
-REMOVEBG_API_KEY = os.environ.get('REMOVEBG_API_KEY', '').strip()
-REMOVEBG_ENDPOINT = os.environ.get('REMOVEBG_ENDPOINT', 'https://api.remove.bg/v1.0/removebg').strip()
+# === Self-hosted AI background removal (Runpod Serverless worker) ===
+RUNPOD_API_KEY = os.environ.get('RUNPOD_API_KEY', '').strip()
+RUNPOD_ENDPOINT_ID = os.environ.get('RUNPOD_ENDPOINT_ID', '').strip()
+RUNPOD_API_BASE = os.environ.get('RUNPOD_API_BASE', 'https://api.runpod.ai/v2').strip().rstrip('/')
+AI_MODEL_NAME = os.environ.get('AI_MODEL_NAME', 'ZhengPeng7/BiRefNet').strip() or 'ZhengPeng7/BiRefNet'
+AI_REMOVE_BG_TIMEOUT = max(30, min(180, int(os.environ.get('AI_REMOVE_BG_TIMEOUT', '120') or 120)))
+AI_MAX_INPUT_BYTES = 6 * 1024 * 1024
+AI_ENABLED = bool(RUNPOD_API_KEY and RUNPOD_ENDPOINT_ID and requests)
 
 DEFAULT_SHOP_DATA = {
     'brands': ['Apple', 'Samsung', 'Google', 'OPPO'],
@@ -225,7 +231,9 @@ def api_health():
     return no_cache_json({
         'status': 'success',
         'persistence': 'supabase' if USE_SUPABASE else 'local',
-        'ai_background_removal': bool(REMOVEBG_API_KEY)
+        'ai_background_removal': AI_ENABLED,
+        'ai_provider': 'self-hosted-runpod' if AI_ENABLED else 'not-configured',
+        'ai_model': AI_MODEL_NAME if AI_ENABLED else ''
     })
 
 
@@ -246,34 +254,86 @@ def get_templates():
 
 @app.route('/api/ai/remove-background', methods=['POST'])
 def ai_remove_background():
-    if not REMOVEBG_API_KEY:
-        return no_cache_json({'status':'error','code':'AI_NOT_CONFIGURED','msg':'AI 去背尚未設定 API Key'}, 503)
-    if requests is None:
-        return no_cache_json({'status':'error','msg':'伺服器缺少 requests 套件'}, 500)
+    if not AI_ENABLED:
+        return no_cache_json({
+            'status':'error',
+            'code':'AI_NOT_CONFIGURED',
+            'msg':'本福丸自架 AI 尚未連線，請先設定 RUNPOD_ENDPOINT_ID 與 RUNPOD_API_KEY'
+        }, 503)
+
     image = request.files.get('image')
     if not image or not image.filename:
         return no_cache_json({'status':'error','msg':'沒有收到圖片'}, 400)
-    if (image.mimetype or '').lower() not in ('image/png','image/jpeg','image/webp'):
+
+    mime = (image.mimetype or '').lower()
+    if mime not in ('image/png','image/jpeg','image/webp'):
         return no_cache_json({'status':'error','msg':'AI 去背只接受 PNG / JPG / WEBP'}, 400)
+
     raw = image.read()
-    if not raw or len(raw) > 10 * 1024 * 1024:
-        return no_cache_json({'status':'error','msg':'圖片需小於 10MB'}, 400)
+    if not raw:
+        return no_cache_json({'status':'error','msg':'圖片內容是空的'}, 400)
+    if len(raw) > AI_MAX_INPUT_BYTES:
+        return no_cache_json({'status':'error','msg':'AI 處理圖片需小於 6MB，請重新選擇圖片'}, 400)
+
     try:
+        payload = {
+            'input': {
+                'image_base64': base64.b64encode(raw).decode('ascii'),
+                'mime_type': mime,
+                'max_output_edge': 1800,
+            }
+        }
+        wait_ms = min(300000, max(1000, AI_REMOVE_BG_TIMEOUT * 1000 - 5000))
+        endpoint = f'{RUNPOD_API_BASE}/{RUNPOD_ENDPOINT_ID}/runsync?wait={wait_ms}'
         r = requests.post(
-            REMOVEBG_ENDPOINT,
-            files={'image_file': (image.filename, raw, image.mimetype)},
-            data={'size':'auto','format':'png'},
-            headers={'X-Api-Key': REMOVEBG_API_KEY},
-            timeout=75,
+            endpoint,
+            headers={
+                'Authorization': f'Bearer {RUNPOD_API_KEY}',
+                'Content-Type': 'application/json',
+            },
+            json=payload,
+            timeout=AI_REMOVE_BG_TIMEOUT,
         )
         if r.status_code != 200:
-            detail = r.text[:300] if r.text else f'HTTP {r.status_code}'
-            return no_cache_json({'status':'error','msg':f'AI 去背失敗：{detail}'}, 502)
-        resp = Response(r.content, mimetype='image/png')
+            detail = (r.text or '')[:500]
+            return no_cache_json({'status':'error','msg':f'自架 AI 服務回應失敗（HTTP {r.status_code}）：{detail}'}, 502)
+
+        try:
+            result = r.json()
+        except Exception:
+            return no_cache_json({'status':'error','msg':'自架 AI 回傳格式錯誤'}, 502)
+
+        if result.get('status') != 'COMPLETED':
+            detail = result.get('error') or result.get('status') or 'unknown'
+            return no_cache_json({'status':'error','msg':f'自架 AI 工作未完成：{detail}'}, 502)
+
+        output = result.get('output') or {}
+        if not isinstance(output, dict):
+            return no_cache_json({'status':'error','msg':'自架 AI 沒有回傳有效結果'}, 502)
+        if output.get('status') == 'error':
+            return no_cache_json({'status':'error','msg':f"自架 AI 失敗：{output.get('error') or 'unknown error'}"}, 502)
+
+        encoded = output.get('image_base64') or ''
+        if not encoded:
+            return no_cache_json({'status':'error','msg':'自架 AI 沒有回傳去背圖片'}, 502)
+        try:
+            png = base64.b64decode(encoded, validate=True)
+        except Exception:
+            return no_cache_json({'status':'error','msg':'自架 AI 圖片資料無法解析'}, 502)
+        if not png.startswith(b'\x89PNG\r\n\x1a\n'):
+            return no_cache_json({'status':'error','msg':'自架 AI 回傳的不是 PNG'}, 502)
+        if len(png) > 14 * 1024 * 1024:
+            return no_cache_json({'status':'error','msg':'自架 AI 回傳圖片過大'}, 502)
+
+        resp = Response(png, mimetype='image/png')
         resp.headers['Cache-Control'] = 'no-store'
+        resp.headers['X-AI-Provider'] = 'self-hosted-runpod'
+        resp.headers['X-AI-Model'] = str(output.get('model') or AI_MODEL_NAME)[:120]
         return resp
+    except requests.Timeout:
+        return no_cache_json({'status':'error','msg':'自架 AI 啟動或處理逾時，請再試一次'}, 504)
     except requests.RequestException as exc:
-        return no_cache_json({'status':'error','msg':f'AI 去背連線失敗：{exc}'}, 502)
+        return no_cache_json({'status':'error','msg':f'自架 AI 連線失敗：{exc}'}, 502)
 
 
 @app.route('/api/create_order', methods=['POST'])

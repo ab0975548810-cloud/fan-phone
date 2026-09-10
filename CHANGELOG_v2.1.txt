@@ -1,0 +1,9 @@
+v2.1 changes
+============
+- Preview: customer inspection now displays 3x PNG instead of 1x mockup.
+- Cart: nav always opens cart page; empty cart has explicit UI and start-design CTA.
+- AI: removed remove.bg dependency from app.py.
+- AI: added Runpod Serverless proxy configuration.
+- AI: browser sends max-1600px JPEG to reduce payload.
+- AI: SHA-256 + IndexedDB cache for up to 10 recent background-removal results.
+- AI: own worker bundle uses ZhengPeng7/BiRefNet.
