@@ -148,7 +148,7 @@
                     </div>
                     <div id="model-tab" style="display: none;">
                         <button class="el-btn" style="margin-bottom: 20px;" onclick="openModelModal()"><i class="fa-solid fa-plus"></i> 新增型號</button>
-                        <table class="el-table"><thead><tr><th width="50">序號</th><th>品牌</th><th>顯示名稱</th><th width="160">操作</th></tr></thead><tbody id="model-table-body"></tbody></table>
+                        <table class="el-table"><thead><tr><th width="50">序號</th><th>品牌</th><th>顯示名稱</th><th>型號圖檔</th><th width="160">操作</th></tr></thead><tbody id="model-table-body"></tbody></table>
                     </div>
                 </div>
             </div>
@@ -190,7 +190,7 @@
 
     <!-- 一般彈窗區 -->
     <div class="modal-overlay" id="brand-modal"><div class="modal-box"><div class="modal-header"><span id="brand-modal-title">新增品牌</span> <button class="el-btn danger" style="padding:4px 8px;" onclick="closeModal('brand-modal')"><i class="fa-solid fa-xmark"></i></button></div><div class="modal-body"><input type="hidden" id="edit-brand-old-name"><div class="form-group"><label>品牌名稱</label><input type="text" id="input-brand-name" class="form-control"></div></div><div class="modal-footer"><button class="el-btn danger" onclick="closeModal('brand-modal')">取消</button> <button class="el-btn" onclick="saveBrand()">儲存</button></div></div></div>
-    <div class="modal-overlay" id="model-modal"><div class="modal-box"><div class="modal-header"><span id="model-modal-title">新增型號</span> <button class="el-btn danger" style="padding:4px 8px;" onclick="closeModal('model-modal')"><i class="fa-solid fa-xmark"></i></button></div><div class="modal-body"><input type="hidden" id="edit-model-id"><div class="form-group"><label>選擇品牌</label><select id="input-model-brand" class="form-control"></select></div><div class="form-group"><label>顯示名稱 (例: iPhone 18)</label><input type="text" id="input-model-name" class="form-control"></div></div><div class="modal-footer"><button class="el-btn danger" onclick="closeModal('model-modal')">取消</button> <button class="el-btn" onclick="saveModel()">儲存</button></div></div></div>
+    <div class="modal-overlay" id="model-modal"><div class="modal-box" style="width:720px"><div class="modal-header"><span id="model-modal-title">新增型號</span> <button class="el-btn danger" style="padding:4px 8px;" onclick="closeModal('model-modal')"><i class="fa-solid fa-xmark"></i></button></div><div class="modal-body"><input type="hidden" id="edit-model-id"><div class="form-row"><div class="form-group"><label>選擇品牌</label><select id="input-model-brand" class="form-control"></select></div><div class="form-group"><label>顯示名稱 (例: iPhone 18)</label><input type="text" id="input-model-name" class="form-control"></div></div><h4 style="color:var(--primary-color);border-bottom:1px solid #eee;padding-bottom:6px">此型號專屬圖檔</h4><div class="form-row"><div class="form-group"><label>預覽遮罩圖</label><div class="upload-preview-box" onclick="document.getElementById('upload-model-mask').click()"><img id="preview-model-mask" src=""><div class="placeholder" id="placeholder-model-mask"><i class="fa-solid fa-upload"></i> 上傳此型號遮罩</div></div><input type="file" id="upload-model-mask" style="display:none" accept="image/png" onchange="handleModelImageUpload(event,'mask')"><input type="hidden" id="saved-model-mask-url"></div><div class="form-group"><label>實體打印圖 / 刀模圖</label><div class="upload-preview-box" onclick="document.getElementById('upload-model-line').click()"><img id="preview-model-line" src=""><div class="placeholder" id="placeholder-model-line"><i class="fa-solid fa-upload"></i> 上傳此型號打印圖</div></div><input type="file" id="upload-model-line" style="display:none" accept="image/png" onchange="handleModelImageUpload(event,'line')"><input type="hidden" id="saved-model-line-url"></div></div><h4 style="color:var(--primary-color);border-bottom:1px solid #eee;padding-bottom:6px">此型號打印位置 / 尺寸（mm）</h4><div class="form-row"><div class="form-group"><label>起始 X</label><input type="number" id="input-model-x" class="form-control" value="0" step="0.1"></div><div class="form-group"><label>起始 Y</label><input type="number" id="input-model-y" class="form-control" value="0" step="0.1"></div><div class="form-group"><label>寬度 W</label><input type="number" id="input-model-w" class="form-control" value="80" step="0.1"></div><div class="form-group"><label>高度 H</label><input type="number" id="input-model-h" class="form-control" value="160" step="0.1"></div></div><div style="font-size:12px;color:#888">不同手機型號請各自上傳遮罩 / 打印圖並設定尺寸，前台會優先使用這裡的資料。</div></div><div class="modal-footer"><button class="el-btn danger" onclick="closeModal('model-modal')">取消</button> <button class="el-btn" onclick="saveModel()">儲存型號</button></div></div></div>
     
     <div class="modal-overlay" id="style-modal">
         <div class="modal-box" style="width: 650px;">
@@ -270,7 +270,7 @@
                 <input type="hidden" id="saved-tpl-bg-url">
                 
                 <div style="font-size: 12px; color: #888; text-align: center; margin-top: 10px;">
-                    藍色虛線框為「客人照片插槽」，其他貼紙或文字會跟底圖一起被存為不可移動的模板！
+                    藍色虛線框是客人照片插槽；貼紙與文字會保留為可編輯元素，客人套用模板後仍可移動、縮放、刪除或更換照片。
                 </div>
             </div>
             <div class="modal-footer"><button class="el-btn danger" onclick="closeModal('template-modal')">取消</button> <button class="el-btn" onclick="saveVisualTemplate()">儲存並生成模板圖</button></div>
@@ -330,9 +330,11 @@
     function saveBrand() { const oldName = document.getElementById('edit-brand-old-name').value; const newName = document.getElementById('input-brand-name').value.trim(); if(!newName) return alert("請輸入品牌"); if(oldName) { const idx = shopData.brands.indexOf(oldName); if(idx !== -1) shopData.brands[idx] = newName; shopData.models.forEach(m => { if(m.brand === oldName) m.brand = newName; }); } else { if(shopData.brands.includes(newName)) return alert("品牌已存在"); shopData.brands.push(newName); } syncShopData(); renderBrands(); renderModels(); closeModal('brand-modal'); }
     function deleteBrand(b) { if(confirm('刪除品牌？')) { shopData.brands = shopData.brands.filter(x => x !== b); syncShopData(); renderBrands(); } }
 
-    function renderModels() { const tbody = document.getElementById('model-table-body'); tbody.innerHTML = ''; shopData.models.forEach((model, idx) => { tbody.innerHTML += `<tr><td>${idx + 1}</td><td><span style="background:var(--primary-light); color:var(--primary-color); padding:4px 8px; border-radius:4px; font-size:12px;">${model.brand}</span></td><td style="font-weight:bold;">${model.name}</td><td><button class="el-btn edit" onclick="openModelModal('${model.id}')"><i class="fa-solid fa-pen"></i></button><button class="el-btn danger" onclick="deleteModel('${model.id}')"><i class="fa-solid fa-trash"></i></button></td></tr>`; }); }
-    function openModelModal(id = '') { document.getElementById('input-model-brand').innerHTML = shopData.brands.map(b => `<option value="${b}">${b}</option>`).join(''); document.getElementById('model-modal-title').innerText = id ? '編輯型號' : '新增型號'; document.getElementById('edit-model-id').value = id; if(id) { const m = shopData.models.find(x => x.id === id); document.getElementById('input-model-brand').value = m.brand; document.getElementById('input-model-name').value = m.name; } else { document.getElementById('input-model-name').value = ''; } openModal('model-modal'); }
-    function saveModel() { const brand = document.getElementById('input-model-brand').value; const name = document.getElementById('input-model-name').value.trim(); const id = document.getElementById('edit-model-id').value; if(!name) return alert("請填寫顯示名稱"); if(id) { const m = shopData.models.find(x => x.id === id); m.brand = brand; m.name = name; } else { shopData.models.push({ id: 'm_' + new Date().getTime(), brand, name, status: true }); } syncShopData(); renderModels(); closeModal('model-modal'); }
+    function renderModels() { const tbody = document.getElementById('model-table-body'); tbody.innerHTML = ''; shopData.models.forEach((model, idx) => { const ready=(model.preview_mask_img||model.mask_img)?'<span style="color:#67c23a;font-weight:bold">✓ 已設定</span>':'<span style="color:#999">未設定</span>'; tbody.innerHTML += `<tr><td>${idx + 1}</td><td><span style="background:var(--primary-light); color:var(--primary-color); padding:4px 8px; border-radius:4px; font-size:12px;">${model.brand}</span></td><td style="font-weight:bold;">${model.name}</td><td>${ready}</td><td><button class="el-btn edit" onclick="openModelModal('${model.id}')"><i class="fa-solid fa-pen"></i></button><button class="el-btn danger" onclick="deleteModel('${model.id}')"><i class="fa-solid fa-trash"></i></button></td></tr>`; }); }
+    function setModelPreview(type,url){ const img=document.getElementById(`preview-model-${type}`),ph=document.getElementById(`placeholder-model-${type}`),hidden=document.getElementById(`saved-model-${type}-url`); hidden.value=url||''; if(url){img.src=url;img.style.display='block';ph.style.display='none'}else{img.style.display='none';ph.style.display='block'} }
+    async function handleModelImageUpload(event,type){const file=event.target.files[0];if(!file)return;const fd=new FormData();fd.append('file',file);fd.append('type','material');const ph=document.getElementById(`placeholder-model-${type}`);ph.innerText='上傳中...';try{const res=await fetch('/api/admin/upload_image',{method:'POST',body:fd});const result=await res.json();if(!res.ok)throw new Error(result.msg||'上傳失敗');setModelPreview(type,result.url)}catch(e){alert('上傳失敗：'+e.message);setModelPreview(type,'')}finally{event.target.value=''} }
+    function openModelModal(id = '') { document.getElementById('input-model-brand').innerHTML = shopData.brands.map(b => `<option value="${b}">${b}</option>`).join(''); document.getElementById('model-modal-title').innerText = id ? '編輯型號與專屬打印參數' : '新增型號'; document.getElementById('edit-model-id').value = id; let m=null; if(id) { m = shopData.models.find(x => x.id === id); document.getElementById('input-model-brand').value = m.brand; document.getElementById('input-model-name').value = m.name; } else { document.getElementById('input-model-name').value = ''; } setModelPreview('mask',m?.preview_mask_img||m?.mask_img||''); setModelPreview('line',m?.print_line_img||m?.line_img||''); document.getElementById('input-model-x').value=parseFloat(m?.print_x)||0; document.getElementById('input-model-y').value=parseFloat(m?.print_y)||0; document.getElementById('input-model-w').value=parseFloat(m?.print_w)||80; document.getElementById('input-model-h').value=parseFloat(m?.print_h)||160; openModal('model-modal'); }
+    function saveModel() { const brand = document.getElementById('input-model-brand').value; const name = document.getElementById('input-model-name').value.trim(); const id = document.getElementById('edit-model-id').value; if(!name) return alert('請填寫顯示名稱'); const patch={brand,name,preview_mask_img:document.getElementById('saved-model-mask-url').value,print_line_img:document.getElementById('saved-model-line-url').value,print_x:parseFloat(document.getElementById('input-model-x').value)||0,print_y:parseFloat(document.getElementById('input-model-y').value)||0,print_w:parseFloat(document.getElementById('input-model-w').value)||80,print_h:parseFloat(document.getElementById('input-model-h').value)||160,status:true}; if(id){const m=shopData.models.find(x=>x.id===id);Object.assign(m,patch);m.id=id}else{patch.id='m_'+new Date().getTime();shopData.models.push(patch)} syncShopData(); renderModels(); closeModal('model-modal'); }
     function deleteModel(id) { if(confirm('刪除型號？')) { shopData.models = shopData.models.filter(m => m.id !== id); syncShopData(); renderModels(); } }
 
     function renderStyles() { const tbody = document.getElementById('style-table-body'); tbody.innerHTML = ''; shopData.styles.forEach((style, idx) => { let colorHtml = (style.colors || []).map(c => `<span class="color-tag" style="display:inline-block; margin-right:4px;">${c}</span>`).join(''); if(!colorHtml) colorHtml = '<span style="color:#999;">無指定</span>'; tbody.innerHTML += `<tr><td>${idx + 1}</td><td style="font-weight:bold;">${style.name}</td><td style="font-weight:900;color:var(--primary-color);">NT$ ${parseInt(style.price)||390}</td><td>${colorHtml}</td><td><button class="el-btn edit" onclick="openStyleModal('${style.id}')"><i class="fa-solid fa-pen"></i> 編輯</button><button class="el-btn danger" onclick="deleteStyle('${style.id}')"><i class="fa-solid fa-trash"></i></button></td></tr>`; }); }
@@ -426,10 +428,9 @@
         if(!modelId) return;
         
         let baseW = 80, baseH = 160;
-        if(shopData.styles && shopData.styles.length > 0) {
-            baseW = parseFloat(shopData.styles[0].print_w) || 80;
-            baseH = parseFloat(shopData.styles[0].print_h) || 160;
-        }
+        const model = shopData.models.find(m => m.id === modelId);
+        if(model) { baseW = parseFloat(model.print_w) || 80; baseH = parseFloat(model.print_h) || 160; }
+        else if(shopData.styles && shopData.styles.length > 0) { baseW = parseFloat(shopData.styles[0].print_w) || 80; baseH = parseFloat(shopData.styles[0].print_h) || 160; }
         
         tplCanvasW = baseW * VISUAL_SCALE;
         tplCanvasH = baseH * VISUAL_SCALE;
@@ -483,7 +484,7 @@
                 fill: 'rgba(64, 158, 255, 0.2)', stroke: '#409EFF', strokeDashArray: [5, 5], strokeWidth: 2,
                 cornerColor: '#409EFF', cornerSize: 10, transparentCorners: false, rx: 10, ry: 10
             });
-            rect.isSlot = true; // 標記為插槽
+            rect.isSlot = true; rect.slotId = slot.id || ('slot_' + Date.now() + '_' + Math.random().toString(36).slice(2,7)); // 標記為插槽
             visualCanvas.add(rect);
             visualCanvas.bringToFront(rect);
         });
@@ -520,7 +521,7 @@
             fill: 'rgba(64, 158, 255, 0.2)', stroke: '#409EFF', strokeDashArray: [5, 5], strokeWidth: 2,
             cornerColor: '#409EFF', cornerSize: 10, transparentCorners: false, rx: 10, ry: 10
         });
-        rect.isSlot = true;
+        rect.isSlot = true; rect.slotId = 'slot_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
         visualCanvas.add(rect);
         visualCanvas.setActiveObject(rect);
         visualCanvas.bringToFront(rect);
@@ -606,7 +607,7 @@
                 const realW = obj.width * obj.scaleX;
                 const realH = obj.height * obj.scaleY;
                 extractedSlots.push({
-                    id: 'slot_' + new Date().getTime() + Math.random(),
+                    id: obj.slotId || ('slot_' + Date.now() + '_' + Math.random().toString(36).slice(2,7)),
                     x: obj.left / VISUAL_SCALE, y: obj.top / VISUAL_SCALE,
                     w: realW / VISUAL_SCALE, h: realH / VISUAL_SCALE
                 });
@@ -627,7 +628,7 @@
         visualCanvas.renderAll();
         
         // 同時把整個畫布的 Fabric 狀態存下來，方便下次編輯
-        const objectsJson = visualCanvas.toJSON(['isSlot', 'isTplBg']);
+        const objectsJson = visualCanvas.toJSON(['isSlot', 'isTplBg', 'slotId']); objectsJson.objects = (objectsJson.objects || []).filter(o => !o.isSlot);
         
         // 3. 上傳這張合成好的 Base64 成為正式的模板背景圖
         document.getElementById('template-modal-title').innerText = "上傳合成圖中，請稍候...";
