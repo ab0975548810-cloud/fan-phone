@@ -49,7 +49,10 @@ RUNPOD_API_KEY = os.environ.get('RUNPOD_API_KEY', '').strip()
 RUNPOD_ENDPOINT_ID = os.environ.get('RUNPOD_ENDPOINT_ID', '').strip()
 RUNPOD_API_BASE = os.environ.get('RUNPOD_API_BASE', 'https://api.runpod.ai/v2').strip().rstrip('/')
 AI_MODEL_NAME = os.environ.get('AI_MODEL_NAME', 'ZhengPeng7/BiRefNet').strip() or 'ZhengPeng7/BiRefNet'
-AI_REMOVE_BG_TIMEOUT = max(30, min(180, int(os.environ.get('AI_REMOVE_BG_TIMEOUT', '120') or 120)))
+AI_REMOVE_BG_TIMEOUT = max(60, min(300, int(os.environ.get('AI_REMOVE_BG_TIMEOUT', '300') or 300)))
+AI_POLL_INTERVAL = max(0.5, min(5.0, float(os.environ.get('AI_POLL_INTERVAL', '2') or 2)))
+AI_HTTP_TIMEOUT = max(5, min(30, int(os.environ.get('AI_HTTP_TIMEOUT', '15') or 15)))
+AI_RETRY_FAILED_JOB = os.environ.get('AI_RETRY_FAILED_JOB', 'true').lower() in ('1', 'true', 'yes')
 AI_MAX_INPUT_BYTES = 6 * 1024 * 1024
 AI_ENABLED = bool(RUNPOD_API_KEY and RUNPOD_ENDPOINT_ID and requests)
 
@@ -221,6 +224,120 @@ def decode_png_data_url(value, max_bytes=10 * 1024 * 1024):
     return raw
 
 
+def _runpod_headers(include_json=False):
+    headers = {'Authorization': f'Bearer {RUNPOD_API_KEY}'}
+    if include_json:
+        headers['Content-Type'] = 'application/json'
+    return headers
+
+
+def _runpod_json(resp, action):
+    if resp.status_code < 200 or resp.status_code >= 300:
+        detail = (resp.text or '').strip()[:500]
+        raise RuntimeError(f'{action}失敗（HTTP {resp.status_code}）：{detail or "沒有錯誤內容"}')
+    try:
+        data = resp.json()
+    except Exception as exc:
+        raise RuntimeError(f'{action}回傳格式錯誤') from exc
+    if not isinstance(data, dict):
+        raise RuntimeError(f'{action}回傳內容不是 JSON object')
+    return data
+
+
+def _runpod_submit(payload):
+    endpoint = f'{RUNPOD_API_BASE}/{RUNPOD_ENDPOINT_ID}/run'
+    resp = requests.post(
+        endpoint,
+        headers=_runpod_headers(include_json=True),
+        json=payload,
+        timeout=AI_HTTP_TIMEOUT,
+    )
+    data = _runpod_json(resp, 'AI 工作送出')
+    job_id = str(data.get('id') or '').strip()
+    if not job_id:
+        raise RuntimeError('AI 工作送出成功但沒有 Job ID')
+    return job_id, data
+
+
+def _runpod_status(job_id):
+    endpoint = f'{RUNPOD_API_BASE}/{RUNPOD_ENDPOINT_ID}/status/{job_id}'
+    resp = requests.get(endpoint, headers=_runpod_headers(), timeout=AI_HTTP_TIMEOUT)
+    if resp.status_code in (408, 425, 429, 500, 502, 503, 504):
+        return {
+            'status': 'TRANSIENT_HTTP',
+            '_http_status': resp.status_code,
+            '_detail': (resp.text or '')[:300],
+        }
+    return _runpod_json(resp, 'AI 狀態查詢')
+
+
+def _runpod_retry(job_id):
+    endpoint = f'{RUNPOD_API_BASE}/{RUNPOD_ENDPOINT_ID}/retry/{job_id}'
+    resp = requests.post(endpoint, headers=_runpod_headers(), timeout=AI_HTTP_TIMEOUT)
+    return _runpod_json(resp, 'AI 工作重試')
+
+
+def _runpod_cancel(job_id):
+    if not job_id:
+        return
+    try:
+        endpoint = f'{RUNPOD_API_BASE}/{RUNPOD_ENDPOINT_ID}/cancel/{job_id}'
+        requests.post(endpoint, headers=_runpod_headers(), timeout=min(AI_HTTP_TIMEOUT, 8))
+    except Exception as exc:
+        print('runpod cancel warning:', repr(exc))
+
+
+def _runpod_wait_for_result(job_id, deadline):
+    retried = False
+    last_status = 'IN_QUEUE'
+    transient_errors = 0
+
+    while time.monotonic() < deadline:
+        try:
+            result = _runpod_status(job_id)
+        except (requests.Timeout, requests.ConnectionError) as exc:
+            transient_errors += 1
+            print('runpod status transient network error:', job_id, repr(exc))
+            time.sleep(min(AI_POLL_INTERVAL, max(0.1, deadline - time.monotonic())))
+            continue
+
+        status = str(result.get('status') or '').upper()
+        if status == 'TRANSIENT_HTTP':
+            transient_errors += 1
+            print('runpod status transient http:', job_id, result.get('_http_status'))
+            time.sleep(min(AI_POLL_INTERVAL, max(0.1, deadline - time.monotonic())))
+            continue
+
+        transient_errors = 0
+        last_status = status or last_status
+
+        if status == 'COMPLETED':
+            return result, retried
+
+        if status in ('FAILED', 'TIMED_OUT') and AI_RETRY_FAILED_JOB and not retried:
+            retry_result = _runpod_retry(job_id)
+            retry_status = str(retry_result.get('status') or '').upper()
+            if retry_status in ('IN_QUEUE', 'IN_PROGRESS'):
+                retried = True
+                last_status = retry_status
+                time.sleep(min(AI_POLL_INTERVAL, max(0.1, deadline - time.monotonic())))
+                continue
+
+        if status in ('FAILED', 'TIMED_OUT', 'ERROR', 'CANCELLED'):
+            detail = result.get('error') or result.get('output') or status
+            if isinstance(detail, (dict, list)):
+                detail = json.dumps(detail, ensure_ascii=False)[:500]
+            raise RuntimeError(f'AI 工作失敗（{status}）：{detail}')
+
+        if status not in ('IN_QUEUE', 'IN_PROGRESS', 'RETRY'):
+            print('runpod unknown status:', job_id, status, result)
+
+        time.sleep(min(AI_POLL_INTERVAL, max(0.1, deadline - time.monotonic())))
+
+    _runpod_cancel(job_id)
+    raise TimeoutError(f'AI 工作等候逾時（最後狀態：{last_status}）')
+
+
 @app.route('/')
 def home():
     return send_file('index.html')
@@ -233,7 +350,9 @@ def api_health():
         'persistence': 'supabase' if USE_SUPABASE else 'local',
         'ai_background_removal': AI_ENABLED,
         'ai_provider': 'self-hosted-runpod' if AI_ENABLED else 'not-configured',
-        'ai_model': AI_MODEL_NAME if AI_ENABLED else ''
+        'ai_model': AI_MODEL_NAME if AI_ENABLED else '',
+        'ai_queue_mode': 'async-poll' if AI_ENABLED else '',
+        'ai_timeout_seconds': AI_REMOVE_BG_TIMEOUT if AI_ENABLED else 0,
     })
 
 
@@ -275,6 +394,8 @@ def ai_remove_background():
     if len(raw) > AI_MAX_INPUT_BYTES:
         return no_cache_json({'status':'error','msg':'AI 處理圖片需小於 6MB，請重新選擇圖片'}, 400)
 
+    job_id = ''
+    started = time.monotonic()
     try:
         payload = {
             'input': {
@@ -283,57 +404,60 @@ def ai_remove_background():
                 'max_output_edge': 1800,
             }
         }
-        wait_ms = min(300000, max(1000, AI_REMOVE_BG_TIMEOUT * 1000 - 5000))
-        endpoint = f'{RUNPOD_API_BASE}/{RUNPOD_ENDPOINT_ID}/runsync?wait={wait_ms}'
-        r = requests.post(
-            endpoint,
-            headers={
-                'Authorization': f'Bearer {RUNPOD_API_KEY}',
-                'Content-Type': 'application/json',
-            },
-            json=payload,
-            timeout=AI_REMOVE_BG_TIMEOUT,
-        )
-        if r.status_code != 200:
-            detail = (r.text or '')[:500]
-            return no_cache_json({'status':'error','msg':f'自架 AI 服務回應失敗（HTTP {r.status_code}）：{detail}'}, 502)
-
-        try:
-            result = r.json()
-        except Exception:
-            return no_cache_json({'status':'error','msg':'自架 AI 回傳格式錯誤'}, 502)
-
-        if result.get('status') != 'COMPLETED':
-            detail = result.get('error') or result.get('status') or 'unknown'
-            return no_cache_json({'status':'error','msg':f'自架 AI 工作未完成：{detail}'}, 502)
+        job_id, submit_result = _runpod_submit(payload)
+        deadline = started + AI_REMOVE_BG_TIMEOUT
+        result, retried = _runpod_wait_for_result(job_id, deadline)
 
         output = result.get('output') or {}
         if not isinstance(output, dict):
-            return no_cache_json({'status':'error','msg':'自架 AI 沒有回傳有效結果'}, 502)
+            return no_cache_json({'status':'error','code':'AI_BAD_OUTPUT','msg':'自架 AI 沒有回傳有效結果'}, 502)
         if output.get('status') == 'error':
-            return no_cache_json({'status':'error','msg':f"自架 AI 失敗：{output.get('error') or 'unknown error'}"}, 502)
+            detail = output.get('error') or 'unknown error'
+            return no_cache_json({'status':'error','code':'AI_WORKER_ERROR','msg':f'自架 AI 失敗：{detail}'}, 502)
 
         encoded = output.get('image_base64') or ''
         if not encoded:
-            return no_cache_json({'status':'error','msg':'自架 AI 沒有回傳去背圖片'}, 502)
+            return no_cache_json({'status':'error','code':'AI_EMPTY_OUTPUT','msg':'自架 AI 沒有回傳去背圖片'}, 502)
         try:
             png = base64.b64decode(encoded, validate=True)
         except Exception:
-            return no_cache_json({'status':'error','msg':'自架 AI 圖片資料無法解析'}, 502)
+            return no_cache_json({'status':'error','code':'AI_BAD_IMAGE_DATA','msg':'自架 AI 圖片資料無法解析'}, 502)
         if not png.startswith(b'\x89PNG\r\n\x1a\n'):
-            return no_cache_json({'status':'error','msg':'自架 AI 回傳的不是 PNG'}, 502)
+            return no_cache_json({'status':'error','code':'AI_NOT_PNG','msg':'自架 AI 回傳的不是 PNG'}, 502)
         if len(png) > 14 * 1024 * 1024:
-            return no_cache_json({'status':'error','msg':'自架 AI 回傳圖片過大'}, 502)
+            return no_cache_json({'status':'error','code':'AI_OUTPUT_TOO_LARGE','msg':'自架 AI 回傳圖片過大'}, 502)
 
         resp = Response(png, mimetype='image/png')
         resp.headers['Cache-Control'] = 'no-store'
         resp.headers['X-AI-Provider'] = 'self-hosted-runpod'
         resp.headers['X-AI-Model'] = str(output.get('model') or AI_MODEL_NAME)[:120]
+        resp.headers['X-AI-Job-ID'] = job_id[:120]
+        resp.headers['X-AI-Retried'] = '1' if retried else '0'
+        if result.get('delayTime') is not None:
+            resp.headers['X-AI-Delay-Ms'] = str(result.get('delayTime'))[:30]
+        if result.get('executionTime') is not None:
+            resp.headers['X-AI-Execution-Ms'] = str(result.get('executionTime'))[:30]
         return resp
+    except TimeoutError as exc:
+        return no_cache_json({
+            'status':'error',
+            'code':'AI_TIMEOUT',
+            'job_id': job_id,
+            'msg':'AI 啟動或排隊時間較久，本次已停止以避免一直計費，請再試一次',
+            'detail':str(exc)[:300]
+        }, 504)
     except requests.Timeout:
-        return no_cache_json({'status':'error','msg':'自架 AI 啟動或處理逾時，請再試一次'}, 504)
+        _runpod_cancel(job_id)
+        return no_cache_json({'status':'error','code':'AI_NETWORK_TIMEOUT','msg':'AI 連線暫時逾時，請再試一次'}, 504)
     except requests.RequestException as exc:
-        return no_cache_json({'status':'error','msg':f'自架 AI 連線失敗：{exc}'}, 502)
+        _runpod_cancel(job_id)
+        return no_cache_json({'status':'error','code':'AI_NETWORK_ERROR','msg':f'自架 AI 連線失敗：{exc}'}, 502)
+    except RuntimeError as exc:
+        return no_cache_json({'status':'error','code':'AI_JOB_ERROR','job_id':job_id,'msg':str(exc)}, 502)
+    except Exception as exc:
+        _runpod_cancel(job_id)
+        print('ai_remove_background unexpected error:', repr(exc))
+        return no_cache_json({'status':'error','code':'AI_UNKNOWN_ERROR','msg':'AI 去背發生未預期錯誤，請再試一次'}, 500)
 
 
 @app.route('/api/create_order', methods=['POST'])
