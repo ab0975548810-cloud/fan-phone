@@ -559,11 +559,27 @@ def admin_get_orders():
         return no_cache_json({'status':'error','msg':'未登入'}, 401)
     try:
         if USE_SUPABASE:
-            rows = SUPABASE.table('orders').select('*').order('created_at', desc=True).execute().data or []
+            try:
+                limit = int(request.args.get('limit', '50') or 50)
+            except Exception:
+                limit = 50
+            limit = max(10, min(200, limit))
+            fields = 'id,customer_name,payment_method,model_name,style_name,unit_price,quantity,total,status,print_path,mockup_path,created_at_unix'
+            rows = (
+                SUPABASE.table('orders')
+                .select(fields)
+                .order('created_at_unix', desc=True)
+                .limit(limit)
+                .execute()
+                .data or []
+            )
             orders = []
             for row in rows:
+                order_id = str(row.get('id') or '')
+                print_path = row.get('print_path') or ''
+                mockup_path = row.get('mockup_path') or ''
                 orders.append({
-                    'order_id': row.get('id'),
+                    'order_id': order_id,
                     'customer_name': row.get('customer_name'),
                     'model': row.get('model_name'),
                     'style': row.get('style_name'),
@@ -573,23 +589,79 @@ def admin_get_orders():
                     'payment_method': row.get('payment_method'),
                     'status': row.get('status'),
                     'time': row.get('created_at_unix'),
-                    'design_json': row.get('design_json'),
-                    'print_url': _supabase_signed_url(row.get('print_path')) if row.get('print_path') else '',
-                    'mockup_url': _supabase_signed_url(row.get('mockup_path')) if row.get('mockup_path') else '',
+                    'has_print': bool(print_path),
+                    'has_mockup': bool(mockup_path),
+                    'print_url': url_for('admin_order_file', order_id=order_id, kind='print') if print_path else '',
+                    'mockup_url': url_for('admin_order_file', order_id=order_id, kind='preview') if mockup_path else '',
                 })
-            return no_cache_json({'status':'success','data':orders})
+            return no_cache_json({'status':'success','data':orders,'limit':limit})
 
         orders = []
         for filename in os.listdir(SAVE_DIR):
             if filename.endswith('_info.json'):
                 try:
-                    orders.append(local_load_json(os.path.join(SAVE_DIR, filename), {}))
+                    info = local_load_json(os.path.join(SAVE_DIR, filename), {})
+                    info.pop('design_json', None)
+                    orders.append(info)
                 except Exception as exc:
                     print('order read warning:', filename, exc)
         orders.sort(key=lambda x: x.get('time', 0), reverse=True)
-        return no_cache_json({'status':'success','data':orders})
+        return no_cache_json({'status':'success','data':orders[:50]})
     except Exception as exc:
         return no_cache_json({'status':'error','msg':str(exc)}, 500)
+
+
+@app.route('/api/admin/order_file/<order_id>/<kind>', methods=['GET'])
+def admin_order_file(order_id, kind):
+    if not session.get('logged_in'):
+        return no_cache_json({'status':'error','msg':'未登入'}, 401)
+    order_id = str(order_id or '').strip()
+    if not order_id or any(ch not in '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-' for ch in order_id):
+        return no_cache_json({'status':'error','msg':'訂單編號格式錯誤'}, 400)
+    if kind not in ('preview', 'print'):
+        return no_cache_json({'status':'error','msg':'圖片類型錯誤'}, 400)
+
+    try:
+        if USE_SUPABASE:
+            filename = 'preview.png' if kind == 'preview' else 'print.png'
+            storage_path = f'orders/{order_id}/{filename}'
+            raw = SUPABASE.storage.from_(SUPABASE_PRIVATE_BUCKET).download(storage_path)
+            if not raw:
+                return no_cache_json({'status':'error','msg':'找不到圖片'}, 404)
+            resp = Response(raw, mimetype='image/png')
+            resp.headers['Cache-Control'] = 'private, max-age=300'
+            resp.headers['X-Content-Type-Options'] = 'nosniff'
+            if kind == 'print':
+                resp.headers['Content-Disposition'] = f'attachment; filename="{order_id}-print.png"'
+            else:
+                resp.headers['Content-Disposition'] = f'inline; filename="{order_id}-preview.png"'
+            return resp
+
+        suffix = '_print.png' if kind == 'print' else '_preview.png'
+        candidates = [name for name in os.listdir(SAVE_DIR) if order_id in name and name.endswith(suffix)]
+        if not candidates:
+            return no_cache_json({'status':'error','msg':'找不到圖片'}, 404)
+        return send_from_directory(SAVE_DIR, candidates[0], as_attachment=(kind == 'print'))
+    except Exception as exc:
+        print('admin_order_file error:', order_id, kind, repr(exc))
+        return no_cache_json({'status':'error','msg':f'圖片讀取失敗：{exc}'}, 404)
+
+
+@app.route('/admin/orders-fast')
+def admin_orders_fast():
+    if not session.get('logged_in'):
+        return redirect(url_for('login_page'))
+    return '''<!doctype html>
+<html lang="zh-TW"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>快速訂單檢查｜本福丸訂製</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#fff8fb;color:#342d31;font-family:-apple-system,BlinkMacSystemFont,"PingFang TC",sans-serif}.wrap{max-width:1100px;margin:auto;padding:18px}.head{display:flex;gap:10px;align-items:center;justify-content:space-between;position:sticky;top:0;background:rgba(255,248,251,.95);padding:10px 0 14px;z-index:3}.head h1{font-size:20px;margin:0}.actions{display:flex;gap:8px}.btn{border:0;border-radius:999px;padding:10px 15px;background:#ff789e;color:#fff;font-weight:800;text-decoration:none;cursor:pointer}.btn.alt{background:#fff;color:#e85d88;border:1px solid #efb5c7}.hint{font-size:12px;color:#8d8187;margin:2px 0 14px}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}.card{background:#fff;border:1px solid #f3dfe6;border-radius:18px;padding:13px;box-shadow:0 7px 22px rgba(180,80,115,.06)}.meta{font-size:12px;color:#8d8187;line-height:1.6}.id{font-weight:900;font-size:13px;word-break:break-all}.preview{height:240px;background:#f8f5f6;border-radius:14px;margin:10px 0;display:grid;place-items:center;overflow:hidden}.preview img{width:100%;height:100%;object-fit:contain}.ok{color:#29a365;font-weight:900}.bad{color:#d94d61;font-weight:900}.status{display:flex;justify-content:space-between;align-items:center;gap:8px}.empty{padding:50px;text-align:center;color:#999}.loading{padding:40px;text-align:center;color:#999}@media(max-width:560px){.wrap{padding:12px}.preview{height:210px}.head h1{font-size:17px}}
+</style></head><body><div class="wrap"><div class="head"><h1>快速訂單檢查</h1><div class="actions"><a class="btn alt" href="/admin">完整後台</a><button class="btn" onclick="loadOrders()">重新整理</button></div></div><div class="hint">這頁只讀最近 50 筆訂單，不載入模板、貼紙庫、Fabric 編輯器；用來快速確認預覽圖與生產圖有沒有成功進來。</div><div id="list" class="loading">讀取訂單中…</div></div>
+<script>
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function loadOrders(){const box=document.getElementById('list');box.className='loading';box.innerHTML='讀取訂單中…';try{const r=await fetch('/api/admin/get_orders?limit=50&ts='+Date.now(),{cache:'no-store'});const j=await r.json();if(!r.ok||j.status!=='success')throw new Error(j.msg||'讀取失敗');const rows=j.data||[];if(!rows.length){box.className='empty';box.textContent='目前沒有訂單';return}box.className='grid';box.innerHTML=rows.map(o=>`<div class="card"><div class="id">${esc(o.order_id)}</div><div class="meta">${esc(o.customer_name||'')}｜${esc(o.model||'')}｜${esc(o.style||'')}<br>${esc(o.payment_method||'')}・${Number(o.quantity||1)} 件・NT$ ${Number(o.total||0).toLocaleString()}</div><div class="preview">${o.mockup_url?`<img loading="lazy" src="${esc(o.mockup_url)}" onerror="this.parentNode.innerHTML='<span class=bad>預覽圖讀取失敗</span>'">`:'<span class=bad>沒有預覽圖路徑</span>'}</div><div class="status"><span class="${o.has_print?'ok':'bad'}">${o.has_print?'✓ 生產圖已入庫':'✕ 無生產圖'}</span>${o.print_url?`<a class="btn alt" href="${esc(o.print_url)}">下載生產圖</a>`:''}</div></div>`).join('')}catch(e){box.className='empty';box.innerHTML='<span class="bad">'+esc(e.message||'讀取失敗')+'</span>'}}
+loadOrders();
+</script></body></html>'''
 
 
 @app.route('/admin')
