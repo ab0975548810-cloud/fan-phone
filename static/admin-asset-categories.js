@@ -10,12 +10,19 @@
   const selected=new Set();
 
   const h=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  const allStickers=()=>Array.isArray(assetsData?.stickers)?assetsData.stickers:[];
+  const isUncategorized=s=>['全部','未分類','',null,undefined].includes(s?.category);
   const categories=()=>{
     const raw=Array.isArray(assetsData?.categories)?assetsData.categories:[];
-    return ['全部',...raw.filter((c,i)=>c&&c!=='全部'&&raw.indexOf(c)===i)];
+    const userCats=raw.filter((c,i)=>c&&c!=='全部'&&c!=='未分類'&&raw.indexOf(c)===i);
+    const hasLoose=allStickers().some(isUncategorized);
+    return ['全部',...(hasLoose?['未分類']:[]),...userCats];
   };
-  const allStickers=()=>Array.isArray(assetsData?.stickers)?assetsData.stickers:[];
-  const visibleList=()=>currentAsset==='全部'?allStickers():allStickers().filter(s=>(s.category||'全部')===currentAsset);
+  const visibleList=()=>{
+    if(currentAsset==='全部')return allStickers();
+    if(currentAsset==='未分類')return allStickers().filter(isUncategorized);
+    return allStickers().filter(s=>(s.category||'未分類')===currentAsset);
+  };
 
   function ensureCss(){
     if(document.getElementById('bf-asset-cat-css'))return;
@@ -49,17 +56,18 @@
       const add=document.createElement('button');add.className='btn alt';add.innerHTML='<i class="fa-solid fa-folder-plus"></i> 新增分類';add.onclick=createCategory;
       const rename=document.createElement('button');rename.className='btn alt';rename.innerHTML='<i class="fa-solid fa-pen"></i> 改名';rename.onclick=renameCategory;
       const remove=document.createElement('button');remove.className='btn danger';remove.innerHTML='<i class="fa-solid fa-folder-minus"></i> 刪除分類';remove.onclick=deleteCategory;
-      const batch=document.createElement('button');batch.id='bf-batch-cat-btn';batch.className='btn alt';batch.innerHTML='<i class="fa-solid fa-check-double"></i> 批量分類';batch.onclick=toggleBatch;
+      const batch=document.createElement('button');batch.id='bf-batch-cat-btn';batch.className='btn alt';batch.innerHTML='<i class="fa-solid fa-check-double"></i> 批量管理';batch.onclick=toggleBatch;
       if(oldUpload){oldUpload.remove();oldUpload.id='bf-sticker-upload-btn';wrap.append(add,rename,remove,batch,oldUpload)}else wrap.append(add,rename,remove,batch);
       title.appendChild(wrap);
     }
     const panel=view.querySelector('.panel');
     if(panel&&!document.getElementById('asset-batchbar')){
       const bar=document.createElement('div');bar.id='asset-batchbar';
-      bar.innerHTML='<span class="count" id="bf-asset-count">已選 0 張</span><button class="btn alt mini" id="bf-select-visible">全選目前分類</button><input id="bf-target-category" list="bf-category-list" placeholder="輸入分類，例如：貓咪"><datalist id="bf-category-list"></datalist><button class="btn mini" id="bf-move-assets">移到分類</button><button class="btn danger mini" id="bf-cancel-batch">取消</button>';
+      bar.innerHTML='<span class="count" id="bf-asset-count">已選 0 張</span><button class="btn alt mini" id="bf-select-visible">全選目前分類</button><input id="bf-target-category" list="bf-category-list" placeholder="輸入分類，例如：貓咪"><datalist id="bf-category-list"></datalist><button class="btn mini" id="bf-move-assets">移到分類</button><button class="btn danger mini" id="bf-delete-assets"><i class="fa-solid fa-trash"></i> 刪除所選</button><button class="btn danger mini" id="bf-cancel-batch">取消</button>';
       panel.insertBefore(bar,panel.firstChild);
       document.getElementById('bf-select-visible').onclick=selectVisible;
       document.getElementById('bf-move-assets').onclick=moveSelected;
+      document.getElementById('bf-delete-assets').onclick=deleteSelected;
       document.getElementById('bf-cancel-batch').onclick=()=>{batchMode=false;selected.clear();syncBatchUi();renderAssets()};
     }
     refreshDatalist();syncBatchUi();
@@ -73,7 +81,7 @@
   function syncBatchUi(){
     const bar=document.getElementById('asset-batchbar'),btn=document.getElementById('bf-batch-cat-btn'),count=document.getElementById('bf-asset-count');
     bar?.classList.toggle('show',batchMode);
-    if(btn)btn.innerHTML=batchMode?'<i class="fa-solid fa-xmark"></i> 結束選取':'<i class="fa-solid fa-check-double"></i> 批量分類';
+    if(btn)btn.innerHTML=batchMode?'<i class="fa-solid fa-xmark"></i> 結束選取':'<i class="fa-solid fa-check-double"></i> 批量管理';
     if(count)count.textContent=`已選 ${selected.size} 張`;
   }
 
@@ -91,6 +99,7 @@
 
   async function createCategory(){
     const name=(prompt('新增貼紙分類名稱，例如：貓咪','')||'').trim();if(!name)return;
+    if(name==='全部'||name==='未分類')return alert('「全部」與「未分類」是系統分類');
     try{
       await api({action:'create',name});
       if(!assetsData.categories.includes(name))assetsData.categories.push(name);
@@ -100,13 +109,14 @@
 
   async function renameCategory(){
     const old=currentAsset;
-    if(!old||old==='全部')return alert('請先點進要改名的分類');
+    if(!old||old==='全部'||old==='未分類')return alert('「全部」與「未分類」是系統分類，不能改名');
     const name=(prompt(`把「${old}」改成：`,old)||'').trim();if(!name||name===old)return;
+    if(name==='全部'||name==='未分類')return alert('這是系統分類名稱');
     try{
       const r=await api({action:'rename',old,new:name});
-      assetsData.categories=categories().filter(c=>c!=='全部'&&c!==old);
+      assetsData.categories=categories().filter(c=>c!=='全部'&&c!=='未分類'&&c!==old);
       if(!assetsData.categories.includes(name))assetsData.categories.push(name);
-      allStickers().forEach(s=>{if((s.category||'全部')===old)s.category=name});
+      allStickers().forEach(s=>{if((s.category||'未分類')===old)s.category=name});
       currentAsset=name;resetPage();renderAssetTabs();renderAssets();refreshDatalist();
       alert(`分類已改成「${name}」，共整理 ${r.moved||0} 張貼紙`);
     }catch(e){alert(e.message||'分類改名失敗')}
@@ -114,14 +124,16 @@
 
   async function deleteCategory(){
     const old=currentAsset;
-    if(!old||old==='全部')return alert('「全部」是系統分類，不能刪除');
-    const count=allStickers().filter(s=>(s.category||'全部')===old).length;
-    if(!confirm(`刪除分類「${old}」？\n\n${count} 張貼紙不會被刪掉，會移回「全部」。`))return;
+    if(!old||old==='全部'||old==='未分類')return alert('「全部」與「未分類」是系統分類，不能刪除；要刪貼紙請用「批量管理」');
+    const count=allStickers().filter(s=>(s.category||'未分類')===old).length;
+    if(!confirm(`刪除分類「${old}」？\n\n${count} 張貼紙不會被刪掉，會移到「未分類」。`))return;
     try{
       await api({action:'delete',name:old});
-      assetsData.categories=categories().filter(c=>c!=='全部'&&c!==old);
-      allStickers().forEach(s=>{if((s.category||'全部')===old)s.category='全部'});
-      currentAsset='全部';selected.clear();batchMode=false;resetPage();renderAssetTabs();renderAssets();refreshDatalist();syncBatchUi();
+      assetsData.categories=categories().filter(c=>c!=='全部'&&c!=='未分類'&&c!==old);
+      allStickers().forEach(s=>{if((s.category||'未分類')===old)s.category='未分類'});
+      currentAsset='未分類';selected.clear();batchMode=false;resetPage();
+      try{await loadAssets(true)}catch(e){renderAssetTabs();renderAssets()}
+      refreshDatalist();syncBatchUi();
     }catch(e){alert(e.message||'刪除分類失敗')}
   }
 
@@ -129,13 +141,29 @@
     if(!selected.size)return alert('請先選擇貼紙');
     const input=document.getElementById('bf-target-category');
     const name=(input?.value||'').trim();if(!name)return alert('請輸入要移到的分類，例如：貓咪');
+    if(name==='全部')return alert('「全部」是總覽，不是實際分類；可改放到「未分類」');
     try{
       const ids=[...selected];const r=await api({action:'move',name,ids});
-      if(!assetsData.categories.includes(name))assetsData.categories.push(name);
+      if(name!=='未分類'&&!assetsData.categories.includes(name))assetsData.categories.push(name);
       const wanted=new Set(ids);allStickers().forEach(s=>{if(wanted.has(String(s.id)))s.category=name});
       selected.clear();batchMode=false;currentAsset=name;resetPage();renderAssetTabs();renderAssets();refreshDatalist();syncBatchUi();if(input)input.value='';
       alert(`完成，${r.moved||0} 張貼紙已移到「${name}」`);
     }catch(e){alert(e.message||'批量分類失敗')}
+  }
+
+  async function deleteSelected(){
+    if(!selected.size)return alert('請先選擇要刪掉的貼紙');
+    const ids=[...selected];
+    if(!confirm(`確定永久刪除這 ${ids.length} 張貼紙？\n\n這次會真的從貼紙庫移除。`))return;
+    try{
+      const r=await api({action:'delete_stickers',ids});
+      const wanted=new Set(ids);
+      assetsData.stickers=allStickers().filter(s=>!wanted.has(String(s.id)));
+      selected.clear();batchMode=false;resetPage();
+      if(currentAsset!=='全部'&&!categories().includes(currentAsset))currentAsset='全部';
+      renderAssetTabs();renderAssets();refreshDatalist();syncBatchUi();
+      alert(`已刪除 ${r.deleted??ids.length} 張貼紙`);
+    }catch(e){alert(e.message||'批量刪除失敗')}
   }
 
   function installRenderOverrides(){
@@ -170,7 +198,7 @@
   function installFastUpload(){
     window.uploadStickers=async function(e){
       const fs=[...(e.target.files||[])];if(!fs.length)return;
-      const def=currentAsset&&currentAsset!=='全部'?currentAsset:'貓咪';
+      const def=currentAsset&&currentAsset!=='全部'&&currentAsset!=='未分類'?currentAsset:'貓咪';
       const cat=(prompt('這批貼紙要放在哪個分類？',def)||'').trim();if(!cat){e.target.value='';return}
       const fd=new FormData();fs.forEach(f=>fd.append('files',f));fd.append('category',cat);
       const btn=document.getElementById('bf-sticker-upload-btn');const old=btn?.innerHTML;
@@ -178,7 +206,7 @@
       try{
         const r=await apiJson('/api/admin/batch_upload_stickers',{method:'POST',body:fd});
         const uploaded=Array.isArray(r.data)?r.data:[];
-        if(!assetsData.categories.includes(cat))assetsData.categories.push(cat);
+        if(cat!=='未分類'&&!assetsData.categories.includes(cat))assetsData.categories.push(cat);
         if(uploaded.length)assetsData.stickers.push(...uploaded);else assetsLoaded=false;
         currentAsset=cat;resetPage();renderAssetTabs();renderAssets();refreshDatalist();
         alert(`上傳完成，共 ${fs.length} 張`);
@@ -188,13 +216,17 @@
 
     window.deleteSticker=async function(id){
       if(!confirm('確定刪除這張貼紙？'))return;
+      const before=assetsData.stickers;
+      assetsData.stickers=allStickers().filter(s=>String(s.id)!==String(id));
+      selected.delete(String(id));renderAssetTabs();renderAssets();
       try{
         await apiJson('/api/admin/delete_sticker',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
-        assetsData.stickers=allStickers().filter(s=>String(s.id)!==String(id));selected.delete(String(id));renderAssets();
-      }catch(e){alert(e.message||'刪除失敗')}
+      }catch(e){
+        assetsData.stickers=before;renderAssetTabs();renderAssets();alert(e.message||'刪除失敗');
+      }
     };
   }
 
-  function boot(){ensureUi();installRenderOverrides();installFastUpload();if(document.getElementById('view-assets')?.classList.contains('active')){renderAssetTabs();renderAssets()}console.info('[ADMIN] fast sticker library enabled: paged render + add/rename/delete categories')}
+  function boot(){ensureUi();installRenderOverrides();installFastUpload();if(document.getElementById('view-assets')?.classList.contains('active')){renderAssetTabs();renderAssets()}console.info('[ADMIN] fast sticker library enabled: uncategorized + bulk delete + paged render')}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
