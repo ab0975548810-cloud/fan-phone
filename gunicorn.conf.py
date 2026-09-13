@@ -29,10 +29,12 @@ def post_worker_init(worker):
         from supabase_resilience import install as install_supabase_resilience
         from admin_perf_patch import install as install_admin_perf
         from order_color_patch import install as install_order_colors
+        from asset_category_patch import install as install_asset_categories
         install_security(app_module)
         install_supabase_resilience(app_module)
         install_admin_perf(app_module)
         install_order_colors(app_module)
+        install_asset_categories(app_module)
         worker.log.info('Benfuwan security/performance middleware installed')
     except Exception:
         worker.log.exception('Failed to install Benfuwan security/performance middleware')
