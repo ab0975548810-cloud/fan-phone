@@ -56,7 +56,6 @@ def install(app_module):
                 if old not in cats:
                     raise ValueError('找不到原本的分類')
                 if new != old and new in cats:
-                    # Merge into an existing category instead of creating a duplicate.
                     assets['categories'] = [c for c in cats if c != old]
                 else:
                     assets['categories'] = [new if c == old else c for c in cats]
@@ -67,6 +66,19 @@ def install(app_module):
                         moved += 1
                 cloud_save_json('assets', assets_file, assets)
                 return no_cache_json({'status': 'success', 'category': new, 'moved': moved})
+
+            if action == 'delete':
+                name = _clean_category(body.get('name'))
+                if name not in cats:
+                    raise ValueError('找不到這個分類')
+                assets['categories'] = [c for c in cats if c != name]
+                moved = 0
+                for sticker in assets.get('stickers', []):
+                    if sticker.get('category') == name:
+                        sticker['category'] = '全部'
+                        moved += 1
+                cloud_save_json('assets', assets_file, assets)
+                return no_cache_json({'status': 'success', 'deleted': name, 'moved': moved})
 
             if action == 'move':
                 name = _clean_category(body.get('name'))
