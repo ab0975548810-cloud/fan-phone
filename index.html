@@ -13,8 +13,11 @@
     const r=await fetch('/static/index-base-20260913.html?v=20260913',{cache:'default'});
     if(!r.ok)throw new Error('HTTP '+r.status);
     let html=await r.text();
-    const fix='<script src="/static/front-v22-fixes.js?v=20260913b"><\/script>';
-    html=html.replace('</body>',fix+'</body>');
+    const fixes=[
+      '<script src="/static/front-v22-fixes.js?v=20260913c"><\/script>',
+      '<script src="/static/front-model-colors.js?v=20260913c"><\/script>'
+    ].join('');
+    html=html.replace('</body>',fixes+'</body>');
     document.open();document.write(html);document.close();
   }catch(e){
     document.body.innerHTML='<div style="padding:28px;text-align:center"><h3>頁面載入失敗</h3><p>請重新整理一次；若仍失敗請告知店員。</p></div>';
