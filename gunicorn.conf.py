@@ -6,6 +6,9 @@ import secrets
 # set FLASK_SECRET_KEY in Zeabur for stable sessions across redeploys.
 if not (os.environ.get('FLASK_SECRET_KEY') or '').strip():
     os.environ['FLASK_SECRET_KEY'] = secrets.token_urlsafe(48)
+    os.environ['BENFUWAN_GENERATED_SECRET'] = '1'
+else:
+    os.environ['BENFUWAN_GENERATED_SECRET'] = '0'
 if not (os.environ.get('SESSION_COOKIE_SECURE') or '').strip():
     os.environ['SESSION_COOKIE_SECURE'] = 'true'
 
