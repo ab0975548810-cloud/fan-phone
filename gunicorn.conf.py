@@ -4,8 +4,10 @@ import secrets
 # These run before app.py is imported by Gunicorn.
 # A random fallback secret is safer than a known hard-coded development secret;
 # set FLASK_SECRET_KEY in Zeabur for stable sessions across redeploys.
-os.environ.setdefault('FLASK_SECRET_KEY', secrets.token_urlsafe(48))
-os.environ.setdefault('SESSION_COOKIE_SECURE', 'true')
+if not (os.environ.get('FLASK_SECRET_KEY') or '').strip():
+    os.environ['FLASK_SECRET_KEY'] = secrets.token_urlsafe(48)
+if not (os.environ.get('SESSION_COOKIE_SECURE') or '').strip():
+    os.environ['SESSION_COOKIE_SECURE'] = 'true'
 
 # One process with multiple threads keeps memory modest while preventing a long
 # AI request or several preview images from freezing the whole admin panel.
