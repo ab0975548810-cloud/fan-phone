@@ -69,26 +69,16 @@ def install(app_module):
 
             if action == 'delete':
                 name = _clean_category(body.get('name'))
-                # 即使前端分類清單與資料短暫不同步，也允許刪除。
-                # 這樣不會因為「分類標籤還看得到、後端 cats 已少一筆」而刪不掉。
-                normalized = []
-                for c in cats:
-                    if c == name:
-                        continue
-                    if c and c not in normalized:
-                        normalized.append(c)
-                if '全部' not in normalized:
-                    normalized.insert(0, '全部')
-                assets['categories'] = normalized
-
+                # Even if a stale client no longer sees the category list entry,
+                # still allow cleaning up sticker rows that use this category.
+                assets['categories'] = [c for c in cats if c != name]
                 moved = 0
                 for sticker in assets.get('stickers', []):
                     if sticker.get('category') == name:
-                        sticker['category'] = '全部'
+                        sticker['category'] = '未分類'
                         moved += 1
-
                 cloud_save_json('assets', assets_file, assets)
-                return no_cache_json({'status': 'success', 'deleted': name, 'moved': moved, 'categories': normalized})
+                return no_cache_json({'status': 'success', 'deleted': name, 'moved': moved})
 
             if action == 'move':
                 name = _clean_category(body.get('name'))
@@ -96,7 +86,7 @@ def install(app_module):
                 if not isinstance(ids, list) or not ids:
                     raise ValueError('請先選擇要移動的貼紙')
                 wanted = {str(x) for x in ids if x}
-                if name not in cats:
+                if name != '未分類' and name not in cats:
                     cats.append(name)
                 moved = 0
                 for sticker in assets.get('stickers', []):
@@ -105,6 +95,20 @@ def install(app_module):
                         moved += 1
                 cloud_save_json('assets', assets_file, assets)
                 return no_cache_json({'status': 'success', 'category': name, 'moved': moved})
+
+            if action == 'delete_stickers':
+                ids = body.get('ids') or []
+                if not isinstance(ids, list) or not ids:
+                    raise ValueError('請先選擇要刪除的貼紙')
+                wanted = {str(x) for x in ids if x}
+                before = len(assets.get('stickers', []))
+                assets['stickers'] = [
+                    s for s in assets.get('stickers', [])
+                    if str(s.get('id')) not in wanted
+                ]
+                deleted = before - len(assets['stickers'])
+                cloud_save_json('assets', assets_file, assets)
+                return no_cache_json({'status': 'success', 'deleted': deleted})
 
             raise ValueError('不支援的分類操作')
         except ValueError as exc:
