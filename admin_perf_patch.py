@@ -24,6 +24,7 @@ def install(app_module):
                     '/static/admin-perf.js?v=20260913d',
                     '/static/admin-model-colors.js?v=20260913d',
                     '/static/admin-asset-categories.js?v=20260913i',
+                    '/static/admin-asset-delete-fix.js?v=20260913j',
                 ]
                 for src in scripts:
                     if src not in html and '</body>' in html:
