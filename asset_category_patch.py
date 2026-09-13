@@ -69,16 +69,26 @@ def install(app_module):
 
             if action == 'delete':
                 name = _clean_category(body.get('name'))
-                if name not in cats:
-                    raise ValueError('找不到這個分類')
-                assets['categories'] = [c for c in cats if c != name]
+                # 即使前端分類清單與資料短暫不同步，也允許刪除。
+                # 這樣不會因為「分類標籤還看得到、後端 cats 已少一筆」而刪不掉。
+                normalized = []
+                for c in cats:
+                    if c == name:
+                        continue
+                    if c and c not in normalized:
+                        normalized.append(c)
+                if '全部' not in normalized:
+                    normalized.insert(0, '全部')
+                assets['categories'] = normalized
+
                 moved = 0
                 for sticker in assets.get('stickers', []):
                     if sticker.get('category') == name:
                         sticker['category'] = '全部'
                         moved += 1
+
                 cloud_save_json('assets', assets_file, assets)
-                return no_cache_json({'status': 'success', 'deleted': name, 'moved': moved})
+                return no_cache_json({'status': 'success', 'deleted': name, 'moved': moved, 'categories': normalized})
 
             if action == 'move':
                 name = _clean_category(body.get('name'))
