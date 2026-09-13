@@ -1,4 +1,4 @@
-/* 本福丸前台體驗修正 2026-09-13：圖層辨識 + 手機殼預覽恢復 */
+/* 本福丸前台體驗修正 2026-09-13：圖層辨識 + 拖曳排序 + 手機殼預覽恢復 */
 (function(){
   'use strict';
 
@@ -62,19 +62,132 @@
     el.appendChild(i);
   }
 
-  // 圖層：同類物件自動編號，照片顯示檔名、文字顯示內容，並加縮圖辨識。
+  function ensureLayerDragStyles(){
+    if(document.getElementById('benfuwan-layer-drag-style'))return;
+    const style=document.createElement('style');
+    style.id='benfuwan-layer-drag-style';
+    style.textContent=`
+      .layer-drag-help{padding:2px 4px 10px;color:#9a8f94;font-size:10px;display:flex;align-items:center;gap:6px}
+      .layer-row{transition:box-shadow .12s ease,transform .12s ease,opacity .12s ease;background:#fff}
+      .layer-row.layer-dragging{opacity:.72;box-shadow:0 10px 24px rgba(80,45,58,.16);transform:scale(.99);position:relative;z-index:5}
+      .layer-drag-handle{width:34px!important;height:34px!important;flex:0 0 34px;border:0!important;background:#fff3f7!important;color:#f45f8d!important;border-radius:10px!important;display:grid!important;place-items:center!important;touch-action:none;cursor:grab;font-size:15px!important}
+      .layer-drag-handle:active{cursor:grabbing;background:#ffe5ee!important}
+      .layer-drag-handle.locked{color:#c8bec2!important;background:#f7f4f5!important;cursor:default}
+    `;
+    document.head.appendChild(style);
+  }
+
+  function isLayerObject(o){return o&&!['guide','slot-guide'].includes(o.role);}
+
+  // 依照畫面上的排序，把 Canvas 的圖層順序一次套用回去。
+  // 清單最上面 = 畫布最上層；最下面 = 畫布最下層。
+  function applyLayerOrderFromDom(box){
+    if(typeof canvas==='undefined'||!canvas)return;
+    const rows=[...box.querySelectorAll('.layer-row')];
+    const topToBottom=rows.map(r=>r._layerObject).filter(Boolean);
+    if(!topToBottom.length)return;
+
+    // 模板背景固定在最底層，避免客人不小心把背景拖到照片上面。
+    const movable=topToBottom.filter(o=>o.role!=='template-bg');
+    const bg=topToBottom.filter(o=>o.role==='template-bg');
+    const desiredBottomToTop=[...bg,...movable.reverse()];
+
+    const oldAll=[...canvas.getObjects()];
+    const editableSlots=oldAll.map((o,i)=>isLayerObject(o)?i:-1).filter(i=>i>=0);
+    if(editableSlots.length!==desiredBottomToTop.length)return;
+
+    const rebuilt=[...oldAll];
+    editableSlots.forEach((slot,i)=>{rebuilt[slot]=desiredBottomToTop[i];});
+    if(Array.isArray(canvas._objects)){
+      canvas._objects.splice(0,canvas._objects.length,...rebuilt);
+      canvas.renderAll();
+      if(typeof recordHistory==='function')recordHistory();
+    }
+  }
+
+  function bindDragHandle(handle,row,box,o){
+    if(o.role==='template-bg'){
+      handle.classList.add('locked');
+      handle.title='模板背景固定在最下層';
+      return;
+    }
+    handle.title='按住拖曳調整圖層';
+    let dragging=false,pointerId=null;
+    const scrollArea=box.closest('.sheet-body');
+
+    const finish=e=>{
+      if(!dragging)return;
+      dragging=false;
+      row.classList.remove('layer-dragging');
+      try{if(pointerId!==null&&handle.hasPointerCapture?.(pointerId))handle.releasePointerCapture(pointerId);}catch(err){}
+      pointerId=null;
+      applyLayerOrderFromDom(box);
+      window.renderLayerList();
+      e?.preventDefault?.();
+      e?.stopPropagation?.();
+    };
+
+    handle.addEventListener('pointerdown',e=>{
+      if(e.button!==undefined&&e.button!==0)return;
+      dragging=true;
+      pointerId=e.pointerId;
+      row.classList.add('layer-dragging');
+      try{handle.setPointerCapture?.(pointerId);}catch(err){}
+      e.preventDefault();
+      e.stopPropagation();
+    });
+
+    handle.addEventListener('pointermove',e=>{
+      if(!dragging)return;
+      const y=e.clientY;
+      const others=[...box.querySelectorAll('.layer-row:not(.layer-dragging)')].filter(r=>r._layerObject?.role!=='template-bg');
+      let placed=false;
+      for(const other of others){
+        const rect=other.getBoundingClientRect();
+        if(y<rect.top+rect.height/2){
+          box.insertBefore(row,other);
+          placed=true;
+          break;
+        }
+      }
+      if(!placed){
+        const bgRow=[...box.querySelectorAll('.layer-row')].find(r=>r._layerObject?.role==='template-bg');
+        if(bgRow)box.insertBefore(row,bgRow);else box.appendChild(row);
+      }
+      if(scrollArea){
+        const r=scrollArea.getBoundingClientRect();
+        if(y<r.top+55)scrollArea.scrollBy({top:-18,behavior:'auto'});
+        else if(y>r.bottom-55)scrollArea.scrollBy({top:18,behavior:'auto'});
+      }
+      e.preventDefault();
+      e.stopPropagation();
+    });
+
+    handle.addEventListener('pointerup',finish);
+    handle.addEventListener('pointercancel',finish);
+  }
+
+  // 圖層：同類物件自動編號、縮圖辨識；用右側三條槓直接上下拖曳排序。
   window.renderLayerList=function(){
     if(typeof canvas==='undefined'||!canvas||!document.getElementById('layer-list'))return;
-    const objs=[...canvas.getObjects()].filter(o=>!['guide','slot-guide'].includes(o.role)).reverse();
+    ensureLayerDragStyles();
+    const objs=[...canvas.getObjects()].filter(isLayerObject).reverse();
     const box=document.getElementById('layer-list');
     box.innerHTML='';
     if(!objs.length){box.innerHTML='<div style="padding:30px;text-align:center;color:#aaa">目前沒有圖層</div>';return;}
+
+    const help=document.createElement('div');
+    help.className='layer-drag-help';
+    help.innerHTML='<i class="fa-solid fa-bars"></i><span>按住右側三條槓，上下拖曳調整圖層位置</span>';
+    box.appendChild(help);
+
     const counts={};
     objs.forEach(o=>{
       const key=o.role||o.type||'object';
       counts[key]=(counts[key]||0)+1;
       const row=document.createElement('div');
       row.className='layer-row';
+      row._layerObject=o;
 
       const thumb=document.createElement('div');
       thumb.className='layer-thumb';
@@ -88,16 +201,21 @@
       visible.innerHTML=`<i class="fa-regular ${o.visible===false?'fa-eye-slash':'fa-eye'}"></i>`;
       visible.onclick=e=>{e.stopPropagation();o.visible=o.visible===false;canvas.renderAll();window.renderLayerList();if(typeof recordHistory==='function')recordHistory();};
 
-      const up=document.createElement('button');
-      up.title='往前'; up.innerHTML='<i class="fa-solid fa-arrow-up"></i>';
-      up.onclick=e=>{e.stopPropagation();canvas.bringForward(o);canvas.renderAll();window.renderLayerList();if(typeof recordHistory==='function')recordHistory();};
+      const handle=document.createElement('button');
+      handle.className='layer-drag-handle';
+      handle.innerHTML='<i class="fa-solid fa-bars"></i>';
+      bindDragHandle(handle,row,box,o);
 
-      const down=document.createElement('button');
-      down.title='往後'; down.innerHTML='<i class="fa-solid fa-arrow-down"></i>';
-      down.onclick=e=>{e.stopPropagation();canvas.sendBackwards(o);canvas.renderAll();window.renderLayerList();if(typeof recordHistory==='function')recordHistory();};
-
-      row.append(thumb,name,visible,up,down);
-      row.onclick=()=>{if(o.selectable!==false){canvas.setActiveObject(o);canvas.renderAll();if(typeof syncSelection==='function')syncSelection();if(typeof closeSheets==='function')closeSheets();}};
+      row.append(thumb,name,visible,handle);
+      row.onclick=e=>{
+        if(e.target.closest('.layer-drag-handle')||e.target.closest('button'))return;
+        if(o.selectable!==false){
+          canvas.setActiveObject(o);
+          canvas.renderAll();
+          if(typeof syncSelection==='function')syncSelection();
+          if(typeof closeSheets==='function')closeSheets();
+        }
+      };
       box.appendChild(row);
     });
   };
