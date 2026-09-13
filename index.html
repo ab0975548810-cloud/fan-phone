@@ -13,7 +13,7 @@
     const r=await fetch('/static/index-base-20260913.html?v=20260913',{cache:'default'});
     if(!r.ok)throw new Error('HTTP '+r.status);
     let html=await r.text();
-    const fix='<script src="/static/front-v22-fixes.js?v=20260913"><\/script>';
+    const fix='<script src="/static/front-v22-fixes.js?v=20260913b"><\/script>';
     html=html.replace('</body>',fix+'</body>');
     document.open();document.write(html);document.close();
   }catch(e){
