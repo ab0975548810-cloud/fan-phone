@@ -25,8 +25,10 @@ keepalive = 5
 def post_worker_init(worker):
     try:
         import app as app_module
-        from security_perf import install
-        install(app_module)
+        from security_perf import install as install_security
+        from admin_perf_patch import install as install_admin_perf
+        install_security(app_module)
+        install_admin_perf(app_module)
         worker.log.info('Benfuwan security/performance middleware installed')
     except Exception:
         worker.log.exception('Failed to install Benfuwan security/performance middleware')
