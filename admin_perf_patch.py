@@ -15,16 +15,24 @@ def install(app_module):
     def _inject_admin_helpers(resp):
         if request.path == '/admin' and resp.status_code == 200 and resp.mimetype == 'text/html':
             try:
+                # /admin is served with Flask send_file(), which uses direct_passthrough.
+                # Disable passthrough before reading/replacing the HTML body, otherwise
+                # Werkzeug raises "Attempted implicit sequence conversion..." and the
+                # helper scripts never get injected.
+                if getattr(resp, 'direct_passthrough', False):
+                    resp.direct_passthrough = False
+
                 html = resp.get_data(as_text=True)
                 scripts = [
-                    '/static/admin-perf.js?v=20260913c',
-                    '/static/admin-model-colors.js?v=20260913c',
+                    '/static/admin-perf.js?v=20260913d',
+                    '/static/admin-model-colors.js?v=20260913d',
                 ]
                 for src in scripts:
                     if src not in html and '</body>' in html:
                         html = html.replace('</body>', f'<script src="{src}"></script></body>')
                 resp.set_data(html)
                 resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+                resp.headers.pop('Content-Length', None)
             except Exception as exc:
                 print('[PERF] admin helper injection warning:', repr(exc), flush=True)
         return resp
