@@ -16,9 +16,6 @@ def install(app_module):
         if request.path == '/admin' and resp.status_code == 200 and resp.mimetype == 'text/html':
             try:
                 # /admin is served with Flask send_file(), which uses direct_passthrough.
-                # Disable passthrough before reading/replacing the HTML body, otherwise
-                # Werkzeug raises "Attempted implicit sequence conversion..." and the
-                # helper scripts never get injected.
                 if getattr(resp, 'direct_passthrough', False):
                     resp.direct_passthrough = False
 
@@ -26,7 +23,7 @@ def install(app_module):
                 scripts = [
                     '/static/admin-perf.js?v=20260913d',
                     '/static/admin-model-colors.js?v=20260913d',
-                    '/static/admin-asset-categories.js?v=20260913h',
+                    '/static/admin-asset-categories.js?v=20260913i',
                 ]
                 for src in scripts:
                     if src not in html and '</body>' in html:
@@ -38,4 +35,4 @@ def install(app_module):
                 print('[PERF] admin helper injection warning:', repr(exc), flush=True)
         return resp
 
-    print('[PERF] admin page lazy-load + model-color + asset-category helpers enabled', flush=True)
+    print('[PERF] admin page lazy-load + model-color + fast asset-category helpers enabled', flush=True)
