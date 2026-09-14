@@ -1,8 +1,16 @@
-/* 本福丸後台效能補丁：減少首屏資料、DOM 與圖片解碼負擔 */
+/* 本福丸後台效能補丁：減少首屏資料、DOM、圖片解碼與高頻輪詢負擔 */
 (function(){
   'use strict';
   if(window.__benfuwanAdminPerfInstalled)return;
   window.__benfuwanAdminPerfInstalled=true;
+
+  // 後台幾個補丁原本每 250~500ms 輪詢，長時間開著會讓低階電腦/iPad 卡頓。
+  // 僅在 admin 頁把過密 interval 拉到 1000ms；功能仍會正常更新。
+  const nativeSetInterval=window.setInterval.bind(window);
+  window.setInterval=function(fn,ms,...args){
+    const delay=(Number(ms)>0&&Number(ms)<800)?1000:ms;
+    return nativeSetInterval(fn,delay,...args);
+  };
 
   if(typeof window.loadShop==='function'){
     const originalLoadShop=window.loadShop;
@@ -13,7 +21,7 @@
     };
   }
 
-  // 訂單管理先讀最近 40 筆；避免舊版一次抓 200 筆並建立大量卡片。
+  // 訂單管理先讀最近 40 筆；搜尋舊單時再由使用者切條件/重新整理即可。
   const originalFetch=window.fetch.bind(window);
   window.fetch=function(input,init){
     if(typeof input==='string'&&input.includes('/api/admin/get_orders')){
@@ -23,19 +31,22 @@
   };
 
   const style=document.createElement('style');
-  style.textContent='.bf-order-day,.bf-order-card,.card{content-visibility:auto;contain-intrinsic-size:auto 260px}.bf-order-thumb{background:#f8f6f7}';
+  style.textContent='.bf-order-day,.bf-order-card,.card{content-visibility:auto;contain-intrinsic-size:auto 260px}.bf-order-thumb{background:#f8f6f7}#bf-order-list{contain:layout style paint}';
   document.head.appendChild(style);
 
+  let raf=0;
   const optimize=()=>{
+    raf=0;
     document.querySelectorAll('img:not([data-bf-optimized])').forEach(img=>{
       if(img.closest('#bf-order-manager,#orders-body,#asset-grid,#template-grid')){
         img.dataset.bfOptimized='1';img.loading='lazy';img.decoding='async';img.fetchPriority='low';
       }
     });
   };
-  optimize();
-  const observer=new MutationObserver(()=>requestAnimationFrame(optimize));
+  const schedule=()=>{if(!raf)raf=requestAnimationFrame(optimize)};
+  schedule();
+  const observer=new MutationObserver(schedule);
   observer.observe(document.body,{childList:true,subtree:true});
 
-  console.info('[PERF] admin lightweight mode enabled: 40 orders + lazy images');
+  console.info('[PERF] admin lightweight mode enabled: slower polling + 40 orders + lazy images');
 })();
