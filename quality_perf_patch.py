@@ -13,11 +13,12 @@ def install(app_module):
     _INSTALLED = True
 
     app = app_module.app
-    app.config['MAX_CONTENT_LENGTH'] = 80 * 1024 * 1024
+    # JSON orders contain base64 production + preview, while template uploads may be large phone originals.
+    app.config['MAX_CONTENT_LENGTH'] = 96 * 1024 * 1024
 
     try:
         from PIL import Image, ImageOps
-        Image.MAX_IMAGE_PIXELS = 120_000_000
+        Image.MAX_IMAGE_PIXELS = 180_000_000
     except Exception:
         Image = None
         ImageOps = None
@@ -45,21 +46,22 @@ def install(app_module):
         with Image.open(BytesIO(raw)) as im:
             im = ImageOps.exif_transpose(im)
             w, h = im.size
-            if w * h > 100_000_000:
-                raise ValueError('圖片解析度過大，請使用 1 億畫素以下的圖片')
+            if w * h > 160_000_000:
+                raise ValueError('圖片解析度過大，請使用 1.6 億畫素以下的圖片')
             has_alpha = 'A' in im.getbands() or 'transparency' in im.info
-            if max(w, h) > 5200:
-                im.thumbnail((5200, 5200), Image.Resampling.LANCZOS)
+            # Template editing does not need the 12K phone original. 6000px preserves plenty of print detail.
+            if max(w, h) > 6000:
+                im.thumbnail((6000, 6000), Image.Resampling.LANCZOS)
             im = im.convert('RGBA' if has_alpha else 'RGB')
             q = 95
             out = BytesIO()
             im.save(out, format='WEBP', quality=q, method=4)
-            while out.tell() > 14 * 1024 * 1024 and q > 84:
+            while out.tell() > 16 * 1024 * 1024 and q > 80:
                 q -= 3
                 out = BytesIO()
                 im.save(out, format='WEBP', quality=q, method=4)
             data = out.getvalue()
-            if len(data) > 16 * 1024 * 1024:
+            if len(data) > 20 * 1024 * 1024:
                 raise ValueError('圖片最佳化後仍過大，請換一張較小的原圖')
             return data, 'image/webp', 'webp'
 
@@ -72,14 +74,14 @@ def install(app_module):
         raw = file_storage.read()
         if not raw:
             raise ValueError('圖片內容是空的')
-        if len(raw) > 48 * 1024 * 1024:
-            raise ValueError('單張原圖需小於 48MB')
+        if len(raw) > 75 * 1024 * 1024:
+            raise ValueError('單張原圖需小於 75MB')
 
-        if folder == 'templates' and (len(raw) > 7 * 1024 * 1024 or Image):
+        if folder in ('template', 'templates'):
             try:
                 optimized, new_mime, new_ext = _optimize_template(raw)
                 if optimized and new_mime and new_ext:
-                    return _upload_bytes(optimized, new_mime, folder, new_ext)
+                    return _upload_bytes(optimized, new_mime, 'templates', new_ext)
             except ValueError:
                 raise
             except Exception as exc:
@@ -92,13 +94,12 @@ def install(app_module):
             except Exception:
                 pass
 
-        # Larger masks/materials are preserved as-is; template photos are optimized above.
-        if len(raw) > 24 * 1024 * 1024:
-            raise ValueError('圖片需小於 24MB')
+        if len(raw) > 32 * 1024 * 1024:
+            raise ValueError('圖片需小於 32MB')
         ext = {'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp'}[mime]
         return _upload_bytes(raw, mime, folder, ext)
 
-    def decode_png_data_url(value, max_bytes=28 * 1024 * 1024):
+    def decode_png_data_url(value, max_bytes=45 * 1024 * 1024):
         import base64
         prefix = 'data:image/png;base64,'
         if not isinstance(value, str) or not value.startswith(prefix):
@@ -108,11 +109,11 @@ def install(app_module):
         except Exception:
             raise ValueError('圖片 Base64 無法解析')
         if len(raw) > max_bytes:
-            raise ValueError('高畫質圖片超過 28MB，請縮小設計後再試')
+            raise ValueError('高畫質圖片超過 45MB，請縮小設計後再試')
         if not raw.startswith(b'\x89PNG\r\n\x1a\n'):
             raise ValueError('圖片不是有效 PNG')
         return raw
 
     app_module.upload_public_file = upload_public_file
     app_module.decode_png_data_url = decode_png_data_url
-    print('[QUALITY] large template uploads + 28MB production PNG enabled', flush=True)
+    print('[QUALITY] 75MB template originals + 45MB production PNG enabled', flush=True)
