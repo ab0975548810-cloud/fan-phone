@@ -27,6 +27,8 @@ def install(app_module):
                     '/static/admin-universal-templates.js?v=20260913k',
                     '/static/admin-template-editor-v2.js?v=20260913l',
                     '/static/admin-template-editor-v3.js?v=20260914a',
+                    '/static/admin-template-editor-v4.js?v=20260914b',
+                    '/static/admin-template-editor-v4-fix.js?v=20260914b',
                     '/static/admin-orders-v2.js?v=20260914a',
                 ]
                 for src in scripts:
@@ -39,4 +41,4 @@ def install(app_module):
                 print('[PERF] admin helper injection warning:', repr(exc), flush=True)
         return resp
 
-    print('[PERF] admin helpers enabled: performance + model colors + assets + templates v3 + orders v2', flush=True)
+    print('[PERF] admin helpers enabled: performance + model colors + assets + templates v4 + orders v2', flush=True)
