@@ -19,21 +19,14 @@ def install(app_module):
                     resp.direct_passthrough = False
 
                 html = resp.get_data(as_text=True)
+                # Keep the everyday admin light. The heavy Fabric/template stack is
+                # loaded only when the template section/editor is opened.
                 scripts = [
-                    '/static/admin-perf.js?v=20260913d',
+                    '/static/admin-perf.js?v=20260914h',
                     '/static/admin-model-colors.js?v=20260913d',
                     '/static/admin-asset-categories.js?v=20260913j',
-                    '/static/admin-universal-templates.js?v=20260913k',
-                    '/static/admin-template-editor-v2.js?v=20260913l',
-                    '/static/admin-template-editor-v3.js?v=20260914a',
-                    '/static/admin-template-editor-v4.js?v=20260914c',
-                    '/static/admin-template-editor-v4-fix.js?v=20260914c',
-                    '/static/admin-global-canvas-bridge.js?v=20260914f',
-                    '/static/admin-template-clean-v2.js?v=20260914f',
-                    '/static/admin-template-outline-v2.js?v=20260914f',
-                    '/static/admin-template-image-tools-v2.js?v=20260914g',
-                    '/static/admin-template-image-tools-v2-fix.js?v=20260914g',
-                    '/static/admin-orders-v2.js?v=20260914a',
+                    '/static/admin-template-loader.js?v=20260914h',
+                    '/static/admin-orders-v2.js?v=20260914h',
                 ]
                 for src in scripts:
                     if src not in html and '</body>' in html:
@@ -45,4 +38,4 @@ def install(app_module):
                 print('[PERF] admin helper injection warning:', repr(exc), flush=True)
         return resp
 
-    print('[PERF] admin helpers enabled: template canvas bridge + outline + image replace/crop/adjust + layer drag + orders v2', flush=True)
+    print('[PERF] lightweight admin + lazy template editor + orders v2 enabled', flush=True)
