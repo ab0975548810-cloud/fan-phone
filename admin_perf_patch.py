@@ -28,9 +28,9 @@ def install(app_module):
                     '/static/admin-template-editor-v3.js?v=20260914a',
                     '/static/admin-template-editor-v4.js?v=20260914c',
                     '/static/admin-template-editor-v4-fix.js?v=20260914c',
-                    '/static/admin-template-outline.js?v=20260914d',
-                    '/static/admin-template-clean-v2.js?v=20260914e',
-                    '/static/admin-template-outline-v2.js?v=20260914e',
+                    '/static/admin-global-canvas-bridge.js?v=20260914f',
+                    '/static/admin-template-clean-v2.js?v=20260914f',
+                    '/static/admin-template-outline-v2.js?v=20260914f',
                     '/static/admin-orders-v2.js?v=20260914a',
                 ]
                 for src in scripts:
@@ -43,4 +43,4 @@ def install(app_module):
                 print('[PERF] admin helper injection warning:', repr(exc), flush=True)
         return resp
 
-    print('[PERF] admin helpers enabled: templates clean canvas + outline v2 + orders v2', flush=True)
+    print('[PERF] admin helpers enabled: template canvas bridge + clean canvas + outline v2 + orders v2', flush=True)
