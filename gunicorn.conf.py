@@ -31,12 +31,14 @@ def post_worker_init(worker):
         from order_color_patch import install as install_order_colors
         from asset_category_patch import install as install_asset_categories
         from template_editor_patch import install as install_template_editor
+        from order_management_patch import install as install_order_management
         install_security(app_module)
         install_supabase_resilience(app_module)
         install_admin_perf(app_module)
         install_order_colors(app_module)
         install_asset_categories(app_module)
         install_template_editor(app_module)
+        install_order_management(app_module)
         worker.log.info('Benfuwan security/performance middleware installed')
     except Exception:
         worker.log.exception('Failed to install Benfuwan security/performance middleware')
