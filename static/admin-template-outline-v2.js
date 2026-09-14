@@ -1,0 +1,52 @@
+/* 本福丸模板編輯器描邊 v2：延遲等待 Fabric/畫布，避免後台初始載入時失效 */
+(function(){
+  'use strict';
+  if(window.__benfuwanTemplateOutlineV2Installed)return;
+  window.__benfuwanTemplateOutlineV2Installed=true;
+
+  const STYLE={none:{label:'無',color:null},white:{label:'白邊',color:'#ffffff'},black:{label:'黑邊',color:'#111111'},pink:{label:'粉邊',color:'#ff6f9a'},shadow:{label:'陰影',color:'#000000'},glow:{label:'發光',color:'#ff8fb2'},dashed:{label:'虛線',color:'#ffffff'},hand:{label:'手繪',color:'#ffffff'},sticker:{label:'厚貼紙',color:'#ffffff'},custom:{label:'自訂色',color:null}};
+  const by=id=>document.getElementById(id);
+  let busy=false,hooked=null,timer=null;
+  const active=()=>window.visualCanvas?.getActiveObject?.()||null;
+  const isImage=o=>!!o&&o.type==='image'&&!o.isTplBg&&!o.isSlot;
+  const status=s=>{const e=by('bf-tpl-status');if(e)e.textContent=s};
+
+  function proxy(url){url=String(url||'');if(!url||url.startsWith('data:')||url.startsWith('blob:')||url.startsWith('/'))return url;try{const u=new URL(url,location.href);if(u.origin===location.origin)return u.href}catch(e){}return '/api/admin/template_asset_proxy?url='+encodeURIComponent(url)}
+  function load(src){return new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=()=>rej(new Error('圖片讀取失敗'));i.src=proxy(src)})}
+  function blob(c){return new Promise((res,rej)=>c.toBlob(b=>b?res(b):rej(new Error('描邊輸出失敗')),'image/webp',.94))}
+
+  function patchSerialize(){
+    if(!window.fabric?.Object||fabric.Object.prototype.__bfOutlineV2Patched)return;
+    const old=fabric.Object.prototype.toObject;
+    fabric.Object.prototype.toObject=function(props){const out=old.call(this,props);['aiOutlineSourcePublic','aiOutlineStyle','aiOutlineWidth','aiOutlineColor','aiBackgroundRemoved'].forEach(k=>{if(this[k]!==undefined)out[k]=this[k]});return out};
+    fabric.Object.prototype.__bfOutlineV2Patched=true;
+  }
+
+  function css(){if(by('bf-outline-v2-css'))return;const s=document.createElement('style');s.id='bf-outline-v2-css';s.textContent=`
+  #bf-outline-v2-panel{display:none;margin-top:8px;padding:11px;border:1px solid #efdfe5;background:#fff;border-radius:14px}#bf-outline-v2-panel.show{display:block}.bf-ov2-head{display:flex;justify-content:space-between;align-items:center;color:#d95580;font-weight:900;font-size:12px;margin-bottom:9px}.bf-ov2-head button{border:1px solid #efd3dc;background:#fff;border-radius:999px;color:#d95580;padding:5px 9px}.bf-ov2-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:7px}.bf-ov2-grid button{border:1px solid #efdee4;background:#fff;border-radius:11px;padding:8px 3px;font-size:10px;font-weight:900;color:#685e63}.bf-ov2-grid button.active{border-color:#ff6f9a;background:#fff0f5;color:#f54f84}.bf-ov2-row{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:10px}.bf-ov2-row label{width:48px;font-weight:900}.bf-ov2-row input[type=range]{flex:1;accent-color:#ff6f9a}.bf-ov2-colors{display:flex;align-items:center;gap:7px}.bf-ov2-color{width:30px;height:30px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px #dfd2d7}.bf-ov2-custom{width:42px;height:34px}.bf-outline-v2-btn{display:none!important}#bf-tpl-objectbar.bf-has-image .bf-outline-v2-btn{display:inline-block!important}@media(max-width:760px){.bf-ov2-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+  `;document.head.appendChild(s)}
+
+  function ensureUi(){
+    css();patchSerialize();
+    const tools=by('bf-tpl-tools'),obj=by('bf-tpl-objectbar');if(!tools||!obj)return;
+    if(!by('bf-outline-v2-panel')){
+      const p=document.createElement('div');p.id='bf-outline-v2-panel';
+      p.innerHTML=`<div class="bf-ov2-head"><span>圖片描邊</span><button type="button" data-close>收起</button></div><div class="bf-ov2-grid">${Object.entries(STYLE).map(([k,v])=>`<button type="button" data-style="${k}">${v.label}</button>`).join('')}</div><div class="bf-ov2-row"><label>粗細</label><input id="bf-ov2-width" type="range" min="2" max="28" value="8"><span id="bf-ov2-width-val">8</span></div><div class="bf-ov2-row"><label>顏色</label><div class="bf-ov2-colors"><button class="bf-ov2-color" data-color="#ffffff" style="background:#fff"></button><button class="bf-ov2-color" data-color="#111111" style="background:#111"></button><button class="bf-ov2-color" data-color="#ff6f9a" style="background:#ff6f9a"></button><input id="bf-ov2-custom" class="bf-ov2-custom" type="color" value="#ffffff"></div></div><div style="font-size:10px;color:#8e8288;margin-top:8px">一般圖片、AI 去背圖片都可以描邊，儲存模板後效果會保留。</div>`;
+      tools.appendChild(p);p.querySelector('[data-close]').onclick=()=>p.classList.remove('show');p.querySelectorAll('[data-style]').forEach(b=>b.onclick=()=>apply(b.dataset.style));p.querySelectorAll('[data-color]').forEach(b=>b.onclick=()=>{by('bf-ov2-custom').value=b.dataset.color;const o=active();if(o){o.aiOutlineColor=b.dataset.color;o.aiOutlineStyle='custom'}apply('custom')});by('bf-ov2-custom').onchange=()=>apply('custom');by('bf-ov2-width').oninput=()=>{by('bf-ov2-width-val').textContent=by('bf-ov2-width').value;clearTimeout(timer);timer=setTimeout(()=>{const o=active();if(isImage(o)&&(o.aiOutlineStyle||'none')!=='none')apply(o.aiOutlineStyle)},180)};
+    }
+    if(!obj.querySelector('.bf-outline-v2-btn')){const b=document.createElement('button');b.type='button';b.className='bf-outline-v2-btn';b.textContent='描邊';b.onclick=()=>{by('bf-outline-v2-panel')?.classList.add('show');sync()};obj.insertBefore(b,obj.querySelector('.danger')||obj.lastElementChild)}
+  }
+
+  function ring(g,img,pad,r,a=1,j=0){const n=Math.max(30,Math.min(78,Math.round(r*2.8)));g.globalAlpha=a;for(let k=0;k<n;k++){const ang=Math.PI*2*k/n,rr=r+(j?((Math.sin(k*2.7)+Math.cos(k*1.4))*j):0);g.drawImage(img,pad+Math.cos(ang)*rr,pad+Math.sin(ang)*rr)}g.globalAlpha=1}
+  function tint(g,c,color){g.globalCompositeOperation='source-in';g.fillStyle=color;g.fillRect(0,0,c.width,c.height);g.globalCompositeOperation='source-over'}
+  async function effect(src,style,color,ui){const img=await load(src),iw=img.naturalWidth||img.width,ih=img.naturalHeight||img.height,base=Math.max(180,Math.min(iw,ih)),w=Math.max(2,Math.min(64,Math.round(base*(ui/700)*(style==='sticker'?1.8:1)))),pad=Math.max(w*3,style==='glow'?w*5:w*2)+5,c=document.createElement('canvas');c.width=Math.ceil(iw+pad*2);c.height=Math.ceil(ih+pad*2);const g=c.getContext('2d');if(style==='shadow'){g.save();g.shadowColor='rgba(0,0,0,.42)';g.shadowBlur=Math.max(8,w*2.6);g.shadowOffsetX=Math.max(2,w*.5);g.shadowOffsetY=Math.max(3,w*.75);g.drawImage(img,pad,pad);g.restore();g.drawImage(img,pad,pad);return c}if(style==='glow'){g.save();g.shadowColor=color||'#ff8fb2';g.shadowBlur=Math.max(12,w*3.2);for(let i=0;i<3;i++)g.drawImage(img,pad,pad);g.restore();g.drawImage(img,pad,pad);return c}if(style==='hand'){ring(g,img,pad,w,.8,Math.max(1,w*.16));ring(g,img,pad,w*.72,.5,Math.max(.6,w*.12));tint(g,c,color);g.drawImage(img,pad,pad);return c}ring(g,img,pad,w);ring(g,img,pad,w*.58);if(style==='dashed'){tint(g,c,color);g.globalCompositeOperation='destination-out';const cell=Math.max(7,Math.round(w));for(let y=0;y<c.height;y+=cell*2)for(let x=0;x<c.width;x+=cell*2)g.clearRect(x,y,cell,cell);g.globalCompositeOperation='source-over';g.drawImage(img,pad,pad);return c}tint(g,c,color);g.drawImage(img,pad,pad);return c}
+
+  async function replace(oldObj,b,publicUrl,meta){const c=window.visualCanvas,idx=c.getObjects().indexOf(oldObj),center=oldObj.getCenterPoint(),oldW=Math.max(1,oldObj.getScaledWidth()),oldH=Math.max(1,oldObj.getScaledHeight()),url=URL.createObjectURL(b);let el;try{el=await load(url)}finally{URL.revokeObjectURL(url)}const neo=new fabric.Image(el,{left:center.x,top:center.y,originX:'center',originY:'center',angle:oldObj.angle||0,flipX:!!oldObj.flipX,flipY:!!oldObj.flipY,opacity:oldObj.opacity??1,objectCaching:true});const fit=Math.min(oldW/Math.max(1,neo.width),oldH/Math.max(1,neo.height));neo.set({scaleX:fit,scaleY:fit});neo.publicSrc=publicUrl;neo.originalName=oldObj.originalName||'圖片';neo.stickerId=oldObj.stickerId||'';neo.aiBackgroundRemoved=!!oldObj.aiBackgroundRemoved;neo.aiOutlineSourcePublic=meta.source;neo.aiOutlineStyle=meta.style;neo.aiOutlineWidth=meta.width;neo.aiOutlineColor=meta.color;c.remove(oldObj);c.insertAt(neo,Math.max(0,idx),false);c.setActiveObject(neo);neo.setCoords();c.requestRenderAll();sync()}
+
+  async function apply(style){if(busy)return;const o=active();if(!isImage(o)){alert('請先點選一張圖片');return}busy=true;style=STYLE[style]?style:'none';by('bf-outline-v2-panel')?.classList.add('show');status(style==='none'?'正在移除描邊…':'正在套用描邊…');try{const source=o.aiOutlineSourcePublic||o.publicSrc||o.getSrc?.()||o._element?.src;if(!source)throw new Error('找不到圖片來源');const width=Number(by('bf-ov2-width')?.value||o.aiOutlineWidth||8),picked=by('bf-ov2-custom')?.value||o.aiOutlineColor||'#fff',color=STYLE[style].color||picked;let c;if(style==='none'){const img=await load(source);c=document.createElement('canvas');c.width=img.naturalWidth||img.width;c.height=img.naturalHeight||img.height;c.getContext('2d').drawImage(img,0,0)}else c=await effect(source,style,color,width);const b=await blob(c);c.width=c.height=1;const url=await uploadAdminImage(new File([b],'outline-'+style+'.webp',{type:'image/webp'}),'template');await replace(o,b,url,{source,style,width,color});status(style==='none'?'描邊已關閉':STYLE[style].label+'已套用')}catch(e){console.error('[TPL OUTLINE V2]',e);alert(e.message||'描邊處理失敗')}finally{busy=false}}
+
+  function sync(){ensureUi();const o=active(),ok=isImage(o),obj=by('bf-tpl-objectbar');if(!obj)return;obj.classList.toggle('bf-has-image',ok);if(!ok)return;const style=o.aiOutlineStyle||'none',width=Number(o.aiOutlineWidth||8),color=o.aiOutlineColor||'#ffffff';if(by('bf-ov2-width'))by('bf-ov2-width').value=String(width);if(by('bf-ov2-width-val'))by('bf-ov2-width-val').textContent=String(width);if(by('bf-ov2-custom'))by('bf-ov2-custom').value=color;document.querySelectorAll('#bf-outline-v2-panel [data-style]').forEach(b=>b.classList.toggle('active',b.dataset.style===style))}
+  function hook(){ensureUi();patchSerialize();const c=window.visualCanvas;if(!c||c===hooked)return;hooked=c;['selection:created','selection:updated','selection:cleared','object:added','object:removed','object:modified'].forEach(ev=>c.on(ev,()=>setTimeout(sync,0)));sync()}
+  function boot(){setInterval(()=>{ensureUi();hook();sync()},450);console.info('[ADMIN] template outline v2 waiting for Fabric/canvas')}
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
+})();
