@@ -15,7 +15,6 @@ def install(app_module):
     def _inject_admin_helpers(resp):
         if request.path == '/admin' and resp.status_code == 200 and resp.mimetype == 'text/html':
             try:
-                # /admin is served with Flask send_file(), which uses direct_passthrough.
                 if getattr(resp, 'direct_passthrough', False):
                     resp.direct_passthrough = False
 
@@ -30,6 +29,8 @@ def install(app_module):
                     '/static/admin-template-editor-v4.js?v=20260914c',
                     '/static/admin-template-editor-v4-fix.js?v=20260914c',
                     '/static/admin-template-outline.js?v=20260914d',
+                    '/static/admin-template-clean-v2.js?v=20260914e',
+                    '/static/admin-template-outline-v2.js?v=20260914e',
                     '/static/admin-orders-v2.js?v=20260914a',
                 ]
                 for src in scripts:
@@ -42,4 +43,4 @@ def install(app_module):
                 print('[PERF] admin helper injection warning:', repr(exc), flush=True)
         return resp
 
-    print('[PERF] admin helpers enabled: performance + model colors + assets + templates v4 + outline + orders v2', flush=True)
+    print('[PERF] admin helpers enabled: templates clean canvas + outline v2 + orders v2', flush=True)
