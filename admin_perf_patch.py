@@ -26,6 +26,8 @@ def install(app_module):
                     '/static/admin-asset-categories.js?v=20260913j',
                     '/static/admin-universal-templates.js?v=20260913k',
                     '/static/admin-template-editor-v2.js?v=20260913l',
+                    '/static/admin-template-editor-v3.js?v=20260914a',
+                    '/static/admin-orders-v2.js?v=20260914a',
                 ]
                 for src in scripts:
                     if src not in html and '</body>' in html:
@@ -37,4 +39,4 @@ def install(app_module):
                 print('[PERF] admin helper injection warning:', repr(exc), flush=True)
         return resp
 
-    print('[PERF] admin page lazy-load + model-color + asset + universal-template + template-editor-v2 helpers enabled', flush=True)
+    print('[PERF] admin helpers enabled: performance + model colors + assets + templates v3 + orders v2', flush=True)
