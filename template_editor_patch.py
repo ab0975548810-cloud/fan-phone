@@ -1,8 +1,8 @@
-"""Admin template editor helpers: same-origin image proxy for Fabric.js.
+"""Template image helpers for admin and public frontend rendering.
 
-The template editor needs to export its canvas. Loading Supabase images directly into
-Fabric can fail CORS checks or taint the canvas, so authenticated admin editing uses
-this narrow proxy. Only the configured Supabase project host is allowed.
+Both the admin Fabric editor and the customer editor need same-origin image bytes
+when exporting a canvas. The proxy is intentionally narrow: it only reads images
+from the configured Supabase project host.
 """
 from urllib.parse import urlparse
 from flask import request, Response
@@ -23,9 +23,8 @@ def install(app_module):
     supabase_url = (app_module.SUPABASE_URL or '').strip()
     allowed_host = (urlparse(supabase_url).hostname or '').lower()
 
-    @app.route('/api/admin/template_asset_proxy', methods=['GET'])
-    def admin_template_asset_proxy():
-        if not session.get('logged_in'):
+    def _serve_proxy(require_admin=False):
+        if require_admin and not session.get('logged_in'):
             return no_cache_json({'status': 'error', 'msg': '未登入'}, 401)
         if not requests_lib:
             return no_cache_json({'status': 'error', 'msg': '伺服器缺少圖片連線元件'}, 503)
@@ -57,11 +56,19 @@ def install(app_module):
                 return no_cache_json({'status': 'error', 'msg': '圖片格式不支援'}, 415)
 
             resp = Response(raw, mimetype=content_type)
-            resp.headers['Cache-Control'] = 'private, max-age=3600'
+            resp.headers['Cache-Control'] = 'private, max-age=3600' if require_admin else 'public, max-age=3600'
             resp.headers['X-Content-Type-Options'] = 'nosniff'
             return resp
         except Exception as exc:
             print('[TEMPLATE] asset proxy error:', repr(exc), flush=True)
             return no_cache_json({'status': 'error', 'msg': '模板圖片讀取失敗'}, 502)
 
-    print('[TEMPLATE] admin same-origin asset proxy enabled', flush=True)
+    @app.route('/api/admin/template_asset_proxy', methods=['GET'])
+    def admin_template_asset_proxy():
+        return _serve_proxy(require_admin=True)
+
+    @app.route('/api/public/asset_proxy', methods=['GET'])
+    def public_template_asset_proxy():
+        return _serve_proxy(require_admin=False)
+
+    print('[TEMPLATE] admin + public same-origin asset proxy enabled', flush=True)

@@ -6,10 +6,19 @@
   const states = new WeakMap();
   let previewBusy = false;
 
+  function safeAssetUrl(url) {
+    url = String(url || '').trim();
+    if (!url || url.startsWith('data:') || url.startsWith('blob:') || url.startsWith('/')) return url;
+    try {
+      const u = new URL(url, location.href);
+      if (u.origin === location.origin) return u.href;
+    } catch (e) {}
+    return '/api/public/asset_proxy?url=' + encodeURIComponent(url);
+  }
+
   function loadImage(url, message) {
     return new Promise((resolve, reject) => {
       const img = new Image();
-      img.crossOrigin = 'anonymous';
       const timer = setTimeout(() => finish(new Error(message)), 15000);
       function finish(error) {
         clearTimeout(timer);
@@ -19,7 +28,7 @@
       }
       img.onload = () => finish(img.naturalWidth && img.naturalHeight ? null : new Error(message));
       img.onerror = () => finish(new Error(message));
-      img.src = url;
+      img.src = safeAssetUrl(url);
     });
   }
 
@@ -51,7 +60,6 @@
       target.requestRenderAll();
       return state.ready;
     }
-    // Loading or failed masks must never expose an unmasked production design.
     const empty = new fabric.Rect({ width: 0, height: 0, strokeWidth: 0, excludeFromExport: true });
     state = { key, clip: empty, image: null, error: null };
     states.set(target, state);
@@ -90,30 +98,27 @@
     });
   };
 
-  // PNG pHYs preserves physical size. Browser canvas otherwise writes 96 DPI.
   function withMetricScale(dataUrl) {
     const binary = atob(dataUrl.split(',')[1]);
     const input = Uint8Array.from(binary, char => char.charCodeAt(0));
     const chunk = new Uint8Array(21);
     const view = new DataView(chunk.buffer);
     view.setUint32(0, 9);
-    chunk.set([112, 72, 89, 115], 4); // pHYs
+    chunk.set([112, 72, 89, 115], 4);
     view.setUint32(8, PIXELS_PER_MM * 1000);
     view.setUint32(12, PIXELS_PER_MM * 1000);
-    chunk[16] = 1; // metre
+    chunk[16] = 1;
     let crc = 0xffffffff;
     for (const byte of chunk.subarray(4, 17)) {
       crc ^= byte;
       for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
     }
     view.setUint32(17, (crc ^ 0xffffffff) >>> 0);
-    const parts = [input.subarray(0, 33), chunk]; // PNG signature + IHDR
+    const parts = [input.subarray(0, 33), chunk];
     const sourceView = new DataView(input.buffer);
     for (let pos = 33; pos < input.length;) {
       const end = pos + sourceView.getUint32(pos) + 12;
-      if (!(input[pos + 4] === 112 && input[pos + 5] === 72 && input[pos + 6] === 89 && input[pos + 7] === 115)) {
-        parts.push(input.subarray(pos, end));
-      }
+      if (!(input[pos + 4] === 112 && input[pos + 5] === 72 && input[pos + 6] === 89 && input[pos + 7] === 115)) parts.push(input.subarray(pos, end));
       pos = end;
     }
     const out = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
@@ -131,8 +136,6 @@
     let source;
     try {
       hidden.forEach(o => { o.visible = false; });
-      // Render objects with their own photo crops, then apply the original mask
-      // once at output resolution, avoiding a second softened/cached mask edge.
       target.clipPath = null;
       source = target.toCanvasElement(Math.max(width / target.width, height / target.height));
     } finally {
@@ -162,9 +165,7 @@
         ensureClip(target, maskUrl, true),
         overlayUrl ? loadImage(overlayUrl, '手機殼預覽讀取失敗，請再試一次。') : Promise.resolve(null)
       ]);
-      if (canvas !== target || ctx !== context || context.printLineUrl !== maskUrl || context.maskUrl !== overlayUrl) {
-        throw new Error('型號已切換，請重新預覽。');
-      }
+      if (canvas !== target || ctx !== context || context.printLineUrl !== maskUrl || context.maskUrl !== overlayUrl) throw new Error('型號已切換，請重新預覽。');
       const width = Math.round(Number(context.printW) * PIXELS_PER_MM);
       const height = Math.round(Number(context.printH) * PIXELS_PER_MM);
       if (!(width > 0 && height > 0) || width * height > 16000000) throw new Error('手機殼尺寸設定有誤，請聯絡店家。');
@@ -192,8 +193,9 @@
       if (info) info.textContent = '請確認照片、文字與貼紙的位置。鏡頭孔及不可印刷的位置不會印上圖案；手機殼外框供預覽參考。';
       navigate('page-preview');
     } catch (error) {
-      console.error(error);
-      toast(/[\u3400-\u9fff]/.test(error.message) ? error.message : '預覽產生失敗，請再試一次。');
+      console.error('[PREVIEW]', error);
+      const msg = error && error.name === 'SecurityError' ? '圖片安全載入失敗，請重新整理後再按一次完成。' : (/[\u3400-\u9fff]/.test(error.message||'') ? error.message : '預覽產生失敗，請再試一次。');
+      toast(msg);
     } finally {
       previewBusy = false;
       setBusy(false);
