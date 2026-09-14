@@ -25,7 +25,7 @@ def install(app_module):
                     '/static/admin-perf.js?v=20260914i',
                     '/static/admin-model-colors.js?v=20260913d',
                     '/static/admin-asset-categories.js?v=20260913j',
-                    '/static/admin-template-loader.js?v=20260914h',
+                    '/static/admin-template-loader.js?v=20260914j',
                     '/static/admin-orders-v2.js?v=20260914h',
                 ]
                 for src in scripts:
@@ -38,4 +38,4 @@ def install(app_module):
                 print('[PERF] admin helper injection warning:', repr(exc), flush=True)
         return resp
 
-    print('[PERF] lightweight admin + lazy template editor + orders v2 enabled', flush=True)
+    print('[PERF] lightweight admin + lazy template editor v5 + orders v2 enabled', flush=True)
