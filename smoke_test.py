@@ -34,7 +34,7 @@ for path in sorted(ROOT.glob("*.py")):
 
 # 2) Every JS patch injected by index.html must exist and parse in Node.
 index = (ROOT / "index.html").read_text(encoding="utf-8")
-refs = sorted(set(re.findall(r'/static/([^\"?]+\\.js)', index)))
+refs = sorted(set(re.findall(r'/static/([^\"?]+\.js)', index)))
 if not refs:
     fail("index.html does not reference any frontend JS patches")
 for rel in refs:
