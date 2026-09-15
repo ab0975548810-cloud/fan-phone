@@ -17,7 +17,8 @@
     '/static/admin-template-image-tools-v2-fix.js?v=20260914h',
     '/static/admin-upload-optimizer.js?v=20260914h',
     '/static/admin-template-normalized-v5.js?v=20260914j',
-    '/static/admin-ai-v5.js?v=20260915remove1'
+    '/static/admin-ai-v5.js?v=20260915remove1',
+    '/static/admin-template-history-v1.js?v=20260915a'
   ];
   let loading=null,loaded=false;
 
