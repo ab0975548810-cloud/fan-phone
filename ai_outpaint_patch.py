@@ -7,7 +7,7 @@ slow or block normal background removal.
 import base64
 import os
 import time
-from flask import request, Response
+from flask import request, Response, session
 
 _INSTALLED = False
 
@@ -39,6 +39,11 @@ def install(app_module):
     def _json(resp, action):
         if resp.status_code < 200 or resp.status_code >= 300:
             detail = (resp.text or '').strip()[:400]
+            if resp.status_code == 404 and 'endpoint not found' in detail.lower():
+                raise RuntimeError(
+                    f'{action}失敗（HTTP 404）：Runpod 找不到或目前 API Key 無權存取擴圖 Endpoint。'
+                    f' 請確認 Endpoint ID={outpaint_endpoint_id} 並確認 Zeabur 使用的 RUNPOD_API_KEY 對這顆 Endpoint 有 Read/Write 權限。'
+                )
             raise RuntimeError(f'{action}失敗（HTTP {resp.status_code}）：{detail or "沒有錯誤內容"}')
         try:
             data = resp.json()
@@ -98,6 +103,80 @@ def install(app_module):
             time.sleep(1.5)
         _cancel(job_id)
         raise TimeoutError(f'AI 擴圖等待逾時（最後狀態：{last}）')
+
+    @app.route('/api/admin/ai_outpaint_diagnose', methods=['GET'])
+    def ai_outpaint_diagnose():
+        """Admin-only transport test. Never returns the Runpod API key."""
+        if not session.get('logged_in'):
+            return no_cache_json({'status':'error','msg':'未登入'}, 401)
+        info = {
+            'status': 'ok',
+            'endpoint_id': outpaint_endpoint_id,
+            'api_base': outpaint_api_base,
+            'api_key_configured': bool(app_module.RUNPOD_API_KEY),
+            'endpoint_configured': bool(outpaint_endpoint_id),
+        }
+        if not requests_lib or not app_module.RUNPOD_API_KEY or not outpaint_endpoint_id:
+            info['status'] = 'config_error'
+            return no_cache_json(info, 503)
+
+        # Read access check.
+        try:
+            h = requests_lib.get(
+                f'{outpaint_api_base}/{outpaint_endpoint_id}/health',
+                headers=_headers(), timeout=15
+            )
+            info['health_http'] = h.status_code
+            info['health_body'] = (h.text or '')[:600]
+        except Exception as exc:
+            info['health_http'] = None
+            info['health_body'] = repr(exc)[:400]
+
+        # Exact same write path the website uses. A ping is intentionally
+        # unsupported by the worker; receiving a Job ID proves auth + routing.
+        try:
+            r = requests_lib.post(
+                f'{outpaint_api_base}/{outpaint_endpoint_id}/run',
+                headers=_headers(True),
+                json={'input': {'task': 'ping'}},
+                timeout=15,
+            )
+            info['run_http'] = r.status_code
+            info['run_body'] = (r.text or '')[:800]
+            if 200 <= r.status_code < 300:
+                try:
+                    data = r.json()
+                except Exception:
+                    data = {}
+                job_id = str(data.get('id') or '').strip() if isinstance(data, dict) else ''
+                info['job_id_received'] = bool(job_id)
+                if job_id:
+                    # Poll briefly; the worker should return UNSUPPORTED_TASK.
+                    for _ in range(8):
+                        time.sleep(0.75)
+                        s = requests_lib.get(
+                            f'{outpaint_api_base}/{outpaint_endpoint_id}/status/{job_id}',
+                            headers=_headers(), timeout=10
+                        )
+                        info['status_http'] = s.status_code
+                        try:
+                            sd = s.json()
+                        except Exception:
+                            sd = {'raw': (s.text or '')[:500]}
+                        info['job_status'] = sd
+                        if isinstance(sd, dict) and str(sd.get('status') or '').upper() in ('COMPLETED','FAILED','TIMED_OUT','ERROR','CANCELLED'):
+                            break
+        except Exception as exc:
+            info['run_http'] = None
+            info['run_body'] = repr(exc)[:400]
+
+        if info.get('run_http') == 404:
+            info['status'] = 'endpoint_or_key_access_error'
+        elif info.get('run_http') and 200 <= info['run_http'] < 300 and info.get('job_id_received'):
+            info['status'] = 'transport_ok'
+        else:
+            info['status'] = 'transport_error'
+        return no_cache_json(info, 200)
 
     @app.route('/api/ai/outpaint', methods=['POST'])
     def ai_outpaint():
