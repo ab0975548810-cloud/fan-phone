@@ -1,16 +1,46 @@
-/* 本福丸後台模板 AI v5：修復 AI 去背，並把原本智慧補邊改成真正生成式 AI 擴圖。 */
+/* 本福丸後台模板 AI：只保留 AI 摳圖。AI 擴圖已下線。 */
 (function(){
 'use strict';
-if(window.__bfAdminAiV5)return;window.__bfAdminAiV5=true;
-const by=id=>document.getElementById(id),canvas=()=>window.visualCanvas||null,active=()=>canvas()?.getActiveObject?.()||null,isImage=o=>!!(o&&o.type==='image'&&!o.isTplBg&&!o.isSlot);let busy=false;
+if(window.__bfAdminAiRemoveOnly)return;window.__bfAdminAiRemoveOnly=true;
+const by=id=>document.getElementById(id),canvas=()=>window.visualCanvas||null,active=()=>canvas()?.getActiveObject?.()||null;
+const isImage=o=>!!(o&&o.type==='image'&&!o.isTplBg&&!o.isSlot);
+let busy=false;
 function status(s){const e=by('bf-tpl-status');if(e)e.textContent=s}
 function load(src){return new Promise((r,j)=>{const i=new Image();i.onload=()=>r(i);i.onerror=()=>j(new Error('圖片載入失敗'));i.src=src})}
 function blob(c,q=.92){return new Promise((r,j)=>c.toBlob(b=>b?r(b):j(new Error('圖片處理失敗')),'image/webp',q))}
-async function sourceBlob(o,max=1600){const el=o.getElement?.()||o._element;if(!el)throw new Error('找不到圖片來源');const iw=el.naturalWidth||el.width,ih=el.naturalHeight||el.height,r=Math.min(1,max/Math.max(iw,ih)),w=Math.max(1,Math.round(iw*r)),h=Math.max(1,Math.round(ih*r)),c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(el,0,0,w,h);let q=.92,b=await blob(c,q);while(b.size>7.5*1024*1024&&q>.62){q-=.07;b=await blob(c,q)}c.width=c.height=1;return b}
-async function replace(old,b,meta={}){const c=canvas(),idx=c.getObjects().indexOf(old),center=old.getCenterPoint(),ow=old.getScaledWidth(),oh=old.getScaledHeight(),url=URL.createObjectURL(b),el=await load(url);URL.revokeObjectURL(url);const neo=new fabric.Image(el,{left:center.x,top:center.y,originX:'center',originY:'center',angle:old.angle||0,flipX:!!old.flipX,flipY:!!old.flipY,opacity:old.opacity??1,objectCaching:true,centeredScaling:true});const fit=Math.min(ow/Math.max(1,neo.width),oh/Math.max(1,neo.height));neo.scaleX=fit;neo.scaleY=fit;neo.originalName=old.originalName||'圖片';neo.stickerId=old.stickerId||'';neo.aiBackgroundRemoved=!!meta.removed;neo.aiExpanded=!!meta.expanded;const f=new File([b],meta.removed?'ai-cutout.png':'ai-expand.png',{type:b.type||'image/png'});try{neo.publicSrc=await uploadAdminImage(f,'template')}catch(e){console.warn('[ADMIN AI] result upload warning',e)}c.remove(old);c.insertAt(neo,Math.max(0,idx),false);c.setActiveObject(neo);neo.setCoords();c.requestRenderAll();c.fire('object:modified',{target:neo});return neo}
-async function call(url,old,fields,meta,label){if(busy)return;if(!isImage(old))return alert('請先選取一張圖片');busy=true;status(label+'…');try{const b=await sourceBlob(old),fd=new FormData();fd.append('image',b,'image.webp');Object.entries(fields||{}).forEach(([k,v])=>fd.append(k,String(v)));const r=await fetch(url,{method:'POST',body:fd,cache:'no-store'});if(!r.ok){let m=label+'失敗';try{m=(await r.json()).msg||m}catch(e){}throw new Error(m)}const out=await r.blob();if(!out.size)throw new Error('AI 沒有回傳圖片');await replace(old,out,meta);status(label+'完成 ✓')}catch(e){console.error('[ADMIN AI V5]',e);alert(e.message||label+'失敗')}finally{busy=false}}
-function ensurePanel(){let p=by('bf-admin-ai-v5-panel');if(p)return p;const tools=by('bf-tpl-tools');if(!tools)return null;p=document.createElement('div');p.id='bf-admin-ai-v5-panel';p.style.cssText='display:none;margin-top:8px;padding:11px;border:1px solid #efdfe5;background:#fff;border-radius:14px';p.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;font-weight:900;color:#d95580;font-size:12px"><span>AI 擴圖</span><button data-close class="btn alt mini">收起</button></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:10px"><button data-dir="all" class="btn alt mini active">四周</button><button data-dir="top" class="btn alt mini">上</button><button data-dir="bottom" class="btn alt mini">下</button><button data-dir="left" class="btn alt mini">左</button><button data-dir="right" class="btn alt mini">右</button></div><div style="display:flex;gap:8px;margin-top:9px"><select id="bf-admin-ai-ratio" style="flex:1"><option value="1.2">小 120%</option><option value="1.4" selected>中 140%</option><option value="1.6">大 160%</option></select><button id="bf-admin-ai-run" class="btn mini">開始擴圖</button></div><div style="font-size:10px;color:#8e8288;margin-top:8px">這次是真正生成式 AI 擴圖，不是模糊補邊。</div>`;tools.appendChild(p);p.querySelector('[data-close]').onclick=()=>p.style.display='none';p.querySelectorAll('[data-dir]').forEach(b=>b.onclick=()=>{p.querySelectorAll('[data-dir]').forEach(x=>x.classList.remove('active'));b.classList.add('active')});by('bf-admin-ai-run').onclick=()=>{const o=active(),dir=p.querySelector('[data-dir].active')?.dataset.dir||'all',ratio=by('bf-admin-ai-ratio')?.value||'1.4';call('/api/ai/outpaint',o,{direction:dir,expand_ratio:ratio},{expanded:true},'AI 擴圖')};return p}
-function bind(){const bar=by('bf-tpl-objectbar');if(!bar)return;const ai=bar.querySelector('.bf-ai-btn');if(ai&&!ai.dataset.v5){ai.dataset.v5='1';ai.textContent='AI 摳圖';ai.onclick=e=>{e.stopImmediatePropagation();call('/api/ai/remove-background',active(),{}, {removed:true},'AI 摳圖')}}const ex=bar.querySelector('.bf-expand-btn');if(ex&&!ex.dataset.v5){ex.dataset.v5='1';ex.textContent='AI 擴圖';ex.onclick=e=>{e.stopImmediatePropagation();const p=ensurePanel();if(p)p.style.display='block'}}const main=by('bf-tpl-expand-v4');if(main&&!main.dataset.v5){main.dataset.v5='1';main.innerHTML='<span class="ico"><i class="fa-solid fa-expand"></i></span>AI 擴圖';main.onclick=e=>{e.stopImmediatePropagation();const p=ensurePanel();if(p)p.style.display='block'}}}
-function boot(){ensurePanel();bind();let n=0;const t=setInterval(()=>{bind();ensurePanel();if(++n>80)clearInterval(t)},500);console.info('[ADMIN] AI remove + real outpaint v5 enabled')}
+async function sourceBlob(o,max=1800){
+  const el=o.getElement?.()||o._element;if(!el)throw new Error('找不到圖片來源');
+  const iw=el.naturalWidth||el.width,ih=el.naturalHeight||el.height,r=Math.min(1,max/Math.max(iw,ih)),w=Math.max(1,Math.round(iw*r)),h=Math.max(1,Math.round(ih*r)),c=document.createElement('canvas');
+  c.width=w;c.height=h;c.getContext('2d').drawImage(el,0,0,w,h);
+  let q=.94,b=await blob(c,q);while(b.size>5.8*1024*1024&&q>.68){q-=.06;b=await blob(c,q)}c.width=c.height=1;return b;
+}
+async function replace(old,b){
+  const c=canvas(),idx=c.getObjects().indexOf(old),center=old.getCenterPoint(),ow=old.getScaledWidth(),oh=old.getScaledHeight(),url=URL.createObjectURL(b),el=await load(url);URL.revokeObjectURL(url);
+  const neo=new fabric.Image(el,{left:center.x,top:center.y,originX:'center',originY:'center',angle:old.angle||0,flipX:!!old.flipX,flipY:!!old.flipY,opacity:old.opacity??1,objectCaching:true,centeredScaling:true});
+  const fit=Math.min(ow/Math.max(1,neo.width),oh/Math.max(1,neo.height));neo.scaleX=fit;neo.scaleY=fit;neo.originalName=old.originalName||'圖片';neo.stickerId=old.stickerId||'';neo.role=old.role;neo.aiBackgroundRemoved=true;
+  const f=new File([b],'ai-cutout.png',{type:'image/png'});try{neo.publicSrc=await uploadAdminImage(f,'template')}catch(e){console.warn('[ADMIN AI] result upload warning',e)}
+  c.remove(old);c.insertAt(neo,Math.max(0,idx),false);c.setActiveObject(neo);neo.setCoords();c.requestRenderAll();c.fire('object:modified',{target:neo});return neo;
+}
+async function runRemove(){
+  if(busy)return;const old=active();if(!isImage(old))return alert('請先選取一張圖片');
+  busy=true;status('AI 正在摳圖（冷啟動第一次可能較久）…');
+  try{
+    const b=await sourceBlob(old),fd=new FormData();fd.append('image',b,'image.webp');
+    const r=await fetch('/api/ai/remove-background',{method:'POST',body:fd,cache:'no-store'});
+    if(!r.ok){let m='AI 摳圖失敗';try{const j=await r.json();m=j.msg||m}catch(e){}throw new Error(m)}
+    const out=await r.blob();if(!out.size)throw new Error('AI 沒有回傳圖片');await replace(old,out);status('AI 摳圖完成 ✓');
+  }catch(e){console.error('[ADMIN AI REMOVE]',e);alert(e.message||'AI 摳圖失敗')}finally{busy=false}
+}
+function removeExpandUi(){
+  by('bf-admin-ai-v5-panel')?.remove();by('bf-tpl-ai-v5-panel')?.remove();
+  const main=by('bf-tpl-expand-v4');if(main)main.style.display='none';
+  document.querySelectorAll('#bf-tpl-objectbar .bf-expand-btn').forEach(b=>b.style.display='none');
+}
+function bind(){
+  removeExpandUi();const bar=by('bf-tpl-objectbar');if(!bar)return;
+  const ai=bar.querySelector('.bf-ai-btn');if(ai&&!ai.dataset.removeOnly){ai.dataset.removeOnly='1';ai.textContent='AI 摳圖';ai.onclick=e=>{e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();runRemove()}}
+  const top=by('bf-tpl-ai-v4');if(top&&!top.dataset.removeOnly){top.dataset.removeOnly='1';top.innerHTML='<span class="ico"><i class="fa-solid fa-wand-magic-sparkles"></i></span>AI 摳圖';top.onclick=e=>{e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();runRemove()}}
+}
+function boot(){bind();let n=0;const t=setInterval(()=>{bind();if(++n>120)clearInterval(t)},500);console.info('[ADMIN] AI remove-background only enabled')}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
