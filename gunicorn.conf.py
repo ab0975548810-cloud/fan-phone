@@ -34,12 +34,10 @@ def post_worker_init(worker):
         from order_management_patch import install as install_order_management
         from quality_perf_patch import install as install_quality_perf
         from ai_runtime_patch import install as install_ai_runtime
-        from ai_outpaint_patch import install as install_ai_outpaint
         install_security(app_module)
         install_supabase_resilience(app_module)
         install_quality_perf(app_module)
         install_ai_runtime(app_module)
-        install_ai_outpaint(app_module)
         install_admin_perf(app_module)
         install_order_colors(app_module)
         install_asset_categories(app_module)
