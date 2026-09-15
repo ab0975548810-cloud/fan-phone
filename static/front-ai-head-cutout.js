@@ -14,18 +14,38 @@
     const s=document.createElement('style');s.id='bf-ai-head-front-css';s.textContent=`
       #bf-ai-head-btn{display:none}#bf-ai-head-btn.show{display:block}
       #bf-ai-head-btn i{color:#ff6f9a}
+      #bf-ai-head-sheet-wrap{margin-top:10px;padding-top:10px;border-top:1px dashed rgba(161,87,195,.28)}
+      #bf-ai-head-sheet-wrap .bf-ai-head-note{font-size:10px;color:#806e77;line-height:1.55;margin:5px 1px 1px}
+      #bf-ai-head-sheet-btn{background:linear-gradient(135deg,#fff,#fff6fb);border-color:#e9b5f2;color:#9a48ba}
+      #bf-ai-head-sheet-btn i{margin-right:6px}
     `;document.head.appendChild(s);
   }
 
   function ensureButton(){
-    addCss();const bar=by('object-bar');if(!bar||by('bf-ai-head-btn'))return;
-    const b=document.createElement('button');b.id='bf-ai-head-btn';b.type='button';b.title='AI 大頭摳圖';b.innerHTML='<i class="fa-solid fa-user-large"></i>AI大頭';b.onclick=e=>{e.preventDefault();e.stopPropagation();run()};
-    const outline=by('bf-ai-outline-btn'),del=[...bar.querySelectorAll('button')].find(x=>/deleteActive/.test(x.getAttribute('onclick')||''));
-    if(outline)bar.insertBefore(b,outline);else if(del)bar.insertBefore(b,del);else bar.appendChild(b);
+    addCss();const bar=by('object-bar');if(!bar)return;
+    let b=by('bf-ai-head-btn');
+    if(!b){
+      b=document.createElement('button');b.id='bf-ai-head-btn';b.type='button';b.title='AI 大頭摳圖';b.innerHTML='<i class="fa-solid fa-user-large"></i>AI大頭';b.onclick=e=>{e.preventDefault();e.stopPropagation();run()};
+      const outline=by('bf-ai-outline-btn'),del=[...bar.querySelectorAll('button')].find(x=>/deleteActive/.test(x.getAttribute('onclick')||''));
+      if(outline)bar.insertBefore(b,outline);else if(del)bar.insertBefore(b,del);else bar.appendChild(b);
+    }
     refresh();
   }
 
-  function refresh(){const b=by('bf-ai-head-btn'),o=active();if(!b)return;b.classList.toggle('show',isPhoto(o));b.disabled=busy||!isPhoto(o);b.title=o?.aiHeadCutout?'這張已做過 AI 大頭摳圖':'AI 大頭摳圖'}
+  function ensureSheetButton(){
+    addCss();const box=document.querySelector('#sheet-upload .ai-box');if(!box||by('bf-ai-head-sheet-wrap'))return;
+    const wrap=document.createElement('div');wrap.id='bf-ai-head-sheet-wrap';
+    wrap.innerHTML='<b><i class="fa-solid fa-user-large"></i> AI 大頭摳圖 <span style="font-size:9px;padding:2px 6px;border-radius:999px;background:#fff;color:#a157c3">NEW</span></b><div class="bf-ai-head-note">先在畫布上選取人物或寵物照片，再按下方按鈕；系統會先去背，再自動裁成適合手機殼排版的大頭素材。</div><button id="bf-ai-head-sheet-btn" class="secondary wide" type="button"><i class="fa-solid fa-user-large"></i>AI 大頭摳圖選取圖片</button>';
+    box.appendChild(wrap);
+    by('bf-ai-head-sheet-btn').onclick=e=>{e.preventDefault();run()};
+    refresh();
+  }
+
+  function refresh(){
+    const o=active(),ok=isPhoto(o),b=by('bf-ai-head-btn'),sheet=by('bf-ai-head-sheet-btn');
+    if(b){b.classList.toggle('show',ok);b.disabled=busy||!ok;b.title=o?.aiHeadCutout?'這張已做過 AI 大頭摳圖':'AI 大頭摳圖'}
+    if(sheet){sheet.disabled=busy;sheet.innerHTML=busy?'<i class="fa-solid fa-spinner fa-spin"></i>AI 大頭處理中…':'<i class="fa-solid fa-user-large"></i>AI 大頭摳圖選取圖片';sheet.title=ok?'AI 大頭摳圖':'請先選取畫布上的照片'}
+  }
 
   function loadImage(src){return new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=()=>reject(new Error('大頭圖片載入失敗'));im.src=src})}
   function dataUrl(ca){return ca.toDataURL('image/png')}
@@ -42,11 +62,12 @@
   }
 
   async function run(){
-    if(busy)return;let old=active();if(!isPhoto(old)){if(typeof toast==='function')toast('請先選取一張照片');return}
+    if(busy)return;let old=active();if(!isPhoto(old)){if(typeof toast==='function')toast('請先在畫布上選取一張人物或寵物照片');return}
     if(old.aiHeadCutout){if(typeof toast==='function')toast('這張照片已經是 AI 大頭摳圖 ♡');return}
-    const core=window.BenfuwanHeadCutout;if(!core){if(typeof toast==='function')toast('AI 大頭工具尚未載入');return}
+    const core=window.BenfuwanHeadCutout;if(!core){if(typeof toast==='function')toast('AI 大頭工具尚未載入，請重新整理頁面');return}
     busy=true;refresh();let face=null;
     try{
+      if(typeof closeSheets==='function')closeSheets();
       if(typeof setBusy==='function')setBusy(true,'AI 正在辨識主要臉部...');
       try{face=await core.detectFace(old.getElement?.()||old._element)}catch(faceErr){console.warn('[FRONT AI HEAD] face detect fallback',faceErr)}
       if(typeof setBusy==='function')setBusy(false);
@@ -76,6 +97,6 @@
     const cv=c();if(!cv||cv===hookedCanvas)return;hookedCanvas=cv;
     ['selection:created','selection:updated','selection:cleared','object:added','object:removed','object:modified'].forEach(evt=>cv.on(evt,()=>setTimeout(refresh,0)));
   }
-  function boot(){ensureButton();hook();setInterval(()=>{ensureButton();hook();refresh()},700);console.info('[FRONT] AI head cutout enabled')}
+  function boot(){ensureButton();ensureSheetButton();hook();setInterval(()=>{ensureButton();ensureSheetButton();hook();refresh()},700);console.info('[FRONT] AI head cutout enabled + visible upload entry')}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
