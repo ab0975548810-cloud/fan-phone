@@ -31,6 +31,7 @@ async function runRemove(){
     const out=await r.blob();if(!out.size)throw new Error('AI 沒有回傳圖片');await replace(old,out);status('AI 摳圖完成 ✓');
   }catch(e){console.error('[ADMIN AI REMOVE]',e);alert(e.message||'AI 摳圖失敗')}finally{busy=false}
 }
+window.bfAdminRemoveBackground=runRemove;
 function removeExpandUi(){
   by('bf-admin-ai-v5-panel')?.remove();by('bf-tpl-ai-v5-panel')?.remove();
   const main=by('bf-tpl-expand-v4');if(main)main.style.display='none';
