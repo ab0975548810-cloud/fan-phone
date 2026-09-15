@@ -1,8 +1,9 @@
-"""Runtime tuning for AI jobs.
+"""Runtime tuning for scale-to-zero AI background-removal jobs.
 
-Keep customer-facing requests from hanging for several minutes. The normal
-BiRefNet endpoint should finish quickly once the lightweight worker is warm;
-if it does not, fail clearly and let the user retry instead of blocking the UI.
+The production Runpod endpoint uses Active workers=0 so idle time costs nothing.
+A cold worker may need time to pull/start the image and load BiRefNet before the
+first request can run. Give that first request enough time instead of failing at
+75 seconds; warm requests still return as soon as they finish.
 """
 
 _INSTALLED = False
@@ -14,12 +15,14 @@ def install(app_module):
         return
     _INSTALLED = True
 
-    # 75 seconds is long enough for a normal scale-to-zero BiRefNet cold start,
-    # but short enough that the storefront never looks permanently frozen.
+    # Scale-to-zero can occasionally need more than 75s for a true cold start.
+    # 180s is still bounded, while avoiding false failures in both storefront
+    # and admin. The backend cancels the Runpod job if this deadline is reached.
     try:
-        app_module.AI_REMOVE_BG_TIMEOUT = min(int(app_module.AI_REMOVE_BG_TIMEOUT or 75), 75)
+        configured = int(app_module.AI_REMOVE_BG_TIMEOUT or 180)
+        app_module.AI_REMOVE_BG_TIMEOUT = max(120, min(configured, 180))
     except Exception:
-        app_module.AI_REMOVE_BG_TIMEOUT = 75
+        app_module.AI_REMOVE_BG_TIMEOUT = 180
 
     try:
         app_module.AI_POLL_INTERVAL = min(float(app_module.AI_POLL_INTERVAL or 1.5), 1.5)
@@ -27,7 +30,7 @@ def install(app_module):
         app_module.AI_POLL_INTERVAL = 1.5
 
     print(
-        f'[AI] runtime tuned: remove-bg timeout={app_module.AI_REMOVE_BG_TIMEOUT}s '
+        f'[AI] scale-to-zero runtime tuned: remove-bg timeout={app_module.AI_REMOVE_BG_TIMEOUT}s '
         f'poll={app_module.AI_POLL_INTERVAL}s',
         flush=True,
     )
