@@ -66,6 +66,7 @@ def _asset_response(body: bytes, content_type: str, source: str):
     resp = Response(body, status=200, content_type=content_type)
     resp.headers["Cache-Control"] = "public, max-age=604800, immutable"
     resp.headers["X-Benfuwan-MediaPipe"] = "same-origin-proxy"
+    # Debug which backend source worked without exposing credentials (there are none).
     resp.headers["X-Benfuwan-Upstream"] = "jsdelivr" if "jsdelivr" in source else ("unpkg" if "unpkg" in source else "google")
     return resp
 
@@ -100,6 +101,7 @@ def install(app_module):
     def mediapipe_bundle():
         try:
             body, source = _fetch_bytes(app_module, _BUNDLE_SOURCES, max_bytes=2 * 1024 * 1024)
+            # A bad CDN response can be HTML with HTTP 200. Reject it before Safari sees it as a module.
             head = body[:256].lstrip().lower()
             if head.startswith(b"<!doctype") or head.startswith(b"<html"):
                 raise RuntimeError("MediaPipe bundle upstream returned HTML")
@@ -130,5 +132,8 @@ def install(app_module):
             print("[MEDIAPIPE] model proxy failed:", repr(exc), flush=True)
             return Response("MediaPipe model unavailable", status=502, content_type="text/plain; charset=utf-8")
 
+    # Register before the security middleware. Flask runs after_request handlers in
+    # reverse registration order, so this executes after security_perf and can add
+    # wasm-unsafe-eval to its CSP without weakening the other directives.
     app.after_request(_allow_wasm_csp)
     print("[MEDIAPIPE] same-origin asset proxy installed", flush=True)
