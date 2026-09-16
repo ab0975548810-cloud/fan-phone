@@ -23,7 +23,6 @@ from supabase_resilience import install as install_supabase_resilience
 from template_editor_patch import install as install_template_editor
 from ai_runtime_patch import install as install_ai_runtime
 
-# Match production middleware order closely enough to verify the real /admin page.
 install_security(app_module)
 install_supabase_resilience(app_module)
 install_quality_perf(app_module)
@@ -34,9 +33,7 @@ install_asset_categories(app_module)
 install_template_editor(app_module)
 install_order_management(app_module)
 
-# security_perf correctly forces Secure cookies in production HTTPS. This browser
-# integration test runs on plain localhost HTTP, so disable only that transport bit
-# after installing the real middleware; all routes/origin checks remain installed.
+# Production correctly requires Secure cookies. Local WebKit is plain HTTP.
 app_module.app.config['SESSION_COOKIE_SECURE'] = False
 
 from werkzeug.serving import make_server
@@ -55,6 +52,20 @@ def sample_jpeg():
     out = BytesIO()
     im.save(out, format='JPEG', quality=94)
     return out.getvalue()
+
+
+def wait_js(page, fn_source, timeout_ms=30000, label='condition'):
+    """Poll via Playwright's execution context without page-side eval()/setTimeout()."""
+    deadline = time.monotonic() + timeout_ms / 1000
+    last = None
+    while time.monotonic() < deadline:
+        try:
+            if page.evaluate(fn_source):
+                return
+        except Exception as exc:
+            last = exc
+        time.sleep(0.12)
+    raise AssertionError(f'timed out waiting for {label}: {last or "false"}')
 
 
 def main():
@@ -77,21 +88,20 @@ def main():
             page.wait_for_url('**/admin')
             page.wait_for_selector('button[data-view="templates"]')
             page.click('button[data-view="templates"]')
-            page.wait_for_function('window.__benfuwanTemplateStackReady === true', timeout=30000)
-            page.wait_for_function('window.__benfuwanTemplateUploadFixV1 === true', timeout=10000)
+            wait_js(page, '() => window.__benfuwanTemplateStackReady === true', 30000, 'template stack')
+            wait_js(page, '() => window.__benfuwanTemplateUploadFixV1 === true', 10000, 'upload fix')
 
             page.click('#view-templates .titlebar .btn')
             page.wait_for_selector('#template-modal.show', timeout=30000)
-            page.wait_for_function('window.visualCanvas && document.querySelector("#bf-tpl-image-file-v3")', timeout=30000)
+            wait_js(page, '() => !!window.visualCanvas && !!document.querySelector("#bf-tpl-image-file-v3")', 30000, 'template canvas')
 
-            # Deliberately give a generic MIME while keeping a .jpg filename. The fix
-            # must normalize it instead of failing before the server receives it.
+            # Generic MIME + .jpg filename exercises Safari-style missing/odd MIME normalization.
             page.set_input_files('#bf-tpl-image-file-v3', {
                 'name': 'template-photo.jpg',
                 'mime_type': 'application/octet-stream',
                 'buffer': jpg,
             })
-            page.wait_for_function("document.querySelector('#bf-tpl-status')?.textContent.includes('圖片已加入')", timeout=30000)
+            page.locator('#bf-tpl-status').filter(has_text='圖片已加入').wait_for(timeout=30000)
             image_state = page.evaluate("""() => {
               const c=window.visualCanvas;
               const imgs=c.getObjects().filter(o=>o.type==='image'&&!o.isTplBg);
@@ -102,7 +112,6 @@ def main():
             assert image_state['publicSrc'], image_state
             assert image_state['width'] > 0, image_state
 
-            # The uploaded standardized image must be retrievable, not just present in Fabric memory.
             uploaded = page.request.get(BASE + image_state['publicSrc'])
             assert uploaded.ok, (uploaded.status, image_state)
             assert uploaded.body()[:4] == b'RIFF', 'server did not standardize template image to WebP'
@@ -112,7 +121,7 @@ def main():
                 'mime_type': 'image/jpeg',
                 'buffer': jpg,
             })
-            page.wait_for_function("document.querySelector('#bf-tpl-status')?.textContent.includes('底圖已加入')", timeout=30000)
+            page.locator('#bf-tpl-status').filter(has_text='底圖已加入').wait_for(timeout=30000)
             bg_state = page.evaluate("""() => {
               const c=window.visualCanvas;
               const bg=c.getObjects().find(o=>o.isTplBg);
@@ -120,8 +129,7 @@ def main():
             }""")
             assert bg_state['exists'] and bg_state['publicSrc'] and bg_state['width'] > 0, bg_state
 
-            # Canvas export verifies the upload did not taint Fabric/CORS state.
-            exported = page.evaluate("window.visualCanvas.toDataURL({format:'png',multiplier:1}).slice(0,30)")
+            exported = page.evaluate("() => window.visualCanvas.toDataURL({format:'png',multiplier:1}).slice(0,30)")
             assert exported.startswith('data:image/png;base64,'), exported
 
             print('TEMPLATE_UPLOAD_WEBKIT_OK', image_state, bg_state)
