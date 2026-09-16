@@ -25,7 +25,7 @@ def install(app_module):
                     '/static/admin-perf.js?v=20260916orders1',
                     '/static/admin-model-colors.js?v=20260913d',
                     '/static/admin-asset-categories.js?v=20260913j',
-                    '/static/admin-template-loader.js?v=20260916upload1',
+                    '/static/admin-template-loader.js?v=20260916ai2',
                     '/static/admin-orders-v2.js?v=20260914h',
                 ]
                 for src in scripts:
