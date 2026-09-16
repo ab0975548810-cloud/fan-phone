@@ -98,7 +98,7 @@ def main():
             # Generic MIME + .jpg filename exercises Safari-style missing/odd MIME normalization.
             page.set_input_files('#bf-tpl-image-file-v3', {
                 'name': 'template-photo.jpg',
-                'mime_type': 'application/octet-stream',
+                'mimeType': 'application/octet-stream',
                 'buffer': jpg,
             })
             page.locator('#bf-tpl-status').filter(has_text='圖片已加入').wait_for(timeout=30000)
@@ -118,7 +118,7 @@ def main():
 
             page.set_input_files('#tpl-bg-file', {
                 'name': 'template-background.jpg',
-                'mime_type': 'image/jpeg',
+                'mimeType': 'image/jpeg',
                 'buffer': jpg,
             })
             page.locator('#bf-tpl-status').filter(has_text='底圖已加入').wait_for(timeout=30000)
