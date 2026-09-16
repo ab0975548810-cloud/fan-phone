@@ -21,14 +21,9 @@
     };
   }
 
-  // 訂單管理先讀最近 40 筆；搜尋舊單時再由使用者切條件/重新整理即可。
-  const originalFetch=window.fetch.bind(window);
-  window.fetch=function(input,init){
-    if(typeof input==='string'&&input.includes('/api/admin/get_orders')){
-      input=input.replace(/limit=(50|200)/,'limit=40');
-    }
-    return originalFetch(input,init);
-  };
+  // 不再攔截 /api/admin/get_orders 的 limit。
+  // 訂單管理 v2 會要求最近 200 筆，後端本身也會把上限限制在 200。
+  // 圖片仍然 lazy-load，卡片也使用 content-visibility，避免一次解碼所有預覽圖。
 
   const style=document.createElement('style');
   style.textContent='.bf-order-day,.bf-order-card,.card{content-visibility:auto;contain-intrinsic-size:auto 260px}.bf-order-thumb{background:#f8f6f7}#bf-order-list{contain:layout style paint}';
@@ -48,5 +43,5 @@
   const observer=new MutationObserver(schedule);
   observer.observe(document.body,{childList:true,subtree:true});
 
-  console.info('[PERF] admin lightweight mode enabled: slower polling + 40 orders + lazy images');
+  console.info('[PERF] admin lightweight mode enabled: slower polling + lazy images; order limit preserved');
 })();
