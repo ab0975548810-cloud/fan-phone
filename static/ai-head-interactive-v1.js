@@ -1,9 +1,9 @@
-/* 本福丸 AI 大頭互動式分割 v1：使用者用筆刷指定要保留/排除的區域，再由 MediaPipe MagicTouch 產生 mask。 */
+/* 本福丸 AI 大頭互動式分割：使用者用筆刷指定要保留/排除的區域，再由 MediaPipe MagicTouch 產生 mask。 */
 (function(){
   'use strict';
   if(window.__bfAiHeadInteractiveV1)return;window.__bfAiHeadInteractiveV1=true;
 
-  // iPhone Safari 對跨網域 dynamic import 偶發失敗，所以 JS / WASM / model 全部改走本站同網域 proxy。
+  // iPhone Safari 對跨網域 dynamic import 偶發失敗，所以 JS / WASM / model 全部走本站同網域 proxy。
   const MP_ESM='/vendor/mediapipe/vision_bundle.mjs?v=1.0.1';
   const MP_WASM='/vendor/mediapipe/wasm';
   const MODEL='/vendor/mediapipe/interactive_segmentation.task';
@@ -23,9 +23,13 @@
     toolPromise=(async()=>{
       console.info('[AI HEAD GUIDE] loading same-origin MediaPipe module',MP_ESM);
       const mod=normalizeModule(await import(MP_ESM));
-      if(!mod?.InteractiveSegmenter||!mod?.FilesetResolver||!mod?.BrushMode){
+      if(!mod?.InteractiveSegmenter||!mod?.FilesetResolver){
         throw new Error('MediaPipe 模組不完整，請重新整理後再試');
       }
+      // @mediapipe/tasks-vision 1.0.1 的 browser bundle 實際沒有輸出 BrushMode，
+      // 但官方 InteractiveSegmenter protocol 固定為 POSITIVE=1 / NEGATIVE=2 / LASSO=3。
+      // 有 export 時優先用官方；沒有時用相同 enum 數值，避免把可用 bundle 誤判成壞掉。
+      const BrushMode=mod.BrushMode||Object.freeze({UNSPECIFIED:0,POSITIVE:1,NEGATIVE:2,LASSO:3});
       console.info('[AI HEAD GUIDE] loading same-origin WASM',MP_WASM);
       const vision=await mod.FilesetResolver.forVisionTasks(MP_WASM);
       let segmenter;
@@ -36,7 +40,7 @@
         segmenter=await mod.InteractiveSegmenter.createFromOptions(vision,{baseOptions:{modelAssetPath:MODEL}});
       }
       console.info('[AI HEAD GUIDE] same-origin segmenter ready');
-      return {segmenter,BrushMode:mod.BrushMode};
+      return {segmenter,BrushMode};
     })().catch(err=>{
       toolPromise=null;
       console.error('[AI HEAD GUIDE] same-origin engine failed',err);
@@ -106,7 +110,7 @@
     const out=document.createElement('canvas');out.width=cw;out.height=ch;const g=out.getContext('2d');
     g.drawImage(el,x,y,cw,ch,0,0,cw,ch);
     g.globalCompositeOperation='destination-in';g.drawImage(m,mx,my,mw,mh,0,0,cw,ch);g.globalCompositeOperation='source-over';
-    return {canvas:trim(out),mode:'interactive-guided-v2-same-origin'};
+    return {canvas:trim(out),mode:'interactive-guided-v3-same-origin'};
   }
 
   function drawPreview(canvas,result,strokes){
@@ -116,6 +120,6 @@
     g.save();g.globalAlpha=.34;g.fillStyle='#ff4f8b';g.fillRect(0,0,w,h);g.globalCompositeOperation='destination-in';g.drawImage(tmp,0,0);g.restore();
   }
 
-  window.BenfuwanInteractiveHead={snapshot,segment,cut,drawPreview,gate:positiveGate,version:'1.2-magic-touch-same-origin'};
+  window.BenfuwanInteractiveHead={snapshot,segment,cut,drawPreview,gate:positiveGate,version:'1.3-magic-touch-same-origin-brushmode-fallback'};
   console.info('[AI HEAD GUIDE] same-origin interactive MagicTouch ready');
 })();
