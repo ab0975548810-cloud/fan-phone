@@ -1,0 +1,26 @@
+name: Template Upload Browser Verify
+
+on:
+  push:
+    branches:
+      - admin-template-upload-fix-20260916
+  workflow_dispatch:
+
+jobs:
+  webkit-template-upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install app and browser dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt playwright
+          python -m playwright install --with-deps webkit
+      - name: Existing smoke test
+        run: python smoke_test.py
+      - name: Real WebKit template image upload test
+        run: python .github/tests/template_upload_webkit.py
