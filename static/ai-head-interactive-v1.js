@@ -4,27 +4,86 @@
   if(window.__bfAiHeadInteractiveV1)return;window.__bfAiHeadInteractiveV1=true;
 
   const MP_VERSION='1.0.1';
-  const MP_ESM=`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}/+esm`;
-  const MP_WASM=`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}/wasm`;
-  const MODEL='https://storage.googleapis.com/mediapipe-models/interactive_segmenter_v2/magic_touch/int8/1/interactive_segmentation.task';
+  // 不再使用 jsDelivr 的 +esm 轉譯入口；部分瀏覽器/網路環境會直接 dynamic import 失敗。
+  // 依序嘗試正式 package root、esm.sh，以及官方 vision_bundle.mjs，並同時提供 WASM CDN fallback。
+  const MP_MODULES=[
+    `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}`,
+    `https://esm.sh/@mediapipe/tasks-vision@${MP_VERSION}?bundle`,
+    `https://unpkg.com/@mediapipe/tasks-vision@${MP_VERSION}/vision_bundle.mjs`
+  ];
+  const MP_WASM_BASES=[
+    `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}/wasm`,
+    `https://unpkg.com/@mediapipe/tasks-vision@${MP_VERSION}/wasm`
+  ];
+  const MODELS=[
+    'https://storage.googleapis.com/mediapipe-models/interactive_segmenter_v2/magic_touch/int8/1/interactive_segmentation.task',
+    'https://storage.googleapis.com/mediapipe-models/interactive_segmenter_v2/magic_touch/int8/latest/interactive_segmentation.task'
+  ];
   let toolPromise=null;
 
   const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
   const dims=el=>({w:Number(el?.naturalWidth||el?.videoWidth||el?.width||0),h:Number(el?.naturalHeight||el?.videoHeight||el?.height||0)});
 
+  function normalizeModule(mod){
+    if(mod?.InteractiveSegmenter&&mod?.FilesetResolver)return mod;
+    if(mod?.default?.InteractiveSegmenter&&mod?.default?.FilesetResolver)return mod.default;
+    return mod;
+  }
+
+  async function loadVisionModule(){
+    let lastErr=null;
+    for(const url of MP_MODULES){
+      try{
+        console.info('[AI HEAD GUIDE] loading MediaPipe module',url);
+        const mod=normalizeModule(await import(url));
+        if(!mod?.InteractiveSegmenter||!mod?.FilesetResolver||!mod?.BrushMode)throw new Error('MediaPipe exports incomplete');
+        console.info('[AI HEAD GUIDE] MediaPipe module loaded',url);
+        return mod;
+      }catch(err){
+        lastErr=err;
+        console.warn('[AI HEAD GUIDE] MediaPipe module source failed',url,err);
+      }
+    }
+    throw new Error('AI 核心載入失敗，請重新整理後再試'+(lastErr?.message?`（${lastErr.message}）`:''));
+  }
+
+  async function createSegmenter(mod){
+    let lastErr=null;
+    for(const wasmBase of MP_WASM_BASES){
+      let vision;
+      try{
+        console.info('[AI HEAD GUIDE] loading WASM',wasmBase);
+        vision=await mod.FilesetResolver.forVisionTasks(wasmBase);
+      }catch(err){
+        lastErr=err;
+        console.warn('[AI HEAD GUIDE] WASM source failed',wasmBase,err);
+        continue;
+      }
+      for(const modelAssetPath of MODELS){
+        try{
+          let segmenter;
+          try{
+            segmenter=await mod.InteractiveSegmenter.createFromOptions(vision,{baseOptions:{modelAssetPath,delegate:'CPU'}});
+          }catch(cpuErr){
+            console.warn('[AI HEAD GUIDE] CPU delegate fallback',cpuErr);
+            segmenter=await mod.InteractiveSegmenter.createFromOptions(vision,{baseOptions:{modelAssetPath}});
+          }
+          console.info('[AI HEAD GUIDE] segmenter ready',wasmBase,modelAssetPath);
+          return segmenter;
+        }catch(err){
+          lastErr=err;
+          console.warn('[AI HEAD GUIDE] segmenter init failed',modelAssetPath,err);
+        }
+      }
+    }
+    throw new Error('AI 分割引擎啟動失敗，請確認網路後重新整理'+(lastErr?.message?`（${lastErr.message}）`:''));
+  }
+
   async function tool(){
     if(toolPromise)return toolPromise;
     toolPromise=(async()=>{
-      const mod=await import(MP_ESM);
-      if(!mod.InteractiveSegmenter||!mod.BrushMode)throw new Error('此版本 AI 互動分割尚未支援');
-      const vision=await mod.FilesetResolver.forVisionTasks(MP_WASM);
-      let segmenter;
-      try{
-        segmenter=await mod.InteractiveSegmenter.createFromOptions(vision,{baseOptions:{modelAssetPath:MODEL,delegate:'CPU'}});
-      }catch(cpuErr){
-        console.warn('[AI HEAD GUIDE] CPU init fallback',cpuErr);
-        segmenter=await mod.InteractiveSegmenter.createFromOptions(vision,{baseOptions:{modelAssetPath:MODEL}});
-      }
+      const mod=await loadVisionModule();
+      const segmenter=await createSegmenter(mod);
       return {segmenter,BrushMode:mod.BrushMode};
     })().catch(err=>{toolPromise=null;throw err});
     return toolPromise;
@@ -103,6 +162,6 @@
     g.save();g.globalAlpha=.34;g.fillStyle='#ff4f8b';g.fillRect(0,0,w,h);g.globalCompositeOperation='destination-in';g.drawImage(tmp,0,0);g.restore();
   }
 
-  window.BenfuwanInteractiveHead={snapshot,segment,cut,drawPreview,gate:positiveGate,version:'1.0-magic-touch'};
+  window.BenfuwanInteractiveHead={snapshot,segment,cut,drawPreview,gate:positiveGate,version:'1.1-magic-touch-cdn-fallback'};
   console.info('[AI HEAD GUIDE] interactive MagicTouch ready');
 })();
