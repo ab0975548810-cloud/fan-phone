@@ -1,12 +1,13 @@
 """Browser-level verification for the guided AI-head MediaPipe pipeline.
 
-Uses Playwright WebKit (Safari engine) and verifies both the raw MediaPipe path
-and the actual storefront flow: open guide -> draw -> preview -> apply -> replace
-Fabric image -> record history.  Production main is not touched by this test.
+Uses Playwright WebKit (Safari engine), boots middleware through the same
+Gunicorn post_worker_init used in production, and verifies the actual storefront
+flow: open guide -> draw -> preview -> apply -> replace Fabric image -> history.
 """
 from __future__ import annotations
 
 import math
+import runpy
 import threading
 import time
 
@@ -14,13 +15,24 @@ from flask import Response
 from werkzeug.serving import make_server
 from playwright.sync_api import sync_playwright
 
-import app as app_module
-from mediapipe_proxy import install as install_mediapipe_proxy
-from security_perf import install as install_security
+
+class _WorkerLog:
+    def info(self, *args, **kwargs):
+        print('[GUNICORN TEST INFO]', *args, flush=True)
+
+    def exception(self, *args, **kwargs):
+        print('[GUNICORN TEST ERROR]', *args, flush=True)
 
 
-install_mediapipe_proxy(app_module)
-install_security(app_module)
+class _Worker:
+    log = _WorkerLog()
+
+
+# Exercise the exact production middleware bootstrap instead of manually
+# installing the MediaPipe proxy in the test.
+_gunicorn = runpy.run_path('gunicorn.conf.py')
+_gunicorn['post_worker_init'](_Worker())
+import app as app_module  # noqa: E402  (already imported by post_worker_init)
 
 
 @app_module.app.route('/__ai_head_test')
@@ -141,11 +153,9 @@ def main():
             }''')
             print('MEDIAPIPE_MODULE_INFO', module_info, flush=True)
 
-            # Draw one clear foreground object and first test the helper API itself.
             result = page.evaluate(r'''async () => {
               const helper = window.BenfuwanInteractiveHead;
               if (!helper) throw new Error('BenfuwanInteractiveHead missing');
-
               const source = document.getElementById('source');
               const g = source.getContext('2d');
               g.fillStyle = '#e8e8e8'; g.fillRect(0, 0, 192, 192);
@@ -153,7 +163,6 @@ def main():
               g.fillStyle = '#f0b040'; g.fillRect(72, 112, 48, 60);
               g.fillStyle = '#ffffff'; g.beginPath(); g.arc(82, 70, 7, 0, Math.PI * 2); g.fill();
               g.beginPath(); g.arc(110, 70, 7, 0, Math.PI * 2); g.fill();
-
               const strokes = [{mode:'positive',points:[
                 {x:0.50,y:0.36},{x:0.50,y:0.43},{x:0.50,y:0.50}
               ]}];
@@ -179,21 +188,16 @@ def main():
             assert result['cutWidth'] > 0 and result['cutHeight'] > 0 and result['pngLength'] > 100
             print('AI_HEAD_WEBKIT_HELPER_OK', result, flush=True)
 
-            # Now test the real front-ai-head-cutout.js interaction and Fabric replacement.
             started = page.evaluate("() => { window.__uiRun = window.makeAiHeadCutout(); return true; }")
             assert started is True
             page.wait_for_selector('#bf-ai-head-guide', state='visible', timeout=10_000)
             paint = page.locator('#bf-ai-head-guide .paint')
             box = paint.bounding_box()
             assert box and box['width'] > 20 and box['height'] > 20, f'paint canvas missing: {box}'
-
             x = box['x'] + box['width'] * 0.50
             y1 = box['y'] + box['height'] * 0.27
             y2 = box['y'] + box['height'] * 0.54
-            page.mouse.move(x, y1)
-            page.mouse.down()
-            page.mouse.move(x, y2, steps=12)
-            page.mouse.up()
+            page.mouse.move(x, y1); page.mouse.down(); page.mouse.move(x, y2, steps=12); page.mouse.up()
 
             page.locator('#bf-ai-head-guide [data-act="preview"]').click()
             page.wait_for_function(
@@ -216,16 +220,11 @@ def main():
                 aiBackgroundRemoved:!!neo?.aiBackgroundRemoved,
                 aiHeadMode:String(neo?.aiHeadMode||''),
                 role:String(neo?.role||''),
-                width:Number(neo?.width||0),
-                height:Number(neo?.height||0),
-                scaleX:Number(neo?.scaleX||0),
-                scaleY:Number(neo?.scaleY||0),
-                history:Number(window.__history||0),
-                renderCount:Number(window.__renderCount||0),
-                layerRendered:!!window.__layerRendered,
-                selectionSynced:!!window.__selectionSynced,
-                styled:!!neo?.__styled,
-                busy:!!window.__busyState,
+                width:Number(neo?.width||0), height:Number(neo?.height||0),
+                scaleX:Number(neo?.scaleX||0), scaleY:Number(neo?.scaleY||0),
+                history:Number(window.__history||0), renderCount:Number(window.__renderCount||0),
+                layerRendered:!!window.__layerRendered, selectionSynced:!!window.__selectionSynced,
+                styled:!!neo?.__styled, busy:!!window.__busyState,
                 toasts:window.__toasts.slice()
               };
             }''')
@@ -244,23 +243,17 @@ def main():
             assert not page_errors, f'WebKit page errors: {page_errors}'
             if console:
                 print('--- browser console ---', flush=True)
-                for line in console[-40:]:
-                    print(line, flush=True)
-
-            context.close()
-            browser.close()
+                for line in console[-40:]: print(line, flush=True)
+            context.close(); browser.close()
     except Exception:
         print('--- browser console before failure ---', flush=True)
-        for line in console[-60:]:
-            print(line, flush=True)
+        for line in console[-60:]: print(line, flush=True)
         if page_errors:
             print('--- page errors ---', flush=True)
-            for line in page_errors:
-                print(line, flush=True)
+            for line in page_errors: print(line, flush=True)
         raise
     finally:
-        server.shutdown()
-        thread.join(timeout=2)
+        server.shutdown(); thread.join(timeout=2)
 
 
 if __name__ == '__main__':
