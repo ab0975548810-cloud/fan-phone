@@ -25,6 +25,7 @@ keepalive = 5
 def post_worker_init(worker):
     try:
         import app as app_module
+        from mediapipe_proxy import install as install_mediapipe_proxy
         from security_perf import install as install_security
         from supabase_resilience import install as install_supabase_resilience
         from admin_perf_patch import install as install_admin_perf
@@ -34,6 +35,9 @@ def post_worker_init(worker):
         from order_management_patch import install as install_order_management
         from quality_perf_patch import install as install_quality_perf
         from ai_runtime_patch import install as install_ai_runtime
+        # Install the vendor routes first. Its after_request hook then runs after
+        # security_perf and can add the CSP token required for WebAssembly.
+        install_mediapipe_proxy(app_module)
         install_security(app_module)
         install_supabase_resilience(app_module)
         install_quality_perf(app_module)
@@ -43,7 +47,7 @@ def post_worker_init(worker):
         install_asset_categories(app_module)
         install_template_editor(app_module)
         install_order_management(app_module)
-        worker.log.info('Benfuwan security/performance/quality/AI middleware installed')
+        worker.log.info('Benfuwan security/performance/quality/AI/MediaPipe middleware installed')
     except Exception:
         worker.log.exception('Failed to install Benfuwan security/performance middleware')
         raise
