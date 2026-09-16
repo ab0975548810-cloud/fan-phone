@@ -34,6 +34,11 @@ install_asset_categories(app_module)
 install_template_editor(app_module)
 install_order_management(app_module)
 
+# security_perf correctly forces Secure cookies in production HTTPS. This browser
+# integration test runs on plain localhost HTTP, so disable only that transport bit
+# after installing the real middleware; all routes/origin checks remain installed.
+app_module.app.config['SESSION_COOKIE_SECURE'] = False
+
 from werkzeug.serving import make_server
 from PIL import Image, ImageDraw
 from playwright.sync_api import sync_playwright
