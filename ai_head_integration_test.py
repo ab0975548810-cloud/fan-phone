@@ -19,8 +19,6 @@ from mediapipe_proxy import install as install_mediapipe_proxy
 from security_perf import install as install_security
 
 
-# Production installs in this order so the proxy's after_request runs last and
-# adds wasm-unsafe-eval to the security CSP.
 install_mediapipe_proxy(app_module)
 install_security(app_module)
 
@@ -67,12 +65,23 @@ def main():
             response = page.goto('http://127.0.0.1:8765/__ai_head_test', wait_until='load', timeout=120_000)
             assert response and response.ok, f'test page HTTP failed: {response.status if response else "no response"}'
 
-            # Sanity-check the exact module endpoint and MIME type Safari imports.
             bundle = context.request.get('http://127.0.0.1:8765/vendor/mediapipe/vision_bundle.mjs?v=1.0.1', timeout=120_000)
             assert bundle.ok, f'bundle proxy HTTP {bundle.status}'
             ctype = (bundle.headers.get('content-type') or '').lower()
             assert 'javascript' in ctype, f'wrong bundle MIME: {ctype}'
             assert len(bundle.body()) > 50_000, 'bundle body unexpectedly small'
+
+            module_info = page.evaluate(r'''async () => {
+              const mod = await import('/vendor/mediapipe/vision_bundle.mjs?v=1.0.1-diagnostics');
+              return {
+                keys: Object.keys(mod).sort(),
+                defaultKeys: mod.default && typeof mod.default === 'object' ? Object.keys(mod.default).sort() : [],
+                hasFilesetResolver: !!mod.FilesetResolver,
+                hasInteractiveSegmenter: !!mod.InteractiveSegmenter,
+                hasBrushMode: !!mod.BrushMode
+              };
+            }''')
+            print('MEDIAPIPE_MODULE_INFO', module_info, flush=True)
 
             result = page.evaluate(r'''async () => {
               const helper = window.BenfuwanInteractiveHead;
@@ -80,7 +89,6 @@ def main():
 
               const canvas = document.getElementById('source');
               const g = canvas.getContext('2d');
-              // Give MagicTouch a simple but non-uniform image with a clear central object.
               g.fillStyle = '#e8e8e8'; g.fillRect(0, 0, 192, 192);
               g.fillStyle = '#1f5fbf'; g.beginPath(); g.arc(96, 78, 48, 0, Math.PI * 2); g.fill();
               g.fillStyle = '#f0b040'; g.fillRect(72, 112, 48, 60);
