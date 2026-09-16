@@ -1,4 +1,4 @@
-/* 本福丸前台：AI 大頭互動摳圖。使用者先用筆刷指定頭部，再由 MagicTouch + 原 AI 去背精修透明邊緣。 */
+/* 本福丸前台：AI 大頭互動摳圖。使用者先用筆刷指定頭部，直接以 MagicTouch mask 產生透明大頭素材。 */
 (function(){
   'use strict';
   if(window.__bfFrontAiHeadCutout)return;window.__bfFrontAiHeadCutout=true;
@@ -68,7 +68,9 @@
   function dataUrl(ca){return ca.toDataURL('image/png')}
 
   async function replaceObject(old,cut){
-    const cv=c();if(!cv)return null;
+    const cv=c();if(!cv)throw new Error('畫布尚未載入');
+    if(!cv.getObjects?.().includes(old))throw new Error('原始圖片狀態已改變，請重新選取照片再試一次');
+    if(!cut?.canvas?.width||!cut?.canvas?.height)throw new Error('大頭圖片輸出為空，請重新預覽後再套用');
     const center=old.getCenterPoint(),idx=cv.getObjects().indexOf(old),displayW=Math.max(1,old.getScaledWidth?.()||((old.width||1)*(old.scaleX||1))),src=dataUrl(cut.canvas),el=await loadImage(src);
     const neo=new fabric.Image(el,{left:center.x,top:center.y,originX:'center',originY:'center',angle:old.angle||0,flipX:!!old.flipX,flipY:!!old.flipY,opacity:old.opacity??1,objectCaching:true});
     const scale=displayW/Math.max(1,neo.width);neo.set({scaleX:scale,scaleY:scale,role:old.role,slotId:old.slotId,slotMeta:old.slotMeta,clipPath:old.clipPath||undefined,originalName:old.originalName,materialType:old.materialType,aiBackgroundRemoved:true,aiHeadCutout:true,aiHeadMode:cut.mode,aiOutlineSource:old.aiOutlineSource,aiOutlineStrength:old.aiOutlineStrength,aiOutlineColor:old.aiOutlineColor});
@@ -124,33 +126,35 @@
 
       function finish(value){document.body.style.overflow=oldOverflow;root.remove();if(!value){source.width=source.height=1}resolve(value)}
       root.querySelector('[data-act="cancel"]').onclick=()=>finish(null);
-      applyBtn.onclick=()=>{if(!lastResult)return;finish({source,result:lastResult,strokes:strokes.map(s=>({mode:s.mode,points:s.points.map(p=>({x:p.x,y:p.y}))}))})};
+      applyBtn.onclick=()=>{
+        if(!lastResult)return;
+        applyBtn.disabled=true;previewBtn.disabled=true;status.textContent='正在套用大頭…';
+        finish({source,result:lastResult,strokes:strokes.map(s=>({mode:s.mode,points:s.points.map(p=>({x:p.x,y:p.y}))}))});
+      };
     });
   }
 
   async function run(){
-    if(busy)return;let old=active();if(!isPhoto(old)){if(typeof toast==='function')toast('請先在畫布上選取一張人物照片');return}
+    if(busy)return;const old=active();if(!isPhoto(old)){if(typeof toast==='function')toast('請先在畫布上選取一張人物照片');return}
     if(old.aiHeadCutout){if(typeof toast==='function')toast('這張照片已經是 AI 大頭摳圖 ♡');return}
     const guide=window.BenfuwanInteractiveHead;if(!guide){if(typeof toast==='function')toast('AI 塗選工具尚未載入，請重新整理頁面');return}
-    busy=true;refresh();
+    busy=true;refresh();let selected=null;
     try{
       if(typeof closeSheets==='function')closeSheets();
       const sourceEl=old.getElement?.()||old._element;if(!sourceEl)throw new Error('讀不到原始照片');
-      const selected=await openGuide(sourceEl);if(!selected)return;
+      selected=await openGuide(sourceEl);if(!selected)return;
 
-      if(!old.aiBackgroundRemoved){
-        if(typeof setBusy==='function')setBusy(true,'AI 正在精修頭髮與人物邊緣…');
-        if(typeof window.removeBackgroundForActive!=='function')throw new Error('AI 去背功能尚未載入');
-        await window.removeBackgroundForActive();old=active();
-        if(!isPhoto(old)||!old.aiBackgroundRemoved)throw new Error('AI 去背未完成，請再試一次');
-      }
-
-      if(typeof setBusy==='function')setBusy(true,'正在依照你塗的範圍製作大頭…');
-      const cut=guide.cut(old.getElement?.()||old._element,selected.result,selected.strokes);await replaceObject(old,cut);
-      if(typeof toast==='function')toast('AI 大頭完成 ♡ 已依照你塗的頭部製作');
-      selected.source.width=selected.source.height=1;
-    }catch(e){console.error('[FRONT AI HEAD]',e);if(typeof toast==='function')toast(e.message||'AI 大頭摳圖失敗，請再試一次')}
-    finally{busy=false;if(typeof setBusy==='function')setBusy(false);refresh()}
+      // 互動式 segmentation 本身已輸出透明 mask。直接套用使用者剛確認的結果，
+      // 不再中途呼叫 BiRefNet 去背替換 Fabric 物件，避免 preview 正常但套用時物件/尺寸失配。
+      if(typeof setBusy==='function')setBusy(true,'正在套用你確認的大頭範圍…');
+      const cut=guide.cut(selected.source,selected.result,selected.strokes);
+      await replaceObject(old,cut);
+      if(typeof toast==='function')toast('AI 大頭完成 ♡ 已套用你確認的頭部範圍');
+    }catch(e){console.error('[FRONT AI HEAD APPLY]',e);if(typeof toast==='function')toast(e.message||'套用大頭失敗，請再試一次')}
+    finally{
+      if(selected?.source){selected.source.width=selected.source.height=1}
+      busy=false;if(typeof setBusy==='function')setBusy(false);refresh();
+    }
   }
 
   window.makeAiHeadCutout=run;
