@@ -103,7 +103,6 @@ def front_test(browser, base):
     }""")
     assert cleared, 'main toolbar click did not release object selection'
 
-    # Re-select the same photo: no background tap is needed and no extra object is introduced.
     page.evaluate("""() => {const o=canvas.getObjects().find(x=>x.role==='photo');canvas.setActiveObject(o);canvas.requestRenderAll();syncSelection();}""")
     page.evaluate("() => window.removeBackgroundForActive()")
     good = page.evaluate("""() => {const o=canvas.getActiveObject();return {ai:!!o?.aiBackgroundRemoved, role:o?.role, outline:String(o?.aiOutlineSource||'').startsWith('data:image/'), count:canvas.getObjects().filter(x=>x.role==='photo').length};}""")
@@ -113,11 +112,14 @@ def front_test(browser, base):
     page.evaluate("() => window.removeBackgroundForActive()")
     bad = page.evaluate("""() => {const o=canvas.getActiveObject();return {ai:!!o?.aiBackgroundRemoved,name:o?.originalName,count:canvas.getObjects().filter(x=>x.role==='photo').length};}""")
     assert bad['ai'] is False and bad['name'] == 'test-1.png' and bad['count'] == 2, bad
+    print('FRONT_WEBKIT_OK')
     page.close()
 
 
 def admin_test(browser, base):
     page = browser.new_page(viewport={'width': 1180, 'height': 900})
+    page.on('console', lambda msg: print('ADMIN_CONSOLE', msg.type, msg.text))
+    page.on('pageerror', lambda exc: print('ADMIN_PAGEERROR', str(exc)))
     page.route('**/api/ai/remove-background', lambda route: route.fulfill(status=200, body=GOOD, content_type='image/png'))
     page.goto(base + '/login', wait_until='domcontentloaded')
     page.locator('input[name="password"]').fill('fan123')
@@ -127,7 +129,20 @@ def admin_test(browser, base):
     page.wait_for_url('**/admin')
     poll(page, "() => typeof window.benfuwanEnsureTemplateEditor === 'function'")
     page.evaluate("() => window.benfuwanEnsureTemplateEditor()")
-    poll(page, "() => !!window.BenfuwanAiRemoveV2 && typeof window.bfAdminRemoveBackground === 'function' && typeof fabric !== 'undefined'")
+    time.sleep(.8)
+    diag = page.evaluate("""() => ({
+      core: !!window.BenfuwanAiRemoveV2,
+      admin: typeof window.bfAdminRemoveBackground,
+      fabricWindow: typeof window.fabric,
+      fabricLexical: (()=>{try{return typeof fabric}catch(e){return 'error:'+String(e)}})(),
+      stackReady: !!window.__benfuwanTemplateStackReady,
+      adminFlag: !!window.__bfAdminAiRemoveOnlyV2,
+      scripts: [...document.scripts].map(s=>s.src).filter(src=>/fabric|ai-remove|admin-ai|template-loader/.test(src))
+    })""")
+    print('ADMIN_DIAG', diag)
+    assert diag['core'], diag
+    assert diag['admin'] == 'function', diag
+    assert diag['fabricWindow'] != 'undefined', diag
     page.evaluate("() => window.openTemplateEditor()")
     poll(page, "() => typeof visualCanvas !== 'undefined' && !!visualCanvas")
 
@@ -142,6 +157,7 @@ def admin_test(browser, base):
     for k in ('w','h','x','y','a'):
         assert abs(after[k]-before[k]) < .75, (k,before,after)
     assert after['publicSrc'], after
+    print('ADMIN_WEBKIT_OK')
     page.close()
 
 
