@@ -25,7 +25,22 @@ jobs:
           SESSION_COOKIE_SECURE: 'false'
         run: python smoke_test.py
       - name: Run real WebKit MediaPipe segmentation test
+        id: browser_test
+        continue-on-error: true
         env:
           FLASK_SECRET_KEY: ai-head-verify-secret
           SESSION_COOKIE_SECURE: 'false'
-        run: python ai_head_integration_test.py
+        run: |
+          set -o pipefail
+          python ai_head_integration_test.py 2>&1 | tee ai-head-test.log
+      - name: Upload browser verification log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-head-webkit-log
+          path: ai-head-test.log
+          if-no-files-found: error
+          retention-days: 3
+      - name: Fail when WebKit verification failed
+        if: steps.browser_test.outcome == 'failure'
+        run: exit 1
