@@ -1,7 +1,13 @@
 import os
+import sys
 import threading
 import time
 from io import BytesIO
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+os.chdir(ROOT)
 
 os.environ['ADMIN_PASSWORD'] = 'template-test-pass'
 os.environ['SESSION_COOKIE_SECURE'] = 'false'
