@@ -10,7 +10,7 @@
 <script>
 (async()=>{
   try{
-    const r=await fetch('/static/index-base-20260913.html?v=20260916i',{cache:'no-store'});
+    const r=await fetch('/static/index-base-20260913.html?v=20260916ai2',{cache:'no-store'});
     if(!r.ok)throw new Error('HTTP '+r.status);
     let html=await r.text();
     const fixes=[
@@ -27,7 +27,10 @@
       '<script src="/static/front-template-precision.js?v=20260914i"><\/script>',
       '<script src="/static/front-production-hq.js?v=20260914i"><\/script>',
       '<script src="/static/front-template-normalized-v5.js?v=20260914j"><\/script>',
-      '<script src="/static/front-editor-history-v2.js?v=20260915b"><\/script>'
+      '<script src="/static/front-editor-history-v2.js?v=20260915b"><\/script>',
+      '<script src="/static/ai-remove-client-v2.js?v=20260916ai2"><\/script>',
+      '<script src="/static/front-ai-remove-v2.js?v=20260916ai2"><\/script>',
+      '<script src="/static/front-editor-access-v1.js?v=20260916ai2"><\/script>'
     ].join('');
     html=html.replace('</body>',fixes+'</body>');
     document.open();document.write(html);document.close();
