@@ -17,9 +17,10 @@
     '/static/admin-template-image-tools-v2-fix.js?v=20260914h',
     '/static/admin-upload-optimizer.js?v=20260914h',
     '/static/admin-template-normalized-v5.js?v=20260914j',
-    '/static/ai-head-cutout-core.js?v=20260915b',
+    '/static/ai-head-cutout-core.js?v=20260916a',
+    '/static/ai-head-cutout-force-head-v2.js?v=20260916a',
     '/static/admin-ai-v5.js?v=20260915head1',
-    '/static/admin-ai-head-cutout.js?v=20260915b',
+    '/static/admin-ai-head-cutout.js?v=20260916a',
     '/static/admin-template-history-v1.js?v=20260915b'
   ];
   let loading=null,loaded=false;
