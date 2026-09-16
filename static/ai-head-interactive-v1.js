@@ -3,22 +3,10 @@
   'use strict';
   if(window.__bfAiHeadInteractiveV1)return;window.__bfAiHeadInteractiveV1=true;
 
-  const MP_VERSION='1.0.1';
-  // 不再使用 jsDelivr 的 +esm 轉譯入口；部分瀏覽器/網路環境會直接 dynamic import 失敗。
-  // 依序嘗試正式 package root、esm.sh，以及官方 vision_bundle.mjs，並同時提供 WASM CDN fallback。
-  const MP_MODULES=[
-    `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}`,
-    `https://esm.sh/@mediapipe/tasks-vision@${MP_VERSION}?bundle`,
-    `https://unpkg.com/@mediapipe/tasks-vision@${MP_VERSION}/vision_bundle.mjs`
-  ];
-  const MP_WASM_BASES=[
-    `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}/wasm`,
-    `https://unpkg.com/@mediapipe/tasks-vision@${MP_VERSION}/wasm`
-  ];
-  const MODELS=[
-    'https://storage.googleapis.com/mediapipe-models/interactive_segmenter_v2/magic_touch/int8/1/interactive_segmentation.task',
-    'https://storage.googleapis.com/mediapipe-models/interactive_segmenter_v2/magic_touch/int8/latest/interactive_segmentation.task'
-  ];
+  // iPhone Safari 對跨網域 dynamic import 偶發失敗，所以 JS / WASM / model 全部改走本站同網域 proxy。
+  const MP_ESM='/vendor/mediapipe/vision_bundle.mjs?v=1.0.1';
+  const MP_WASM='/vendor/mediapipe/wasm';
+  const MODEL='/vendor/mediapipe/interactive_segmentation.task';
   let toolPromise=null;
 
   const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
@@ -30,62 +18,30 @@
     return mod;
   }
 
-  async function loadVisionModule(){
-    let lastErr=null;
-    for(const url of MP_MODULES){
-      try{
-        console.info('[AI HEAD GUIDE] loading MediaPipe module',url);
-        const mod=normalizeModule(await import(url));
-        if(!mod?.InteractiveSegmenter||!mod?.FilesetResolver||!mod?.BrushMode)throw new Error('MediaPipe exports incomplete');
-        console.info('[AI HEAD GUIDE] MediaPipe module loaded',url);
-        return mod;
-      }catch(err){
-        lastErr=err;
-        console.warn('[AI HEAD GUIDE] MediaPipe module source failed',url,err);
-      }
-    }
-    throw new Error('AI 核心載入失敗，請重新整理後再試'+(lastErr?.message?`（${lastErr.message}）`:''));
-  }
-
-  async function createSegmenter(mod){
-    let lastErr=null;
-    for(const wasmBase of MP_WASM_BASES){
-      let vision;
-      try{
-        console.info('[AI HEAD GUIDE] loading WASM',wasmBase);
-        vision=await mod.FilesetResolver.forVisionTasks(wasmBase);
-      }catch(err){
-        lastErr=err;
-        console.warn('[AI HEAD GUIDE] WASM source failed',wasmBase,err);
-        continue;
-      }
-      for(const modelAssetPath of MODELS){
-        try{
-          let segmenter;
-          try{
-            segmenter=await mod.InteractiveSegmenter.createFromOptions(vision,{baseOptions:{modelAssetPath,delegate:'CPU'}});
-          }catch(cpuErr){
-            console.warn('[AI HEAD GUIDE] CPU delegate fallback',cpuErr);
-            segmenter=await mod.InteractiveSegmenter.createFromOptions(vision,{baseOptions:{modelAssetPath}});
-          }
-          console.info('[AI HEAD GUIDE] segmenter ready',wasmBase,modelAssetPath);
-          return segmenter;
-        }catch(err){
-          lastErr=err;
-          console.warn('[AI HEAD GUIDE] segmenter init failed',modelAssetPath,err);
-        }
-      }
-    }
-    throw new Error('AI 分割引擎啟動失敗，請確認網路後重新整理'+(lastErr?.message?`（${lastErr.message}）`:''));
-  }
-
   async function tool(){
     if(toolPromise)return toolPromise;
     toolPromise=(async()=>{
-      const mod=await loadVisionModule();
-      const segmenter=await createSegmenter(mod);
+      console.info('[AI HEAD GUIDE] loading same-origin MediaPipe module',MP_ESM);
+      const mod=normalizeModule(await import(MP_ESM));
+      if(!mod?.InteractiveSegmenter||!mod?.FilesetResolver||!mod?.BrushMode){
+        throw new Error('MediaPipe 模組不完整，請重新整理後再試');
+      }
+      console.info('[AI HEAD GUIDE] loading same-origin WASM',MP_WASM);
+      const vision=await mod.FilesetResolver.forVisionTasks(MP_WASM);
+      let segmenter;
+      try{
+        segmenter=await mod.InteractiveSegmenter.createFromOptions(vision,{baseOptions:{modelAssetPath:MODEL,delegate:'CPU'}});
+      }catch(cpuErr){
+        console.warn('[AI HEAD GUIDE] CPU delegate fallback',cpuErr);
+        segmenter=await mod.InteractiveSegmenter.createFromOptions(vision,{baseOptions:{modelAssetPath:MODEL}});
+      }
+      console.info('[AI HEAD GUIDE] same-origin segmenter ready');
       return {segmenter,BrushMode:mod.BrushMode};
-    })().catch(err=>{toolPromise=null;throw err});
+    })().catch(err=>{
+      toolPromise=null;
+      console.error('[AI HEAD GUIDE] same-origin engine failed',err);
+      throw new Error('AI 核心載入失敗，請重新整理後再試'+(err?.message?`（${err.message}）`:''));
+    });
     return toolPromise;
   }
 
@@ -121,7 +77,6 @@
     if(!pts.length)return {x:0,y:0,w:1,h:1};
     let x1=1,y1=1,x2=0,y2=0;pts.forEach(p=>{x1=Math.min(x1,p.x);y1=Math.min(y1,p.y);x2=Math.max(x2,p.x);y2=Math.max(y2,p.y)});
     let bw=Math.max(.16,x2-x1+.03),bh=Math.max(.18,y2-y1+.03),cx=(x1+x2)/2,cy=(y1+y2)/2;
-    // 使用者塗過的頭部只是「提示範圍」，四周再多留空間給頭髮、耳朵與少量脖子。
     const left=cx-bw*.72,right=cx+bw*.72,top=cy-bh*.78,bottom=cy+bh*.68;
     const x=clamp(left,0,1),y=clamp(top,0,1),r=clamp(right,0,1),b=clamp(bottom,0,1);
     return {x,y,w:Math.max(.01,r-x),h:Math.max(.01,b-y)};
@@ -131,7 +86,6 @@
     const w=Number(result?.width||0),h=Number(result?.height||0),data=result?.data;if(!w||!h||!data||data.length<w*h)throw new Error('AI 選取遮罩格式錯誤');
     const c=document.createElement('canvas');c.width=w;c.height=h;const g=c.getContext('2d'),img=g.createImageData(w,h),d=img.data;
     for(let i=0,j=0;i<w*h;i++,j+=4){
-      // MagicTouch 是 confidence mask；保留柔邊，但壓掉低信心雜訊。
       const v=clamp((Number(data[i]||0)-.12)/.78,0,1),a=Math.round(v*255);
       d[j]=255;d[j+1]=255;d[j+2]=255;d[j+3]=a;
     }
@@ -146,13 +100,13 @@
   }
 
   function cut(el,result,strokes){
-    const {w,h}=dims(el);if(!w||!h)throw new Error('去背圖片尺寸錯誤');
+    const {w,h}=dims(el);if(!w||!h)throw new Error('大頭圖片尺寸錯誤');
     const gate=positiveGate(strokes),x=Math.floor(gate.x*w),y=Math.floor(gate.y*h),cw=Math.max(1,Math.ceil(gate.w*w)),ch=Math.max(1,Math.ceil(gate.h*h));
     const m=maskCanvas(result),mx=gate.x*m.width,my=gate.y*m.height,mw=gate.w*m.width,mh=gate.h*m.height;
     const out=document.createElement('canvas');out.width=cw;out.height=ch;const g=out.getContext('2d');
     g.drawImage(el,x,y,cw,ch,0,0,cw,ch);
     g.globalCompositeOperation='destination-in';g.drawImage(m,mx,my,mw,mh,0,0,cw,ch);g.globalCompositeOperation='source-over';
-    return {canvas:trim(out),mode:'interactive-guided-v1'};
+    return {canvas:trim(out),mode:'interactive-guided-v2-same-origin'};
   }
 
   function drawPreview(canvas,result,strokes){
@@ -162,6 +116,6 @@
     g.save();g.globalAlpha=.34;g.fillStyle='#ff4f8b';g.fillRect(0,0,w,h);g.globalCompositeOperation='destination-in';g.drawImage(tmp,0,0);g.restore();
   }
 
-  window.BenfuwanInteractiveHead={snapshot,segment,cut,drawPreview,gate:positiveGate,version:'1.1-magic-touch-cdn-fallback'};
-  console.info('[AI HEAD GUIDE] interactive MagicTouch ready');
+  window.BenfuwanInteractiveHead={snapshot,segment,cut,drawPreview,gate:positiveGate,version:'1.2-magic-touch-same-origin'};
+  console.info('[AI HEAD GUIDE] same-origin interactive MagicTouch ready');
 })();
