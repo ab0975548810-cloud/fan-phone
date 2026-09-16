@@ -3,7 +3,6 @@
   'use strict';
   if(window.BenfuwanAiRemoveV2)return;
 
-  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
   const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
   function elementSize(el){
@@ -15,9 +14,7 @@
 
   function canvasBlob(canvas,type='image/jpeg',quality=.92){
     return new Promise((resolve,reject)=>{
-      try{
-        canvas.toBlob(b=>b?resolve(b):reject(new Error('圖片壓縮失敗')),type,quality);
-      }catch(e){reject(e)}
+      try{canvas.toBlob(b=>b?resolve(b):reject(new Error('圖片壓縮失敗')),type,quality)}catch(e){reject(e)}
     });
   }
 
@@ -27,7 +24,7 @@
     const size=elementSize(el);
     if(!size.width||!size.height)throw new Error('讀不到原始圖片尺寸');
 
-    let ratio=Math.min(1,maxEdge/Math.max(size.width,size.height));
+    const ratio=Math.min(1,maxEdge/Math.max(size.width,size.height));
     let w=Math.max(1,Math.round(size.width*ratio));
     let h=Math.max(1,Math.round(size.height*ratio));
     let quality=.92;
@@ -40,16 +37,13 @@
       g.fillStyle='#fff';g.fillRect(0,0,w,h);
       try{g.drawImage(el,0,0,w,h)}catch(e){
         c.width=c.height=1;
-        const err=new Error('圖片來源無法讀取，請重新上傳這張圖片再試');
-        err.cause=e;throw err;
+        const err=new Error('圖片來源無法讀取，請重新上傳這張圖片再試');err.cause=e;throw err;
       }
-      const b=await canvasBlob(c,'image/jpeg',quality);
-      c.width=c.height=1;
+      const b=await canvasBlob(c,'image/jpeg',quality);c.width=c.height=1;
       if(b.size<=maxBytes)return b;
       if(quality>.66){quality=Math.max(.64,quality-.08);continue}
-      w=Math.max(480,Math.round(w*.82));
-      h=Math.max(480,Math.round(h*.82));
-      quality=.82;
+      // 兩邊使用同一倍率，任何長寬比都不會被壓扁或拉長。
+      w=Math.max(1,Math.round(w*.82));h=Math.max(1,Math.round(h*.82));quality=.82;
     }
     throw new Error('圖片資料仍然太大，請換一張較小的照片再試');
   }
@@ -94,11 +88,9 @@
         try{const j=await r.clone().json();msg=j?.msg||j?.error||msg}catch(e){try{const t=(await r.text()).trim();if(t)msg=t.slice(0,180)}catch(_) {}}
         throw new Error(msg+'（HTTP '+r.status+'）');
       }
-      const out=await r.blob();if(!out.size)throw new Error('AI 沒有回傳圖片');
-      return out;
+      const out=await r.blob();if(!out.size)throw new Error('AI 沒有回傳圖片');return out;
     }catch(e){
-      if(e?.name==='AbortError')throw new Error('AI 處理逾時，原圖已保留，請再試一次');
-      throw e;
+      if(e?.name==='AbortError')throw new Error('AI 處理逾時，原圖已保留，請再試一次');throw e;
     }finally{if(timer)clearTimeout(timer)}
   }
 
@@ -110,13 +102,11 @@
     if(!window.crypto?.subtle||!(blob instanceof Blob))return '';
     try{
       const prefix=new TextEncoder().encode(version+'|'),body=new Uint8Array(await blob.arrayBuffer()),all=new Uint8Array(prefix.length+body.length);all.set(prefix);all.set(body,prefix.length);
-      const hash=await crypto.subtle.digest('SHA-256',all.buffer);
-      return [...new Uint8Array(hash)].map(b=>b.toString(16).padStart(2,'0')).join('');
+      const hash=await crypto.subtle.digest('SHA-256',all.buffer);return [...new Uint8Array(hash)].map(b=>b.toString(16).padStart(2,'0')).join('');
     }catch(e){return ''}
   }
 
   async function validateWithRetry(blob){
-    // Safari 偶爾在 Blob 剛建立的同一個 event loop 解碼失敗；僅針對解碼錯誤重試一次。
     try{return await validate(blob)}catch(e){
       if(!/讀取|格式/.test(String(e?.message||'')))throw e;
       await sleep(40);return validate(blob);
