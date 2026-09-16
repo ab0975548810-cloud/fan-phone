@@ -38,10 +38,8 @@ class ServerThread(threading.Thread):
     def __init__(self):
         super().__init__()
         self.server = make_server('127.0.0.1', 8765, app_module.app, threaded=True)
-    def run(self):
-        self.server.serve_forever()
-    def close(self):
-        self.server.shutdown()
+    def run(self): self.server.serve_forever()
+    def close(self): self.server.shutdown()
 
 
 def poll(page, fn, timeout=15000, interval=.1):
@@ -50,8 +48,7 @@ def poll(page, fn, timeout=15000, interval=.1):
     while time.time() < end:
         try:
             last = page.evaluate(fn)
-            if last:
-                return last
+            if last: return last
         except Exception:
             pass
         time.sleep(interval)
@@ -99,16 +96,16 @@ def front_test(browser, base):
     }""")
     assert cleared, 'main toolbar click did not release object selection'
 
-    add_front_photo(page, 0)
+    # Re-select the same photo: no background tap is needed and no extra object is introduced.
+    page.evaluate("""() => {const o=canvas.getObjects().find(x=>x.role==='photo');canvas.setActiveObject(o);canvas.requestRenderAll();syncSelection();}""")
     page.evaluate("() => window.removeBackgroundForActive()")
     good = page.evaluate("""() => {const o=canvas.getActiveObject();return {ai:!!o?.aiBackgroundRemoved, role:o?.role, outline:String(o?.aiOutlineSource||'').startsWith('data:image/'), count:canvas.getObjects().filter(x=>x.role==='photo').length};}""")
     assert good == {'ai': True, 'role': 'photo', 'outline': True, 'count': 1}, good
 
     add_front_photo(page, 1)
-    before = page.evaluate("() => canvas.getActiveObject()")
     page.evaluate("() => window.removeBackgroundForActive()")
     bad = page.evaluate("""() => {const o=canvas.getActiveObject();return {ai:!!o?.aiBackgroundRemoved,name:o?.originalName,count:canvas.getObjects().filter(x=>x.role==='photo').length};}""")
-    assert bad['ai'] is False and bad['name'] == 'test-1.png', bad
+    assert bad['ai'] is False and bad['name'] == 'test-1.png' and bad['count'] == 2, bad
     page.close()
 
 
@@ -157,5 +154,4 @@ def main():
         server.close()
 
 
-if __name__ == '__main__':
-    main()
+if __name__ == '__main__': main()
