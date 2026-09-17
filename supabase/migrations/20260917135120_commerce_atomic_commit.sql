@@ -35,7 +35,7 @@ begin
         end if;
     end loop;
     for entry in select key, value from jsonb_each(coalesce(previous->'order_finance', '{}'::jsonb)) loop
-        if (p_data->'order_finance'->entry.key - array['status','inventory_quantity','inventory_reserved','inventory_sequence'])
+        if ((p_data->'order_finance'->entry.key) - array['status','inventory_quantity','inventory_reserved','inventory_sequence'])
            is distinct from (entry.value - array['status','inventory_quantity','inventory_reserved','inventory_sequence']) then
             raise exception 'Order financial snapshots are immutable';
         end if;

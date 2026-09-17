@@ -9,3 +9,4 @@ templates.json
 orders/
 static/materials/
 static/stickers/
+supabase/.temp/
