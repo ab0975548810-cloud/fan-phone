@@ -32,6 +32,49 @@ def install(app_module):
     except Exception:
         app_module.AI_POLL_INTERVAL = 1.5
 
+    # Safari / canvas uploads can occasionally declare a different image MIME than
+    # the bytes actually contain. Keep the security check, but trust PNG/JPEG/WEBP
+    # magic bytes instead of the browser label and normalize the multipart MIME so
+    # app.py and the Runpod worker receive the real format.
+    try:
+        import security_perf as security_module
+
+        def _sniff_image_mime(file_storage):
+            if not file_storage or not getattr(file_storage, 'stream', None):
+                return ''
+            stream = file_storage.stream
+            try:
+                pos = stream.tell()
+            except Exception:
+                pos = 0
+            try:
+                head = stream.read(32)
+                stream.seek(pos)
+            except Exception:
+                return ''
+            if head.startswith(b'\x89PNG\r\n\x1a\n'):
+                return 'image/png'
+            if head.startswith(b'\xff\xd8\xff'):
+                return 'image/jpeg'
+            if len(head) >= 12 and head[:4] == b'RIFF' and head[8:12] == b'WEBP':
+                return 'image/webp'
+            return ''
+
+        def _valid_image_by_magic(file_storage):
+            detected = _sniff_image_mime(file_storage)
+            if not detected:
+                return False
+            try:
+                file_storage.headers['Content-Type'] = detected
+            except Exception:
+                pass
+            return True
+
+        security_module._sniff_image_mime = _sniff_image_mime
+        security_module._valid_image = _valid_image_by_magic
+    except Exception as exc:
+        print('[AI] image MIME compatibility patch warning:', repr(exc), flush=True)
+
     app = app_module.app
 
     # MediaPipe Tasks Vision 1.0.1, pinned so the JS and WASM files always match.
@@ -121,6 +164,6 @@ def install(app_module):
 
     print(
         f'[AI] scale-to-zero runtime tuned: remove-bg timeout={app_module.AI_REMOVE_BG_TIMEOUT}s '
-        f'poll={app_module.AI_POLL_INTERVAL}s; MediaPipe same-origin proxy enabled',
+        f'poll={app_module.AI_POLL_INTERVAL}s; MediaPipe same-origin proxy enabled; image magic-byte validation enabled',
         flush=True,
     )
