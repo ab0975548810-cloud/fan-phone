@@ -7,6 +7,15 @@ This repository powers the production website for 本福丸訂製.
 - Production URL: `https://fanphone.zeabur.app`
 - Deployment: pushes/merges to `main` trigger Zeabur
 
+## Mandatory companion document
+
+Before any substantial feature, architecture, POS, inventory, template, artwork, printer, or data-model work, read **`PROJECT_BLUEPRINT.md`** in the latest `main`.
+
+- `AGENTS.md` = engineering rules, invariants, testing and current handoff.
+- `PROJECT_BLUEPRINT.md` = product vision, target system architecture, module boundaries, production/printing roadmap and agreed long-term construction plan.
+
+If current code conflicts with the blueprint, do not silently rewrite one side. Explain the conflict, risk and proposed migration/fix first.
+
 ## 1. Source of truth and working style
 
 1. Before every change, fetch the latest `main` and inspect the current files. Never overwrite newer work with stale code.
@@ -124,21 +133,22 @@ Use an idempotent print queue / unique print-job identity so retries cannot crea
 
 ## 8. Current handoff for Codex
 
-At the time this file was created, latest production `main` was based on commit `1a8239e22d388081f8bbdd350f98f7ad11afa343`.
+Always fetch the latest production `main`; do not rely on a hard-coded commit SHA in handoff text.
 
 There is already an in-progress POS implementation in:
 
 - Branch: `backend-commerce-pos-v1-20260917`
-- Pull request: `#8` — **Add private POS pricing profit and inventory core**
+- Pull request: `#8` — **POS Phase 1 — pricing, cost, profit and inventory core**
 
 Do NOT start a second POS implementation from scratch.
 
 ### First task
 
-1. Fetch latest `main` and inspect PR #8 completely.
-2. Review the PR for architecture, security, persistence, idempotency, order-history correctness, and frontend/admin regressions.
-3. Preserve the intended separation between public sale-price data and private cost/inventory/profit data.
-4. Confirm the POS flow supports:
+1. Fetch latest `main`, read `PROJECT_BLUEPRINT.md`, and inspect PR #8 completely.
+2. Bring the PR branch up to date with latest `main` before changing code.
+3. Review the PR for architecture, security, persistence, idempotency, order-history correctness, and frontend/admin regressions.
+4. Preserve the intended separation between public sale-price data and private cost/inventory/profit data.
+5. Confirm the POS flow supports:
    - manage sale price
    - manage cost price
    - unit gross profit
@@ -150,9 +160,9 @@ Do NOT start a second POS implementation from scratch.
    - order creation stock deduction
    - void stock restoration
    - restore stock re-deduction
-5. Fix any defects found on the existing PR branch instead of duplicating the implementation.
-6. Run Smoke + WebKit/browser regression and explain any failure rather than bypassing it.
-7. Do NOT merge to `main` automatically. Stop with a clean PR, test results, changed-file summary, risks/assumptions, and anything needing human/product approval.
+6. Fix any defects found on the existing PR branch instead of duplicating the implementation.
+7. Run Smoke + WebKit/browser regression and explain any failure rather than bypassing it.
+8. Do NOT merge to `main` automatically. Stop with a clean PR, test results, changed-file summary, risks/assumptions, and anything needing human/product approval.
 
 ## 9. Communication style for this project
 
