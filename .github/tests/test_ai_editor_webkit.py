@@ -83,15 +83,21 @@ def front_test(browser, base):
     add_front_photo(page, 0)
     page.wait_for_timeout(100)
     metrics = page.evaluate("""() => {
-      const ob=document.getElementById('object-bar'),tb=document.querySelector('#page-editor>.toolbar'),ws=document.querySelector('#page-editor>.workspace'),shell=document.getElementById('canvas-shell');
-      const a=ob.getBoundingClientRect(),b=tb.getBoundingClientRect(),c=ws.getBoundingClientRect(),d=shell.getBoundingClientRect();
-      return {show:ob.classList.contains('show'),objectTop:a.top,objectBottom:a.bottom,toolbarTop:b.top,workspaceBottom:c.bottom,shellBottom:d.bottom,toolbarVisible:getComputedStyle(tb).visibility,toolbarPointer:getComputedStyle(tb).pointerEvents,position:getComputedStyle(ob).position};
+      const ob=document.getElementById('object-bar'),tb=document.querySelector('#page-editor>.toolbar'),ws=document.querySelector('#page-editor>.workspace'),shell=document.getElementById('canvas-shell'),row=document.querySelector('#page-editor>.bf-editor-action-row');
+      const a=ob.getBoundingClientRect(),b=tb.getBoundingClientRect(),c=ws.getBoundingClientRect(),d=shell.getBoundingClientRect(),r=row?.getBoundingClientRect();
+      const left=row?.querySelector('.editor-float:not(.right)'),right=row?.querySelector('.editor-float.right');
+      return {show:ob.classList.contains('show'),objectTop:a.top,objectBottom:a.bottom,toolbarTop:b.top,workspaceBottom:c.bottom,shellBottom:d.bottom,actionTop:r?.top||0,actionBottom:r?.bottom||0,actionHeight:r?.height||0,toolbarVisible:getComputedStyle(tb).visibility,toolbarPointer:getComputedStyle(tb).pointerEvents,position:getComputedStyle(ob).position,leftPosition:left?getComputedStyle(left).position:'',rightPosition:right?getComputedStyle(right).position:'',workspaceHasFloat:!!ws.querySelector('.editor-float')};
     }""")
     assert metrics['show'] and metrics['toolbarVisible']=='visible' and metrics['toolbarPointer']!='none', metrics
     assert metrics['position'] == 'relative', metrics
-    assert metrics['workspaceBottom'] <= metrics['objectTop'] + 2, metrics
+    assert metrics['workspaceBottom'] <= metrics['actionTop'] + 2, metrics
     assert metrics['shellBottom'] <= metrics['workspaceBottom'] + 2, metrics
+    assert metrics['actionBottom'] <= metrics['objectTop'] + 2, metrics
+    assert 44 <= metrics['actionHeight'] <= 56, metrics
+    assert metrics['leftPosition'] == 'relative' and metrics['rightPosition'] == 'relative', metrics
+    assert not metrics['workspaceHasFloat'], metrics
     assert metrics['objectBottom'] <= metrics['toolbarTop'] + 8, metrics
+    print('FRONT_ACTION_ROW_OK', metrics['actionTop'], metrics['actionBottom'])
 
     payload = page.evaluate("""() => {
       const huge={background:'#fff',objects:[{type:'image',role:'photo',left:120,top:240,angle:8,src:'data:image/png;base64,'+'A'.repeat(2200000),originalName:'huge.png'}]};
@@ -127,8 +133,6 @@ def admin_test(browser, base):
     else: page.locator('form').evaluate('(f)=>f.submit()')
     page.wait_for_url('**/admin')
 
-    # Follow the same path an operator uses. Entering the template section first
-    # lets shop/template data and the lazy editor stack finish before opening the modal.
     template_nav = page.locator('.nav button[data-view="templates"]')
     template_nav.click()
     poll(page, "() => typeof window.benfuwanEnsureTemplateEditor === 'function' && typeof shopLoaded !== 'undefined' && shopLoaded && typeof templatesLoaded !== 'undefined' && templatesLoaded")
@@ -137,7 +141,6 @@ def admin_test(browser, base):
     print('ADMIN_STACK_DIAG', diag)
     assert diag['core'] and diag['admin']=='function' and diag['stackReady'] and diag['adminFlag'] and diag['models'] > 0, diag
 
-    # Click the real UI button instead of bypassing the lazy loader with a direct function call.
     page.locator('#view-templates .titlebar .btn').click()
     poll(page, "() => document.getElementById('template-modal')?.classList.contains('show') && typeof window.fabric !== 'undefined' && typeof visualCanvas !== 'undefined' && !!visualCanvas", timeout=30000)
     print('ADMIN_FABRIC_LAZY_OK')
