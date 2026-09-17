@@ -28,7 +28,7 @@ historical SKUs block reversal instead of silently losing inventory.
 Checkout requires a durable idempotency key. The browser saves it in the cart
 before sending; retries and reloads keep it until confirmed success. The server
 stores a request fingerprint and original success response. A key reused with
-different content is rejected. Admin lifecycle requests also retain a key while
+different content is rejected. Admin lifecycle requests also require a key and retain it while
 their outcome is uncertain. Delayed retries cannot reverse a later operation.
 Deleted orders retain their accounting and receipt, so replay cannot recreate
 them. Deletion requires a prior void and performs best-effort image cleanup.

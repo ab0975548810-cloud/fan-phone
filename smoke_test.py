@@ -13,6 +13,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import uuid
 
 ROOT = Path(__file__).resolve().parent
 os.chdir(ROOT)
@@ -195,7 +196,7 @@ if not any(str(row.get("order_id") or row.get("id") or "") == order_id for row i
 
 
 # 8) Exercise void/restore stock reversal, then guarded production workflow.
-void_resp = client.post("/api/admin/order_action", json={"order_id": order_id, "action": "void"})
+void_resp = client.post("/api/admin/order_action", json={"idempotency_key": uuid.uuid4().hex, "order_id": order_id, "action": "void"})
 if void_resp.status_code != 200:
     fail(f"Void order failed: {void_resp.status_code} {void_resp.get_data(as_text=True)[:300]}")
 void_data = client.get("/api/admin/commerce_data").get_json() or {}
@@ -203,7 +204,7 @@ void_sku = next((s for s in (void_data.get("data") or {}).get("skus") or [] if s
 if not void_sku or void_sku.get("stock_qty") != 5:
     fail(f"Voiding order did not restore stock to 5: {void_sku}")
 
-restore_resp = client.post("/api/admin/order_action", json={"order_id": order_id, "action": "restore"})
+restore_resp = client.post("/api/admin/order_action", json={"idempotency_key": uuid.uuid4().hex, "order_id": order_id, "action": "restore"})
 if restore_resp.status_code != 200:
     fail(f"Restore order failed: {restore_resp.status_code} {restore_resp.get_data(as_text=True)[:300]}")
 restore_data = client.get("/api/admin/commerce_data").get_json() or {}
@@ -214,7 +215,7 @@ if not restore_sku or restore_sku.get("stock_qty") != 4:
 for new_status in ("製作中", "待列印"):
     status_resp = client.post(
         "/api/admin/order_action",
-        json={"order_id": order_id, "action": "set_status", "new_status": new_status},
+        json={"idempotency_key": uuid.uuid4().hex, "order_id": order_id, "action": "set_status", "new_status": new_status},
     )
     status_json = status_resp.get_json() or {}
     if status_resp.status_code != 200 or status_json.get("new_status") != new_status:
@@ -231,7 +232,7 @@ if not row or row.get("status") != "待列印":
 
 invalid_resp = client.post(
     "/api/admin/order_action",
-    json={"order_id": order_id, "action": "set_status", "new_status": "亂填狀態"},
+    json={"idempotency_key": uuid.uuid4().hex, "order_id": order_id, "action": "set_status", "new_status": "亂填狀態"},
 )
 if invalid_resp.status_code != 400:
     fail(f"Invalid order status was not rejected: HTTP {invalid_resp.status_code}")

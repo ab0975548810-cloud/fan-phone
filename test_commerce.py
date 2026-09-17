@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+import uuid
 from unittest.mock import patch
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -113,7 +114,7 @@ class CommerceTests(unittest.TestCase):
 
     def action(self, order_id, action, key='', **extra):
         return self.client.post('/api/admin/order_action', json=dict(
-            order_id=order_id, action=action, idempotency_key=key, **extra))
+            order_id=order_id, action=action, idempotency_key=key.ljust(16, '0') if key else uuid.uuid4().hex, **extra))
 
     def test_replay_and_conflicting_payload(self):
         first = self.create()
@@ -128,6 +129,20 @@ class CommerceTests(unittest.TestCase):
         payload = self.payload(); payload.pop('idempotency_key')
         self.assertEqual(self.client.post('/api/create_order', json=payload).status_code, 400)
         self.assertEqual(self.stock(), 5)
+
+    def test_action_requires_identity(self):
+        oid = self.create().get_json()['order_id']
+        response = self.client.post('/api/admin/order_action', json=dict(order_id=oid, action='void'))
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.stock(), 4)
+
+    def test_replay_survives_catalog_change(self):
+        first = self.create().get_json()
+        shop = app.local_load_json(app.DATA_FILE, {})
+        shop['styles'][0]['status'] = False
+        app.local_save_json(app.DATA_FILE, shop)
+        self.assertEqual(self.create().get_json(), first)
+        self.assertEqual(self.stock(), 4)
 
     def test_stale_admin_save_and_history(self):
         stale = self.data()
