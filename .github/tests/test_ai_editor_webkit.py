@@ -78,12 +78,30 @@ def front_test(browser, base):
     responses = [GOOD, BAD]
     page.route('**/api/ai/remove-background', lambda route: route.fulfill(status=200, body=responses.pop(0) if responses else GOOD, content_type='image/png'))
     page.goto(base + '/', wait_until='domcontentloaded')
-    poll(page, "() => typeof fabric !== 'undefined' && typeof initCanvas === 'function' && !!window.BenfuwanAiRemoveV2 && !!window.removeBackgroundForActive")
+    poll(page, "() => typeof fabric !== 'undefined' && typeof initCanvas === 'function' && !!window.BenfuwanAiRemoveV2 && !!window.removeBackgroundForActive && !!window.BenfuwanEditorAccess && !!window.BenfuwanOrderPayload")
     page.evaluate("""() => {ctx.printW=80;ctx.printH=160;ctx.maskUrl='';navigate('page-editor');initCanvas();editorHasSession=true;}""")
     add_front_photo(page, 0)
-    metrics = page.evaluate("""() => {const ob=document.getElementById('object-bar'),tb=document.querySelector('#page-editor>.toolbar');const a=ob.getBoundingClientRect(),b=tb.getBoundingClientRect();return {show:ob.classList.contains('show'),objectBottom:a.bottom,toolbarTop:b.top,toolbarVisible:getComputedStyle(tb).visibility,toolbarPointer:getComputedStyle(tb).pointerEvents};}""")
+    page.wait_for_timeout(100)
+    metrics = page.evaluate("""() => {
+      const ob=document.getElementById('object-bar'),tb=document.querySelector('#page-editor>.toolbar'),ws=document.querySelector('#page-editor>.workspace'),shell=document.getElementById('canvas-shell');
+      const a=ob.getBoundingClientRect(),b=tb.getBoundingClientRect(),c=ws.getBoundingClientRect(),d=shell.getBoundingClientRect();
+      return {show:ob.classList.contains('show'),objectTop:a.top,objectBottom:a.bottom,toolbarTop:b.top,workspaceBottom:c.bottom,shellBottom:d.bottom,toolbarVisible:getComputedStyle(tb).visibility,toolbarPointer:getComputedStyle(tb).pointerEvents,position:getComputedStyle(ob).position};
+    }""")
     assert metrics['show'] and metrics['toolbarVisible']=='visible' and metrics['toolbarPointer']!='none', metrics
-    assert metrics['objectBottom'] <= metrics['toolbarTop'] + 2, metrics
+    assert metrics['position'] == 'relative', metrics
+    assert metrics['workspaceBottom'] <= metrics['objectTop'] + 2, metrics
+    assert metrics['shellBottom'] <= metrics['workspaceBottom'] + 2, metrics
+    assert metrics['objectBottom'] <= metrics['toolbarTop'] + 8, metrics
+
+    payload = page.evaluate("""() => {
+      const huge={background:'#fff',objects:[{type:'image',role:'photo',left:120,top:240,angle:8,src:'data:image/png;base64,'+'A'.repeat(2200000),originalName:'huge.png'}]};
+      const compact=window.BenfuwanOrderPayload.compactDesign(huge),txt=JSON.stringify(compact);
+      return {raw:JSON.stringify(huge).length,compact:txt.length,embedded:txt.includes('data:image'),role:compact.objects?.[0]?.role,left:compact.objects?.[0]?.left};
+    }""")
+    assert payload['raw'] > 2_000_000 and payload['compact'] < 1_500_000 and not payload['embedded'], payload
+    assert payload['role'] == 'photo' and payload['left'] == 120, payload
+    print('FRONT_ORDER_PAYLOAD_OK', payload['raw'], payload['compact'])
+
     assert page.evaluate("""() => {const tb=document.querySelector('#page-editor>.toolbar');const b=[...tb.querySelectorAll('button')].find(x=>/openSheet|openTemplates|layer|sticker/i.test(x.getAttribute('onclick')||''))||tb.querySelector('button');b.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));return !canvas.getActiveObject();}"""), 'main toolbar did not release selection'
     page.evaluate("""() => {const o=canvas.getObjects().find(x=>x.role==='photo');canvas.setActiveObject(o);canvas.requestRenderAll();syncSelection();}""")
     page.evaluate("() => window.removeBackgroundForActive()")
