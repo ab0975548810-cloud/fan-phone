@@ -108,15 +108,20 @@ def admin_test(browser, base):
     if submit.count(): submit.click()
     else: page.locator('form').evaluate('(f)=>f.submit()')
     page.wait_for_url('**/admin')
-    poll(page, "() => typeof window.benfuwanEnsureTemplateEditor === 'function'")
-    page.evaluate("() => window.benfuwanEnsureTemplateEditor()")
-    diag = page.evaluate("""() => ({core:!!window.BenfuwanAiRemoveV2,admin:typeof window.bfAdminRemoveBackground,stackReady:!!window.__benfuwanTemplateStackReady,adminFlag:!!window.__bfAdminAiRemoveOnlyV2})""")
-    print('ADMIN_STACK_DIAG', diag)
-    assert diag['core'] and diag['admin']=='function' and diag['stackReady'] and diag['adminFlag'], diag
 
-    # Fabric is intentionally lazy in admin.html: it is downloaded only when the template editor opens.
-    page.evaluate("() => window.openTemplateEditor()")
-    poll(page, "() => typeof window.fabric !== 'undefined' && typeof visualCanvas !== 'undefined' && !!visualCanvas")
+    # Follow the same path an operator uses. Entering the template section first
+    # lets shop/template data and the lazy editor stack finish before opening the modal.
+    template_nav = page.locator('.nav button[data-view="templates"]')
+    template_nav.click()
+    poll(page, "() => typeof window.benfuwanEnsureTemplateEditor === 'function' && typeof shopLoaded !== 'undefined' && shopLoaded && typeof templatesLoaded !== 'undefined' && templatesLoaded")
+    page.evaluate("() => window.benfuwanEnsureTemplateEditor()")
+    diag = page.evaluate("""() => ({core:!!window.BenfuwanAiRemoveV2,admin:typeof window.bfAdminRemoveBackground,stackReady:!!window.__benfuwanTemplateStackReady,adminFlag:!!window.__bfAdminAiRemoveOnlyV2,models:(shopData?.models||[]).length})""")
+    print('ADMIN_STACK_DIAG', diag)
+    assert diag['core'] and diag['admin']=='function' and diag['stackReady'] and diag['adminFlag'] and diag['models'] > 0, diag
+
+    # Click the real UI button instead of bypassing the lazy loader with a direct function call.
+    page.locator('#view-templates .titlebar .btn').click()
+    poll(page, "() => document.getElementById('template-modal')?.classList.contains('show') && typeof window.fabric !== 'undefined' && typeof visualCanvas !== 'undefined' && !!visualCanvas", timeout=30000)
     print('ADMIN_FABRIC_LAZY_OK')
 
     page.evaluate("""() => new Promise((resolve,reject)=>{const c=document.createElement('canvas');c.width=128;c.height=128;const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,128,128);g.fillStyle='#d94d75';g.fillRect(24,16,80,96);fabric.Image.fromURL(c.toDataURL('image/png'),img=>{try{img.set({left:tplW/2,top:tplH/2,originX:'center',originY:'center',scaleX:.8,scaleY:1.1,angle:13,originalName:'admin-test.png'});visualCanvas.add(img);visualCanvas.setActiveObject(img);visualCanvas.requestRenderAll();resolve()}catch(e){reject(e)}});})""")

@@ -2,8 +2,8 @@
 
 This intentionally avoids external services. It catches broken Python imports,
 missing frontend patch files, JavaScript syntax errors, core Flask route
-regressions, order creation, and authenticated admin order listing before a
-change is reported as ready.
+regressions, order creation, authenticated admin order listing, and the admin
+production status workflow before a change is reported as ready.
 """
 from pathlib import Path
 import base64
@@ -46,6 +46,14 @@ for rel in refs:
     proc = subprocess.run(["node", "--check", str(path)], capture_output=True, text=True)
     if proc.returncode:
         fail(f"JavaScript syntax: static/{rel}\n{proc.stderr}")
+
+# The order center is injected into /admin by middleware, so validate it explicitly.
+order_center = ROOT / "static" / "admin-orders-v3.js"
+if not order_center.exists():
+    fail("Missing admin order center: static/admin-orders-v3.js")
+proc = subprocess.run(["node", "--check", str(order_center)], capture_output=True, text=True)
+if proc.returncode:
+    fail(f"JavaScript syntax: static/admin-orders-v3.js\n{proc.stderr}")
 
 
 # 3) Import Flask app and install the exact production middleware set.
@@ -126,6 +134,8 @@ if login_resp.status_code not in {301, 302, 303, 307, 308}:
 admin_resp = client.get("/admin", follow_redirects=False)
 if admin_resp.status_code != 200:
     fail(f"Authenticated GET /admin: HTTP {admin_resp.status_code}")
+if b"admin-orders-v3.js" not in admin_resp.data:
+    fail("Authenticated /admin did not inject admin-orders-v3.js")
 orders_resp = client.get("/api/admin/get_orders?limit=10")
 try:
     orders_json = orders_resp.get_json() or {}
@@ -138,7 +148,34 @@ if not any(str(row.get("order_id") or row.get("id") or "") == order_id for row i
     fail("Admin order list did not include the just-created smoke order")
 
 
-# 7) Remove local smoke artifacts so CI leaves a clean workspace.
+# 7) Exercise the guarded production workflow used by the real admin UI.
+for new_status in ("製作中", "待列印"):
+    status_resp = client.post(
+        "/api/admin/order_action",
+        json={"order_id": order_id, "action": "set_status", "new_status": new_status},
+    )
+    status_json = status_resp.get_json() or {}
+    if status_resp.status_code != 200 or status_json.get("new_status") != new_status:
+        fail(
+            f"Order status -> {new_status}: HTTP {status_resp.status_code}, "
+            f"body={status_resp.get_data(as_text=True)[:500]}"
+        )
+
+orders_resp = client.get("/api/admin/get_orders?limit=10")
+rows = (orders_resp.get_json() or {}).get("data") or []
+row = next((r for r in rows if str(r.get("order_id") or r.get("id") or "") == order_id), None)
+if not row or row.get("status") != "待列印":
+    fail("Admin order list did not persist the production workflow status")
+
+invalid_resp = client.post(
+    "/api/admin/order_action",
+    json={"order_id": order_id, "action": "set_status", "new_status": "亂填狀態"},
+)
+if invalid_resp.status_code != 400:
+    fail(f"Invalid order status was not rejected: HTTP {invalid_resp.status_code}")
+
+
+# 8) Remove local smoke artifacts so CI leaves a clean workspace.
 orders_dir = ROOT / "orders"
 if orders_dir.exists():
     for path in list(orders_dir.iterdir()):
@@ -149,6 +186,6 @@ if orders_dir.exists():
                 pass
 
 print(
-    f"SMOKE OK: {len(refs)} frontend scripts + Python middleware + "
-    "front routes + order creation + admin login/order listing"
+    f"SMOKE OK: {len(refs)} frontend scripts + admin order center v3 + Python middleware + "
+    "front routes + order creation + admin login/listing + production status workflow"
 )
