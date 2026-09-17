@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 
 ROOT = Path(__file__).resolve().parent
 os.chdir(ROOT)
@@ -55,6 +56,11 @@ for admin_js in ("admin-orders-v3.js", "admin-commerce-v1.js"):
     if proc.returncode:
         fail(f"JavaScript syntax: static/{admin_js}\n{proc.stderr}")
 
+
+test_dir = tempfile.TemporaryDirectory()
+os.environ['COMMERCE_DB_PATH'] = str(Path(test_dir.name) / 'commerce.sqlite3')
+os.environ.pop('SUPABASE_URL', None)
+os.environ.pop('SUPABASE_SERVICE_ROLE_KEY', None)
 
 # 3) Import Flask app and install the exact production middleware set.
 app_module = importlib.import_module("app")
@@ -126,7 +132,7 @@ sku["low_stock_threshold"] = 2
 sku["track_stock"] = True
 save_commerce = client.post(
     "/api/admin/save_commerce_data",
-    json={"style_defaults": commerce.get("style_defaults") or {}, "skus": commerce.get("skus") or []},
+    json={"revision": commerce["revision"], "style_defaults": commerce.get("style_defaults") or {}, "skus": commerce.get("skus") or []},
 )
 if save_commerce.status_code != 200:
     fail(f"POST /api/admin/save_commerce_data: {save_commerce.status_code} {save_commerce.get_data(as_text=True)[:400]}")
@@ -140,6 +146,7 @@ png_url = "data:image/png;base64," + base64.b64encode(png_raw).decode("ascii")
 order_resp = client.post(
     "/api/create_order",
     json={
+        "idempotency_key": "smoke-order-00000001",
         "print_file": png_url,
         "mockup_file": png_url,
         "model_id": model["id"],

@@ -8,13 +8,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
-import threading
+import re
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+from commerce_store import Store, CommerceError
 import time
 from flask import g, request
 
 _INSTALLED = False
-_LOCK = threading.RLock()
 COMMERCE_FILE = 'commerce_data.json'
 DEFAULT_COMMERCE = {
     'version': 1,
@@ -123,24 +124,28 @@ def _normalize_store(raw):
         skus.append(sku)
     finance = raw.get('order_finance') if isinstance(raw.get('order_finance'), dict) else {}
     return {
-        'version': 1,
+        'version': 2,
+        'revision': int(raw.get('revision', 0)),
+        'inventory_ledger': raw.get('inventory_ledger', []),
+        'requests': raw.get('requests', {}),
+        'actions': raw.get('actions', {}),
         'style_defaults': defaults,
         'skus': skus,
         'order_finance': finance,
     }
 
 
-def _load(app_module):
-    raw = app_module.cloud_get_json('commerce_data', COMMERCE_FILE, DEFAULT_COMMERCE)
-    return _normalize_store(raw)
-
-
-def _save(app_module, data):
-    app_module.cloud_save_json('commerce_data', COMMERCE_FILE, _normalize_store(data))
+def _shop(app_module):
+    if app_module.USE_SUPABASE:
+        rows = app_module.SUPABASE.table('app_store').select('value').eq('key', 'shop_data').limit(1).execute().data
+        if not rows:
+            raise RuntimeError('Missing production catalog')
+        return rows[0]['value']
+    return app_module.local_load_json(app_module.DATA_FILE, app_module.DEFAULT_SHOP_DATA)
 
 
 def _sync_skus(app_module, data):
-    shop = app_module.cloud_get_json('shop_data', app_module.DATA_FILE, app_module.DEFAULT_SHOP_DATA)
+    shop = _shop(app_module)
     models = [m for m in (shop.get('models') or []) if m.get('status', True)]
     styles = [s for s in (shop.get('styles') or []) if s.get('status', True)]
     existing = {_sku_key(s['model_id'], s['style_id'], s.get('color')): s for s in data.get('skus') or []}
@@ -184,7 +189,9 @@ def _finance_summary(data):
     active_orders = 0
     today_revenue = 0.0
     today_profit = 0.0
-    today_start = int(time.time()) - (int(time.time()) % 86400)
+    midnight = datetime.fromtimestamp(time.time(), ZoneInfo('Asia/Taipei')).replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start = midnight.timestamp()
+    tomorrow = (midnight + timedelta(days=1)).timestamp()
     for row in (data.get('order_finance') or {}).values():
         if not isinstance(row, dict) or row.get('status') == '作廢':
             continue
@@ -192,7 +199,7 @@ def _finance_summary(data):
         rev = float(row.get('revenue') or 0)
         revenue += rev
         created = int(row.get('created_at_unix') or 0)
-        if created >= today_start:
+        if today_start <= created < tomorrow:
             today_revenue += rev
         if row.get('cost_known'):
             cost = float(row.get('cost_total') or 0)
@@ -200,7 +207,7 @@ def _finance_summary(data):
             known_cost += cost
             known_profit += profit
             known_orders += 1
-            if created >= today_start:
+            if today_start <= created < tomorrow:
                 today_profit += profit
         else:
             unknown_cost_orders += 1
@@ -216,237 +223,251 @@ def _finance_summary(data):
     }
 
 
+def _ledger(data, sku, delta, reason, identity, order_id='', source='admin'):
+    balance = int(sku['stock_qty']) + delta
+    if balance < 0:
+        raise CommerceError('OUT_OF_STOCK', '庫存不足，請重新確認數量')
+    if any(x['id'] == identity for x in data['inventory_ledger']):
+        raise CommerceError('DUPLICATE_TRANSACTION', '庫存異動識別重複')
+    data['inventory_ledger'].append(dict(id=identity, sku_id=sku['id'], delta=delta,
+        balance_after=balance, reason=reason, order_id=order_id,
+        created_at_unix=int(time.time()), source=source))
+    sku['stock_qty'] = balance
+
+
+class Commerce:
+    def __init__(self, app_module):
+        self.app = app_module
+        self.store = Store(app_module)
+
+    def read(self):
+        return _normalize_store(self.store.read())
+
+    def mutate(self, fn):
+        for _ in range(12):
+            data = self.read()
+            result, order, action = fn(data)
+            if self.store.commit(data['revision'], data, order, action):
+                return result
+        raise CommerceError('BUSY', '其他訂單正在更新庫存，請以同一筆操作重試')
+
+    def replay(self, key, fingerprint, data=None):
+        prior = (data if data is not None else self.read())['requests'].get(key)
+        if prior:
+            if prior['fingerprint'] != fingerprint:
+                raise CommerceError('IDEMPOTENCY_CONFLICT', '同一送單識別已用於不同內容，請勿重複送出')
+            return prior['response']
+
+    def create(self, order):
+        key, fingerprint = g.commerce_key, g.commerce_fingerprint
+        def update(data):
+            prior = self.replay(key, fingerprint, data)
+            if prior:
+                return prior, None, ''
+            color = str(getattr(g, '_bf_order_color', '') or '')
+            _sync_skus(self.app, data)
+            sku = next((s for s in data['skus'] if _sku_key(s['model_id'], s['style_id'], s['color']) ==
+                        _sku_key(order['model_id'], order['style_id'], color)), None)
+            if not sku or not sku['active']:
+                raise CommerceError('SKU_UNAVAILABLE', '此規格尚未啟用，請洽店員')
+            qty, total = order['quantity'], order['total']
+            cost = sku['cost_price']
+            finance = dict(order_id=order['id'], sku_id=sku['id'], model_id=order['model_id'],
+                style_id=order['style_id'], color=color, quantity=qty, unit_price=order['unit_price'],
+                unit_cost=cost, revenue=total, cost_known=cost is not None,
+                cost_total=round(cost * qty, 2) if cost is not None else None,
+                gross_profit=round(total - cost * qty, 2) if cost is not None else None,
+                status='待處理', payment_method=order['payment_method'],
+                created_at_unix=order['created_at_unix'], stock_deducted=sku['track_stock'],
+                inventory_quantity=qty if sku['track_stock'] else 0, inventory_reserved=bool(sku['track_stock']),
+                inventory_sequence=0)
+            if sku['track_stock']:
+                _ledger(data, sku, -qty, 'ORDER_CREATED', order['id'] + ':0', order['id'], 'checkout')
+            data['order_finance'][order['id']] = finance
+            result = dict(status='success', order_id=order['id'], total=total, msg='訂單建立成功')
+            data['requests'][key] = dict(fingerprint=fingerprint, response=result)
+            return result, order, 'create'
+        return self.mutate(update)
+
+    def action(self, order_id, action, target, key=''):
+        signature = [order_id, action, target]
+        cleanup = self.store.order(order_id) if action == 'delete' else None
+        def update(data):
+            if key and key in data['actions']:
+                prior = data['actions'][key]
+                if prior['signature'] != signature:
+                    raise CommerceError('IDEMPOTENCY_CONFLICT', '操作識別已用於不同操作')
+                return prior['response'], None, ''
+            order = self.store.order(order_id)
+            if not order:
+                raise CommerceError('ORDER_NOT_FOUND', '找不到這筆訂單', 404)
+            if action == 'delete' and order['status'] != '作廢':
+                raise CommerceError('VOID_REQUIRED', '請先作廢回補庫存，再刪除訂單')
+            if target in ('待列印', '列印中', '已完成') and not order.get('print_path'):
+                raise CommerceError('PRINT_FILE_REQUIRED', '缺少高清生產圖，無法更新狀態')
+            finance = data['order_finance'].get(order_id)
+            if finance and action != 'delete':
+                # Migrate the prior PR snapshot without inventing historical deductions.
+                qty = finance.get('inventory_quantity', finance.get('quantity', 0) if finance.get('stock_deducted') else 0)
+                reserved = finance.get('inventory_reserved', bool(qty and finance['status'] != '作廢'))
+                want_reserved = bool(qty and target != '作廢')
+                if reserved != want_reserved:
+                    sku = next((s for s in data['skus'] if s['id'] == finance['sku_id']), None)
+                    if sku is None:
+                        raise CommerceError('SKU_MISSING', '歷史訂單 SKU 遺失，請先修復庫存資料')
+                    seq = finance.get('inventory_sequence', 0) + 1
+                    _ledger(data, sku, -qty if want_reserved else qty,
+                            'ORDER_RESTORED' if want_reserved else 'ORDER_VOID', f'{order_id}:{seq}', order_id)
+                    finance['inventory_sequence'] = seq
+                finance.update(inventory_quantity=qty, inventory_reserved=want_reserved, status=target)
+            result = dict(status='success', order_id=order_id, new_status=target, msg='訂單狀態已更新')
+            if action == 'delete':
+                # Finance and ledger remain for audit; deletion never erases accounting.
+                result['msg'] = '訂單已刪除；庫存異動與財務紀錄保留'
+            if key:
+                data['actions'][key] = dict(signature=signature, response=result)
+            return result, dict(id=order_id, status=target), 'delete' if action == 'delete' else 'status'
+        result = self.mutate(update)
+        if cleanup:
+            for name in ('print_path', 'mockup_path'):
+                self.app.delete_private_path(cleanup.get(name))
+        return result
+
+
 def install(app_module):
     global _INSTALLED
     if _INSTALLED:
         return
     _INSTALLED = True
+    app, session, reply = app_module.app, app_module.session, app_module.no_cache_json
+    commerce = Commerce(app_module)
+    app_module.commerce = commerce
 
-    app = app_module.app
-    session = app_module.session
-    no_cache_json = app_module.no_cache_json
+    @app.errorhandler(CommerceError)
+    def commerce_error(exc):
+        return reply(dict(status='error', code=exc.code, msg=str(exc)), exc.status)
 
-    @app.route('/api/admin/commerce_data', methods=['GET'])
+    def guarded(fn):
+        from functools import wraps
+        @wraps(fn)
+        def wrapped(*args, **kwargs):
+            if not session.get('logged_in'):
+                return reply(dict(status='error', msg='未登入'), 401)
+            try:
+                return fn(*args, **kwargs)
+            except CommerceError:
+                raise
+            except Exception as exc:
+                app.logger.exception('Commerce transaction failed')
+                return reply(dict(status='error', code='COMMERCE_UNAVAILABLE', msg='商務資料未完成寫入，請重試原操作'), 503)
+        return wrapped
+
+    @app.route('/api/admin/commerce_data')
+    @guarded
     def admin_commerce_data():
-        if not session.get('logged_in'):
-            return no_cache_json({'status': 'error', 'msg': '未登入'}, 401)
-        try:
-            with _LOCK:
-                data = _load(app_module)
-            return no_cache_json({
-                'status': 'success',
-                'data': {
-                    'version': data['version'],
-                    'style_defaults': data['style_defaults'],
-                    'skus': data['skus'],
-                },
-                'summary': _finance_summary(data),
-            })
-        except Exception as exc:
-            print('[COMMERCE] read error:', repr(exc), flush=True)
-            return no_cache_json({'status': 'error', 'msg': f'POS 資料讀取失敗：{exc}'}, 500)
+        data = commerce.read()
+        return reply(dict(status='success', data={k: data[k] for k in ('version', 'revision', 'skus', 'style_defaults')},
+                          summary=_finance_summary(data)))
+
+    @app.route('/api/admin/inventory_ledger')
+    @guarded
+    def inventory_ledger():
+        data = commerce.read()
+        return reply(dict(status='success', data=data['inventory_ledger'][-200:]))
 
     @app.route('/api/admin/commerce_sync_skus', methods=['POST'])
+    @guarded
     def admin_commerce_sync_skus():
-        if not session.get('logged_in'):
-            return no_cache_json({'status': 'error', 'msg': '未登入'}, 401)
-        try:
-            with _LOCK:
-                data = _load(app_module)
-                added = _sync_skus(app_module, data)
-                _save(app_module, data)
-            return no_cache_json({'status': 'success', 'added': added, 'total': len(data['skus']), 'msg': f'已同步商品 SKU，新增 {added} 筆'})
-        except Exception as exc:
-            print('[COMMERCE] sync error:', repr(exc), flush=True)
-            return no_cache_json({'status': 'error', 'msg': f'SKU 同步失敗：{exc}'}, 500)
+        def update(data):
+            added = _sync_skus(app_module, data)
+            return dict(status='success', added=added, total=len(data['skus'])), None, ''
+        return reply(commerce.mutate(update))
 
     @app.route('/api/admin/save_commerce_data', methods=['POST'])
+    @guarded
     def admin_save_commerce_data():
-        if not session.get('logged_in'):
-            return no_cache_json({'status': 'error', 'msg': '未登入'}, 401)
-        payload = request.get_json(silent=True) or {}
-        if not isinstance(payload, dict):
-            return no_cache_json({'status': 'error', 'msg': '資料格式錯誤'}, 400)
-        incoming_skus = payload.get('skus')
-        if not isinstance(incoming_skus, list) or len(incoming_skus) > 5000:
-            return no_cache_json({'status': 'error', 'msg': 'SKU 資料格式錯誤或數量過多'}, 400)
-        incoming_defaults = payload.get('style_defaults') or {}
-        if not isinstance(incoming_defaults, dict) or len(incoming_defaults) > 500:
-            return no_cache_json({'status': 'error', 'msg': '材質預設資料格式錯誤'}, 400)
-        try:
-            with _LOCK:
-                current = _load(app_module)
-                candidate = {
-                    'version': 1,
-                    'style_defaults': incoming_defaults,
-                    'skus': incoming_skus,
-                    'order_finance': current.get('order_finance') or {},
-                }
-                clean = _normalize_store(candidate)
-                _save(app_module, clean)
-            return no_cache_json({'status': 'success', 'msg': '成本與庫存已儲存', 'count': len(clean['skus'])})
-        except Exception as exc:
-            print('[COMMERCE] save error:', repr(exc), flush=True)
-            return no_cache_json({'status': 'error', 'msg': f'成本與庫存儲存失敗：{exc}'}, 500)
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or not isinstance(payload.get('skus'), list) or len(payload['skus']) > 5000:
+            raise CommerceError('BAD_DATA', 'SKU 資料格式錯誤', 400)
+        if not isinstance(payload.get('style_defaults', {}), dict):
+            raise CommerceError('BAD_DATA', '材質預設資料格式錯誤', 400)
+        def update(data):
+            if payload.get('revision') != data['revision']:
+                raise CommerceError('STALE_INVENTORY', '庫存或設定已更新，請重新整理後再修改；本次未儲存')
+            existing = {s['id']: s for s in data['skus']}
+            seen = set()
+            for raw in payload['skus']:
+                sku = _normalize_sku(raw)
+                if not sku or sku['id'] not in existing or sku['id'] in seen:
+                    raise CommerceError('BAD_SKU', 'SKU 不存在或重複，請先同步商品', 400)
+                seen.add(sku['id'])
+                old = existing[sku['id']]
+                delta = sku['stock_qty'] - old['stock_qty']
+                if delta:
+                    _ledger(data, old, delta, 'MANUAL_ADJUST', f"admin:{data['revision']}:{sku['id']}")
+                old.update(sku)
+            data['style_defaults'] = _normalize_store({'style_defaults': payload.get('style_defaults', {})})['style_defaults']
+            return dict(status='success', msg='成本與庫存已儲存'), None, ''
+        return reply(commerce.mutate(update))
 
     @app.route('/api/admin/commerce_set_style_price', methods=['POST'])
+    @guarded
     def admin_commerce_set_style_price():
-        if not session.get('logged_in'):
-            return no_cache_json({'status': 'error', 'msg': '未登入'}, 401)
         payload = request.get_json(silent=True) or {}
-        style_id = str(payload.get('style_id') or '').strip()[:120]
-        price = _as_money(payload.get('price'))
-        if not style_id or price <= 0:
-            return no_cache_json({'status': 'error', 'msg': '材質或售價格式錯誤'}, 400)
+        price, style_id = _as_money(payload.get('price')), str(payload.get('style_id') or '')
+        if price <= 0:
+            raise CommerceError('BAD_PRICE', '售價必須大於零', 400)
+        shop = _shop(app_module)
+        style = next((s for s in shop['styles'] if str(s['id']) == style_id), None)
+        if not style:
+            raise CommerceError('STYLE_NOT_FOUND', '找不到材質', 404)
+        style['price'] = int(round(price))
+        app_module.cloud_save_json('shop_data', app_module.DATA_FILE, shop)
+        return reply(dict(status='success', price=style['price']))
+
+    original = app.view_functions['create_order']
+    def create_order():
+        req = request.get_json(silent=True)
+        if not isinstance(req, dict):
+            raise CommerceError('BAD_DATA', '下單格式錯誤', 400)
+        key = request.headers.get('Idempotency-Key') or req.get('idempotency_key', '')
+        if not isinstance(key, str) or not re.fullmatch(r'[A-Za-z0-9_-]{16,100}', key):
+            raise CommerceError('IDEMPOTENCY_REQUIRED', '請重新整理頁面後送單（缺少送單識別）', 400)
+        fingerprint = hashlib.sha256(json.dumps({k: v for k, v in req.items() if k != 'idempotency_key'},
+            ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+        g.commerce_key, g.commerce_fingerprint = key, fingerprint
+        # Color is saved inside the transaction, not by a post-response write.
+        g.commerce_atomic = True
         try:
-            with _LOCK:
-                shop = app_module.cloud_get_json('shop_data', app_module.DATA_FILE, app_module.DEFAULT_SHOP_DATA)
-                style = next((s for s in (shop.get('styles') or []) if str(s.get('id')) == style_id), None)
-                if not style:
-                    return no_cache_json({'status': 'error', 'msg': '找不到這個手機殼材質'}, 404)
-                style['price'] = int(round(price))
-                app_module.cloud_save_json('shop_data', app_module.DATA_FILE, shop)
-            return no_cache_json({'status': 'success', 'style_id': style_id, 'price': style['price'], 'msg': '售價已更新，前台會同步使用新售價'})
-        except Exception as exc:
-            print('[COMMERCE] price error:', repr(exc), flush=True)
-            return no_cache_json({'status': 'error', 'msg': f'售價更新失敗：{exc}'}, 500)
-
-    # Snapshot sale/cost/profit when an order succeeds. The original orders table
-    # schema stays unchanged; finance is stored privately in commerce_data.
-    original_create_order = app.view_functions.get('create_order')
-    if original_create_order:
-        def _commerce_create_order(*args, **kwargs):
-            req = request.get_json(silent=True) or {}
-            model_id = str(req.get('model_id') or '').strip()
-            style_id = str(req.get('style_id') or '').strip()
-            color = str(getattr(g, '_bf_order_color', '') or req.get('color_name') or '').strip()
-            qty = max(1, min(99, _as_int(req.get('quantity'), 1)))
-            with _LOCK:
-                data = None
-                sku = None
-                try:
-                    data = _load(app_module)
-                    sku = next((s for s in data['skus'] if s.get('active', True) and _sku_key(s.get('model_id'), s.get('style_id'), s.get('color')) == _sku_key(model_id, style_id, color)), None)
-                    if sku and sku.get('track_stock') and int(sku.get('stock_qty') or 0) < qty:
-                        return no_cache_json({
-                            'status': 'error',
-                            'code': 'OUT_OF_STOCK',
-                            'msg': f'這個規格庫存不足，目前剩 {int(sku.get("stock_qty") or 0)} 個，請洽店員',
-                        }, 409)
-                except Exception as exc:
-                    print('[COMMERCE] pre-order inventory check warning:', repr(exc), flush=True)
-
-                response = app.make_response(original_create_order(*args, **kwargs))
-                if not (200 <= response.status_code < 300):
-                    return response
-                try:
-                    body = response.get_json(silent=True) or {}
-                    order_id = str(body.get('order_id') or '').strip()
-                    total = float(body.get('total') or 0)
-                    if not order_id:
-                        return response
-                    if data is None:
-                        data = _load(app_module)
-                    if sku is None:
-                        sku = next((s for s in data['skus'] if s.get('active', True) and _sku_key(s.get('model_id'), s.get('style_id'), s.get('color')) == _sku_key(model_id, style_id, color)), None)
-                    cost_price = sku.get('cost_price') if sku else None
-                    cost_known = cost_price is not None
-                    cost_total = round(float(cost_price or 0) * qty, 2) if cost_known else None
-                    gross_profit = round(total - cost_total, 2) if cost_known else None
-                    timestamp = int(time.time())
-                    data.setdefault('order_finance', {})[order_id] = {
-                        'order_id': order_id,
-                        'sku_id': sku.get('id') if sku else '',
-                        'model_id': model_id,
-                        'style_id': style_id,
-                        'color': color,
-                        'quantity': qty,
-                        'unit_price': round(total / qty, 2) if qty else total,
-                        'unit_cost': cost_price if cost_known else None,
-                        'revenue': round(total, 2),
-                        'cost_total': cost_total,
-                        'gross_profit': gross_profit,
-                        'cost_known': bool(cost_known),
-                        'status': '待處理',
-                        'payment_method': str(req.get('payment_method') or ''),
-                        'created_at_unix': timestamp,
-                        'stock_deducted': False,
-                    }
-                    if sku and sku.get('track_stock'):
-                        sku['stock_qty'] = max(0, int(sku.get('stock_qty') or 0) - qty)
-                        data['order_finance'][order_id]['stock_deducted'] = True
-                    _save(app_module, data)
-                except Exception as exc:
-                    print('[COMMERCE] order finance snapshot warning:', repr(exc), flush=True)
-                return response
-        _commerce_create_order.__name__ = original_create_order.__name__
-        app.view_functions['create_order'] = _commerce_create_order
-
-    original_order_action = app.view_functions.get('admin_order_action')
-    if original_order_action:
-        def _commerce_order_action(*args, **kwargs):
-            req = request.get_json(silent=True) or {}
-            order_id = str(req.get('order_id') or '').strip()
-            action = str(req.get('action') or '').strip().lower()
-            requested = str(req.get('new_status') or '').strip()
-            with _LOCK:
-                data = None
-                finance = None
-                sku = None
-                try:
-                    data = _load(app_module)
-                    finance = (data.get('order_finance') or {}).get(order_id)
-                    if isinstance(finance, dict):
-                        sku_id = str(finance.get('sku_id') or '')
-                        sku = next((s for s in data['skus'] if str(s.get('id')) == sku_id), None)
-                        target = '作廢' if action == 'void' else ('待處理' if action == 'restore' else requested)
-                        if finance.get('status') == '作廢' and target != '作廢' and finance.get('stock_deducted') and sku and sku.get('track_stock'):
-                            qty = int(finance.get('quantity') or 0)
-                            if int(sku.get('stock_qty') or 0) < qty:
-                                return no_cache_json({'status': 'error', 'code': 'OUT_OF_STOCK', 'msg': '庫存不足，無法恢復這筆作廢訂單'}, 409)
-                except Exception as exc:
-                    print('[COMMERCE] order-action precheck warning:', repr(exc), flush=True)
-
-                response = app.make_response(original_order_action(*args, **kwargs))
-                if not (200 <= response.status_code < 300) or action == 'delete':
-                    return response
-                try:
-                    body = response.get_json(silent=True) or {}
-                    new_status = str(body.get('new_status') or '')
-                    if data is None:
-                        data = _load(app_module)
-                    finance = (data.get('order_finance') or {}).get(order_id)
-                    if isinstance(finance, dict):
-                        old_status = str(finance.get('status') or '')
-                        if finance.get('stock_deducted') and sku and sku.get('track_stock'):
-                            qty = int(finance.get('quantity') or 0)
-                            if new_status == '作廢' and old_status != '作廢':
-                                sku['stock_qty'] = int(sku.get('stock_qty') or 0) + qty
-                            elif old_status == '作廢' and new_status != '作廢':
-                                sku['stock_qty'] = max(0, int(sku.get('stock_qty') or 0) - qty)
-                        finance['status'] = new_status or finance.get('status')
-                        _save(app_module, data)
-                except Exception as exc:
-                    print('[COMMERCE] order-action finance warning:', repr(exc), flush=True)
-                return response
-        _commerce_order_action.__name__ = original_order_action.__name__
-        app.view_functions['admin_order_action'] = _commerce_order_action
+            prior = commerce.replay(key, fingerprint)
+            if prior:
+                return reply(prior)
+            shop = _shop(app_module)
+            style = next((s for s in shop['styles'] if str(s['id']) == str(req.get('style_id'))), None)
+            if style:
+                allowed = _allowed_colors(style, str(req.get('model_id')))
+                color = str(req.get('color_name') or '').strip()
+                if not color and len(allowed) == 1:
+                    color = allowed[0]
+                if color not in allowed:
+                    raise CommerceError('COLOR_NOT_AVAILABLE', '請重新選擇手機殼顏色', 400)
+                g._bf_order_color = color
+            g.commerce_shop = shop
+            return original()
+        except CommerceError:
+            raise
+        except Exception:
+            app.logger.exception('Checkout persistence unavailable')
+            return reply(dict(status='error', code='COMMERCE_UNAVAILABLE', msg='訂單尚未確認，請重試原訂單'), 503)
+    app.view_functions['create_order'] = create_order
 
     @app.after_request
-    def _inject_commerce_admin(resp):
+    def inject_commerce(resp):
         if request.path == '/admin' and resp.status_code == 200 and resp.mimetype == 'text/html':
-            try:
-                if getattr(resp, 'direct_passthrough', False):
-                    resp.direct_passthrough = False
-                html = resp.get_data(as_text=True)
-                src = '/static/admin-commerce-v1.js?v=20260917a'
-                if src not in html and '</body>' in html:
-                    html = html.replace('</body>', f'<script src="{src}"></script></body>')
-                resp.set_data(html)
-                resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-                resp.headers.pop('Content-Length', None)
-            except Exception as exc:
-                print('[COMMERCE] admin injection warning:', repr(exc), flush=True)
+            resp.direct_passthrough = False
+            html = resp.get_data(as_text=True)
+            src = '/static/admin-commerce-v1.js?v=20260917b'
+            if src not in html:
+                resp.set_data(html.replace('</body>', f'<script src="{src}"></script></body>'))
+            resp.headers['Cache-Control'] = 'no-store'
         return resp
-
-    print('[COMMERCE] private POS / cost / inventory / profit core enabled', flush=True)

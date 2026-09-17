@@ -163,7 +163,7 @@
 
   async function saveAll(silent=false){
     document.querySelectorAll('#commerce-sku-body tr[data-sku]').forEach(updateSkuFromRow);
-    try{await apiJson('/api/admin/save_commerce_data',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({style_defaults:state.style_defaults||{},skus:state.skus||[]})});if(!silent)alert('成本與庫存已儲存');await load(true)}catch(e){if(!silent)alert('儲存失敗：'+e.message);throw e}
+    try{await apiJson('/api/admin/save_commerce_data',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision:state.revision,style_defaults:state.style_defaults||{},skus:state.skus||[]})});if(!silent)alert('成本與庫存已儲存');await load(true)}catch(e){if(!silent)alert('儲存失敗：'+e.message);throw e}
   }
 
   async function syncSkus(){

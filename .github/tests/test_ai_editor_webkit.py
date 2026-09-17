@@ -2,6 +2,7 @@ import io
 import os
 import sys
 import threading
+import tempfile
 import time
 from pathlib import Path
 
@@ -18,6 +19,10 @@ os.environ.setdefault('ADMIN_PASSWORD', 'fan123')
 os.environ['SESSION_COOKIE_SECURE'] = 'false'
 os.environ['PORT'] = '8765'
 
+test_dir = tempfile.TemporaryDirectory()
+os.environ['COMMERCE_DB_PATH'] = str(Path(test_dir.name) / 'commerce.sqlite3')
+os.environ.pop('SUPABASE_URL', None)
+os.environ.pop('SUPABASE_SERVICE_ROLE_KEY', None)
 import app as app_module
 from admin_perf_patch import install as install_admin_perf
 from template_editor_patch import install as install_template_editor
@@ -128,6 +133,37 @@ def front_test(browser, base):
     page.close()
 
 
+def checkout_test(browser, base):
+    page = browser.new_page()
+    sent = []
+    def intercept(route):
+        sent.append(route.request.post_data_json)
+        if len(sent) == 1:
+            # Server commits, browser receives a simulated transport failure.
+            result = route.fetch()
+            assert result.status == 200, result.text()
+            route.abort('failed')
+        else:
+            route.continue_()
+    page.route('**/api/create_order', intercept)
+    page.goto(base + '/', wait_until='domcontentloaded')
+    poll(page, "() => !!window.BenfuwanOrderPayload && typeof shopData !== 'undefined' && shopData.models?.length")
+    page.evaluate("""async () => {
+      const c=document.createElement('canvas');c.width=2;c.height=2;
+      cartItem={modelId:shopData.models[0].id,styleId:shopData.styles[0].id,modelName:shopData.models[0].name,styleName:shopData.styles[0].name,colorName:'透明',quantity:1,payment:'現金',printBase64:c.toDataURL(),designJson:{}};
+      await idbSet('cart',cartItem);document.getElementById('form-surname').value='測試';await submitOrder();
+    }""")
+    assert len(sent) == 1 and sent[0]['idempotency_key']
+    page.reload(wait_until='domcontentloaded')
+    poll(page, "() => !!window.BenfuwanOrderPayload && typeof shopData !== 'undefined' && shopData.models?.length")
+    page.evaluate("async () => {document.getElementById('form-surname').value='測試';await submitOrder()}")
+    assert len(sent) == 2 and sent[0] == sent[1], sent
+    assert page.evaluate("() => !!document.getElementById('success-id').textContent")
+    assert page.evaluate("() => idbGet('cart')") is None
+    print('CHECKOUT_LOST_RESPONSE_RELOAD_OK')
+    page.close()
+
+
 def admin_test(browser, base):
     page = browser.new_page(viewport={'width': 1180, 'height': 900})
     page.on('console', lambda msg: print('ADMIN_CONSOLE', msg.type, msg.text))
@@ -179,7 +215,7 @@ def main():
         with sync_playwright() as p:
             browser = p.webkit.launch()
             try:
-                base='http://127.0.0.1:8765';front_test(browser,base);admin_test(browser,base)
+                base='http://127.0.0.1:8765';front_test(browser,base);checkout_test(browser,base);admin_test(browser,base)
             finally: browser.close()
         print('AI_EDITOR_WEBKIT_OK')
     finally:

@@ -1,9 +1,10 @@
-from flask import Flask, request, jsonify, send_file, session, redirect, url_for, send_from_directory, Response
+from flask import g, Flask, request, jsonify, send_file, session, redirect, url_for, send_from_directory, Response
 import os
 import json
 import time
 import base64
 import uuid
+from commerce_store import CommerceError
 from io import BytesIO
 
 try:
@@ -471,7 +472,7 @@ def create_order():
         if not model_id or not style_id:
             raise ValueError('缺少手機型號或手機殼款式')
 
-        shop = cloud_get_json('shop_data', DATA_FILE, DEFAULT_SHOP_DATA)
+        shop = getattr(g, 'commerce_shop', None) or cloud_get_json('shop_data', DATA_FILE, DEFAULT_SHOP_DATA)
         model = next((m for m in shop.get('models', []) if str(m.get('id')) == model_id and m.get('status', True)), None)
         style = next((s for s in shop.get('styles', []) if str(s.get('id')) == style_id and s.get('status', True)), None)
         if not model or not style:
@@ -518,6 +519,15 @@ def create_order():
             'created_at_unix': timestamp,
         }
 
+        if 'commerce' in globals():
+            if getattr(g, '_bf_order_color', ''):
+                order_payload['style_name'] += '・' + g._bf_order_color
+            result = commerce.create(order_payload)
+            if result['order_id'] != order_id:
+                delete_private_path(print_path)
+                delete_private_path(mockup_path)
+            return no_cache_json(result)
+
         if USE_SUPABASE:
             try:
                 SUPABASE.table('orders').insert(order_payload).execute()
@@ -546,6 +556,8 @@ def create_order():
             local_save_json(os.path.join(SAVE_DIR, f'{order_id}_info.json'), local_info)
 
         return no_cache_json({'status':'success','order_id':order_id,'total':total,'msg':'訂單建立成功'})
+    except CommerceError:
+        raise
     except ValueError as exc:
         return no_cache_json({'status':'error','msg':str(exc)}, 400)
     except Exception as exc:
@@ -595,6 +607,20 @@ def admin_get_orders():
                     'mockup_url': url_for('admin_order_file', order_id=order_id, kind='preview') if mockup_path else '',
                 })
             return no_cache_json({'status':'success','data':orders,'limit':limit})
+
+        if 'commerce' in globals():
+            rows = commerce.store.local_orders()
+            orders = []
+            for row in rows:
+                orders.append(dict(order_id=row['id'], customer_name=row.get('customer_name'),
+                    model=row.get('model_name'), style=row.get('style_name'), price=row.get('unit_price'),
+                    quantity=row.get('quantity'), total=row.get('total'), payment_method=row.get('payment_method'),
+                    status=row.get('status'), time=row.get('created_at_unix'),
+                    has_print=bool(row.get('print_path')), has_mockup=bool(row.get('mockup_path')),
+                    print_url='/orders/' + row['print_path'] if row.get('print_path') else '',
+                    mockup_url='/orders/' + row['mockup_path'] if row.get('mockup_path') else ''))
+            orders.sort(key=lambda row: row.get('time') or 0, reverse=True)
+            return no_cache_json(dict(status='success', data=orders[:200]))
 
         orders = []
         for filename in os.listdir(SAVE_DIR):

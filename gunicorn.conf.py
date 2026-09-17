@@ -1,6 +1,8 @@
 import os
 import secrets
 
+os.environ.setdefault('BENFUWAN_PRODUCTION', '1')
+
 # These run before app.py is imported by Gunicorn.
 # A random fallback secret is safer than a known hard-coded development secret;
 # set FLASK_SECRET_KEY in Zeabur for stable sessions across redeploys.

@@ -77,6 +77,8 @@ def install(app_module):
 
     @app.before_request
     def _validate_order_color():
+        if hasattr(app_module, 'commerce'):
+            return None  # Atomic checkout validates after checking its durable receipt.
         if request.path!='/api/create_order' or request.method!='POST':
             return None
         data=request.get_json(silent=True)
@@ -113,6 +115,8 @@ def install(app_module):
 
     @app.after_request
     def _persist_order_color(resp):
+        if getattr(g, 'commerce_atomic', False):
+            return resp
         if request.path!='/api/create_order' or request.method!='POST' or not (200<=resp.status_code<300):
             return resp
         color=str(getattr(g,'_bf_order_color','') or '').strip()

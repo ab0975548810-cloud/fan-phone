@@ -1,5 +1,6 @@
 """Admin order lifecycle actions with guarded production workflow statuses."""
 import os
+from commerce_store import CommerceError
 from flask import request
 
 _INSTALLED = False
@@ -61,6 +62,10 @@ def install(app_module):
                 }, 400)
 
         try:
+            if hasattr(app_module, 'commerce'):
+                target = '作廢' if action in ('void', 'delete') else ('待處理' if action == 'restore' else requested_status)
+                result = app_module.commerce.action(order_id, action, target, str(data.get('idempotency_key') or '')[:100])
+                return no_cache_json(result)
             if app_module.USE_SUPABASE:
                 rows = (app_module.SUPABASE.table('orders')
                         .select('id,status,print_path,mockup_path')
@@ -122,6 +127,8 @@ def install(app_module):
                 'order_id': order_id,
                 'new_status': new_status,
             })
+        except CommerceError:
+            raise
         except Exception as exc:
             print('[ORDER ACTION] error:', order_id, action, repr(exc), flush=True)
             return no_cache_json({'status': 'error', 'msg': f'訂單操作失敗：{exc}'}, 500)
