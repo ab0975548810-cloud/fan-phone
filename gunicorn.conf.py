@@ -1,6 +1,8 @@
 import os
 import secrets
 
+os.environ.setdefault('BENFUWAN_PRODUCTION', '1')
+
 # These run before app.py is imported by Gunicorn.
 # A random fallback secret is safer than a known hard-coded development secret;
 # set FLASK_SECRET_KEY in Zeabur for stable sessions across redeploys.
@@ -34,6 +36,7 @@ def post_worker_init(worker):
         from order_management_patch import install as install_order_management
         from quality_perf_patch import install as install_quality_perf
         from ai_runtime_patch import install as install_ai_runtime
+        from commerce_patch import install as install_commerce
         install_security(app_module)
         install_supabase_resilience(app_module)
         install_quality_perf(app_module)
@@ -43,7 +46,10 @@ def post_worker_init(worker):
         install_asset_categories(app_module)
         install_template_editor(app_module)
         install_order_management(app_module)
-        worker.log.info('Benfuwan security/performance/quality/AI middleware installed')
+        # Commerce installs after order-color/order-management so it can wrap the
+        # final create_order + order_action endpoints and keep finance/stock aligned.
+        install_commerce(app_module)
+        worker.log.info('Benfuwan security/performance/quality/AI/commerce middleware installed')
     except Exception:
         worker.log.exception('Failed to install Benfuwan security/performance middleware')
         raise

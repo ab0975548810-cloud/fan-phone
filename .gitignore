@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.sqlite3
+*.sqlite3-*
+commerce_data.json
+shop_data.json
+assets.json
+templates.json
+orders/
+static/materials/
+static/stickers/
+supabase/.temp/

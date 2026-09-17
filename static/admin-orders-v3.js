@@ -159,9 +159,12 @@
   }
 
   async function requestAction(orderId,action,newStatus=''){
-    const payload={order_id:orderId,action};if(newStatus)payload.new_status=newStatus;
+    const slot='bf-action:'+orderId+':'+action+':'+newStatus;
+    const key=sessionStorage.getItem(slot)||crypto.randomUUID();sessionStorage.setItem(slot,key);
+    const payload={order_id:orderId,action,idempotency_key:key};if(newStatus)payload.new_status=newStatus;
     const r=await fetch('/api/admin/order_action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});let j={};try{j=await r.json()}catch(e){}
     if(!r.ok||j.status!=='success')throw new Error(j.msg||('HTTP '+r.status));
+    sessionStorage.removeItem(slot);
     return j;
   }
 
@@ -173,7 +176,7 @@
     if(action==='void'&&!confirm('確定將這筆訂單標記為「作廢」？資料與生產圖會保留。'))return;
     if(action==='restore'&&!confirm('確定恢復這筆訂單為「待處理」？'))return;
     if(action==='delete'){
-      if(!confirm('這會永久刪除訂單資料與生產/預覽圖片，確定刪除？'))return;
+      if(!confirm('請先作廢。刪除後訂單不再顯示，財務與庫存異動仍保留，確定刪除？'))return;
       if(!confirm('最後確認：永久刪除後無法復原。'))return;
     }
     try{await requestAction(orderId,action);await refreshOrders(true)}catch(err){alert(err.message||'訂單操作失敗')}

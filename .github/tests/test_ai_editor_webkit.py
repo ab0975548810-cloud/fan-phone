@@ -2,6 +2,7 @@ import io
 import os
 import sys
 import threading
+import tempfile
 import time
 from pathlib import Path
 
@@ -18,12 +19,18 @@ os.environ.setdefault('ADMIN_PASSWORD', 'fan123')
 os.environ['SESSION_COOKIE_SECURE'] = 'false'
 os.environ['PORT'] = '8765'
 
+test_dir = tempfile.TemporaryDirectory()
+os.environ['COMMERCE_DB_PATH'] = str(Path(test_dir.name) / 'commerce.sqlite3')
+os.environ.pop('SUPABASE_URL', None)
+os.environ.pop('SUPABASE_SERVICE_ROLE_KEY', None)
 import app as app_module
 from admin_perf_patch import install as install_admin_perf
 from template_editor_patch import install as install_template_editor
+from commerce_patch import install as install_commerce
 
 install_admin_perf(app_module)
 install_template_editor(app_module)
+install_commerce(app_module)
 app_module.app.config['SESSION_COOKIE_SECURE'] = False
 
 
@@ -79,15 +86,20 @@ def front_test(browser, base):
     page.route('**/api/ai/remove-background', lambda route: route.fulfill(status=200, body=responses.pop(0) if responses else GOOD, content_type='image/png'))
     page.goto(base + '/', wait_until='domcontentloaded')
     poll(page, "() => typeof fabric !== 'undefined' && typeof initCanvas === 'function' && !!window.BenfuwanAiRemoveV2 && !!window.removeBackgroundForActive && !!window.BenfuwanEditorAccess && !!window.BenfuwanOrderPayload")
-    page.evaluate("""() => {ctx.printW=80;ctx.printH=160;ctx.maskUrl='';navigate('page-editor');initCanvas();editorHasSession=true;}""")
+    # Let the app finish its own initial catalog load/navigation before forcing
+    # the editor. Otherwise the startup async task can switch pages after the
+    # test has entered the editor and produce a false zero-geometry failure.
+    poll(page, "() => typeof shopData !== 'undefined' && Array.isArray(shopData?.models) && shopData.models.length > 0", timeout=10000)
+    page.evaluate("""() => {ctx.printW=80;ctx.printH=160;ctx.maskUrl='';navigate('page-editor');initCanvas();editorHasSession=true;window.BenfuwanEditorAccess?.fitCanvas?.();}""")
     add_front_photo(page, 0)
-    page.wait_for_timeout(100)
-    metrics = page.evaluate("""() => {
-      const ob=document.getElementById('object-bar'),tb=document.querySelector('#page-editor>.toolbar'),ws=document.querySelector('#page-editor>.workspace'),shell=document.getElementById('canvas-shell'),row=document.querySelector('#page-editor>.bf-editor-action-row');
-      const a=ob.getBoundingClientRect(),b=tb.getBoundingClientRect(),c=ws.getBoundingClientRect(),d=shell.getBoundingClientRect(),r=row?.getBoundingClientRect();
-      const left=row?.querySelector('.editor-float:not(.right)'),right=row?.querySelector('.editor-float.right');
-      return {show:ob.classList.contains('show'),objectTop:a.top,objectBottom:a.bottom,toolbarTop:b.top,workspaceBottom:c.bottom,shellBottom:d.bottom,actionTop:r?.top||0,actionBottom:r?.bottom||0,actionHeight:r?.height||0,toolbarVisible:getComputedStyle(tb).visibility,toolbarPointer:getComputedStyle(tb).pointerEvents,position:getComputedStyle(ob).position,leftPosition:left?getComputedStyle(left).position:'',rightPosition:right?getComputedStyle(right).position:'',workspaceHasFloat:!!ws.querySelector('.editor-float')};
-    }""")
+    metrics = poll(page, """() => {
+      const pe=document.getElementById('page-editor'),ob=document.getElementById('object-bar'),tb=document.querySelector('#page-editor>.toolbar'),ws=document.querySelector('#page-editor>.workspace'),shell=document.getElementById('canvas-shell'),row=document.querySelector('#page-editor>.bf-editor-action-row');
+      if(!pe||!ob||!tb||!ws||!shell||!row||getComputedStyle(pe).display==='none')return false;
+      const a=ob.getBoundingClientRect(),b=tb.getBoundingClientRect(),c=ws.getBoundingClientRect(),d=shell.getBoundingClientRect(),r=row.getBoundingClientRect();
+      const left=row.querySelector('.editor-float:not(.right)'),right=row.querySelector('.editor-float.right');
+      const out={show:ob.classList.contains('show'),objectTop:a.top,objectBottom:a.bottom,toolbarTop:b.top,workspaceBottom:c.bottom,shellBottom:d.bottom,actionTop:r.top,actionBottom:r.bottom,actionHeight:r.height,toolbarVisible:getComputedStyle(tb).visibility,toolbarPointer:getComputedStyle(tb).pointerEvents,position:getComputedStyle(ob).position,leftPosition:left?getComputedStyle(left).position:'',rightPosition:right?getComputedStyle(right).position:'',workspaceHasFloat:!!ws.querySelector('.editor-float')};
+      return out.show && out.actionHeight>=44 && a.height>0 && b.height>0 && c.height>0 ? out : false;
+    }""", timeout=10000)
     assert metrics['show'] and metrics['toolbarVisible']=='visible' and metrics['toolbarPointer']!='none', metrics
     assert metrics['position'] == 'relative', metrics
     assert metrics['workspaceBottom'] <= metrics['actionTop'] + 2, metrics
@@ -121,6 +133,37 @@ def front_test(browser, base):
     page.close()
 
 
+def checkout_test(browser, base):
+    page = browser.new_page()
+    sent = []
+    def intercept(route):
+        sent.append(route.request.post_data_json)
+        if len(sent) == 1:
+            # Server commits, browser receives a simulated transport failure.
+            result = route.fetch()
+            assert result.status == 200, result.text()
+            route.abort('failed')
+        else:
+            route.continue_()
+    page.route('**/api/create_order', intercept)
+    page.goto(base + '/', wait_until='domcontentloaded')
+    poll(page, "() => !!window.BenfuwanOrderPayload && typeof shopData !== 'undefined' && shopData.models?.length")
+    page.evaluate("""async () => {
+      const c=document.createElement('canvas');c.width=2;c.height=2;
+      cartItem={modelId:shopData.models[0].id,styleId:shopData.styles[0].id,modelName:shopData.models[0].name,styleName:shopData.styles[0].name,colorName:'透明',quantity:1,payment:'現金',printBase64:c.toDataURL(),designJson:{}};
+      await idbSet('cart',cartItem);document.getElementById('form-surname').value='測試';await submitOrder();
+    }""")
+    assert len(sent) == 1 and sent[0]['idempotency_key']
+    page.reload(wait_until='domcontentloaded')
+    poll(page, "() => !!window.BenfuwanOrderPayload && typeof shopData !== 'undefined' && shopData.models?.length")
+    page.evaluate("async () => {document.getElementById('form-surname').value='測試';await submitOrder()}")
+    assert len(sent) == 2 and sent[0] == sent[1], sent
+    assert page.evaluate("() => !!document.getElementById('success-id').textContent")
+    assert page.evaluate("() => idbGet('cart')") is None
+    print('CHECKOUT_LOST_RESPONSE_RELOAD_OK')
+    page.close()
+
+
 def admin_test(browser, base):
     page = browser.new_page(viewport={'width': 1180, 'height': 900})
     page.on('console', lambda msg: print('ADMIN_CONSOLE', msg.type, msg.text))
@@ -132,6 +175,15 @@ def admin_test(browser, base):
     if submit.count(): submit.click()
     else: page.locator('form').evaluate('(f)=>f.submit()')
     page.wait_for_url('**/admin')
+
+    # POS UI is injected only for authenticated admin and must coexist with the
+    # existing order/template editor without leaking private data publicly.
+    poll(page, "() => !!window.BenfuwanCommerce && !!document.querySelector('.nav button[data-view=\"commerce\"]')")
+    page.locator('.nav button[data-view="commerce"]').click()
+    poll(page, "() => document.getElementById('view-commerce')?.classList.contains('active') && document.querySelectorAll('#commerce-summary .commerce-kpi').length===4")
+    commerce_diag = page.evaluate("""() => ({version:window.BenfuwanCommerce?.version||'',publicCostLeak:JSON.stringify(shopData||{}).includes('cost_price'),view:document.getElementById('view-commerce')?.classList.contains('active')})""")
+    assert commerce_diag['version'].startswith('1.0') and commerce_diag['view'] and not commerce_diag['publicCostLeak'], commerce_diag
+    print('ADMIN_COMMERCE_WEBKIT_OK', commerce_diag['version'])
 
     template_nav = page.locator('.nav button[data-view="templates"]')
     template_nav.click()
@@ -163,10 +215,16 @@ def main():
         with sync_playwright() as p:
             browser = p.webkit.launch()
             try:
-                base='http://127.0.0.1:8765';front_test(browser,base);admin_test(browser,base)
+                base='http://127.0.0.1:8765';front_test(browser,base);checkout_test(browser,base);admin_test(browser,base)
             finally: browser.close()
         print('AI_EDITOR_WEBKIT_OK')
-    finally: server.close()
+    finally:
+        server.close()
+        # The commerce test runs in local fallback mode; keep CI workspaces clean.
+        commerce = ROOT / 'commerce_data.json'
+        if commerce.exists():
+            try: commerce.unlink()
+            except Exception: pass
 
 
 if __name__ == '__main__': main()

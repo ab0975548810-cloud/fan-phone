@@ -1,5 +1,7 @@
 """Admin order lifecycle actions with guarded production workflow statuses."""
 import os
+import re
+from commerce_store import CommerceError
 from flask import request
 
 _INSTALLED = False
@@ -43,6 +45,8 @@ def install(app_module):
             return no_cache_json({'status': 'error', 'msg': '未登入'}, 401)
 
         data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return no_cache_json({'status': 'error', 'msg': '資料格式錯誤'}, 400)
         order_id = valid_order_id(data.get('order_id'))
         action = str(data.get('action') or '').strip().lower()
         if not order_id:
@@ -61,6 +65,13 @@ def install(app_module):
                 }, 400)
 
         try:
+            if hasattr(app_module, 'commerce'):
+                key = data.get('idempotency_key', '')
+                if not isinstance(key, str) or not re.fullmatch(r'[A-Za-z0-9_-]{16,100}', key):
+                    raise CommerceError('IDEMPOTENCY_REQUIRED', '請重新整理後台後再操作（缺少操作識別）', 400)
+                target = '作廢' if action in ('void', 'delete') else ('待處理' if action == 'restore' else requested_status)
+                result = app_module.commerce.action(order_id, action, target, key)
+                return no_cache_json(result)
             if app_module.USE_SUPABASE:
                 rows = (app_module.SUPABASE.table('orders')
                         .select('id,status,print_path,mockup_path')
@@ -122,6 +133,8 @@ def install(app_module):
                 'order_id': order_id,
                 'new_status': new_status,
             })
+        except CommerceError:
+            raise
         except Exception as exc:
             print('[ORDER ACTION] error:', order_id, action, repr(exc), flush=True)
             return no_cache_json({'status': 'error', 'msg': f'訂單操作失敗：{exc}'}, 500)
