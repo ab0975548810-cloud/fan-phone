@@ -81,22 +81,20 @@ def front_test(browser, base):
     page.route('**/api/ai/remove-background', lambda route: route.fulfill(status=200, body=responses.pop(0) if responses else GOOD, content_type='image/png'))
     page.goto(base + '/', wait_until='domcontentloaded')
     poll(page, "() => typeof fabric !== 'undefined' && typeof initCanvas === 'function' && !!window.BenfuwanAiRemoveV2 && !!window.removeBackgroundForActive && !!window.BenfuwanEditorAccess && !!window.BenfuwanOrderPayload")
-    page.evaluate("""() => {ctx.printW=80;ctx.printH=160;ctx.maskUrl='';navigate('page-editor');initCanvas();editorHasSession=true;}""")
+    # Let the app finish its own initial catalog load/navigation before forcing
+    # the editor. Otherwise the startup async task can switch pages after the
+    # test has entered the editor and produce a false zero-geometry failure.
+    poll(page, "() => typeof shopData !== 'undefined' && Array.isArray(shopData?.models) && shopData.models.length > 0", timeout=10000)
+    page.evaluate("""() => {ctx.printW=80;ctx.printH=160;ctx.maskUrl='';navigate('page-editor');initCanvas();editorHasSession=true;window.BenfuwanEditorAccess?.fitCanvas?.();}""")
     add_front_photo(page, 0)
-    # WebKit may report zero geometry for one frame immediately after the flex rows
-    # are re-parented. Wait for actual layout instead of using an arbitrary sleep.
-    poll(page, """() => {
-      const pe=document.getElementById('page-editor'),row=document.querySelector('#page-editor>.bf-editor-action-row'),ob=document.getElementById('object-bar'),tb=document.querySelector('#page-editor>.toolbar');
-      if(!pe||!row||!ob||!tb||getComputedStyle(pe).display==='none')return false;
-      const rr=row.getBoundingClientRect(),or=ob.getBoundingClientRect(),tr=tb.getBoundingClientRect();
-      return rr.height>=44 && or.height>0 && tr.height>0;
+    metrics = poll(page, """() => {
+      const pe=document.getElementById('page-editor'),ob=document.getElementById('object-bar'),tb=document.querySelector('#page-editor>.toolbar'),ws=document.querySelector('#page-editor>.workspace'),shell=document.getElementById('canvas-shell'),row=document.querySelector('#page-editor>.bf-editor-action-row');
+      if(!pe||!ob||!tb||!ws||!shell||!row||getComputedStyle(pe).display==='none')return false;
+      const a=ob.getBoundingClientRect(),b=tb.getBoundingClientRect(),c=ws.getBoundingClientRect(),d=shell.getBoundingClientRect(),r=row.getBoundingClientRect();
+      const left=row.querySelector('.editor-float:not(.right)'),right=row.querySelector('.editor-float.right');
+      const out={show:ob.classList.contains('show'),objectTop:a.top,objectBottom:a.bottom,toolbarTop:b.top,workspaceBottom:c.bottom,shellBottom:d.bottom,actionTop:r.top,actionBottom:r.bottom,actionHeight:r.height,toolbarVisible:getComputedStyle(tb).visibility,toolbarPointer:getComputedStyle(tb).pointerEvents,position:getComputedStyle(ob).position,leftPosition:left?getComputedStyle(left).position:'',rightPosition:right?getComputedStyle(right).position:'',workspaceHasFloat:!!ws.querySelector('.editor-float')};
+      return out.show && out.actionHeight>=44 && a.height>0 && b.height>0 && c.height>0 ? out : false;
     }""", timeout=10000)
-    metrics = page.evaluate("""() => {
-      const ob=document.getElementById('object-bar'),tb=document.querySelector('#page-editor>.toolbar'),ws=document.querySelector('#page-editor>.workspace'),shell=document.getElementById('canvas-shell'),row=document.querySelector('#page-editor>.bf-editor-action-row');
-      const a=ob.getBoundingClientRect(),b=tb.getBoundingClientRect(),c=ws.getBoundingClientRect(),d=shell.getBoundingClientRect(),r=row?.getBoundingClientRect();
-      const left=row?.querySelector('.editor-float:not(.right)'),right=row?.querySelector('.editor-float.right');
-      return {show:ob.classList.contains('show'),objectTop:a.top,objectBottom:a.bottom,toolbarTop:b.top,workspaceBottom:c.bottom,shellBottom:d.bottom,actionTop:r?.top||0,actionBottom:r?.bottom||0,actionHeight:r?.height||0,toolbarVisible:getComputedStyle(tb).visibility,toolbarPointer:getComputedStyle(tb).pointerEvents,position:getComputedStyle(ob).position,leftPosition:left?getComputedStyle(left).position:'',rightPosition:right?getComputedStyle(right).position:'',workspaceHasFloat:!!ws.querySelector('.editor-float')};
-    }""")
     assert metrics['show'] and metrics['toolbarVisible']=='visible' and metrics['toolbarPointer']!='none', metrics
     assert metrics['position'] == 'relative', metrics
     assert metrics['workspaceBottom'] <= metrics['actionTop'] + 2, metrics
