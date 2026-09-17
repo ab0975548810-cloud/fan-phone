@@ -21,9 +21,11 @@ os.environ['PORT'] = '8765'
 import app as app_module
 from admin_perf_patch import install as install_admin_perf
 from template_editor_patch import install as install_template_editor
+from commerce_patch import install as install_commerce
 
 install_admin_perf(app_module)
 install_template_editor(app_module)
+install_commerce(app_module)
 app_module.app.config['SESSION_COOKIE_SECURE'] = False
 
 
@@ -81,7 +83,14 @@ def front_test(browser, base):
     poll(page, "() => typeof fabric !== 'undefined' && typeof initCanvas === 'function' && !!window.BenfuwanAiRemoveV2 && !!window.removeBackgroundForActive && !!window.BenfuwanEditorAccess && !!window.BenfuwanOrderPayload")
     page.evaluate("""() => {ctx.printW=80;ctx.printH=160;ctx.maskUrl='';navigate('page-editor');initCanvas();editorHasSession=true;}""")
     add_front_photo(page, 0)
-    page.wait_for_timeout(100)
+    # WebKit may report zero geometry for one frame immediately after the flex rows
+    # are re-parented. Wait for actual layout instead of using an arbitrary sleep.
+    poll(page, """() => {
+      const pe=document.getElementById('page-editor'),row=document.querySelector('#page-editor>.bf-editor-action-row'),ob=document.getElementById('object-bar'),tb=document.querySelector('#page-editor>.toolbar');
+      if(!pe||!row||!ob||!tb||getComputedStyle(pe).display==='none')return false;
+      const rr=row.getBoundingClientRect(),or=ob.getBoundingClientRect(),tr=tb.getBoundingClientRect();
+      return rr.height>=44 && or.height>0 && tr.height>0;
+    }""", timeout=10000)
     metrics = page.evaluate("""() => {
       const ob=document.getElementById('object-bar'),tb=document.querySelector('#page-editor>.toolbar'),ws=document.querySelector('#page-editor>.workspace'),shell=document.getElementById('canvas-shell'),row=document.querySelector('#page-editor>.bf-editor-action-row');
       const a=ob.getBoundingClientRect(),b=tb.getBoundingClientRect(),c=ws.getBoundingClientRect(),d=shell.getBoundingClientRect(),r=row?.getBoundingClientRect();
@@ -133,6 +142,15 @@ def admin_test(browser, base):
     else: page.locator('form').evaluate('(f)=>f.submit()')
     page.wait_for_url('**/admin')
 
+    # POS UI is injected only for authenticated admin and must coexist with the
+    # existing order/template editor without leaking private data publicly.
+    poll(page, "() => !!window.BenfuwanCommerce && !!document.querySelector('.nav button[data-view=\"commerce\"]')")
+    page.locator('.nav button[data-view="commerce"]').click()
+    poll(page, "() => document.getElementById('view-commerce')?.classList.contains('active') && document.querySelectorAll('#commerce-summary .commerce-kpi').length===4")
+    commerce_diag = page.evaluate("""() => ({version:window.BenfuwanCommerce?.version||'',publicCostLeak:JSON.stringify(shopData||{}).includes('cost_price'),view:document.getElementById('view-commerce')?.classList.contains('active')})""")
+    assert commerce_diag['version'].startswith('1.0') and commerce_diag['view'] and not commerce_diag['publicCostLeak'], commerce_diag
+    print('ADMIN_COMMERCE_WEBKIT_OK', commerce_diag['version'])
+
     template_nav = page.locator('.nav button[data-view="templates"]')
     template_nav.click()
     poll(page, "() => typeof window.benfuwanEnsureTemplateEditor === 'function' && typeof shopLoaded !== 'undefined' && shopLoaded && typeof templatesLoaded !== 'undefined' && templatesLoaded")
@@ -166,7 +184,13 @@ def main():
                 base='http://127.0.0.1:8765';front_test(browser,base);admin_test(browser,base)
             finally: browser.close()
         print('AI_EDITOR_WEBKIT_OK')
-    finally: server.close()
+    finally:
+        server.close()
+        # The commerce test runs in local fallback mode; keep CI workspaces clean.
+        commerce = ROOT / 'commerce_data.json'
+        if commerce.exists():
+            try: commerce.unlink()
+            except Exception: pass
 
 
 if __name__ == '__main__': main()
