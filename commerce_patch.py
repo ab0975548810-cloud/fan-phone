@@ -88,6 +88,7 @@ def _normalize_sku(raw):
         'style_id': style_id,
         'color': color,
         'cost_price': _as_money(raw.get('cost_price'), allow_none=True),
+        'target_stock': _as_int(raw.get('target_stock')) if raw.get('target_stock') not in (None, '') else None,
         'stock_qty': _as_int(raw.get('stock_qty'), 0),
         'low_stock_threshold': _as_int(raw.get('low_stock_threshold'), 2),
         'track_stock': bool(raw.get('track_stock', False)),
@@ -124,7 +125,9 @@ def _normalize_store(raw):
         skus.append(sku)
     finance = raw.get('order_finance') if isinstance(raw.get('order_finance'), dict) else {}
     return {
-        'version': 2,
+        'version': 3,
+        'expenses': raw.get('expenses', {}),
+        'expense_ledger': raw.get('expense_ledger', []),
         'revision': int(raw.get('revision', 0)),
         'inventory_ledger': raw.get('inventory_ledger', []),
         'requests': raw.get('requests', {}),
@@ -170,6 +173,7 @@ def _sync_skus(app_module, data):
                     'color': color,
                     'cost_price': default.get('cost_price'),
                     'stock_qty': 0,
+                    'target_stock': None,
                     'low_stock_threshold': default.get('low_stock_threshold', 2),
                     'track_stock': default.get('track_stock', False),
                     'active': True,
@@ -273,7 +277,9 @@ class Commerce:
             qty, total = order['quantity'], order['total']
             cost = sku['cost_price']
             finance = dict(order_id=order['id'], sku_id=sku['id'], model_id=order['model_id'],
-                style_id=order['style_id'], color=color, quantity=qty, unit_price=order['unit_price'],
+                style_id=order['style_id'], series_id=order['style_id'],
+                series_name=str(next((s.get('name') for s in getattr(g, 'commerce_shop', {}).get('styles', []) if str(s['id']) == order['style_id']), order['style_id'])),
+                color=color, quantity=qty, unit_price=order['unit_price'],
                 unit_cost=cost, revenue=total, cost_known=cost is not None,
                 cost_total=round(cost * qty, 2) if cost is not None else None,
                 gross_profit=round(total - cost * qty, 2) if cost is not None else None,
@@ -397,6 +403,23 @@ def install(app_module):
             existing = {s['id']: s for s in data['skus']}
             seen = set()
             for raw in payload['skus']:
+                if not isinstance(raw, dict):
+                    raise CommerceError('BAD_SKU', 'SKU 格式錯誤', 400)
+                for field in ('stock_qty', 'low_stock_threshold', 'target_stock'):
+                    value = raw.get(field)
+                    if field == 'target_stock' and value is None:
+                        continue
+                    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 10_000_000:
+                        raise CommerceError('BAD_QUANTITY', '庫存設定須為零至一千萬的整數', 400)
+                value = raw.get('cost_price')
+                if value is not None:
+                    from decimal import Decimal, InvalidOperation
+                    try:
+                        cost = Decimal(str(value))
+                        if not cost.is_finite() or cost < 0 or cost > 10_000_000 or cost != cost.quantize(Decimal('.01')):
+                            raise ValueError()
+                    except (ValueError, InvalidOperation):
+                        raise CommerceError('BAD_COST', '成本須為非負金額，最多兩位小數', 400)
                 sku = _normalize_sku(raw)
                 if not sku or sku['id'] not in existing or sku['id'] in seen:
                     raise CommerceError('BAD_SKU', 'SKU 不存在或重複，請先同步商品', 400)
@@ -424,6 +447,9 @@ def install(app_module):
         style['price'] = int(round(price))
         app_module.cloud_save_json('shop_data', app_module.DATA_FILE, shop)
         return reply(dict(status='success', price=style['price']))
+
+    from commerce_phase2 import install as install_phase2
+    install_phase2(app_module, guarded)
 
     original = app.view_functions['create_order']
     def create_order():
@@ -466,8 +492,8 @@ def install(app_module):
         if request.path == '/admin' and resp.status_code == 200 and resp.mimetype == 'text/html':
             resp.direct_passthrough = False
             html = resp.get_data(as_text=True)
-            src = '/static/admin-commerce-v1.js?v=20260917b'
+            src = '/static/admin-commerce-v1.js?v=20260918a'
             if src not in html:
-                resp.set_data(html.replace('</body>', f'<script src="{src}"></script></body>'))
+                resp.set_data(html.replace('</body>', f'<link rel="stylesheet" href="/static/admin-commerce.css?v=20260918a"><script src="{src}"></script></body>'))
             resp.headers['Cache-Control'] = 'no-store'
         return resp

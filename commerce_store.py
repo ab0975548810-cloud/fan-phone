@@ -71,6 +71,20 @@ class Store:
         with self.connection() as db:
             return [json.loads(row[0]) for row in db.execute('SELECT value FROM orders')]
 
+    def orders_between(self, start, end):
+        if not self.app.USE_SUPABASE:
+            return [r for r in self.local_orders() if start <= int(r.get('created_at_unix') or 0) < end]
+        rows, offset = [], 0
+        while True:
+            batch = (self.app.SUPABASE.table('orders')
+                     .select('id,style_id,style_name,total,quantity,status,created_at_unix')
+                     .gte('created_at_unix', start).lt('created_at_unix', end)
+                     .order('id').range(offset, offset + 499).execute().data or [])
+            rows.extend(batch)
+            if len(batch) < 500:
+                return rows
+            offset += 500
+
     def commit(self, revision, data, order=None, action=''):
         data['revision'] = revision + 1
         if self.app.USE_SUPABASE:

@@ -1,189 +1,135 @@
-/* 本福丸後台 POS / 成本 / 毛利 / 庫存管理 v1 */
+/* Existing POS, Phase 2: series workspace, receiving, reports and expenses. */
 (function(){
   'use strict';
   if(window.__bfAdminCommerceV1)return;window.__bfAdminCommerceV1=true;
-
-  let state={version:1,style_defaults:{},skus:[]};
-  let summary={};
-  let loaded=false;
-  const money=n=>'NT$ '+Math.round(Number(n)||0).toLocaleString('zh-TW');
-  const num=(v,d=0)=>Number.isFinite(Number(v))?Number(v):d;
+  let state={revision:0,style_defaults:{},skus:[]}, loaded=false, series='', tab='stock', dirty=false;
+  let expenses=[], reportData=null, reportEpoch=0, busy=false, editingExpense=null;
   const h=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const modelOf=id=>(shopData.models||[]).find(x=>String(x.id)===String(id));
-  const styleOf=id=>(shopData.styles||[]).find(x=>String(x.id)===String(id));
-
-  function css(){
-    if(document.getElementById('bf-commerce-css'))return;
-    const s=document.createElement('style');s.id='bf-commerce-css';s.textContent=`
-      .commerce-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:14px}
-      .commerce-kpi{background:#fff;border:1px solid var(--line);border-radius:16px;padding:13px;box-shadow:var(--shadow)}
-      .commerce-kpi small{display:block;color:var(--muted);font-weight:800;font-size:11px}.commerce-kpi b{display:block;margin-top:5px;font-size:20px}.commerce-kpi em{display:block;margin-top:4px;color:#a09197;font-size:10px;font-style:normal}
-      .commerce-toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}.commerce-toolbar input,.commerce-toolbar select{border:1px solid #eadce1;border-radius:999px;padding:8px 11px;background:#fff;font-size:12px}
-      .commerce-section-title{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:8px 0 10px}.commerce-section-title b{font-size:14px}
-      .commerce-price-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(245px,1fr));gap:10px;margin-bottom:16px}
-      .commerce-price-card{border:1px solid var(--line);border-radius:16px;padding:12px;background:#fffafb}.commerce-price-card h4{margin:0 0 9px;font-size:13px}.commerce-mini-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}.commerce-mini-grid label{font-size:10px;color:var(--muted);font-weight:800}.commerce-mini-grid input{width:100%;margin-top:4px;border:1px solid #eadce1;border-radius:10px;padding:8px;background:#fff}.commerce-price-meta{font-size:11px;color:#7d7176;margin:8px 0}.commerce-actions{display:flex;gap:6px;flex-wrap:wrap}
-      .commerce-table input[type=number]{width:82px;border:1px solid #eadce1;border-radius:9px;padding:7px}.commerce-table input[type=checkbox]{width:18px;height:18px;accent-color:var(--pink)}
-      .commerce-profit{font-weight:900}.commerce-profit.positive{color:var(--green)}.commerce-profit.negative{color:var(--red)}.commerce-low{background:#fff2f3!important}.commerce-muted{color:var(--muted);font-size:11px}.commerce-warning{padding:10px 12px;border-radius:12px;background:#fff7e9;color:#8d682e;font-size:11px;margin-bottom:12px}
-      @media(max-width:900px){.commerce-summary{grid-template-columns:1fr 1fr}.commerce-price-grid{grid-template-columns:1fr}.commerce-table{min-width:900px}}
-    `;document.head.appendChild(s);
+  const money=v=>v==null?'成本未知':'NT$ '+Number(v).toLocaleString('zh-TW',{maximumFractionDigits:2});
+  const styles=()=>shopData.styles||[], models=()=>shopData.models||[];
+  const styleOf=id=>styles().find(x=>String(x.id)===String(id));
+  const modelOf=id=>models().find(x=>String(x.id)===String(id));
+  const el=id=>document.getElementById(id);
+  const labels={out:'缺貨',low:'低於警戒值',threshold:'剛好警戒值',normal:'正常',untracked:'未追蹤'};
+  const categories=['房租','廣告','水電','耗材','運費','平台費','其他'];
+  const status=s=>!s.track_stock?'untracked':s.stock_qty===0?'out':s.stock_qty<s.low_stock_threshold?'low':s.stock_qty===s.low_stock_threshold?'threshold':'normal';
+  const needs=s=>['out','low','threshold'].includes(status(s));
+  const active=s=>s.active&&!!styleOf(s.style_id)&&!!modelOf(s.model_id)&&styleOf(s.style_id)?.status!==false&&modelOf(s.model_id)?.status!==false;
+  const today=()=>{const p=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());return ['year','month','day'].map(k=>p.find(x=>x.type===k).value).join('-')};
+  function message(text,error=false){const box=el('pos-message');if(box){box.textContent=text;box.className='pos-message'+(error?' error':'');box.hidden=!text}}
+  async function api(url,body){const r=await fetch(url,{cache:'no-store',...(body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{})});let j;try{j=await r.json()}catch{throw Error('回應中斷，請重試原操作')};if(!r.ok||j.status!=='success'){const e=Error(j.msg||'操作失敗');e.status=r.status;throw e}return j}
+  const pendingSlot='bf-pos2-pending';
+  function pending(){try{return JSON.parse(sessionStorage.getItem(pendingSlot)||'null')}catch{return null}}
+  function pendingUi(){const p=pending();el('pos-pending').hidden=!p;if(p)el('pos-pending-text').textContent='有一筆尚未確認的'+p.label+'。請先重送查明結果，再登記下一筆。'}
+  async function execute(saved){
+    if(busy)return;busy=true;const buttons=[...document.querySelectorAll('#view-commerce .pos-write')].map(b=>[b,b.disabled]);buttons.forEach(([b])=>b.disabled=true);
+    try{const result=await api(saved.url,saved.body);sessionStorage.removeItem(pendingSlot);pendingUi();message(result.msg||'已完成');el('pos-dialog').close();await load(true);return result}
+    catch(e){if(e.status>=400&&e.status<500){sessionStorage.removeItem(pendingSlot);pendingUi()}message(e.message,true);throw e}
+    finally{busy=false;buttons.forEach(([b,disabled])=>b.disabled=disabled)}
   }
-
+  async function command(url,body,label){
+    if(pending()){message('請先按「重送原操作」確認上一筆結果，避免重複入帳。',true);return}
+    const saved={url,body:{...body,idempotency_key:crypto.randomUUID()},label};
+    try{sessionStorage.setItem(pendingSlot,JSON.stringify(saved))}catch{message('無法保存操作識別，請允許網站儲存資料後再試。',true);return}
+    pendingUi();return execute(saved);
+  }
   function ensureUi(){
-    css();
-    const nav=document.querySelector('.nav');
-    if(nav&&!document.querySelector('.nav button[data-view="commerce"]')){
-      const btn=document.createElement('button');btn.dataset.view='commerce';btn.innerHTML='<i class="fa-solid fa-cash-register"></i><span>商品・庫存 POS</span>';
-      const orders=nav.querySelector('button[data-view="orders"]');
-      if(orders)orders.insertAdjacentElement('afterend',btn);else nav.prepend(btn);
-      btn.addEventListener('click',openView);
-    }
-    const content=document.querySelector('.content');
-    if(content&&!document.getElementById('view-commerce')){
-      const section=document.createElement('section');section.className='view';section.id='view-commerce';section.innerHTML=`
-        <div class="titlebar"><h2>商品・庫存 POS</h2><div style="display:flex;gap:7px"><button class="btn alt" id="commerce-reload"><i class="fa-solid fa-rotate"></i> 重新整理</button><button class="btn" id="commerce-sync"><i class="fa-solid fa-arrows-rotate"></i> 同步商品 SKU</button></div></div>
-        <div class="commerce-summary" id="commerce-summary"></div>
-        <div class="commerce-warning" id="commerce-warning">售價會同步到客人前台；成本、庫存、毛利只存在店內後台，不會公開給客人。</div>
-        <div class="panel" style="margin-bottom:14px">
-          <div class="commerce-section-title"><b>材質售價與預設成本</b><span class="commerce-muted">售價＝前台售價；預設成本只套用到新 SKU，除非你按「套用到現有 SKU」</span></div>
-          <div class="commerce-price-grid" id="commerce-price-grid"></div>
-        </div>
-        <div class="panel">
-          <div class="commerce-section-title"><b>SKU 庫存明細</b><button class="btn" id="commerce-save"><i class="fa-solid fa-floppy-disk"></i> 儲存全部庫存</button></div>
-          <div class="commerce-toolbar">
-            <input id="commerce-search" placeholder="搜尋型號／材質／顏色">
-            <select id="commerce-style-filter"><option value="">全部材質</option></select>
-            <label style="font-size:12px;font-weight:800"><input id="commerce-low-only" type="checkbox"> 只看低庫存</label>
-          </div>
-          <div class="table-wrap"><table class="tbl commerce-table"><thead><tr><th>型號</th><th>材質</th><th>顏色</th><th>售價</th><th>成本</th><th>單件毛利</th><th>毛利率</th><th>庫存</th><th>警戒</th><th>追蹤庫存</th></tr></thead><tbody id="commerce-sku-body"></tbody></table></div>
-        </div>`;
-      const orders=document.getElementById('view-orders');if(orders)orders.insertAdjacentElement('afterend',section);else content.prepend(section);
-      section.querySelector('#commerce-reload').addEventListener('click',()=>load(true));
-      section.querySelector('#commerce-sync').addEventListener('click',syncSkus);
-      section.querySelector('#commerce-save').addEventListener('click',saveAll);
-      section.querySelector('#commerce-search').addEventListener('input',renderSkus);
-      section.querySelector('#commerce-style-filter').addEventListener('change',renderSkus);
-      section.querySelector('#commerce-low-only').addEventListener('change',renderSkus);
-      section.querySelector('#commerce-sku-body').addEventListener('input',onSkuInput);
-      section.querySelector('#commerce-sku-body').addEventListener('change',onSkuInput);
-    }
+    const nav=document.querySelector('.nav'),content=document.querySelector('.content');if(!nav||!content||el('view-commerce'))return;
+    const button=document.createElement('button');button.dataset.view='commerce';button.innerHTML='<i class="fa-solid fa-cash-register"></i><span>商品・營運 POS</span>';button.addEventListener('click',open);
+    const orderNav=nav.querySelector('[data-view="orders"]');if(orderNav)orderNav.after(button);else nav.prepend(button);
+    const section=document.createElement('section');section.id='view-commerce';section.className='view';section.innerHTML=`
+      <div class="pos-heading"><div><p class="pos-eyebrow">本福丸 · 店務工作台</p><h2>商品與營運</h2><p>按系列管理商品，讓補貨與對帳更清楚。</p></div><button class="btn alt" id="commerce-reload">重新整理</button></div>
+      <div id="pos-message" class="pos-message" role="status" aria-live="polite" hidden></div>
+      <div id="pos-pending" class="pos-notice" hidden><span id="pos-pending-text"></span><button class="btn pos-write" id="pos-retry">重送原操作</button></div>
+      <nav class="pos-tabs" aria-label="POS 工作區"><button data-tab="stock" class="selected">系列商品</button><button data-tab="restock">補貨中心</button><button data-tab="reports">營運報表</button><button data-tab="expenses">支出管理</button></nav>
+      <div id="pos-stock-panel">
+        <div id="commerce-summary" class="commerce-summary"></div>
+        <div class="pos-row"><div><h3 id="pos-stock-title">依系列管理</h3><p class="pos-muted">選擇系列，再查看型號與顏色。售價為系列統一售價。</p></div><div class="pos-row-actions"><button id="commerce-sync" class="btn alt pos-write">同步商品</button><button id="pos-list" class="btn">產生補貨清單</button></div></div>
+        <div class="pos-series" id="pos-series" aria-label="商品系列"></div>
+        <div class="pos-series-detail"><div><h3 id="pos-series-name"></h3><span class="pos-muted" id="pos-series-caption"></span></div><form id="pos-price-form" class="pos-price-form"><label>系列售價<input id="pos-series-price" type="number" min="1" step="1" required></label><button class="btn alt pos-write" type="submit">更新售價</button></form></div>
+        <div class="pos-filter"><label class="pos-search">搜尋型號或顏色<input id="commerce-search" type="search" placeholder="例如 iPhone 16、透明"></label><label>庫存狀態<select id="pos-status"><option value="">全部狀態</option>${Object.entries(labels).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select></label><label class="pos-check"><input type="checkbox" id="commerce-low-only">只看需要補貨</label></div>
+        <div id="pos-skus" class="pos-skus"></div>
+        <div class="pos-savebar"><span id="pos-save-hint">到貨請使用「到貨登記」，系統會保留庫存異動。</span><button id="commerce-save" class="btn pos-write">儲存商品設定</button></div>
+      </div>
+      <section id="pos-report-panel" hidden>
+        <div class="pos-row"><div><h3>營運表現</h3><p class="pos-muted">Asia/Taipei · 每週由週一開始</p></div></div>
+        <form id="pos-report-form" class="pos-filter"><label>統計區間<select id="pos-period"><option value="today">今日</option><option value="week">本週</option><option value="month">本月</option><option value="year">今年</option><option value="custom">自訂日期</option></select></label><label class="pos-custom" hidden>開始日期<input id="pos-start" type="date"></label><label class="pos-custom" hidden>結束日期<input id="pos-end" type="date"></label><button class="btn" type="submit">查詢</button></form>
+        <p id="pos-report-range" class="pos-muted"></p><div id="pos-report-warning" class="pos-notice" hidden></div><div id="pos-metrics" class="pos-metrics"></div>
+        <h3>系列銷售表現</h3><div id="pos-series-report" class="pos-report-series"></div>
+        <details id="pos-unknown"><summary>成本未知訂單</summary><div id="pos-unknown-list"></div></details><p class="pos-muted" id="pos-recognition"></p>
+      </section>
+      <section id="pos-expense-panel" hidden>
+        <div class="pos-row"><div><h3>營運支出</h3><p class="pos-muted">進貨成本由售出商品成本計算，請勿在此重複列為營運支出。</p></div></div>
+        <form id="pos-expense-form" class="pos-expense-form"><label>日期<input id="pos-expense-date" type="date" required></label><label>分類<select id="pos-expense-category">${categories.map(c=>`<option>${c}</option>`).join('')}</select></label><label>金額（NT$）<input id="pos-expense-amount" type="number" min="0.01" max="10000000" step="0.01" required></label><label class="pos-note">備註<input id="pos-expense-note" maxlength="500" placeholder="例如：九月店面租金"></label><button id="pos-expense-save" type="submit" class="btn pos-write">新增支出</button><button id="pos-expense-cancel" type="button" class="btn alt" hidden>取消編輯</button></form>
+        <div class="pos-filter"><label>篩選月份<input id="pos-expense-month" type="month"></label><label class="pos-check"><input id="pos-show-voided" type="checkbox">包含作廢紀錄</label></div><p id="pos-expense-total" class="pos-muted"></p><div id="pos-expenses" class="pos-expenses"></div>
+      </section>
+      <dialog id="pos-dialog"><form id="pos-dialog-form"><div class="pos-row"><h3 id="pos-dialog-title"></h3><button id="pos-close" type="button" class="btn alt" aria-label="關閉">關閉</button></div><div id="pos-dialog-body"></div><div class="pos-dialog-actions"><button id="pos-dialog-submit" class="btn pos-write" type="submit">確認</button></div></form></dialog>`;
+    content.prepend(section);
+    section.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>switchTab(b.dataset.tab)));
+    el('commerce-reload').onclick=()=>{if(!dirty||confirm('有尚未儲存的商品設定，確定重新整理？')){dirty=false;load(true)}};
+    el('commerce-sync').onclick=async()=>{if(dirty){message('請先儲存商品設定。',true);return}try{await api('/api/admin/commerce_sync_skus',{});await load(true);message('商品已同步')}catch(e){message(e.message,true)}};
+    el('commerce-save').onclick=saveAll;
+    el('commerce-search').oninput=renderSkus;el('pos-status').onchange=renderSkus;el('commerce-low-only').onchange=renderSkus;
+    el('pos-series').onclick=e=>{const b=e.target.closest('[data-series]');if(b){series=b.dataset.series;renderStock()}};
+    el('pos-skus').oninput=onSkuInput;
+    el('pos-skus').onclick=e=>{const b=e.target.closest('[data-receive],[data-adjust]');if(b)stockDialog(b.dataset.receive||b.dataset.adjust,!!b.dataset.adjust)};
+    el('pos-price-form').onsubmit=async e=>{e.preventDefault();try{const j=await api('/api/admin/commerce_set_style_price',{style_id:series,price:Number(el('pos-series-price').value)});styleOf(series).price=j.price;message('系列售價已更新');renderSkus()}catch(e){message(e.message,true)}};
+    el('pos-list').onclick=exportList;el('pos-close').onclick=()=>el('pos-dialog').close();
+    el('pos-period').onchange=()=>document.querySelectorAll('.pos-custom').forEach(x=>x.hidden=el('pos-period').value!=='custom');
+    el('pos-start').value=el('pos-end').value=today();
+    el('pos-report-form').onsubmit=e=>{e.preventDefault();loadReport()};
+    el('pos-expense-date').value=today();el('pos-expense-month').value=today().slice(0,7);
+    el('pos-expense-form').onsubmit=saveExpense;el('pos-expense-cancel').onclick=resetExpense;
+    el('pos-expense-month').onchange=renderExpenses;el('pos-show-voided').onchange=renderExpenses;
+    el('pos-expenses').onclick=e=>{const b=e.target.closest('[data-edit-expense],[data-void-expense]');if(b)expenseAction(b.dataset.editExpense||b.dataset.voidExpense,!!b.dataset.voidExpense)};
+    el('pos-retry').onclick=()=>{const p=pending();if(p)execute(p).catch(()=>{})};pendingUi();
   }
-
-  async function openView(){
-    document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.view==='commerce'));
-    document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id==='view-commerce'));
-    try{currentView='commerce'}catch(e){}
-    await load(false);
-  }
-
+  async function open(){ensureUi();document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.view==='commerce'));document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id==='view-commerce'));try{currentView='commerce'}catch{}await load(false)}
   async function load(force=false){
-    ensureUi();
-    try{
-      if(typeof loadShop==='function')await loadShop(force);
-      if(loaded&&!force){renderAll();return}
-      const j=await apiJson('/api/admin/commerce_data?ts='+Date.now(),{cache:'no-store'});
-      state=j.data||{version:1,style_defaults:{},skus:[]};summary=j.summary||{};loaded=true;renderAll();
-    }catch(e){alert('POS 資料載入失敗：'+e.message)}
+    ensureUi();try{if(typeof loadShop==='function')await loadShop(force);if(!loaded||force){const j=await api('/api/admin/commerce_data');state=j.data;loaded=true;dirty=false}
+      if(!series||!styles().some(s=>String(s.id)===series))series=String(styles().find(s=>s.status!==false)?.id||'');renderStock();
+      if(tab==='reports')await loadReport();if(tab==='expenses')await loadExpenses();
+    }catch(e){message('資料載入失敗：'+e.message,true)}
   }
-
-  function styleDefault(styleId){
-    state.style_defaults=state.style_defaults||{};
-    state.style_defaults[styleId]=state.style_defaults[styleId]||{cost_price:null,low_stock_threshold:2,track_stock:false};
-    return state.style_defaults[styleId];
+  function switchTab(value){tab=value;document.querySelectorAll('.pos-tabs button').forEach(b=>b.classList.toggle('selected',b.dataset.tab===tab));el('pos-stock-panel').hidden=!['stock','restock'].includes(tab);el('pos-report-panel').hidden=tab!=='reports';el('pos-expense-panel').hidden=tab!=='expenses';if(tab==='restock'){el('commerce-low-only').checked=true;el('pos-status').value=''}else if(tab==='stock')el('commerce-low-only').checked=false;if(tab==='reports')loadReport();else if(tab==='expenses')loadExpenses();else renderStock()}
+  function renderStock(){
+    const counts={out:0,low:0,threshold:0,normal:0};state.skus.filter(active).forEach(s=>{if(status(s) in counts)counts[status(s)]++});
+    el('commerce-summary').innerHTML=Object.entries(counts).map(([k,n])=>`<button class="commerce-kpi ${k}" data-stock-status="${k}"><small>${labels[k]}</small><b>${n}</b><span>個規格</span></button>`).join('');
+    el('commerce-summary').querySelectorAll('[data-stock-status]').forEach(b=>b.onclick=()=>{el('pos-status').value=b.dataset.stockStatus;el('commerce-low-only').checked=false;renderSkus()});
+    el('pos-stock-title').textContent=tab==='restock'?'今天需要補哪些貨？':'依系列管理';
+    el('pos-series').innerHTML=styles().filter(s=>s.status!==false).map(s=>{const list=state.skus.filter(x=>x.style_id===String(s.id)&&active(x)),count=list.filter(needs).length;return `<button data-series="${h(s.id)}" class="${String(s.id)===series?'selected':''}" aria-pressed="${String(s.id)===series}"><strong>${h(s.name)}</strong><span>${list.length} 個規格${count?' · '+count+' 個待補貨':''}</span></button>`}).join('');
+    const st=styleOf(series);el('pos-series-name').textContent=st?.name||'尚無系列';el('pos-series-price').value=st?.price||'';el('pos-price-form').hidden=!st;el('pos-series-caption').textContent='售價共用；成本與庫存依型號／顏色個別管理';renderSkus();
   }
-
-  function inventoryStats(){
-    let low=0,value=0,potential=0,potentialProfit=0,unknown=0;
-    for(const sku of state.skus||[]){
-      if(!sku.active)continue;
-      const st=styleOf(sku.style_id),sale=num(st?.price,0),stock=Math.max(0,num(sku.stock_qty,0)),cost=sku.cost_price;
-      if(sku.track_stock&&stock<=num(sku.low_stock_threshold,2))low++;
-      potential+=sale*stock;
-      if(cost===null||cost===undefined||cost==='')unknown++;else{value+=num(cost,0)*stock;potentialProfit+=(sale-num(cost,0))*stock}
-    }
-    return{low,value,potential,potentialProfit,unknown};
-  }
-
-  function renderSummary(){
-    const inv=inventoryStats();
-    const box=document.getElementById('commerce-summary');if(!box)return;
-    const missing=num(summary.orders_missing_cost,0);
-    box.innerHTML=`
-      <div class="commerce-kpi"><small>今日營收</small><b>${money(summary.today_revenue)}</b><em>POS 啟用後的訂單</em></div>
-      <div class="commerce-kpi"><small>今日毛利</small><b>${money(summary.today_gross_profit)}</b><em>${missing?'有 '+missing+' 筆訂單尚未設定成本':'已知成本訂單計算'}</em></div>
-      <div class="commerce-kpi"><small>目前庫存成本</small><b>${money(inv.value)}</b><em>${inv.unknown?'有 '+inv.unknown+' 個 SKU 成本未設定':'全部 SKU 已有成本'}</em></div>
-      <div class="commerce-kpi"><small>低庫存 SKU</small><b>${inv.low.toLocaleString('zh-TW')}</b><em>依各 SKU 警戒值判定</em></div>`;
-  }
-
-  function renderPriceCards(){
-    const box=document.getElementById('commerce-price-grid');if(!box)return;
-    const styles=(shopData.styles||[]).filter(s=>s.status!==false);
-    box.innerHTML=styles.map(st=>{
-      const d=styleDefault(String(st.id));const cost=d.cost_price;const sale=num(st.price,0);const profit=cost==null?null:sale-num(cost,0);const margin=cost==null||sale<=0?null:(profit/sale*100);
-      return `<div class="commerce-price-card" data-style="${h(st.id)}"><h4>${h(st.name)}</h4>
-        <div class="commerce-mini-grid">
-          <label>前台售價<input class="commerce-style-price" type="number" min="1" step="1" value="${h(st.price||0)}"></label>
-          <label>預設成本<input class="commerce-style-cost" type="number" min="0" step="1" value="${cost==null?'':h(cost)}" placeholder="未設定"></label>
-          <label>預設低庫存警戒<input class="commerce-style-low" type="number" min="0" step="1" value="${h(d.low_stock_threshold??2)}"></label>
-          <label style="display:flex;align-items:flex-end;gap:7px;padding-bottom:7px"><input class="commerce-style-track" type="checkbox" ${d.track_stock?'checked':''} style="width:18px;height:18px"> 追蹤庫存</label>
-        </div>
-        <div class="commerce-price-meta">單件毛利：<b>${profit==null?'尚未設定成本':money(profit)}</b>${margin==null?'':` ・ 毛利率 ${margin.toFixed(1)}%`}</div>
-        <div class="commerce-actions"><button class="btn mini" onclick="BenfuwanCommerce.saveStyle('${h(st.id)}',false)">儲存材質設定</button><button class="btn alt mini" onclick="BenfuwanCommerce.saveStyle('${h(st.id)}',true)">套用成本到現有 SKU</button></div>
-      </div>`;
-    }).join('')||'<div class="empty">目前沒有啟用中的手機殼材質</div>';
-  }
-
-  function renderFilters(){
-    const sel=document.getElementById('commerce-style-filter');if(!sel)return;const keep=sel.value;
-    sel.innerHTML='<option value="">全部材質</option>'+(shopData.styles||[]).filter(s=>s.status!==false).map(s=>`<option value="${h(s.id)}">${h(s.name)}</option>`).join('');sel.value=keep;
-  }
-
-  function skuMatches(sku){
-    const q=(document.getElementById('commerce-search')?.value||'').trim().toLowerCase();const styleFilter=document.getElementById('commerce-style-filter')?.value||'';const lowOnly=!!document.getElementById('commerce-low-only')?.checked;
-    const m=modelOf(sku.model_id),st=styleOf(sku.style_id);const text=`${m?.name||sku.model_id} ${st?.name||sku.style_id} ${sku.color||''}`.toLowerCase();
-    if(q&&!text.includes(q))return false;if(styleFilter&&String(sku.style_id)!==styleFilter)return false;if(lowOnly&&!(sku.track_stock&&num(sku.stock_qty)<=num(sku.low_stock_threshold,2)))return false;return true;
-  }
-
   function renderSkus(){
-    const body=document.getElementById('commerce-sku-body');if(!body)return;
-    const list=(state.skus||[]).filter(skuMatches).sort((a,b)=>{const am=modelOf(a.model_id)?.name||a.model_id,bm=modelOf(b.model_id)?.name||b.model_id;return am.localeCompare(bm,'zh-Hant')||String(a.style_id).localeCompare(String(b.style_id))||String(a.color).localeCompare(String(b.color),'zh-Hant')});
-    body.innerHTML=list.map(sku=>{
-      const m=modelOf(sku.model_id),st=styleOf(sku.style_id),sale=num(st?.price,0),cost=sku.cost_price;const profit=cost==null?null:sale-num(cost,0),margin=profit==null||sale<=0?null:(profit/sale*100),low=sku.track_stock&&num(sku.stock_qty)<=num(sku.low_stock_threshold,2);
-      return `<tr data-sku="${h(sku.id)}" class="${low?'commerce-low':''}"><td><b>${h(m?.name||sku.model_id)}</b></td><td>${h(st?.name||sku.style_id)}</td><td>${h(sku.color||'—')}</td><td>${money(sale)}</td><td><input data-field="cost_price" type="number" min="0" step="1" value="${cost==null?'':h(cost)}" placeholder="未設定"></td><td class="commerce-profit ${profit!=null&&profit>=0?'positive':'negative'}">${profit==null?'—':money(profit)}</td><td class="commerce-margin">${margin==null?'—':margin.toFixed(1)+'%'}</td><td><input data-field="stock_qty" type="number" min="0" step="1" value="${h(sku.stock_qty??0)}"></td><td><input data-field="low_stock_threshold" type="number" min="0" step="1" value="${h(sku.low_stock_threshold??2)}"></td><td style="text-align:center"><input data-field="track_stock" type="checkbox" ${sku.track_stock?'checked':''}></td></tr>`;
-    }).join('')||'<tr><td colspan="10" class="empty">沒有符合條件的 SKU；第一次使用請按「同步商品 SKU」。</td></tr>';
+    const q=el('commerce-search').value.trim().toLowerCase(),filter=el('pos-status').value,only=el('commerce-low-only').checked;
+    const list=state.skus.filter(s=>s.style_id===series&&active(s)&&(!only||needs(s))&&(!filter||status(s)===filter)&&`${modelOf(s.model_id)?.name||s.model_id} ${s.color}`.toLowerCase().includes(q));
+    el('pos-skus').innerHTML=list.map(s=>{const k=status(s),target=s.target_stock,suggest=target==null?'先設定目標':Math.max(0,target-s.stock_qty)+' 件';return `<article class="pos-sku" data-sku="${h(s.id)}"><div class="pos-sku-heading"><div><h4>${h(modelOf(s.model_id)?.name||s.model_id)}</h4><p>${h(s.color||'無色別')}</p></div><span class="pos-badge ${k}">${labels[k]}</span></div><div class="pos-stock-number"><div><small>目前庫存</small><b>${s.stock_qty}<span> 件</span></b></div><div><small>建議補貨</small><strong>${s.track_stock?h(suggest):'未追蹤'}</strong></div></div><div class="pos-fields"><label>成本<input data-field="cost_price" aria-label="成本" type="number" step="0.01" min="0" max="10000000" value="${s.cost_price??''}" placeholder="成本未知"></label><label>警戒庫存<input data-field="low_stock_threshold" aria-label="警戒庫存" type="number" min="0" max="10000000" step="1" value="${s.low_stock_threshold}"></label><label>目標庫存<input data-field="target_stock" aria-label="目標庫存" type="number" min="0" max="10000000" step="1" value="${target??''}" placeholder="未設定"></label></div><div class="pos-sku-footer"><label class="pos-check"><input data-field="track_stock" type="checkbox" ${s.track_stock?'checked':''}>追蹤庫存</label><div><button class="pos-link" data-adjust="${h(s.id)}">盤點校正</button><button class="btn alt pos-write" data-receive="${h(s.id)}" ${!s.track_stock?'disabled':''}>到貨登記</button></div></div></article>`}).join('')||'<div class="pos-empty">沒有符合條件的規格。可切換系列／篩選，首次使用請按「同步商品」。</div>';
+    el('pos-save-hint').textContent=dirty?'有尚未儲存的商品設定':'到貨請使用「到貨登記」，系統會保留庫存異動。';
   }
-
-  function renderAll(){renderSummary();renderPriceCards();renderFilters();renderSkus()}
-
-  function updateSkuFromRow(row){
-    const sku=(state.skus||[]).find(x=>String(x.id)===String(row.dataset.sku));if(!sku)return;
-    row.querySelectorAll('[data-field]').forEach(el=>{const f=el.dataset.field;if(f==='track_stock')sku[f]=el.checked;else if(f==='cost_price')sku[f]=el.value===''?null:Math.max(0,num(el.value,0));else sku[f]=Math.max(0,Math.floor(num(el.value,0))) });
+  function onSkuInput(e){const f=e.target.dataset.field,s=state.skus.find(x=>x.id===e.target.closest('[data-sku]')?.dataset.sku);if(!f||!s)return;s[f]=f==='track_stock'?e.target.checked:e.target.value===''&&['cost_price','target_stock'].includes(f)?null:Number(e.target.value);dirty=true;el('pos-save-hint').textContent='有尚未儲存的商品設定';}
+  async function saveAll(){try{const fields=[...el('pos-skus').querySelectorAll('input')];if(fields.some(x=>!x.reportValidity()))return;await api('/api/admin/save_commerce_data',{revision:state.revision,style_defaults:state.style_defaults,skus:state.skus});await load(true);message('商品設定已儲存')}catch(e){message(e.message,true)}}
+  function stockDialog(id,adjust=false){
+    if(dirty){message('請先儲存商品設定，再登記到貨或盤點。',true);return}const s=state.skus.find(x=>x.id===id);if(!s)return;
+    el('pos-dialog-title').textContent=adjust?'盤點校正':'到貨登記';el('pos-dialog-body').innerHTML=`<p>${h(styleOf(s.style_id)?.name)} · ${h(modelOf(s.model_id)?.name)} · ${h(s.color)}</p><p class="pos-muted">${adjust?'請輸入實際盤點數量；差額會記錄為盤點異動。':'輸入這次實際收到的數量，系統會加到最新庫存。'}</p><label>${adjust?'實際庫存':'本次到貨件數'}<input id="pos-receive-qty" type="number" min="${adjust?0:1}" max="10000000" step="1" required value="${adjust?s.stock_qty:Math.max(1,(s.target_stock??s.stock_qty+1)-s.stock_qty)}"></label>${adjust?'':'<label>備註<input id="pos-receive-note" maxlength="500" placeholder="例如：供應商／到貨單號"></label>'}`;
+    el('pos-dialog-submit').textContent=adjust?'確認盤點校正':'確認到貨入庫';el('pos-dialog-submit').hidden=false;
+    el('pos-dialog-form').onsubmit=async e=>{e.preventDefault();const quantity=Number(el('pos-receive-qty').value);try{if(adjust){const copy=structuredClone(s);copy.stock_qty=quantity;await api('/api/admin/save_commerce_data',{revision:state.revision,style_defaults:state.style_defaults,skus:[copy]});el('pos-dialog').close();await load(true);message('盤點校正已記錄')}else await command('/api/admin/purchase_received',{items:[{sku_id:id,quantity}],note:el('pos-receive-note').value},'到貨')}catch(e){message(e.message,true)}};el('pos-dialog').showModal();
   }
-
-  function onSkuInput(e){const row=e.target.closest('tr[data-sku]');if(!row)return;updateSkuFromRow(row);const sku=(state.skus||[]).find(x=>String(x.id)===String(row.dataset.sku)),st=styleOf(sku?.style_id),sale=num(st?.price,0),cost=sku?.cost_price,profit=cost==null?null:sale-num(cost,0),margin=profit==null||sale<=0?null:profit/sale*100;const p=row.querySelector('.commerce-profit'),m=row.querySelector('.commerce-margin');if(p){p.textContent=profit==null?'—':money(profit);p.className='commerce-profit '+(profit!=null&&profit>=0?'positive':'negative')}if(m)m.textContent=margin==null?'—':margin.toFixed(1)+'%';row.classList.toggle('commerce-low',!!sku?.track_stock&&num(sku.stock_qty)<=num(sku.low_stock_threshold,2));renderSummary()}
-
-  async function saveAll(silent=false){
-    document.querySelectorAll('#commerce-sku-body tr[data-sku]').forEach(updateSkuFromRow);
-    try{await apiJson('/api/admin/save_commerce_data',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision:state.revision,style_defaults:state.style_defaults||{},skus:state.skus||[]})});if(!silent)alert('成本與庫存已儲存');await load(true)}catch(e){if(!silent)alert('儲存失敗：'+e.message);throw e}
+  async function exportList(){
+    if(dirty){message('請先儲存目標與警戒庫存，再產生清單。',true);return}
+    try{const j=await api('/api/admin/replenishment'),data=j.data;el('pos-dialog-title').textContent='補貨清單';el('pos-dialog-body').innerHTML=`<p>${data.groups.length} 個系列 · 建議 ${data.total_suggested} 件${data.missing_targets?' · '+data.missing_targets+' 個規格尚未設定目標':''}</p><p class="pos-muted">包含所有系列的缺貨、低於／剛好警戒品項。產生清單不會改動庫存。</p><textarea id="pos-export-text" readonly aria-label="補貨清單">${h(data.text)}</textarea><p id="pos-copy-status" role="status"></p>`;el('pos-dialog-submit').hidden=false;el('pos-dialog-submit').textContent='複製清單';el('pos-dialog-form').onsubmit=async e=>{e.preventDefault();try{await navigator.clipboard.writeText(data.text);el('pos-copy-status').textContent='已複製'}catch{el('pos-export-text').select();el('pos-copy-status').textContent='請長按或按 Ctrl+C 複製已選取文字'}};el('pos-dialog').showModal()}catch(e){message(e.message,true)}
   }
-
-  async function syncSkus(){
-    try{const j=await apiJson('/api/admin/commerce_sync_skus',{method:'POST'});loaded=false;await load(true);alert(j.msg||'SKU 同步完成')}catch(e){alert('SKU 同步失敗：'+e.message)}
+  async function loadReport(){const epoch=++reportEpoch;el('pos-metrics').setAttribute('aria-busy','true');try{const qs=new URLSearchParams({period:el('pos-period').value,start:el('pos-start').value,end:el('pos-end').value});const j=await api('/api/admin/commerce_report?'+qs);if(epoch!==reportEpoch)return;reportData=j.data;renderReport()}catch(e){if(epoch===reportEpoch){el('pos-metrics').innerHTML='';el('pos-series-report').innerHTML='';el('pos-report-warning').hidden=true;el('pos-unknown').hidden=true;el('pos-report-range').textContent='';message(e.message,true)}}finally{if(epoch===reportEpoch)el('pos-metrics').removeAttribute('aria-busy')}}
+  function renderReport(){const r=reportData,s=r.summary;el('pos-report-range').textContent=r.range.start+' ～ '+r.range.end+'（台灣時間）';el('pos-report-warning').hidden=!s.unknown_cost_orders;el('pos-report-warning').textContent=`有 ${s.unknown_cost_orders} 筆訂單成本未知。已知商品成本 ${money(s.known_cost)}；完整成本、毛利與淨利暫不計算。`;
+    const items=[['營業額',money(s.revenue)],['訂單數',s.orders+' 筆'],['銷售件數',s.units+' 件'],['商品成本',money(s.product_cost)],['毛利',money(s.gross_profit)],['毛利率',s.gross_margin==null?'—':s.gross_margin.toFixed(2)+'%'],['平均客單價',money(s.average_order_value)],['營運支出',money(s.expenses)],['淨利',money(s.net_profit)]];
+    el('pos-metrics').innerHTML=items.map(([label,value])=>`<article class="pos-metric"><small>${label}</small><b>${value}</b></article>`).join('');
+    el('pos-series-report').innerHTML=r.series.map(x=>`<article class="pos-report-card"><h4>${h(x.series_name)}</h4><p class="pos-muted">${x.orders} 筆訂單 · ${x.units} 件</p><dl><div><dt>營業額</dt><dd>${money(x.revenue)}</dd></div><div><dt>商品成本</dt><dd>${money(x.product_cost)}</dd></div><div><dt>毛利</dt><dd>${money(x.gross_profit)}</dd></div><div><dt>毛利率</dt><dd>${x.gross_margin==null?'—':x.gross_margin.toFixed(2)+'%'}</dd></div></dl>${x.unknown_cost_orders?`<p class="pos-muted">${x.unknown_cost_orders} 筆成本未知；已知成本 ${money(x.known_cost)}</p>`:''}</article>`).join('')||'<div class="pos-empty">這段期間還沒有有效訂單。</div>';
+    el('pos-unknown').hidden=!r.unknown_cost_orders.length;el('pos-unknown-list').innerHTML=r.unknown_cost_orders.map(x=>`<p>${h(x.order_id)} · ${h(x.series_name)} · 成本未知</p>`).join('');el('pos-recognition').textContent=r.recognition;
   }
-
-  async function saveStyle(styleId,applyExisting){
-    const card=document.querySelector(`.commerce-price-card[data-style="${CSS.escape(String(styleId))}"]`);if(!card)return;
-    const price=Math.round(num(card.querySelector('.commerce-style-price')?.value,0));const rawCost=card.querySelector('.commerce-style-cost')?.value??'';const cost=rawCost===''?null:Math.max(0,num(rawCost,0));const low=Math.max(0,Math.floor(num(card.querySelector('.commerce-style-low')?.value,2)));const track=!!card.querySelector('.commerce-style-track')?.checked;
-    if(price<=0)return alert('售價必須大於 0');
-    const d=styleDefault(String(styleId));d.cost_price=cost;d.low_stock_threshold=low;d.track_stock=track;
-    if(applyExisting){for(const sku of state.skus||[]){if(String(sku.style_id)===String(styleId)){sku.cost_price=cost;sku.low_stock_threshold=low;sku.track_stock=track}}}
-    try{
-      await apiJson('/api/admin/commerce_set_style_price',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({style_id:styleId,price})});
-      const st=styleOf(styleId);if(st)st.price=price;
-      await saveAll(true);renderAll();alert(applyExisting?'售價與預設已儲存，並套用到現有 SKU':'售價與預設已儲存');
-    }catch(e){alert('材質設定儲存失敗：'+e.message)}
-  }
-
-  window.BenfuwanCommerce={version:'1.0-pos-inventory',open:openView,load,saveAll,syncSkus,saveStyle,get state(){return state}};
+  async function loadExpenses(){try{expenses=(await api('/api/admin/expenses')).data;renderExpenses()}catch(e){message(e.message,true)}}
+  function renderExpenses(){const month=el('pos-expense-month').value,show=el('pos-show-voided').checked,list=expenses.filter(x=>(!month||x.date.startsWith(month))&&(show||!x.voided));el('pos-expense-total').textContent=`${list.filter(x=>!x.voided).length} 筆有效支出 · 合計 ${money(list.filter(x=>!x.voided).reduce((n,x)=>n+x.amount,0))}`;el('pos-expenses').innerHTML=list.map(x=>`<article class="pos-expense ${x.voided?'voided':''}"><div><span class="pos-badge">${h(x.category)}</span><strong>${money(x.amount)}</strong><small>${h(x.date)}${x.voided?' · 已作廢':''}</small><p>${h(x.note||'無備註')}</p></div>${x.voided?'':`<div><button class="pos-link" data-edit-expense="${h(x.id)}">編輯</button><button class="pos-link danger" data-void-expense="${h(x.id)}">作廢</button></div>`}</article>`).join('')||'<div class="pos-empty">這個月份尚無支出紀錄。</div>'}
+  function resetExpense(){editingExpense=null;el('pos-expense-form').reset();el('pos-expense-date').value=today();el('pos-expense-save').textContent='新增支出';el('pos-expense-cancel').hidden=true}
+  async function expenseAction(id,voided){const row=expenses.find(x=>x.id===id);if(!row)return;if(voided){if(!confirm('作廢這筆支出？原始紀錄仍會保留。'))return;try{await command('/api/admin/expense',{action:'void',expense_id:id,expected_version:row.version},'支出作廢')}catch{}return}editingExpense=row;el('pos-expense-date').value=row.date;el('pos-expense-category').value=row.category;el('pos-expense-amount').value=row.amount;el('pos-expense-note').value=row.note;el('pos-expense-save').textContent='儲存修改';el('pos-expense-cancel').hidden=false;el('pos-expense-form').scrollIntoView({behavior:'smooth',block:'center'})}
+  async function saveExpense(e){e.preventDefault();try{const result=await command('/api/admin/expense',{action:'save',date:el('pos-expense-date').value,category:el('pos-expense-category').value,amount:Number(el('pos-expense-amount').value),note:el('pos-expense-note').value,...(editingExpense?{expense_id:editingExpense.id,expected_version:editingExpense.version}:{})},'支出');if(result)resetExpense()}catch{}}
+  window.BenfuwanCommerce={version:'2.0-series-operations',open,load,saveAll,get state(){return state}};
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',ensureUi,{once:true});else ensureUi();
-  console.info('[COMMERCE] admin POS / cost / inventory UI enabled');
 })();

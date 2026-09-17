@@ -182,8 +182,69 @@ def admin_test(browser, base):
     page.locator('.nav button[data-view="commerce"]').click()
     poll(page, "() => document.getElementById('view-commerce')?.classList.contains('active') && document.querySelectorAll('#commerce-summary .commerce-kpi').length===4")
     commerce_diag = page.evaluate("""() => ({version:window.BenfuwanCommerce?.version||'',publicCostLeak:JSON.stringify(shopData||{}).includes('cost_price'),view:document.getElementById('view-commerce')?.classList.contains('active')})""")
-    assert commerce_diag['version'].startswith('1.0') and commerce_diag['view'] and not commerce_diag['publicCostLeak'], commerce_diag
+    assert commerce_diag['version'].startswith('2.0') and commerce_diag['view'] and not commerce_diag['publicCostLeak'], commerce_diag
     print('ADMIN_COMMERCE_WEBKIT_OK', commerce_diag['version'])
+
+    # Real Phase 2 controls, including a committed receipt with lost response.
+    assert page.request.post(base + '/api/admin/commerce_sync_skus', data={}).ok
+    data = page.request.get(base + '/api/admin/commerce_data').json()['data']
+    sku = data['skus'][0]
+    sku.update(stock_qty=1, cost_price=100, low_stock_threshold=2, target_stock=8, track_stock=True)
+    assert page.request.post(base + '/api/admin/save_commerce_data', data=data).ok
+    page.locator('#commerce-reload').click()
+    poll(page, "() => window.BenfuwanCommerce.state.skus[0]?.target_stock===8")
+    card = page.locator('[data-sku="' + sku['id'] + '"]')
+    card.locator('[data-field="target_stock"]').fill('10')
+    page.locator('#commerce-save').click()
+    poll(page, "() => document.getElementById('pos-message').textContent==='商品設定已儲存'")
+    page.locator('[data-tab="restock"]').click()
+    assert page.locator('#commerce-low-only').is_checked()
+    assert card.is_visible()
+    page.locator('#pos-list').click()
+    page.locator('#pos-export-text').wait_for(state='visible')
+    assert '建議 9 件' in page.locator('#pos-export-text').input_value()
+    page.locator('#pos-close').click()
+    receipts = []
+    def receive(route):
+        receipts.append(route.request.post_data_json)
+        if len(receipts) == 1:
+            assert route.fetch().status == 200
+            route.abort('failed')
+        else:
+            route.continue_()
+    page.route('**/api/admin/purchase_received', receive)
+    card.locator('[data-receive]').click()
+    page.locator('#pos-receive-qty').fill('3')
+    page.locator('#pos-dialog-submit').click()
+    poll(page, "() => document.getElementById('pos-message').classList.contains('error')")
+    page.reload(wait_until='domcontentloaded')
+    page.locator('.nav button[data-view="commerce"]').click()
+    page.locator('#pos-retry').click()
+    poll(page, "() => !sessionStorage.getItem('bf-pos2-pending') && window.BenfuwanCommerce.state.skus[0]?.stock_qty===4")
+    assert len(receipts) == 2 and receipts[0] == receipts[1], receipts
+    page.locator('[data-tab="expenses"]').click()
+    page.locator('#pos-expense-category').select_option('廣告')
+    page.locator('#pos-expense-amount').fill('20.25')
+    page.locator('#pos-expense-note').fill('瀏覽器測試支出')
+    page.locator('#pos-expense-save').click()
+    page.locator('.pos-expense').filter(has_text='瀏覽器測試支出').wait_for()
+    for width, height in ((390,844),(1024,768),(1440,900)):
+        page.set_viewport_size(dict(width=width,height=height))
+        for tab in ('stock','restock','reports','expenses'):
+            page.locator('[data-tab="'+tab+'"]').click()
+            if tab == 'reports':
+                poll(page, "() => document.querySelectorAll('.pos-metric').length===9")
+            metrics = page.evaluate("""() => ({width:innerWidth,scroll:document.documentElement.scrollWidth,view:document.getElementById('view-commerce').getBoundingClientRect().width})""")
+            assert metrics['scroll'] <= width + 2 and metrics['view'] > 200, (tab,metrics)
+            if os.environ.get('POS_SCREENSHOT_DIR'):
+                folder = Path(os.environ['POS_SCREENSHOT_DIR']);folder.mkdir(parents=True,exist_ok=True)
+                page.screenshot(path=str(folder / f'pos-{width}-{tab}.png'), full_page=True)
+    page.locator('[data-tab="reports"]').click()
+    for period in ('week','month','year','custom'):
+        page.locator('#pos-period').select_option(period)
+        page.locator('#pos-report-form button').click()
+        poll(page, "() => document.querySelectorAll('.pos-metric').length===9 && document.getElementById('pos-metrics').getAttribute('aria-busy')===null")
+    print('POS_PHASE2_RESPONSIVE_RECEIPT_EXPENSE_REPORT_OK')
 
     template_nav = page.locator('.nav button[data-view="templates"]')
     template_nav.click()
@@ -213,7 +274,7 @@ def main():
     server = ServerThread();server.start();time.sleep(.8)
     try:
         with sync_playwright() as p:
-            browser = p.webkit.launch()
+            browser = getattr(p, os.environ.get('BROWSER_ENGINE', 'webkit')).launch()
             try:
                 base='http://127.0.0.1:8765';front_test(browser,base);checkout_test(browser,base);admin_test(browser,base)
             finally: browser.close()
