@@ -49,7 +49,7 @@ for rel in refs:
     if proc.returncode:
         fail(f"JavaScript syntax: static/{rel}\n{proc.stderr}")
 
-for admin_js in ("admin-orders-v3.js", "admin-commerce-v1.js"):
+for admin_js in ("admin-orders-v3.js", "admin-commerce-v1.js", "admin-print-center.js"):
     path = ROOT / "static" / admin_js
     if not path.exists():
         fail(f"Missing admin module: static/{admin_js}")
@@ -76,6 +76,7 @@ installers = [
     ("template_editor_patch", "install"),
     ("order_management_patch", "install"),
     ("commerce_patch", "install"),
+    ("print_center", "install"),
 ]
 for module_name, fn_name in installers:
     module = importlib.import_module(module_name)
@@ -111,6 +112,8 @@ if b"admin-orders-v3.js" not in admin_resp.data:
     fail("Authenticated /admin did not inject admin-orders-v3.js")
 if b"admin-commerce-v1.js" not in admin_resp.data:
     fail("Authenticated /admin did not inject admin-commerce-v1.js")
+if b"admin-print-center.js" not in admin_resp.data:
+    fail("Authenticated /admin did not inject admin-print-center.js")
 
 sync_resp = client.post("/api/admin/commerce_sync_skus")
 sync_json = sync_resp.get_json() or {}

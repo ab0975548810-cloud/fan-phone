@@ -37,6 +37,7 @@ def post_worker_init(worker):
         from quality_perf_patch import install as install_quality_perf
         from ai_runtime_patch import install as install_ai_runtime
         from commerce_patch import install as install_commerce
+        from print_center import install as install_print_center
         install_security(app_module)
         install_supabase_resilience(app_module)
         install_quality_perf(app_module)
@@ -49,7 +50,9 @@ def post_worker_init(worker):
         # Commerce installs after order-color/order-management so it can wrap the
         # final create_order + order_action endpoints and keep finance/stock aligned.
         install_commerce(app_module)
-        worker.log.info('Benfuwan security/performance/quality/AI/commerce middleware installed')
+        # Print Center depends on the final commerce order/finance transaction layer.
+        install_print_center(app_module)
+        worker.log.info('Benfuwan security/performance/quality/AI/commerce/print middleware installed')
     except Exception:
         worker.log.exception('Failed to install Benfuwan security/performance middleware')
         raise

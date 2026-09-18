@@ -27,10 +27,12 @@ import app as app_module
 from admin_perf_patch import install as install_admin_perf
 from template_editor_patch import install as install_template_editor
 from commerce_patch import install as install_commerce
+from print_center import install as install_print_center
 
 install_admin_perf(app_module)
 install_template_editor(app_module)
 install_commerce(app_module)
+install_print_center(app_module)
 app_module.app.config['SESSION_COOKIE_SECURE'] = False
 
 
@@ -246,6 +248,21 @@ def admin_test(browser, base):
         page.locator('#pos-report-form button').click()
         poll(page, "() => document.querySelectorAll('#pos-metrics .pos-metric').length===9 && document.getElementById('pos-metrics').getAttribute('aria-busy')===null")
     print('POS_PHASE2_RESPONSIVE_RECEIPT_EXPENSE_REPORT_OK')
+
+    print_nav = page.locator('.nav button[data-view="print-center"]')
+    print_nav.click()
+    poll(page, "() => document.querySelectorAll('#pc-grid .pc-card').length>0 && document.getElementById('view-print-center').classList.contains('active')")
+    assert page.locator('#pc-config').get_attribute('class').find('warn') >= 0
+    for width, height in ((390,844),(768,1024),(1440,900)):
+        page.set_viewport_size(dict(width=width,height=height))
+        metrics = page.evaluate("""() => ({
+          width:innerWidth,scroll:document.documentElement.scrollWidth,
+          view:document.getElementById('view-print-center').getBoundingClientRect().width,
+          cards:document.querySelectorAll('#pc-grid .pc-card').length,
+          secrets:document.getElementById('view-print-center').textContent.includes('fake-key')
+        })""")
+        assert metrics['scroll'] <= width + 2 and metrics['view'] > 200 and metrics['cards'] > 0 and not metrics['secrets'], metrics
+    print('PRINT_CENTER_RESPONSIVE_FAIL_CLOSED_OK')
 
     template_nav = page.locator('.nav button[data-view="templates"]')
     template_nav.click()
