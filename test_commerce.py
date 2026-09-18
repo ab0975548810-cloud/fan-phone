@@ -74,6 +74,16 @@ def worker(folder, payload, barrier, queue):
     queue.put((response.status_code, response.get_json()))
 
 
+def receipt_worker(folder, payload, barrier, queue):
+    configure(folder)
+    client = app.app.test_client()
+    with client.session_transaction() as session:
+        session['logged_in'] = True
+    barrier.wait(timeout=20)
+    response = client.post('/api/admin/purchase_received', json=payload)
+    queue.put((response.status_code, response.get_json()))
+
+
 class CommerceTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -115,6 +125,132 @@ class CommerceTests(unittest.TestCase):
     def action(self, order_id, action, key='', **extra):
         return self.client.post('/api/admin/order_action', json=dict(
             order_id=order_id, action=action, idempotency_key=key.ljust(16, '0') if key else uuid.uuid4().hex, **extra))
+
+
+    def test_concurrent_purchase_and_sale(self):
+        ctx = multiprocessing.get_context('spawn')
+        barrier, queue = ctx.Barrier(2), ctx.Queue()
+        purchase = dict(idempotency_key=uuid.uuid4().hex, items=[dict(sku_id=self.sku_id, quantity=7)])
+        jobs = [ctx.Process(target=receipt_worker, args=(self.tmp.name,purchase,barrier,queue)),
+                ctx.Process(target=worker, args=(self.tmp.name,self.payload(),barrier,queue))]
+        for job in jobs: job.start()
+        results = [queue.get(timeout=30) for _ in jobs]
+        for job in jobs:
+            job.join(30)
+            self.assertEqual(job.exitcode, 0)
+        self.assertEqual(sorted(x[0] for x in results), [200,200], results)
+        self.assertEqual(self.stock(), 11)
+
+    @unittest.skipUnless(os.environ.get('TEST_POSTGRES_DSN'), 'SQL guard runs on PostgreSQL CI')
+    def test_phase2_database_guard(self):
+        from commerce_reporting import date_range
+        body = dict(idempotency_key=uuid.uuid4().hex, date=date_range()['start'], category='房租', amount=200)
+        self.assertEqual(self.client.post('/api/admin/expense', json=body).status_code, 200)
+        original = app.commerce.read()
+        for field in ('version','expense_ledger'):
+            changed = copy.deepcopy(original)
+            changed[field] = 2 if field == 'version' else []
+            with self.assertRaises(Exception):
+                app.commerce.store.commit(original['revision'], changed)
+            self.assertEqual(app.commerce.read(), original)
+
+    def test_purchase_receipt_replay_and_atomic_validation(self):
+        body = dict(idempotency_key=uuid.uuid4().hex, items=[dict(sku_id=self.sku_id, quantity=3)], note='到貨 A')
+        first = self.client.post('/api/admin/purchase_received', json=body)
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(self.client.post('/api/admin/purchase_received', json=body).get_json(), first.get_json())
+        self.assertEqual(self.stock(), 8)
+        entries = [x for x in app.commerce.read()['inventory_ledger'] if x['reason'] == 'PURCHASE_RECEIVED']
+        self.assertEqual(len(entries), 1)
+        body['items'][0]['quantity'] = 4
+        self.assertEqual(self.client.post('/api/admin/purchase_received', json=body).status_code, 409)
+        body['idempotency_key'] = uuid.uuid4().hex
+        body['items'].append(dict(sku_id='missing', quantity=2))
+        self.assertEqual(self.client.post('/api/admin/purchase_received', json=body).status_code, 400)
+        self.assertEqual(self.stock(), 8)
+
+    def test_purchase_write_failure_rolls_back(self):
+        body = dict(idempotency_key=uuid.uuid4().hex, items=[dict(sku_id=self.sku_id, quantity=3)])
+        with patch.object(app.commerce.store, 'commit', side_effect=RuntimeError('injected write failure')):
+            self.assertEqual(self.client.post('/api/admin/purchase_received', json=body).status_code, 503)
+        self.assertEqual(self.stock(), 5)
+        self.assertEqual(self.client.post('/api/admin/purchase_received', json=body).status_code, 200)
+        self.assertEqual(self.stock(), 8)
+
+    def test_expense_replay_edit_void_and_report(self):
+        from commerce_reporting import date_range
+        self.create()
+        day = date_range()['start']
+        body = dict(idempotency_key=uuid.uuid4().hex, date=day, category='廣告', amount=20.25, note='活動')
+        first = self.client.post('/api/admin/expense', json=body)
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(self.client.post('/api/admin/expense', json=body).get_json(), first.get_json())
+        expense = first.get_json()['expense']
+        report = self.client.get('/api/admin/commerce_report').get_json()['data']['summary']
+        self.assertEqual(report['product_cost'], 100)
+        self.assertEqual(report['net_profit'], report['revenue'] - 120.25)
+        edit = dict(body, idempotency_key=uuid.uuid4().hex, expense_id=expense['id'], expected_version=1, amount=30)
+        self.assertEqual(self.client.post('/api/admin/expense', json=edit).status_code, 200)
+        edit['idempotency_key'] = uuid.uuid4().hex
+        self.assertEqual(self.client.post('/api/admin/expense', json=edit).status_code, 409)
+        void = dict(idempotency_key=uuid.uuid4().hex, action='void', expense_id=expense['id'], expected_version=2)
+        response = self.client.post('/api/admin/expense', json=void)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.client.post('/api/admin/expense', json=void).get_json(), response.get_json())
+        self.assertEqual(len(app.commerce.read()['expense_ledger']), 3)
+        report = self.client.get('/api/admin/commerce_report').get_json()['data']['summary']
+        self.assertEqual(report['expenses'], 0)
+
+    def test_invalid_phase2_data(self):
+        for amount in (-1, 0, 'NaN', 1.001, True):
+            body = dict(idempotency_key=uuid.uuid4().hex, date='2026-09-18', category='廣告', amount=amount)
+            self.assertEqual(self.client.post('/api/admin/expense', json=body).status_code, 400)
+        for args in ('period=custom&start=2026-02-30&end=2026-03-01', 'period=custom&start=2026-09-20&end=2026-09-18', 'period=invalid'):
+            self.assertEqual(self.client.get('/api/admin/commerce_report?' + args).status_code, 400)
+        for qty in (-1, 1.5, True):
+            data = self.data(); data['skus'][0]['target_stock'] = qty
+            self.assertEqual(self.save(data).status_code, 400)
+
+    def test_taipei_report_calendar_boundaries(self):
+        from commerce_reporting import date_range, report
+        now = datetime(2024, 3, 31, 17, tzinfo=ZoneInfo('UTC'))
+        self.assertEqual(date_range('today', now=now)['start'], '2024-04-01')
+        self.assertEqual(date_range('week', now=now)['end'], '2024-04-07')
+        feb = date_range('month', now=datetime(2024, 2, 14, tzinfo=ZoneInfo('Asia/Taipei')))
+        self.assertEqual(feb['end'], '2024-02-29')
+        self.assertEqual(date_range('year', now=now)['start'], '2024-01-01')
+        interval = date_range('custom', '2026-09-18', '2026-09-18')
+        self.assertEqual(interval['end_unix'] - interval['start_unix'], 86400)
+        orders = [dict(id=str(i), total=200, quantity=1, created_at_unix=t, style_name='晶彩') for i,t in enumerate((interval['start_unix']-1, interval['start_unix'],interval['end_unix']-1,interval['end_unix']))]
+        result = report(dict(order_finance={}), orders, interval)
+        self.assertEqual(result['summary']['orders'], 2)
+        self.assertIsNone(result['summary']['product_cost'])
+        self.assertIsNone(result['summary']['net_profit'])
+        self.assertEqual(len(result['unknown_cost_orders']), 2)
+
+    def test_replenishment_status_and_grouped_export(self):
+        from commerce_reporting import stock_status, replenishment
+        base = dict(active=True, track_stock=True, low_stock_threshold=2, target_stock=10)
+        for qty, status in ((0,'out'),(1,'low'),(2,'threshold'),(3,'normal')):
+            self.assertEqual(stock_status(dict(base, stock_qty=qty)), status)
+        self.assertEqual(stock_status(dict(base, stock_qty=0, track_stock=False)), 'untracked')
+        shop = dict(models=[dict(id='m',name='iPhone')], styles=[dict(id='a',name='晶彩'),dict(id='b',name='鏡面')])
+        rows = [dict(base,id=k,model_id='m',style_id=k,color='透明',stock_qty=2) for k in ('a','b')]
+        result = replenishment(dict(skus=rows,revision=1), shop)
+        self.assertEqual(len(result['groups']), 2)
+        self.assertEqual(result['total_suggested'], 16)
+        self.assertIn('晶彩', result['text']); self.assertIn('鏡面', result['text'])
+        rows[0]['target_stock'] = None
+        self.assertEqual(replenishment(dict(skus=rows,revision=1), shop)['missing_targets'], 1)
+
+    def test_phase2_snapshot_report_unchanged_by_current_prices(self):
+        self.create()
+        before = self.client.get('/api/admin/commerce_report').get_json()['data']
+        data = self.data(); data['skus'][0]['cost_price'] = 999
+        self.assertEqual(self.save(data).status_code, 200)
+        after = self.client.get('/api/admin/commerce_report').get_json()['data']
+        self.assertEqual(before, after)
+        self.assertTrue(after['series'][0]['series_name'])
 
     def test_replay_and_conflicting_payload(self):
         first = self.create()
