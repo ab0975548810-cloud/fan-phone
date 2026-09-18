@@ -20,6 +20,7 @@ Keep `YUN_PRINT_ENABLED` unset or false until migration, callback reachability, 
 2. Review and apply `supabase/migrations/20260918134538_print_center_core.sql`.
 3. Verify RLS is enabled and `anon` / `authenticated` have no privileges on all five print tables; run Supabase security and performance advisors.
 4. Deploy the application with `YUN_PRINT_ENABLED=false` and the HTTPS/token settings present.
+   Confirm the hosting reverse proxy also redacts `/api/print/artwork/*` paths from access logs; Gunicorn's repository config already omits all request paths.
 5. In the admin Print Center, configure production profiles from confirmed vendor values. Do not derive physical millimetres from the Fabric editor.
 6. Verify a job-scoped artwork URL with a vendor-approved test device or sandbox and verify both callback endpoints.
 7. Confirm `startPrint` versus `pushPrint`, channel, spot colour, angle, callback clock tolerance, status 6, and task-list retention with the vendor.

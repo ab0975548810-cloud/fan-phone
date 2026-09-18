@@ -23,6 +23,10 @@ timeout = 330
 graceful_timeout = 30
 keepalive = 5
 
+# Artwork URLs contain a short-lived job token. If access logging is enabled by
+# the hosting command, never include the request target/path in Gunicorn logs.
+access_log_format = '%(h)s %(t)s "%(m)s" %(s)s %(b)s "%(a)s"'
+
 
 def post_worker_init(worker):
     try:
