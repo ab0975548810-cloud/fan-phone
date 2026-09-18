@@ -17,22 +17,37 @@
   const active=s=>s.active&&!!styleOf(s.style_id)&&!!modelOf(s.model_id)&&styleOf(s.style_id)?.status!==false&&modelOf(s.model_id)?.status!==false;
   const today=()=>{const p=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());return ['year','month','day'].map(k=>p.find(x=>x.type===k).value).join('-')};
   function message(text,error=false){const box=el('pos-message');if(box){box.textContent=text;box.className='pos-message'+(error?' error':'');box.hidden=!text}}
-  async function api(url,body){const r=await fetch(url,{cache:'no-store',...(body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{})});let j;try{j=await r.json()}catch{throw Error('回應中斷，請重試原操作')};if(!r.ok||j.status!=='success'){const e=Error(j.msg||'操作失敗');e.status=r.status;throw e}return j}
+  async function api(url,body){const r=await fetch(url,{cache:'no-store',...(body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{})});let j;try{j=await r.json()}catch{throw Error('回應中斷，請重試原操作')};if(!r.ok||j.status!=='success'){const e=Error(j.msg||'操作失敗');e.status=r.status;e.code=j.code;throw e}return j}
   const pendingSlot='bf-pos2-pending';
-  function pending(){try{return JSON.parse(sessionStorage.getItem(pendingSlot)||'null')}catch{return null}}
-  function pendingUi(){const p=pending();el('pos-pending').hidden=!p;if(p)el('pos-pending-text').textContent='有一筆尚未確認的'+p.label+'。請先重送查明結果，再登記下一筆。'}
+  // A single durable receipt shared by all tabs on this origin. Web Locks makes
+  // check + save/clear atomic across tabs; unsupported storage fails closed.
+  function pending(){
+    const raw=localStorage.getItem(pendingSlot);if(!raw)return null;
+    const p=JSON.parse(raw);
+    if(!p||!['/api/admin/purchase_received','/api/admin/expense'].includes(p.url)||typeof p.body?.idempotency_key!=='string')throw Error('未確認操作資料異常，請保留網站資料並核對紀錄。');
+    return p;
+  }
+  function receiptLock(fn){if(!navigator.locks)throw Error('瀏覽器不支援安全保存操作，請更新瀏覽器後再試。');return navigator.locks.request(pendingSlot,fn)}
+  function pendingUi(){try{const p=pending();el('pos-pending').hidden=!p;if(p)el('pos-pending-text').textContent='有一筆尚未確認的'+p.label+'。請先重送查明結果，再登記下一筆。'}catch(e){message('無法讀取未確認操作：'+e.message,true)}}
+  async function clearReceipt(saved){await receiptLock(()=>{if(pending()?.body.idempotency_key===saved.body.idempotency_key)localStorage.removeItem(pendingSlot)});pendingUi()}
+  const terminalCodes=new Set(['IDEMPOTENCY_REQUIRED','IDEMPOTENCY_CONFLICT','BAD_DATA','BAD_ITEMS','BAD_NOTE','BAD_SKU','BAD_QUANTITY','BAD_ACTION','BAD_DATE','BAD_AMOUNT','BAD_EXPENSE','EXPENSE_NOT_FOUND','STALE_EXPENSE']);
   async function execute(saved){
     if(busy)return;busy=true;const buttons=[...document.querySelectorAll('#view-commerce .pos-write')].map(b=>[b,b.disabled]);buttons.forEach(([b])=>b.disabled=true);
-    try{const result=await api(saved.url,saved.body);sessionStorage.removeItem(pendingSlot);pendingUi();message(result.msg||'已完成');el('pos-dialog').close();await load(true);return result}
-    catch(e){if(e.status>=400&&e.status<500){sessionStorage.removeItem(pendingSlot);pendingUi()}message(e.message,true);throw e}
+    try{const result=await api(saved.url,saved.body);await clearReceipt(saved);message(result.msg||'已完成');el('pos-dialog').close();await load(true);return result}
+    catch(e){if(e.status>=400&&e.status<500&&terminalCodes.has(e.code))await clearReceipt(saved);message(e.message,true);throw e}
     finally{busy=false;buttons.forEach(([b,disabled])=>b.disabled=disabled)}
   }
   async function command(url,body,label){
-    if(pending()){message('請先按「重送原操作」確認上一筆結果，避免重複入帳。',true);return}
-    const saved={url,body:{...body,idempotency_key:crypto.randomUUID()},label};
-    try{sessionStorage.setItem(pendingSlot,JSON.stringify(saved))}catch{message('無法保存操作識別，請允許網站儲存資料後再試。',true);return}
+    let saved;
+    try{saved=await receiptLock(()=>{
+      if(pending())throw Error('請先按「重送原操作」確認上一筆結果，避免重複入帳。');
+      const receipt={url,body:{...body,idempotency_key:crypto.randomUUID()},label};
+      localStorage.setItem(pendingSlot,JSON.stringify(receipt));return receipt;
+    })}catch(e){pendingUi();message('未送出：'+e.message,true);return}
     pendingUi();return execute(saved);
   }
+  window.addEventListener('storage',e=>{if((e.key===pendingSlot||e.key===null)&&el('pos-pending'))pendingUi()});
+  window.addEventListener('focus',()=>{if(el('pos-pending'))pendingUi()});
   function ensureUi(){
     const nav=document.querySelector('.nav'),content=document.querySelector('.content');if(!nav||!content||el('view-commerce'))return;
     const button=document.createElement('button');button.dataset.view='commerce';button.innerHTML='<i class="fa-solid fa-cash-register"></i><span>商品・營運 POS</span>';button.addEventListener('click',open);
@@ -82,7 +97,7 @@
     el('pos-expense-form').onsubmit=saveExpense;el('pos-expense-cancel').onclick=resetExpense;
     el('pos-expense-month').onchange=renderExpenses;el('pos-show-voided').onchange=renderExpenses;
     el('pos-expenses').onclick=e=>{const b=e.target.closest('[data-edit-expense],[data-void-expense]');if(b)expenseAction(b.dataset.editExpense||b.dataset.voidExpense,!!b.dataset.voidExpense)};
-    el('pos-retry').onclick=()=>{const p=pending();if(p)execute(p).catch(()=>{})};pendingUi();
+    el('pos-retry').onclick=()=>{try{const p=pending();if(p)execute(p).catch(()=>{})}catch(e){message(e.message,true)}};pendingUi();
   }
   async function open(){ensureUi();document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.view==='commerce'));document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id==='view-commerce'));try{currentView='commerce'}catch{}await load(false)}
   async function load(force=false){

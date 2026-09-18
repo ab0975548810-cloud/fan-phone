@@ -220,7 +220,7 @@ def admin_test(browser, base):
     page.reload(wait_until='domcontentloaded')
     page.locator('.nav button[data-view="commerce"]').click()
     page.locator('#pos-retry').click()
-    poll(page, "() => !sessionStorage.getItem('bf-pos2-pending') && window.BenfuwanCommerce.state.skus[0]?.stock_qty===4")
+    poll(page, "() => !localStorage.getItem('bf-pos2-pending') && window.BenfuwanCommerce.state.skus[0]?.stock_qty===4")
     assert len(receipts) == 2 and receipts[0] == receipts[1], receipts
     page.locator('[data-tab="expenses"]').click()
     page.locator('#pos-expense-category').select_option('廣告')
@@ -270,6 +270,93 @@ def admin_test(browser, base):
     page.close()
 
 
+def durable_receipt_test(playwright, base):
+    """Persist the real committed request across tab close AND browser restart."""
+    engine = getattr(playwright, os.environ.get('BROWSER_ENGINE', 'webkit'))
+    def admin(context):
+        page = context.new_page()
+        page.goto(base + '/login', wait_until='domcontentloaded')
+        if '/admin' not in page.url:
+            page.locator('input[name="password"]').fill('fan123')
+            page.locator('button[type="submit"],input[type="submit"]').first.click()
+            page.wait_for_url('**/admin')
+        poll(page, "() => !!window.BenfuwanCommerce")
+        page.locator('.nav button[data-view="commerce"]').click()
+        poll(page, "() => window.BenfuwanCommerce.state.skus.length>0")
+        return page
+    with tempfile.TemporaryDirectory() as profile:
+        for kind in ('purchase', 'expense'):
+            context = engine.launch_persistent_context(profile, headless=True)
+            try:
+                page = admin(context)
+                before = app_module.commerce.read()
+                sku = before['skus'][0]
+                url = '/api/admin/purchase_received' if kind == 'purchase' else '/api/admin/expense'
+                sent = []
+                def lose_response(route):
+                    sent.append(route.request.post_data_json)
+                    assert route.fetch().status == 200
+                    route.abort('failed')
+                context.route('**' + url, lose_response)
+                if kind == 'purchase':
+                    page.locator('[data-sku="'+sku['id']+'"] [data-receive]').click()
+                    page.locator('#pos-receive-qty').fill('3')
+                    page.locator('#pos-dialog-submit').click()
+                else:
+                    page.locator('[data-tab="expenses"]').click()
+                    page.locator('#pos-expense-amount').fill('37.5')
+                    page.locator('#pos-expense-note').fill('durable restart receipt')
+                    page.locator('#pos-expense-save').click()
+                poll(page, "() => document.getElementById('pos-message').classList.contains('error')")
+                saved = page.evaluate("() => JSON.parse(localStorage.getItem('bf-pos2-pending'))")
+                assert saved['body'] == sent[0]
+                # Existing/new tabs see the same receipt and cannot replace it.
+                other = admin(context)
+                assert other.locator('#pos-pending').is_visible()
+                other.locator('[data-tab="expenses"]').click()
+                other.locator('#pos-expense-amount').fill('999')
+                other.locator('#pos-expense-save').click()
+                poll(other, "() => document.getElementById('pos-message').textContent.includes('未送出')")
+                assert other.evaluate("() => JSON.parse(localStorage.getItem('bf-pos2-pending'))") == saved
+                page.close()
+                other.close()
+            finally:
+                context.close()  # exits browser; retain only the on-disk profile
+            context = engine.launch_persistent_context(profile, headless=True)
+            try:
+                page = admin(context)
+                assert page.locator('#pos-pending').is_visible()
+                assert page.evaluate("() => JSON.parse(localStorage.getItem('bf-pos2-pending'))") == saved
+                # Expired authentication must not discard an uncertain receipt.
+                context.route('**'+url, lambda route: route.fulfill(status=401,content_type='application/json',body='{"status":"error","msg":"login required"}'))
+                page.locator('#pos-retry').click()
+                poll(page, "() => document.getElementById('pos-message').textContent==='login required'")
+                assert page.evaluate("() => JSON.parse(localStorage.getItem('bf-pos2-pending'))") == saved
+                context.unroute('**'+url)
+                def retry(route):
+                    sent.append(route.request.post_data_json)
+                    route.continue_()
+                context.route('**'+url, retry)
+                observer = admin(context)
+                assert observer.locator('#pos-pending').is_visible()
+                page.locator('#pos-retry').click()
+                poll(page, "() => !localStorage.getItem('bf-pos2-pending')")
+                poll(observer, "() => document.getElementById('pos-pending').hidden")
+                assert len(sent) == 2 and sent[0] == sent[1], sent
+                after = app_module.commerce.read()
+                if kind == 'purchase':
+                    assert after['skus'][0]['stock_qty'] == sku['stock_qty'] + 3
+                    entries = [x for x in after['inventory_ledger'] if x.get('receipt_id') == saved['body']['idempotency_key']]
+                    assert len(entries) == 1
+                else:
+                    assert len(after['expenses']) == len(before['expenses']) + 1
+                    entries = [x for x in after['expense_ledger'] if x['id'] == saved['body']['idempotency_key']]
+                    assert len(entries) == 1
+                print('DURABLE_RECEIPT_BROWSER_RESTART_OK', kind)
+            finally:
+                context.close()
+
+
 def main():
     server = ServerThread();server.start();time.sleep(.8)
     try:
@@ -278,6 +365,7 @@ def main():
             try:
                 base='http://127.0.0.1:8765';front_test(browser,base);checkout_test(browser,base);admin_test(browser,base)
             finally: browser.close()
+            durable_receipt_test(p, base)
         print('AI_EDITOR_WEBKIT_OK')
     finally:
         server.close()

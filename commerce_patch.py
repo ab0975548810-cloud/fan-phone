@@ -492,8 +492,8 @@ def install(app_module):
         if request.path == '/admin' and resp.status_code == 200 and resp.mimetype == 'text/html':
             resp.direct_passthrough = False
             html = resp.get_data(as_text=True)
-            src = '/static/admin-commerce-v1.js?v=20260918a'
+            src = '/static/admin-commerce-v1.js?v=20260918b'
             if src not in html:
-                resp.set_data(html.replace('</body>', f'<link rel="stylesheet" href="/static/admin-commerce.css?v=20260918a"><script src="{src}"></script></body>'))
+                resp.set_data(html.replace('</body>', f'<link rel="stylesheet" href="/static/admin-commerce.css?v=20260918b"><script src="{src}"></script></body>'))
             resp.headers['Cache-Control'] = 'no-store'
         return resp
