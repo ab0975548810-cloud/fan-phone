@@ -22,5 +22,8 @@ with psycopg.connect(os.environ['TEST_POSTGRES_DSN']) as db:
             assert not db.execute("SELECT has_table_privilege(%s, %s, 'INSERT')", (role, 'public.' + table)).fetchone()[0]
         assert db.execute("SELECT has_table_privilege('service_role', %s, 'SELECT')", ('public.' + table,)).fetchone()[0]
     assert db.execute("SELECT to_regclass('public.idx_print_jobs_one_active_order') IS NOT NULL").fetchone()[0]
+    assert db.execute("SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname='orders_prevent_active_print_job_delete')").fetchone()[0]
+    for role in ('anon', 'authenticated'):
+        assert not db.execute("SELECT has_function_privilege(%s, 'public.prevent_active_print_job_order_delete()', 'EXECUTE')", (role,)).fetchone()[0]
     assert not db.execute("SELECT prosecdef FROM pg_proc WHERE oid='public.commerce_commit(bigint,jsonb,jsonb,text)'::regprocedure").fetchone()[0]
 print('POSTGRES_SCHEMA_AND_PRIVILEGES_OK')

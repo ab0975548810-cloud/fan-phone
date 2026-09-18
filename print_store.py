@@ -162,6 +162,17 @@ class PrintStore:
         with self.connection() as db:
             return self._decode(db.execute("SELECT * FROM print_jobs WHERE order_id=? ORDER BY attempt_no DESC LIMIT 1", (order_id,)).fetchone())
 
+    def active_job(self, order_id):
+        if self.app.USE_SUPABASE:
+            rows = (self.app.SUPABASE.table("print_jobs").select("*").eq("order_id", order_id)
+                    .in_("state", list(ACTIVE_STATES)).limit(1).execute().data or [])
+            return rows[0] if rows else None
+        with self.connection() as db:
+            marks = ",".join("?" for _ in ACTIVE_STATES)
+            row = db.execute(f"SELECT * FROM print_jobs WHERE order_id=? AND state IN ({marks}) LIMIT 1",
+                             (order_id, *ACTIVE_STATES)).fetchone()
+            return self._decode(row)
+
     def list_jobs(self, limit=300):
         if self.app.USE_SUPABASE:
             return self.app.SUPABASE.table("print_jobs").select("*").order("updated_at", desc=True).limit(limit).execute().data or []

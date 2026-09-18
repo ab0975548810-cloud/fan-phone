@@ -16,7 +16,7 @@ from commerce_store import Store
 from order_color_patch import install as install_colors
 from order_management_patch import install as install_actions
 from print_store import PrintStore
-from print_vendor import YunPrintClient, yun_sign
+from print_vendor import VendorAmbiguous, YunPrintClient, yun_sign
 
 install_colors(app)
 install_actions(app)
@@ -57,6 +57,9 @@ class PrintCenterTests(unittest.TestCase):
             "YUN_PRINT_DEVICE_KEY": "fake-key-never-production", "YUN_PRINT_BASE_URL": "https://fixture.invalid",
             "CI": "true",
         }
+        self._old_print_env = {name: os.environ.get(name) for name in ("PRINT_ARTWORK_TOKEN_SECRET", "PRINT_PUBLIC_BASE_URL")}
+        os.environ["PRINT_ARTWORK_TOKEN_SECRET"] = "fixture-artwork-token-secret-32-characters"
+        os.environ["PRINT_PUBLIC_BASE_URL"] = "https://print.fixture.invalid"
         app.print_center.client = YunPrintClient(transport=self.fake, env=self.vendor_env, clock=lambda: 1700000000, nonce=lambda: "once-fixed")
         self.client = app.app.test_client()
         with self.client.session_transaction() as session:
@@ -69,6 +72,11 @@ class PrintCenterTests(unittest.TestCase):
         self.order_id = self.create_order()
 
     def tearDown(self):
+        for name, value in self._old_print_env.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
         self.tmp.cleanup()
 
     def create_order(self):
@@ -131,10 +139,23 @@ class PrintCenterTests(unittest.TestCase):
         app.print_center.client = YunPrintClient(env={"CI": "true"})
         response = self.send(job["id"])
         self.assertEqual(response.status_code, 503)
-        self.assertEqual(response.get_json()["code"], "VENDOR_DISABLED")
+        self.assertEqual(response.get_json()["code"], "VENDOR_NOT_READY")
         app.print_center.store.patch_job(job["id"], {"state": "QUEUED", "vendor_taskid": "fixture-disabled"})
         response = self.post("start", {"job_id": job["id"]})
-        self.assertEqual((response.status_code, response.get_json()["code"]), (503, "VENDOR_DISABLED"))
+        self.assertEqual((response.status_code, response.get_json()["code"]), (503, "VENDOR_NOT_READY"))
+
+    def test_enabled_vendor_requires_explicit_https_url_and_token_secret(self):
+        self.save_profile();job = self.prepare()
+        os.environ.pop("PRINT_ARTWORK_TOKEN_SECRET", None)
+        os.environ.pop("PRINT_PUBLIC_BASE_URL", None)
+        dashboard = self.client.get("/api/admin/print/jobs").get_json()
+        self.assertFalse(dashboard["vendor_ready"])
+        response = self.send(job["id"])
+        self.assertEqual((response.status_code, response.get_json()["code"]), (503, "VENDOR_NOT_READY"))
+        app.print_center.store.patch_job(job["id"], {"state": "QUEUED", "vendor_taskid": "secure-config-task"})
+        response = self.post("start", {"job_id": job["id"]})
+        self.assertEqual((response.status_code, response.get_json()["code"]), (503, "VENDOR_NOT_READY"))
+        self.assertFalse(any(path in ("/api/Device/receiveTask", "/api/Device/startPrint") for path, _ in self.fake.calls))
 
     def test_vendor_artwork_token_is_job_scoped_png_and_revoked_terminal(self):
         self.save_profile();job = self.prepare()
@@ -181,6 +202,32 @@ class PrintCenterTests(unittest.TestCase):
         self.assertEqual(self.post("start", {"job_id": job["id"]}, key).status_code, 200)
         self.assertEqual(len([c for c in self.fake.calls if c[0] == "/api/Device/startPrint"]), 1)
 
+    def test_malformed_success_and_unconfirmed_cancel_become_unknown(self):
+        with self.assertRaises(VendorAmbiguous):
+            YunPrintClient._unpack({})
+        self.save_profile();job = self.prepare();self.assertEqual(self.send(job["id"]).status_code, 200)
+        self.fake.responses["/api/Device/startPrint"] = {}
+        response = self.post("start", {"job_id": job["id"]})
+        self.assertEqual((response.status_code, response.get_json()["code"]), (503, "RECONCILE_REQUIRED"))
+        self.assertEqual(app.print_center.store.job(job["id"])["state"], "UNKNOWN")
+        app.print_center.store.patch_job(job["id"], {"state": "QUEUED", "ambiguous_operation": None})
+        self.fake.responses["/api/Device/cancelTask"] = {"code": 0, "data": {}}
+        response = self.post("cancel", {"job_id": job["id"]})
+        self.assertEqual((response.status_code, response.get_json()["code"]), (503, "RECONCILE_REQUIRED"))
+        self.assertEqual(app.print_center.store.job(job["id"])["state"], "UNKNOWN")
+
+    def test_stale_sending_and_canceling_can_reconcile_without_resend(self):
+        self.save_profile();job = self.prepare()
+        app.print_center.store.patch_job(job["id"], {"state": "SENDING"})
+        self.fake.responses["/api/Device/getAllTasks"] = {"code": 0, "data": {"list": [{"order_id": self.order_id, "taskid": "stale-task", "status": 0}]}}
+        self.assertEqual(self.post("reconcile", {"job_id": job["id"]}).status_code, 200)
+        self.assertEqual(app.print_center.store.job(job["id"])["state"], "QUEUED")
+        app.print_center.store.patch_job(job["id"], {"state": "CANCELING"})
+        self.fake.responses["/api/Device/getAllTasks"] = {"code": 0, "data": {"list": []}}
+        self.assertEqual(self.post("reconcile", {"job_id": job["id"]}).status_code, 200)
+        self.assertEqual(app.print_center.store.job(job["id"])["state"], "UNKNOWN")
+        self.assertFalse(any(path in ("/api/Device/receiveTask", "/api/Device/cancelTask") for path, _ in self.fake.calls))
+
     def test_callbacks_are_authenticated_idempotent_and_complete_order_safely(self):
         self.save_profile();job = self.prepare();self.assertEqual(self.send(job["id"]).status_code, 200)
         self.assertEqual(self.callback("task-fixture", 1).status_code, 200)
@@ -225,6 +272,22 @@ class PrintCenterTests(unittest.TestCase):
         self.assertEqual(self.post("start", {"job_id": job["id"]}).get_json()["code"], "VOID_ORDER")
         self.assertEqual(self.callback("task-fixture", 2, "late complete").status_code, 200)
         self.assertEqual(app.commerce.store.order(other)["status"], "作廢")
+
+    def test_active_print_job_blocks_permanent_order_delete_and_artwork_cleanup(self):
+        job = self.prepare()
+        order = app.commerce.store.order(self.order_id)
+        artwork = Path(app.SAVE_DIR) / order["print_path"]
+        self.assertTrue(artwork.exists())
+        self.assertEqual(self.client.post("/api/admin/order_action", json={"order_id": self.order_id, "action": "void", "idempotency_key": "void-delete-00000001"}).status_code, 200)
+        blocked = self.client.post("/api/admin/order_action", json={"order_id": self.order_id, "action": "delete", "idempotency_key": "delete-active-000001"})
+        self.assertEqual((blocked.status_code, blocked.get_json()["code"]), (409, "ACTIVE_PRINT_JOB"))
+        self.assertIsNotNone(app.commerce.store.order(self.order_id))
+        self.assertTrue(artwork.exists())
+        app.print_center.store.patch_job(job["id"], {"state": "CANCELED", "canceled_at": "2026-09-19T00:00:00+00:00"})
+        deleted = self.client.post("/api/admin/order_action", json={"order_id": self.order_id, "action": "delete", "idempotency_key": "delete-terminal-0001"})
+        self.assertEqual(deleted.status_code, 200, deleted.get_data(as_text=True))
+        self.assertIsNone(app.commerce.store.order(self.order_id))
+        self.assertFalse(artwork.exists())
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ import secrets
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
+from urllib.parse import urlsplit
 
 from flask import Response, request, session, url_for
 
@@ -78,6 +79,18 @@ class PrintService:
         self.store = store or PrintStore(app_module)
         self.client = client or YunPrintClient()
 
+    @property
+    def vendor_ready(self):
+        if not self.client.ready:
+            return False
+        secret = os.environ.get("PRINT_ARTWORK_TOKEN_SECRET", "").strip()
+        public_url = os.environ.get("PRINT_PUBLIC_BASE_URL", "").strip()
+        try:
+            parsed = urlsplit(public_url)
+        except ValueError:
+            return False
+        return bool(len(secret) >= 32 and parsed.scheme == "https" and parsed.netloc and not parsed.username and not parsed.password)
+
     def _order(self, order_id):
         order = self.app.commerce.store.order(order_id)
         if not order:
@@ -112,9 +125,11 @@ class PrintService:
     def _token_secret(self):
         configured = os.environ.get("PRINT_ARTWORK_TOKEN_SECRET", "").strip()
         if configured:
+            if self.client.enabled and len(configured) < 32:
+                raise PrintError("PRINT_TOKEN_NOT_CONFIGURED", "生產圖存取密鑰至少需要 32 個字元", 503)
             return configured.encode("utf-8")
-        if os.environ.get("BENFUWAN_PRODUCTION") == "1":
-            raise PrintError("PRINT_TOKEN_NOT_CONFIGURED", "正式環境尚未設定生產圖存取密鑰", 503)
+        if self.client.enabled:
+            raise PrintError("PRINT_TOKEN_NOT_CONFIGURED", "啟用雲打印前必須明確設定生產圖存取密鑰", 503)
         return str(self.app.app.secret_key).encode("utf-8")
 
     def artwork_token(self, job):
@@ -218,9 +233,17 @@ class PrintService:
         return self.store.job(job_id)
 
     def _base_url(self):
-        base = (os.environ.get("PRINT_PUBLIC_BASE_URL") or request.host_url).strip().rstrip("/")
-        if os.environ.get("BENFUWAN_PRODUCTION") == "1" and not base.startswith("https://"):
-            raise PrintError("PRINT_PUBLIC_URL_INVALID", "正式環境列印 callback / 生產圖網址必須使用 HTTPS", 503)
+        configured = os.environ.get("PRINT_PUBLIC_BASE_URL", "").strip()
+        if self.client.enabled:
+            try:
+                parsed = urlsplit(configured)
+            except ValueError:
+                parsed = None
+            if not parsed or parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
+                raise PrintError("PRINT_PUBLIC_URL_INVALID", "啟用雲打印前必須明確設定無帳密的 HTTPS public URL", 503)
+            base = configured.rstrip("/")
+        else:
+            base = (configured or request.host_url).strip().rstrip("/")
         return base
 
     def send(self, job_id, key):
@@ -239,8 +262,8 @@ class PrintService:
             raise PrintError("BAD_PRINT_STATE", "目前任務狀態不可送到雲端")
         if not job.get("profile_complete"):
             raise PrintError("PROFILE_MISSING", "列印參數未設定，不可送到雲端")
-        if not self.client.ready:
-            raise PrintError("VENDOR_DISABLED", "雲打印未啟用或設備憑證未設定", 503)
+        if not self.vendor_ready:
+            raise PrintError("VENDOR_NOT_READY", "雲打印憑證、HTTPS public URL 或生產圖密鑰尚未完整設定", 503)
         base = self._base_url()
         self._token_secret()
         owner, prior = self.store.claim_request(key, "send", job_id, fingerprint)
@@ -278,6 +301,11 @@ class PrintService:
             job = self.store.patch_job(job_id, {"state": "PREPARED", "last_error": str(exc)[:500]}, ("SENDING",))
             self.store.finish_request(key, "FAILED", {"job_id": job_id, "code": "VENDOR_REJECTED"})
             raise PrintError("VENDOR_REJECTED", str(exc), 502)
+        except Exception as exc:
+            self.app.app.logger.exception("Unexpected receiveTask failure for %s", job_id)
+            job = self.store.patch_job(job_id, {"state": "UNKNOWN", "ambiguous_operation": "receiveTask", "last_error": "送出發生未預期中斷，必須先查核"}, ("SENDING",))
+            self.store.finish_request(key, "UNKNOWN", {"job_id": job_id, "code": "RECONCILE_REQUIRED"})
+            raise PrintError("RECONCILE_REQUIRED", "送出結果無法確認，任務已鎖定；請先查核", 503) from exc
         raw_status = str(result.get("status", "0"))
         job = self.store.patch_job(job_id, {
             "state": CALLBACK_STATES.get(raw_status, "QUEUED"), "vendor_taskid": taskid,
@@ -303,8 +331,8 @@ class PrintService:
             raise PrintError("RECONCILE_REQUIRED", "任務狀態不明，禁止再次啟動")
         if job["state"] != "QUEUED":
             raise PrintError("BAD_PRINT_STATE", "只有雲端等待中的任務可以開始列印")
-        if not self.client.ready:
-            raise PrintError("VENDOR_DISABLED", "雲打印未啟用或設備憑證未設定", 503)
+        if not self.vendor_ready:
+            raise PrintError("VENDOR_NOT_READY", "雲打印憑證、HTTPS public URL 或生產圖密鑰尚未完整設定", 503)
         owner, _ = self.store.claim_request(key, "start", job_id, fingerprint)
         if not owner:
             return self.store.job(job_id)
@@ -328,6 +356,11 @@ class PrintService:
             job = self.store.patch_job(job_id, {"state": "QUEUED", "last_error": str(exc)[:500]}, ("STARTING",))
             self.store.finish_request(key, "FAILED", {"job_id": job_id, "code": "VENDOR_REJECTED"})
             raise PrintError("VENDOR_REJECTED", str(exc), 502)
+        except Exception as exc:
+            self.app.app.logger.exception("Unexpected startPrint failure for %s", job_id)
+            job = self.store.patch_job(job_id, {"state": "UNKNOWN", "ambiguous_operation": "startPrint", "last_error": "啟動發生未預期中斷，必須先查核"}, ("STARTING",))
+            self.store.finish_request(key, "UNKNOWN", {"job_id": job_id, "code": "RECONCILE_REQUIRED"})
+            raise PrintError("RECONCILE_REQUIRED", "啟動結果無法確認，禁止再次啟動；請先查核", 503) from exc
         job = self.store.patch_job(job_id, {
             "state": "STARTING", "started_at": utcnow(),
             "vendor_raw_status": str(result.get("status", job.get("vendor_raw_status") or "")),
@@ -364,6 +397,8 @@ class PrintService:
             raise PrintError("CONCURRENT_OPERATION", "另一個列印操作正在執行")
         try:
             result = self.client.cancel_task(claimed["vendor_taskid"])
+            if str((result or {}).get("status") or "") != "3":
+                raise VendorAmbiguous("雲打印未回傳明確已取消狀態")
         except VendorAmbiguous as exc:
             updated = self.store.patch_job(job_id, {"state": "UNKNOWN", "ambiguous_operation": "cancelTask", "last_error": str(exc)[:500]}, ("CANCELING",))
             self.store.finish_request(key, "UNKNOWN", {"job_id": job_id, "code": "RECONCILE_REQUIRED"})
@@ -372,6 +407,11 @@ class PrintService:
             updated = self.store.patch_job(job_id, {"state": "QUEUED", "last_error": str(exc)[:500]}, ("CANCELING",))
             self.store.finish_request(key, "FAILED", {"job_id": job_id, "code": "VENDOR_REJECTED"})
             raise PrintError("VENDOR_REJECTED", str(exc), 502)
+        except Exception as exc:
+            self.app.app.logger.exception("Unexpected cancelTask failure for %s", job_id)
+            updated = self.store.patch_job(job_id, {"state": "UNKNOWN", "ambiguous_operation": "cancelTask", "last_error": "取消發生未預期中斷，必須先查核"}, ("CANCELING",))
+            self.store.finish_request(key, "UNKNOWN", {"job_id": job_id, "code": "RECONCILE_REQUIRED"})
+            raise PrintError("RECONCILE_REQUIRED", "取消結果無法確認，請先查核", 503) from exc
         updated = self.store.patch_job(job_id, {
             "state": "CANCELED", "canceled_at": utcnow(), "ambiguous_operation": None,
             "vendor_raw_status": str(result.get("status", "3")), "vendor_raw_message": str(result.get("msg") or "")[:500],
@@ -543,9 +583,10 @@ class PrintService:
             })
         return {
             "rows": result,
-            "vendor_ready": self.client.ready,
+            "vendor_ready": self.vendor_ready,
+            "vendor_connected": self.client.ready,
             "vendor_enabled": self.client.enabled,
-            "device_id": self.client.device_id if self.client.ready else "",
+            "device_id": self.client.device_id if self.vendor_ready else "",
         }
 
 

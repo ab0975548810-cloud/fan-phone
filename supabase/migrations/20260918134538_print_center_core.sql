@@ -117,3 +117,31 @@ grant select, insert, update on table public.print_jobs to service_role;
 grant select, insert, update on table public.print_requests to service_role;
 grant select, insert on table public.print_events to service_role;
 grant select, insert on table public.printer_status_events to service_role;
+
+create or replace function public.prevent_active_print_job_order_delete()
+returns trigger
+language plpgsql security invoker set search_path = ''
+as $$
+begin
+    if exists (
+        select 1 from public.print_jobs
+        where order_id = old.id
+          and state in ('PREPARED','SENDING','QUEUED','STARTING','PRINTING','CANCELING','UNKNOWN')
+    ) then
+        raise exception 'ACTIVE_PRINT_JOB';
+    end if;
+    return old;
+end;
+$$;
+
+revoke all on function public.prevent_active_print_job_order_delete() from public, anon, authenticated;
+
+do $$
+begin
+    if not exists (select 1 from pg_trigger where tgname = 'orders_prevent_active_print_job_delete') then
+        create trigger orders_prevent_active_print_job_delete
+        before delete on public.orders
+        for each row execute function public.prevent_active_print_job_order_delete();
+    end if;
+end;
+$$;

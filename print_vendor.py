@@ -86,8 +86,15 @@ class YunPrintClient:
     def _unpack(raw):
         if not isinstance(raw, dict):
             raise VendorAmbiguous("雲打印回應格式無法確認")
-        code = raw.get("code", raw.get("status_code", 0))
-        if str(code) not in ("0", "200", "success", "True") and raw.get("success") is not True:
+        if "code" in raw:
+            success = str(raw.get("code")) == "0"
+        elif "status_code" in raw:
+            success = str(raw.get("status_code")) == "0"
+        elif raw.get("success") is True:
+            success = True
+        else:
+            raise VendorAmbiguous("雲打印回應缺少明確成功訊號")
+        if not success:
             raise VendorError("雲打印拒絕此操作")
         data = raw.get("data", raw)
         return data if isinstance(data, (dict, list)) else {"value": data}

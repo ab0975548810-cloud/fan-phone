@@ -298,6 +298,10 @@ class Commerce:
     def action(self, order_id, action, target, key=''):
         signature = [order_id, action, target]
         cleanup = self.store.order(order_id) if action == 'delete' else None
+        if action == 'delete' and hasattr(self.app, 'print_center'):
+            active = self.app.print_center.store.active_job(order_id)
+            if active:
+                raise CommerceError('ACTIVE_PRINT_JOB', '此訂單仍有進行中的列印任務，完成或取消後才能永久刪除')
         def update(data):
             if key and key in data['actions']:
                 prior = data['actions'][key]
