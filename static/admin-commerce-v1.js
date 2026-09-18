@@ -2,7 +2,7 @@
 (function(){
   'use strict';
   if(window.__bfAdminCommerceV1)return;window.__bfAdminCommerceV1=true;
-  let state={revision:0,style_defaults:{},skus:[]}, loaded=false, series='', tab='stock', dirty=false;
+  let state={revision:0,style_defaults:{},skus:[]}, loaded=false, series='', tab='overview', dirty=false;
   let expenses=[], reportData=null, reportEpoch=0, busy=false, editingExpense=null;
   const h=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const money=v=>v==null?'成本未知':'NT$ '+Number(v).toLocaleString('zh-TW',{maximumFractionDigits:2});
@@ -56,8 +56,19 @@
       <div class="pos-heading"><div><p class="pos-eyebrow">本福丸 · 店務工作台</p><h2>商品與營運</h2><p>按系列管理商品，讓補貨與對帳更清楚。</p></div><button class="btn alt" id="commerce-reload">重新整理</button></div>
       <div id="pos-message" class="pos-message" role="status" aria-live="polite" hidden></div>
       <div id="pos-pending" class="pos-notice" hidden><span id="pos-pending-text"></span><button class="btn pos-write" id="pos-retry">重送原操作</button></div>
-      <nav class="pos-tabs" aria-label="POS 工作區"><button data-tab="stock" class="selected">系列商品</button><button data-tab="restock">補貨中心</button><button data-tab="reports">營運報表</button><button data-tab="expenses">支出管理</button></nav>
-      <div id="pos-stock-panel">
+      <nav class="pos-tabs" aria-label="POS 工作區"><button data-tab="overview" class="selected">總覽</button><button data-tab="stock">系列商品</button><button data-tab="restock">補貨中心</button><button data-tab="reports">營運報表</button><button data-tab="expenses">支出管理</button></nav>
+      <section id="pos-overview-panel">
+        <div class="pos-row"><div><h3>老闆營運總覽</h3><p class="pos-muted">先看營運，再安排今天的店務。</p></div><label>總覽期間<select id="pos-overview-period"><option value="today">今日</option><option value="week">本週</option><option value="month" selected>本月</option><option value="year">今年</option></select></label></div>
+        <div class="pos-overview-actions"><button class="btn alt" id="pos-overview-restock">前往補貨中心</button><button class="btn alt" id="pos-overview-report">查看完整報表</button><button class="btn" id="pos-overview-expense">新增支出</button></div>
+        <p id="pos-overview-status" role="status" aria-live="polite"></p>
+        <div id="pos-overview-content" hidden>
+          <p id="pos-overview-range" class="pos-muted"></p><p id="pos-overview-cost-note" class="pos-notice" hidden></p>
+          <div id="pos-overview-kpis" class="pos-metrics"></div><p id="pos-overview-empty" class="pos-muted" hidden>這段期間尚無有效訂單；營運支出仍依登記日期列計。</p>
+          <div class="pos-overview-columns"><section class="pos-overview-box"><h3>補貨摘要</h3><p class="pos-muted">目前庫存 · 缺貨優先，其次低於／剛好警戒</p><div id="pos-overview-restock-summary"></div><ul id="pos-overview-restock-list" class="pos-overview-list"></ul></section><section class="pos-overview-box"><h3>熱銷系列</h3><p class="pos-muted">所選期間營業額前 5 名</p><ol id="pos-overview-series" class="pos-overview-list"></ol></section></div>
+          <p id="pos-overview-recognition" class="pos-muted"></p>
+        </div>
+      </section>
+      <div id="pos-stock-panel" hidden>
         <div id="commerce-summary" class="commerce-summary"></div>
         <div class="pos-row"><div><h3 id="pos-stock-title">依系列管理</h3><p class="pos-muted">選擇系列，再查看型號與顏色。售價為系列統一售價。</p></div><div class="pos-row-actions"><button id="commerce-sync" class="btn alt pos-write">同步商品</button><button id="pos-list" class="btn">產生補貨清單</button></div></div>
         <div class="pos-series" id="pos-series" aria-label="商品系列"></div>
@@ -83,6 +94,10 @@
     section.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>switchTab(b.dataset.tab)));
     el('commerce-reload').onclick=()=>{if(!dirty||confirm('有尚未儲存的商品設定，確定重新整理？')){dirty=false;load(true)}};
     el('commerce-sync').onclick=async()=>{if(dirty){message('請先儲存商品設定。',true);return}try{await api('/api/admin/commerce_sync_skus',{});await load(true);message('商品已同步')}catch(e){message(e.message,true)}};
+    el('pos-overview-period').onchange=loadOverview;
+    el('pos-overview-restock').onclick=()=>switchTab('restock');
+    el('pos-overview-report').onclick=()=>{el('pos-period').value=el('pos-overview-period').value;el('pos-period').onchange();switchTab('reports')};
+    el('pos-overview-expense').onclick=()=>{switchTab('expenses');resetExpense();el('pos-expense-form').scrollIntoView({block:'center'});el('pos-expense-date').focus()};
     el('commerce-save').onclick=saveAll;
     el('commerce-search').oninput=renderSkus;el('pos-status').onchange=renderSkus;el('commerce-low-only').onchange=renderSkus;
     el('pos-series').onclick=e=>{const b=e.target.closest('[data-series]');if(b){series=b.dataset.series;renderStock()}};
@@ -103,10 +118,42 @@
   async function load(force=false){
     ensureUi();try{if(typeof loadShop==='function')await loadShop(force);if(!loaded||force){const j=await api('/api/admin/commerce_data');state=j.data;loaded=true;dirty=false}
       if(!series||!styles().some(s=>String(s.id)===series))series=String(styles().find(s=>s.status!==false)?.id||'');renderStock();
-      if(tab==='reports')await loadReport();if(tab==='expenses')await loadExpenses();
+      if(tab==='overview')await loadOverview();if(tab==='reports')await loadReport();if(tab==='expenses')await loadExpenses();
     }catch(e){message('資料載入失敗：'+e.message,true)}
   }
-  function switchTab(value){tab=value;document.querySelectorAll('.pos-tabs button').forEach(b=>b.classList.toggle('selected',b.dataset.tab===tab));el('pos-stock-panel').hidden=!['stock','restock'].includes(tab);el('pos-report-panel').hidden=tab!=='reports';el('pos-expense-panel').hidden=tab!=='expenses';if(tab==='restock'){el('commerce-low-only').checked=true;el('pos-status').value=''}else if(tab==='stock')el('commerce-low-only').checked=false;if(tab==='reports')loadReport();else if(tab==='expenses')loadExpenses();else renderStock()}
+  function switchTab(value){tab=value;el('pos-overview-panel').hidden=tab!=='overview';document.querySelectorAll('.pos-tabs button').forEach(b=>b.classList.toggle('selected',b.dataset.tab===tab));el('pos-stock-panel').hidden=!['stock','restock'].includes(tab);el('pos-report-panel').hidden=tab!=='reports';el('pos-expense-panel').hidden=tab!=='expenses';if(tab==='restock'){el('commerce-low-only').checked=true;el('pos-status').value=''}else if(tab==='stock')el('commerce-low-only').checked=false;if(tab==='overview')loadOverview();else if(tab==='reports')loadReport();else if(tab==='expenses')loadExpenses();else renderStock()}
+  let overviewEpoch=0;
+  async function loadOverview(){
+    const epoch=++overviewEpoch,period=el('pos-overview-period').value;
+    el('pos-overview-panel').setAttribute('aria-busy','true');
+    el('pos-overview-status').textContent='正在載入總覽…';
+    el('pos-overview-content').hidden=true;
+    try{
+      const [financial,inventory]=await Promise.all([api('/api/admin/commerce_report?period='+encodeURIComponent(period)),api('/api/admin/replenishment')]);
+      if(epoch!==overviewEpoch)return;
+      renderOverview(financial.data,inventory.data);
+      el('pos-overview-status').textContent='';el('pos-overview-content').hidden=false;
+    }catch(e){if(epoch===overviewEpoch)el('pos-overview-status').textContent='總覽載入失敗：'+e.message+'。請按重新整理再試。'}
+    finally{if(epoch===overviewEpoch)el('pos-overview-panel').removeAttribute('aria-busy')}
+  }
+  function renderOverview(report,stock){
+    const s=report.summary,complete=s.cost_complete&&s.unknown_cost_orders===0;
+    const cost=v=>complete&&v!=null?money(v):'成本資料不足';
+    el('pos-overview-range').textContent=report.range.start+' ～ '+report.range.end+'（台灣時間）';
+    el('pos-overview-cost-note').hidden=complete;
+    el('pos-overview-cost-note').textContent=`${s.unknown_cost_orders} 筆成本未知 · 已知商品成本小計 ${money(s.known_cost)}。完整商品成本、毛利與淨利暫不計算。`;
+    const values=[['revenue','營業額',money(s.revenue)],['orders','訂單數',s.orders+' 筆'],['units','銷售件數',s.units+' 件'],['average_order_value','平均客單價',money(s.average_order_value)],['product_cost','商品成本',cost(s.product_cost)],['gross_profit','毛利',cost(s.gross_profit)],['expenses','營運支出',money(s.expenses)],['net_profit','淨利',cost(s.net_profit)]];
+    el('pos-overview-kpis').innerHTML=values.map(([key,label,value])=>`<article class="pos-metric" data-kpi="${key}"><small>${label}</small><b>${h(value)}</b></article>`).join('');
+    el('pos-overview-empty').hidden=s.orders!==0;
+    el('pos-overview-recognition').textContent=report.recognition;
+    const needed=stock.counts.out+stock.counts.low+stock.counts.threshold;
+    el('pos-overview-restock-summary').innerHTML=`<span>需要補貨 <b data-restock="needed">${needed}</b> 個規格</span><span>建議補貨 <b data-restock="suggested">${stock.total_suggested}</b> 件</span><span>未設定目標 <b data-restock="missing">${stock.missing_targets}</b> 個</span>`;
+    const priority={out:0,low:1,threshold:2};
+    const urgent=stock.groups.flatMap(g=>g.items.map(x=>({...x,series_name:g.series_name}))).sort((a,b)=>priority[a.status]-priority[b.status]||a.stock_qty-b.stock_qty||a.sku_id.localeCompare(b.sku_id)).slice(0,5);
+    el('pos-overview-restock-list').innerHTML=urgent.map(x=>`<li><div><strong>${h(x.series_name)}</strong><p>${h(x.model_name)} · ${h(x.color||'無色別')}</p><span class="pos-badge ${h(x.status)}">${h(x.status_label)}</span></div><div>現有 ${x.stock_qty} 件<br><b>建議 ${x.suggested_quantity==null?'先設定目標':x.suggested_quantity+' 件'}</b></div></li>`).join('')||'<li class="pos-empty">目前沒有需要補貨的規格。</li>';
+    const ranked=[...report.series].sort((a,b)=>b.revenue-a.revenue||a.series_id.localeCompare(b.series_id)).slice(0,5),max=Math.max(0,...ranked.map(x=>x.revenue));
+    el('pos-overview-series').innerHTML=ranked.map((x,i)=>`<li><div class="pos-rank-heading"><strong>${i+1}. ${h(x.series_name)}</strong><b>${money(x.revenue)}</b></div><p>${x.orders} 筆訂單 · ${x.units} 件 · ${x.cost_complete&&x.gross_profit!=null?'毛利 '+money(x.gross_profit):'成本資料不足'}</p><div class="pos-rank-track" aria-hidden="true"><span style="width:${max?Math.max(0,Math.min(100,x.revenue/max*100)):0}%"></span></div></li>`).join('')||'<li class="pos-empty">這段期間尚無系列銷售。</li>';
+  }
   function renderStock(){
     const counts={out:0,low:0,threshold:0,normal:0};state.skus.filter(active).forEach(s=>{if(status(s) in counts)counts[status(s)]++});
     el('commerce-summary').innerHTML=Object.entries(counts).map(([k,n])=>`<button class="commerce-kpi ${k}" data-stock-status="${k}"><small>${labels[k]}</small><b>${n}</b><span>個規格</span></button>`).join('');

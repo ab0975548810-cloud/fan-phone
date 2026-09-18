@@ -184,6 +184,7 @@ def admin_test(browser, base):
     commerce_diag = page.evaluate("""() => ({version:window.BenfuwanCommerce?.version||'',publicCostLeak:JSON.stringify(shopData||{}).includes('cost_price'),view:document.getElementById('view-commerce')?.classList.contains('active')})""")
     assert commerce_diag['version'].startswith('2.0') and commerce_diag['view'] and not commerce_diag['publicCostLeak'], commerce_diag
     print('ADMIN_COMMERCE_WEBKIT_OK', commerce_diag['version'])
+    page.locator('[data-tab="stock"]').click()
 
     # Real Phase 2 controls, including a committed receipt with lost response.
     assert page.request.post(base + '/api/admin/commerce_sync_skus', data={}).ok
@@ -233,7 +234,7 @@ def admin_test(browser, base):
         for tab in ('stock','restock','reports','expenses'):
             page.locator('[data-tab="'+tab+'"]').click()
             if tab == 'reports':
-                poll(page, "() => document.querySelectorAll('.pos-metric').length===9")
+                poll(page, "() => document.querySelectorAll('#pos-metrics .pos-metric').length===9")
             metrics = page.evaluate("""() => ({width:innerWidth,scroll:document.documentElement.scrollWidth,view:document.getElementById('view-commerce').getBoundingClientRect().width})""")
             assert metrics['scroll'] <= width + 2 and metrics['view'] > 200, (tab,metrics)
             if os.environ.get('POS_SCREENSHOT_DIR'):
@@ -243,7 +244,7 @@ def admin_test(browser, base):
     for period in ('week','month','year','custom'):
         page.locator('#pos-period').select_option(period)
         page.locator('#pos-report-form button').click()
-        poll(page, "() => document.querySelectorAll('.pos-metric').length===9 && document.getElementById('pos-metrics').getAttribute('aria-busy')===null")
+        poll(page, "() => document.querySelectorAll('#pos-metrics .pos-metric').length===9 && document.getElementById('pos-metrics').getAttribute('aria-busy')===null")
     print('POS_PHASE2_RESPONSIVE_RECEIPT_EXPENSE_REPORT_OK')
 
     template_nav = page.locator('.nav button[data-view="templates"]')
@@ -283,6 +284,7 @@ def durable_receipt_test(playwright, base):
         poll(page, "() => !!window.BenfuwanCommerce")
         page.locator('.nav button[data-view="commerce"]').click()
         poll(page, "() => window.BenfuwanCommerce.state.skus.length>0")
+        page.locator('[data-tab="stock"]').click()
         return page
     with tempfile.TemporaryDirectory() as profile:
         for kind in ('purchase', 'expense'):
@@ -364,6 +366,8 @@ def main():
             browser = getattr(p, os.environ.get('BROWSER_ENGINE', 'webkit')).launch()
             try:
                 base='http://127.0.0.1:8765';front_test(browser,base);checkout_test(browser,base);admin_test(browser,base)
+                import runpy
+                runpy.run_path(str(ROOT / '.github/tests/test_pos_dashboard.py'))['dashboard_test'](browser,base,poll)
             finally: browser.close()
             durable_receipt_test(p, base)
         print('AI_EDITOR_WEBKIT_OK')
