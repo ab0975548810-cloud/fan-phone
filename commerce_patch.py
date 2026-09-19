@@ -298,6 +298,10 @@ class Commerce:
     def action(self, order_id, action, target, key=''):
         signature = [order_id, action, target]
         cleanup = self.store.order(order_id) if action == 'delete' else None
+        if action == 'delete' and hasattr(self.app, 'print_center'):
+            active = self.app.print_center.store.active_job(order_id)
+            if active:
+                raise CommerceError('ACTIVE_PRINT_JOB', '此訂單仍有進行中的列印任務，完成或取消後才能永久刪除')
         def update(data):
             if key and key in data['actions']:
                 prior = data['actions'][key]
@@ -307,6 +311,8 @@ class Commerce:
             order = self.store.order(order_id)
             if not order:
                 raise CommerceError('ORDER_NOT_FOUND', '找不到這筆訂單', 404)
+            if order.get('status') == '作廢' and action not in ('restore', 'delete') and target != '作廢':
+                raise CommerceError('VOID_ORDER', '作廢訂單不可由背景流程恢復狀態')
             if action == 'delete' and order['status'] != '作廢':
                 raise CommerceError('VOID_REQUIRED', '請先作廢回補庫存，再刪除訂單')
             if target in ('待列印', '列印中', '已完成') and not order.get('print_path'):

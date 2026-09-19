@@ -23,7 +23,9 @@ jobs:
           python-version: '3.11'
       - run: pip install -r requirements.txt 'psycopg[binary]==3.2.12'
       - name: SQLite transaction and multi-process regression
-        run: python test_commerce.py
+        run: |
+          python test_commerce.py
+          python test_print_center.py
       - name: PostgreSQL schema, privileges, rollback and concurrency
         env:
           TEST_POSTGRES_DSN: postgresql://postgres:test-only@localhost:5432/commerce_test

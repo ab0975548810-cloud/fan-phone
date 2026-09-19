@@ -103,6 +103,12 @@ class Store:
                 if not old:
                     raise CommerceError('ORDER_NOT_FOUND', '找不到這筆訂單', 404)
                 if action == 'delete':
+                    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='print_jobs'").fetchone():
+                        active = db.execute("""SELECT 1 FROM print_jobs WHERE order_id=? AND state IN
+                            ('PREPARED','SENDING','QUEUED','STARTING','PRINTING','CANCELING','UNKNOWN') LIMIT 1""",
+                            (order['id'],)).fetchone()
+                        if active:
+                            raise CommerceError('ACTIVE_PRINT_JOB', '此訂單仍有進行中的列印任務，完成或取消後才能永久刪除')
                     db.execute('DELETE FROM orders WHERE id=?', (order['id'],))
                 else:
                     row = json.loads(old[0])
