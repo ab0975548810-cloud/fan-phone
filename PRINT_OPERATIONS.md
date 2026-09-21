@@ -19,7 +19,13 @@ The compatibility endpoint `/api/admin/print/start` always fails closed with `DE
 - Vendor supports PNG / JPG / TIF. This system serves canonical production artwork as transparent PNG in RGB without an ICC profile.
 - Vendor recommendations are under 20 MB, at most 8000 × 8000 pixels, and 300–900 DPI. Treat these as quality guidance, not hard upload limits.
 
-Existing model `print_w / print_h / print_x / print_y` values may appear as a suggestion only when all four are explicitly present on that model. Generic style fallback values such as `80 × 160` are never promoted to a production profile. The operator must calibrate the exact model + style and press **儲存列印參數** before the profile becomes usable.
+The only editable production-profile entry is **手機品牌及型號 → 型號設定**. `print_x / print_y` are jig positions with the origin at the bottom-right; `print_w / print_h` are the physical print size, and `print_angle` defaults to `0`. Saving a model explicitly batch-upserts the same geometry to every active commerce SKU for that model. Channel is fixed at `1`, spot colour is empty, and an existing copies value is preserved (otherwise it defaults to `1`).
+
+Print Center is read-only for production profiles. It shows the saved `W × H / X / Y` values or directs the operator back to **品牌及型號**. It cannot create or edit a profile. A missing formal profile blocks **準備任務**; model suggestions and legacy style `print_*` values are never promoted automatically. Existing style geometry remains stored for storefront compatibility, but the style editor no longer exposes those fields.
+
+There is no deploy-time backfill. Existing profiles remain unchanged until the owner explicitly saves that model. A model save writes `shop_data` first and then performs an idempotent batch upsert of profiles. If profile synchronization fails, the API returns `PROFILE_SYNC_FAILED` and the model dialog remains available for the operator to retry; it must never report success. This operation does not write order finance, revenue, cost, stock, or inventory ledger data.
+
+Per-style or per-colour geometry overrides and a model × style calibration matrix are deferred until real-device evidence requires them.
 
 Legacy orders without `commerce_data.order_finance` must use **補綁列印 SKU** before they can enter this flow. The selection is stored only in `print_order_bindings`; it never creates or edits finance snapshots, revenue, cost, stock, or inventory ledger entries. Model/style matches and an old `style_name` colour suffix may preselect a candidate, but an operator must explicitly confirm it. A valid production profile must then be saved before a legacy order can be prepared.
 
@@ -51,7 +57,7 @@ Printer status code `6` remains raw-only until the vendor gives one consistent d
 2. Confirm the existing Print Phase 3.0 migration is present, then apply `20260921184801_print_order_bindings.sql`. Do not backfill bindings automatically.
 3. Verify RLS remains enabled and `anon` / `authenticated` have no privileges on all print tables; run Supabase security and performance advisors.
 4. Deploy the application with `YUN_PRINT_ENABLED=false` and the HTTPS/token settings present. Confirm the reverse proxy redacts `/api/print/artwork/*`; the repository Gunicorn config already omits request paths.
-5. Calibrate and explicitly save one production profile for the exact model + style. Do not accept a suggested value without physical measurement.
+5. Calibrate one model in **品牌及型號**, then explicitly save it and verify every active SKU for that model shows the same read-only profile in Print Center. Do not accept guessed values without physical measurement.
 6. Give the printer callback URL to the vendor for backend binding, then verify both callback endpoints and one job-scoped artwork URL with a vendor-approved sandbox or supervised device.
 7. Confirm angle, every model/style position, callback clock tolerance, `getAllTasks` retention, and printer status code `6`.
 8. Enable `YUN_PRINT_ENABLED=true` only in a supervised test window. Prepare and send one approved task, then perform the physical confirmation in Ruiyin.

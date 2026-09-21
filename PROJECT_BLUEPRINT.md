@@ -498,7 +498,18 @@ Callback 必須：
 
 ---
 
-## 16. 三方合作方式：Owner + ChatGPT + Codex
+## 16. Print Phase 3.2：列印參數單一入口
+
+- 正式列印參數唯一可編輯入口是「手機品牌及型號 → 型號設定」。
+- 型號保存 `print_x / print_y / print_w / print_h / print_angle`；X / Y 採治具右下角原點，W / H 是實際列印尺寸，A5 有效範圍為 200 × 230 mm。
+- 店員明確儲存型號時，後端把相同幾何批次同步到該型號所有啟用中的 commerce SKU `production_profiles`；保留既有 copies，channel 固定 `1`、spot color 固定空字串、angle 使用型號值或 `0`。
+- Print Center 只讀顯示正式 profile；沒有 profile 時引導回「品牌及型號」，且不得準備列印任務。
+- 材質舊 `print_*` 資料保留供前台相容，不做破壞性 migration，也不在材質後台顯示編輯欄位。
+- 既有 profile 不批次改寫；只有 owner 明確儲存該型號才同步。同步失敗必須清楚回報並允許安全重試，不得顯示成功。
+- 這條同步路徑不得修改 order finance、營收、成本、庫存或 inventory ledger。
+- model × style、每顏色列印參數與材質覆蓋留待真機證據確認後另案設計。
+
+## 17. 三方合作方式：Owner + ChatGPT + Codex
 
 - **Owner**：決定店內真正想要的操作方式與商業需求。
 - **ChatGPT**：整理產品需求、架構、驗收條件、風險與 review。

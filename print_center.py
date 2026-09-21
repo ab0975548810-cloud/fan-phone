@@ -162,34 +162,6 @@ class PrintService:
             raise PrintError("INVALID_PRINT_SKU", "所選 SKU 不屬於這筆訂單的型號與系列", 400)
         return self.store.save_binding(order_id, sku_id)
 
-    @staticmethod
-    def _profile_suggestion(shop, model_id, style_id):
-        """Return only explicit model calibration; never use style fallbacks."""
-        if not isinstance(shop, dict):
-            return None
-        model = next((row for row in (shop.get("models") or [])
-                      if str(row.get("id") or "") == str(model_id or "")), None)
-        style = next((row for row in (shop.get("styles") or [])
-                      if str(row.get("id") or "") == str(style_id or "")), None)
-        required = ("print_w", "print_h", "print_x", "print_y")
-        if not model or not style or any(name not in model or model.get(name) in (None, "") for name in required):
-            return None
-        try:
-            numbers = {name: Decimal(str(model[name])) for name in required}
-        except (InvalidOperation, TypeError, ValueError):
-            return None
-        if any(not value.is_finite() or value < -10000 or value > 10000 for value in numbers.values()):
-            return None
-        if numbers["print_w"] <= 0 or numbers["print_h"] <= 0:
-            return None
-        values = {name: float(value) for name, value in numbers.items()}
-        return {
-            "width_mm": values["print_w"], "height_mm": values["print_h"],
-            "left_mm": values["print_x"], "top_mm": values["print_y"],
-            "source": f"來自 {model.get('name') or model_id} 蒙版設定",
-            "notice": f"僅為建議值；請依 {style.get('name') or style_id} 實體殼校正後儲存確認",
-        }
-
     def _assert_order_printable(self, order, *, needs_artwork=True):
         if order.get("status") == "作廢":
             raise PrintError("VOID_ORDER", "作廢訂單不可建立或啟動列印任務")
@@ -269,8 +241,8 @@ class PrintService:
             if not sku_id or sku_id not in {row["id"] for row in candidates}:
                 raise PrintError("SKU_BINDING_REQUIRED", "舊訂單必須先明確補綁列印 SKU")
         profile = self.store.profile(sku_id)
-        if legacy_binding and not profile:
-            raise PrintError("PROFILE_MISSING", "舊訂單補綁 SKU 後，必須先確認列印參數")
+        if not profile:
+            raise PrintError("PROFILE_MISSING", "請先到「品牌及型號」儲存此型號的列印參數")
         raw = self._download_artwork(order["print_path"])
         job = self.store.create_job(order, sku_id, profile, hashlib.sha256(raw).hexdigest(), secrets.token_urlsafe(18))
         owner, _ = self.store.claim_request(key, "prepare", job["id"], fingerprint)
@@ -278,28 +250,54 @@ class PrintService:
             self.store.finish_request(key, "COMPLETED", {"job_id": job["id"]})
         return self.store.job(job["id"])
 
-    def save_profile(self, payload):
-        sku_id = str(payload.get("sku_id") or "").strip()
-        if not sku_id or len(sku_id) > 200:
-            raise PrintError("BAD_PROFILE", "缺少 SKU 識別", 400)
-        try:
-            copies = int(payload.get("copies", 1))
-        except (TypeError, ValueError):
-            raise PrintError("BAD_PROFILE", "列印份數格式錯誤", 400)
-        if copies < 1 or copies > 99:
-            raise PrintError("BAD_PROFILE", "列印份數須為 1 至 99", 400)
-        profile = {
-            "sku_id": sku_id,
-            "width_mm": _as_decimal(payload.get("width_mm"), "寬度", positive=True),
-            "height_mm": _as_decimal(payload.get("height_mm"), "高度", positive=True),
-            "left_mm": _as_decimal(payload.get("left_mm", 0), "左偏移"),
-            "top_mm": _as_decimal(payload.get("top_mm", 0), "上偏移"),
-            "copies": copies,
-            "spot_color": "",
-            "channel": "1",
-            "angle": _as_decimal(payload.get("angle", 0), "角度"),
+    def save_model_profiles(self, payload):
+        shop = payload.get("shop_data")
+        model_id = str(payload.get("model_id") or "").strip()
+        if (not isinstance(shop, dict) or not isinstance(shop.get("models"), list)
+                or not isinstance(shop.get("styles"), list) or not model_id):
+            raise PrintError("BAD_MODEL_PROFILE", "型號列印參數格式錯誤", 400)
+        model = next((row for row in (shop.get("models") or [])
+                      if str(row.get("id") or "") == model_id), None)
+        if not model:
+            raise PrintError("BAD_MODEL_PROFILE", "找不到要儲存的型號", 400)
+        profile_values = {
+            "width_mm": _as_decimal(model.get("print_w"), "寬度", positive=True),
+            "height_mm": _as_decimal(model.get("print_h"), "高度", positive=True),
+            "left_mm": _as_decimal(model.get("print_x", 0), "水平定位 X"),
+            "top_mm": _as_decimal(model.get("print_y", 0), "垂直定位 Y"),
+            "angle": _as_decimal(model.get("print_angle", 0), "角度"),
         }
-        return self.store.save_profile(profile)
+        commerce_before = self.app.commerce.read()
+        active_skus = [row for row in (commerce_before.get("skus") or [])
+                       if row.get("active") is not False and str(row.get("model_id") or "") == model_id]
+        current = {row["sku_id"]: row for row in self.store.profiles()}
+        profiles = []
+        for sku in active_skus:
+            sku_id = str(sku.get("id") or "").strip()
+            if not sku_id:
+                continue
+            old = current.get(sku_id) or {}
+            profiles.append({
+                "sku_id": sku_id,
+                **profile_values,
+                "copies": int(old.get("copies") or 1),
+                "spot_color": "",
+                "channel": "1",
+            })
+        # Persist the explicit model edit first. Profile sync is an idempotent
+        # batch upsert, so a clear failure can be retried without guessing or
+        # duplicating print/commerce transactions.
+        self.app.cloud_save_json("shop_data", self.app.DATA_FILE, shop)
+        try:
+            saved = self.store.save_profiles(profiles)
+        except Exception as exc:
+            self.app.app.logger.exception("Model production profile sync failed")
+            raise PrintError(
+                "PROFILE_SYNC_FAILED",
+                "型號資料已儲存，但正式列印參數同步失敗；請勿關閉視窗並再次按儲存。",
+                503,
+            ) from exc
+        return {"model_id": model_id, "synced_skus": len(saved)}
 
     def snapshot_profile(self, job_id, key):
         job = self.store.job(job_id)
@@ -631,9 +629,6 @@ class PrintService:
             binding_sku_id = str(binding.get("sku_id") or "")
             binding_valid = bool(binding_sku_id and binding_sku_id in candidate_ids)
             sku_id = finance_sku_id or (binding_sku_id if binding_valid else "")
-            model_id = fin.get("model_id") if finance_sku_id else order.get("model_id")
-            style_id = fin.get("style_id") if finance_sku_id else order.get("style_id")
-            suggestion = self._profile_suggestion(shop, model_id, style_id)
             result.append({
                 "order_id": order_id, "customer_name": order.get("customer_name") or "",
                 "model": order.get("model_name") or "", "style": order.get("style_name") or "",
@@ -645,7 +640,6 @@ class PrintService:
                 "sku_candidates": candidates,
                 "suggested_sku_id": self._suggested_sku(order, candidates),
                 "profile_available": bool(sku_id and sku_id in profiles),
-                "profile_suggestion": suggestion,
                 "profile": ({key: profiles[sku_id].get(key) for key in
                     ("width_mm", "height_mm", "left_mm", "top_mm", "copies", "spot_color", "channel", "angle")}
                     if sku_id in profiles else None),
@@ -711,11 +705,11 @@ def install(app_module):
     def print_jobs():
         return app_module.no_cache_json({"status": "success", **service.dashboard()})
 
-    @app.route("/api/admin/print/profile", methods=["POST"])
+    @app.route("/api/admin/print/model-profiles", methods=["POST"])
     @guarded
-    def print_profile():
-        profile = service.save_profile(body())
-        return app_module.no_cache_json({"status": "success", "profile": profile})
+    def print_model_profiles():
+        result = service.save_model_profiles(body())
+        return app_module.no_cache_json({"status": "success", **result})
 
     @app.route("/api/admin/print/binding", methods=["POST"])
     @guarded

@@ -180,6 +180,35 @@ class PrintStore:
                 active=1,updated_at=excluded.updated_at""", row)
         return self.profile(profile["sku_id"])
 
+    def save_profiles(self, profiles):
+        """Upsert a model's active SKU profiles as one database statement."""
+        profiles = list(profiles or [])
+        if not profiles:
+            return []
+        now = utcnow()
+        existing = {row["sku_id"]: row for row in self.profiles()}
+        rows = []
+        for profile in profiles:
+            old = existing.get(profile["sku_id"])
+            rows.append({
+                **profile,
+                "active": True,
+                "created_at": old.get("created_at") if old else now,
+                "updated_at": now,
+            })
+        if self.app.USE_SUPABASE:
+            self.app.SUPABASE.table("production_profiles").upsert(rows).execute()
+        else:
+            with self.connection(True) as db:
+                db.executemany("""INSERT INTO production_profiles
+                    (sku_id,width_mm,height_mm,left_mm,top_mm,copies,spot_color,channel,angle,active,created_at,updated_at)
+                    VALUES (:sku_id,:width_mm,:height_mm,:left_mm,:top_mm,:copies,:spot_color,:channel,:angle,1,:created_at,:updated_at)
+                    ON CONFLICT(sku_id) DO UPDATE SET width_mm=excluded.width_mm,height_mm=excluded.height_mm,
+                    left_mm=excluded.left_mm,top_mm=excluded.top_mm,copies=excluded.copies,
+                    spot_color=excluded.spot_color,channel=excluded.channel,angle=excluded.angle,
+                    active=1,updated_at=excluded.updated_at""", rows)
+        return [self.profile(row["sku_id"]) for row in rows]
+
     def job(self, job_id):
         if self.app.USE_SUPABASE:
             rows = self.app.SUPABASE.table("print_jobs").select("*").eq("id", job_id).limit(1).execute().data or []
