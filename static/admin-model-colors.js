@@ -129,10 +129,6 @@
       colors:cleanList(document.getElementById('style-colors').value),
       model_colors:collectOverrides(),
       mask_img:document.getElementById('style-mask-url').value||'',
-      print_x:Number(document.getElementById('style-x').value)||0,
-      print_y:Number(document.getElementById('style-y').value)||0,
-      print_w:Number(document.getElementById('style-w').value)||80,
-      print_h:Number(document.getElementById('style-h').value)||160,
       status:true
     };
     if(!data.name)return alert('請填材質名稱');

@@ -249,11 +249,34 @@ def admin_test(browser, base):
         poll(page, "() => document.querySelectorAll('#pos-metrics .pos-metric').length===9 && document.getElementById('pos-metrics').getAttribute('aria-busy')===null")
     print('POS_PHASE2_RESPONSIVE_RECEIPT_EXPENSE_REPORT_OK')
 
+    page.locator('.nav button[data-view="models"]').click()
+    page.locator('#model-tab-btn').click()
+    poll(page, "() => document.getElementById('view-models').classList.contains('active') && document.getElementById('model-admin-view').classList.contains('active') && document.querySelector('#models-body button')")
+    page.locator('#models-body button').first.click()
+    page.locator('#model-modal.show').wait_for()
+    model_text = page.locator('#model-modal').inner_text()
+    assert 'A5 有效範圍為 200 × 230 mm' in model_text
+    assert '座標原點在治具右下角' in model_text
+    page.locator('#model-x').fill('1.5');page.locator('#model-y').fill('2.5')
+    page.locator('#model-w').fill('80');page.locator('#model-h').fill('160');page.locator('#model-angle').fill('0')
+    page.locator('#model-modal .mf .btn').last.click()
+    page.locator('#model-modal').wait_for(state='hidden')
+    page.locator('.nav button[data-view="styles"]').click()
+    poll(page, "() => document.getElementById('view-styles').classList.contains('active') && document.querySelector('#styles-body button')")
+    page.locator('#styles-body button').first.click()
+    page.locator('#style-modal.show').wait_for()
+    assert page.locator('#style-x,#style-y,#style-w,#style-h').count() == 0
+    page.locator('#style-modal .mh button').click()
+    print('MODEL_PROFILE_SINGLE_ENTRY_WEBKIT_OK')
+
     print_nav = page.locator('.nav button[data-view="print-center"]')
     print_nav.click()
     poll(page, "() => document.querySelectorAll('#pc-grid .pc-card').length>0 && document.getElementById('view-print-center').classList.contains('active')")
     assert page.locator('#pc-config').get_attribute('class').find('warn') >= 0
     assert page.locator('[data-pc="start"]').count() == 0
+    assert page.locator('[data-pc="profile"]').count() == 0
+    assert page.locator('#pc-modal').count() == 0
+    assert '80 × 160 mm / X 1.5 / Y 2.5' in page.locator('#pc-grid').inner_text()
     for width, height in ((390,844),(768,1024),(1440,900)):
         page.set_viewport_size(dict(width=width,height=height))
         metrics = page.evaluate("""() => ({
@@ -263,14 +286,6 @@ def admin_test(browser, base):
           secrets:document.getElementById('view-print-center').textContent.includes('fake-key')
         })""")
         assert metrics['scroll'] <= width + 2 and metrics['view'] > 200 and metrics['cards'] > 0 and not metrics['secrets'], metrics
-    profile_button = page.locator('[data-pc="profile"]').first
-    profile_button.click()
-    page.locator('#pc-modal.show').wait_for()
-    modal_text = page.locator('#pc-modal').inner_text()
-    assert 'A5 有效範圍：200 × 230 mm' in modal_text
-    assert '座標原點：治具右下角' in modal_text
-    assert 'Channel 固定為 1' in modal_text
-    page.locator('#pc-close').click()
     legacy_order = app_module.commerce.store.local_orders()[0]
     commerce = app_module.commerce.read()
     assert commerce['order_finance'].pop(legacy_order['id'], None), legacy_order['id']
