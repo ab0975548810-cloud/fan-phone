@@ -97,6 +97,15 @@ class PrintCenterTests(unittest.TestCase):
         self.assertTrue(app.commerce.store.commit(int(data.get("revision", 0)), data))
         return finance
 
+    def create_legacy_job(self, state):
+        order_id = self.create_order()
+        finance = self.make_legacy(order_id)
+        order = app.commerce.store.order(order_id)
+        job = app.print_center.store.create_job(order, "", None, "0" * 64, "legacy-fixture-token")
+        if state != "PREPARED":
+            job = app.print_center.store.patch_job(job["id"], {"state": state})
+        return order_id, finance["sku_id"], job
+
     def post(self, action, payload, key=None):
         idem = key or ("print-" + uuid.uuid4().hex)
         return self.client.post("/api/admin/print/" + action, json={**payload, "idempotency_key": idem}, headers={"Idempotency-Key": idem})
@@ -340,6 +349,28 @@ class PrintCenterTests(unittest.TestCase):
         }).status_code, 200)
         voided = self.client.post("/api/admin/print/binding", json={"order_id": self.order_id, "sku_id": self.sku_id})
         self.assertEqual((voided.status_code, voided.get_json()["code"]), (409, "VOID_ORDER"))
+
+    def test_terminal_print_jobs_do_not_block_legacy_binding_or_change_history(self):
+        for state in ("CANCELED", "FAILED", "COMPLETED"):
+            with self.subTest(state=state):
+                order_id, sku_id, job_before = self.create_legacy_job(state)
+                commerce_before = app.commerce.read()
+                response = self.client.post("/api/admin/print/binding", json={"order_id": order_id, "sku_id": sku_id})
+                self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+                self.assertEqual(app.print_center.store.binding(order_id)["sku_id"], sku_id)
+                self.assertEqual(app.print_center.store.job(job_before["id"]), job_before)
+                self.assertEqual(app.commerce.read(), commerce_before)
+
+    def test_active_print_jobs_still_block_legacy_binding(self):
+        for state in ("PREPARED", "QUEUED", "PRINTING", "UNKNOWN"):
+            with self.subTest(state=state):
+                order_id, sku_id, job_before = self.create_legacy_job(state)
+                commerce_before = app.commerce.read()
+                response = self.client.post("/api/admin/print/binding", json={"order_id": order_id, "sku_id": sku_id})
+                self.assertEqual((response.status_code, response.get_json()["code"]), (409, "BINDING_LOCKED"))
+                self.assertIsNone(app.print_center.store.binding(order_id))
+                self.assertEqual(app.print_center.store.job(job_before["id"]), job_before)
+                self.assertEqual(app.commerce.read(), commerce_before)
 
     def test_print_center_ui_has_a5_guidance_and_no_start_action(self):
         source = (Path(__file__).parent / "static" / "admin-print-center.js").read_text(encoding="utf-8")

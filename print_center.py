@@ -153,7 +153,7 @@ class PrintService:
         self._assert_order_printable(order, needs_artwork=False)
         if self._finance(order_id).get("sku_id"):
             raise PrintError("FINANCE_SKU_EXISTS", "此訂單已有不可變更的財務 SKU 快照")
-        if self.store.latest_job(order_id):
+        if self.store.active_job(order_id):
             raise PrintError("BINDING_LOCKED", "此訂單已有列印任務，不能變更列印 SKU")
         commerce = self.app.commerce.read()
         shop = self.app.cloud_get_json("shop_data", self.app.DATA_FILE, self.app.DEFAULT_SHOP_DATA)
