@@ -79,16 +79,23 @@ class PrintCenterTests(unittest.TestCase):
                 os.environ[name] = value
         self.tmp.cleanup()
 
-    def create_order(self):
+    def create_order(self, *, style_id=None, color_name="透明"):
         key = "checkout-" + uuid.uuid4().hex
         response = self.client.post("/api/create_order", json={
             "idempotency_key": key, "print_file": PNG, "mockup_file": PNG,
             "model_id": app.DEFAULT_SHOP_DATA["models"][0]["id"],
-            "style_id": app.DEFAULT_SHOP_DATA["styles"][0]["id"], "color_name": "透明",
+            "style_id": style_id or app.DEFAULT_SHOP_DATA["styles"][0]["id"], "color_name": color_name,
             "quantity": 1, "customer_name": "列印測試", "payment_method": "現金", "design_json": {},
         })
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         return response.get_json()["order_id"]
+
+    def make_legacy(self, order_id=None):
+        order_id = order_id or self.order_id
+        data = app.commerce.read()
+        finance = data["order_finance"].pop(order_id)
+        self.assertTrue(app.commerce.store.commit(int(data.get("revision", 0)), data))
+        return finance
 
     def post(self, action, payload, key=None):
         idem = key or ("print-" + uuid.uuid4().hex)
@@ -291,12 +298,58 @@ class PrintCenterTests(unittest.TestCase):
         job = self.prepare()
         self.assertFalse(job["profile_complete"])
 
+    def test_legacy_order_binding_is_explicit_print_only_and_required_before_prepare(self):
+        self.order_id = self.create_order(style_id="style_color", color_name="粉")
+        finance = self.make_legacy()
+        self.sku_id = finance["sku_id"]
+        commerce_before = app.commerce.read()
+        dashboard = self.client.get("/api/admin/print/jobs").get_json()
+        row = next(item for item in dashboard["rows"] if item["order_id"] == self.order_id)
+        self.assertTrue(row["legacy_order"])
+        self.assertTrue(row["binding_required"])
+        self.assertEqual(row["sku_id"], "")
+        self.assertEqual(row["suggested_sku_id"], self.sku_id)
+        self.assertGreater(len(row["sku_candidates"]), 1)
+        self.assertTrue(any(item["id"] == self.sku_id for item in row["sku_candidates"]))
+        blocked = self.post("prepare", {"order_id": self.order_id})
+        self.assertEqual((blocked.status_code, blocked.get_json()["code"]), (409, "SKU_BINDING_REQUIRED"))
+
+        wrong_sku = next(item["id"] for item in commerce_before["skus"] if item["style_id"] != finance["style_id"])
+        rejected = self.client.post("/api/admin/print/binding", json={"order_id": self.order_id, "sku_id": wrong_sku})
+        self.assertEqual((rejected.status_code, rejected.get_json()["code"]), (400, "INVALID_PRINT_SKU"))
+        saved = self.client.post("/api/admin/print/binding", json={"order_id": self.order_id, "sku_id": self.sku_id})
+        self.assertEqual(saved.status_code, 200, saved.get_data(as_text=True))
+        self.assertEqual(app.print_center.store.binding(self.order_id)["source"], "ADMIN_CONFIRMED")
+        self.assertEqual(app.commerce.read(), commerce_before)
+        self.assertNotIn(self.order_id, app.commerce.read()["order_finance"])
+
+        missing_profile = self.post("prepare", {"order_id": self.order_id})
+        self.assertEqual((missing_profile.status_code, missing_profile.get_json()["code"]), (409, "PROFILE_MISSING"))
+        self.save_profile()
+        job = self.prepare()
+        self.assertEqual(job["sku_id"], self.sku_id)
+        self.assertTrue(job["profile_complete"])
+        self.assertEqual(app.commerce.read(), commerce_before)
+
+    def test_legacy_binding_rejects_void_orders_and_finance_orders(self):
+        finance_order = self.client.post("/api/admin/print/binding", json={"order_id": self.order_id, "sku_id": self.sku_id})
+        self.assertEqual((finance_order.status_code, finance_order.get_json()["code"]), (409, "FINANCE_SKU_EXISTS"))
+        self.make_legacy()
+        self.assertEqual(self.client.post("/api/admin/order_action", json={
+            "order_id": self.order_id, "action": "void", "idempotency_key": "void-legacy-bind-0001"
+        }).status_code, 200)
+        voided = self.client.post("/api/admin/print/binding", json={"order_id": self.order_id, "sku_id": self.sku_id})
+        self.assertEqual((voided.status_code, voided.get_json()["code"]), (409, "VOID_ORDER"))
+
     def test_print_center_ui_has_a5_guidance_and_no_start_action(self):
         source = (Path(__file__).parent / "static" / "admin-print-center.js").read_text(encoding="utf-8")
         self.assertNotIn('data-pc="start"', source)
         self.assertIn("A5 有效範圍：200 × 230 mm", source)
         self.assertIn("座標原點：治具右下角", source)
         self.assertIn("送到銳印", source)
+        self.assertIn("補綁列印 SKU", source)
+        self.assertIn("不會修改營收／成本／庫存資料", source)
+        self.assertIn("pc-bind-modal", source)
 
     def test_fault_statuses_and_printer_status_six_keep_raw_values(self):
         self.save_profile();job = self.prepare();self.assertEqual(self.send(job["id"]).status_code, 200)

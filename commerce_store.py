@@ -110,6 +110,8 @@ class Store:
                         if active:
                             raise CommerceError('ACTIVE_PRINT_JOB', '此訂單仍有進行中的列印任務，完成或取消後才能永久刪除')
                     db.execute('DELETE FROM orders WHERE id=?', (order['id'],))
+                    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='print_order_bindings'").fetchone():
+                        db.execute('DELETE FROM print_order_bindings WHERE order_id=?', (order['id'],))
                 else:
                     row = json.loads(old[0])
                     row['status'] = order['status']

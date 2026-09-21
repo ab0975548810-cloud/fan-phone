@@ -116,6 +116,53 @@ class PrintService:
         return (self.app.commerce.read().get("order_finance") or {}).get(order_id) or {}
 
     @staticmethod
+    def _sku_candidates(order, commerce, shop):
+        model_id = str(order.get("model_id") or "")
+        style_id = str(order.get("style_id") or "")
+        models = {str(row.get("id") or ""): row.get("name") or "" for row in (shop.get("models") or [])}
+        styles = {str(row.get("id") or ""): row.get("name") or "" for row in (shop.get("styles") or [])}
+        result = []
+        for sku in commerce.get("skus") or []:
+            if not sku.get("active", True):
+                continue
+            if str(sku.get("model_id") or "") != model_id or str(sku.get("style_id") or "") != style_id:
+                continue
+            result.append({
+                "id": str(sku.get("id") or ""), "model_id": model_id, "style_id": style_id,
+                "model": models.get(model_id) or order.get("model_name") or model_id,
+                "style": styles.get(style_id) or str(order.get("style_name") or "").split("・", 1)[0] or style_id,
+                "color": str(sku.get("color") or ""),
+            })
+        return [row for row in result if row["id"]]
+
+    @staticmethod
+    def _suggested_sku(order, candidates):
+        if len(candidates) == 1:
+            return candidates[0]["id"]
+        style_name = str(order.get("style_name") or "")
+        color_hint = style_name.rsplit("・", 1)[1].strip() if "・" in style_name else ""
+        matches = [row for row in candidates if color_hint and row["color"].casefold() == color_hint.casefold()]
+        return matches[0]["id"] if len(matches) == 1 else ""
+
+    def save_binding(self, payload):
+        order_id = str(payload.get("order_id") or "").strip()
+        sku_id = str(payload.get("sku_id") or "").strip()
+        if not order_id or not sku_id or len(order_id) > 200 or len(sku_id) > 200:
+            raise PrintError("BAD_BINDING", "缺少有效的訂單或 SKU 識別", 400)
+        order = self._order(order_id)
+        self._assert_order_printable(order, needs_artwork=False)
+        if self._finance(order_id).get("sku_id"):
+            raise PrintError("FINANCE_SKU_EXISTS", "此訂單已有不可變更的財務 SKU 快照")
+        if self.store.latest_job(order_id):
+            raise PrintError("BINDING_LOCKED", "此訂單已有列印任務，不能變更列印 SKU")
+        commerce = self.app.commerce.read()
+        shop = self.app.cloud_get_json("shop_data", self.app.DATA_FILE, self.app.DEFAULT_SHOP_DATA)
+        candidates = self._sku_candidates(order, commerce, shop)
+        if sku_id not in {row["id"] for row in candidates}:
+            raise PrintError("INVALID_PRINT_SKU", "所選 SKU 不屬於這筆訂單的型號與系列", 400)
+        return self.store.save_binding(order_id, sku_id)
+
+    @staticmethod
     def _profile_suggestion(shop, model_id, style_id):
         """Return only explicit model calibration; never use style fallbacks."""
         if not isinstance(shop, dict):
@@ -210,10 +257,21 @@ class PrintService:
                 return job
         order = self._order(order_id)
         self._assert_order_printable(order)
-        raw = self._download_artwork(order["print_path"])
         finance = self._finance(order_id)
         sku_id = str(finance.get("sku_id") or "")
+        legacy_binding = None
+        if not sku_id:
+            legacy_binding = self.store.binding(order_id)
+            sku_id = str((legacy_binding or {}).get("sku_id") or "")
+            commerce = self.app.commerce.read()
+            shop = self.app.cloud_get_json("shop_data", self.app.DATA_FILE, self.app.DEFAULT_SHOP_DATA)
+            candidates = self._sku_candidates(order, commerce, shop)
+            if not sku_id or sku_id not in {row["id"] for row in candidates}:
+                raise PrintError("SKU_BINDING_REQUIRED", "舊訂單必須先明確補綁列印 SKU")
         profile = self.store.profile(sku_id)
+        if legacy_binding and not profile:
+            raise PrintError("PROFILE_MISSING", "舊訂單補綁 SKU 後，必須先確認列印參數")
+        raw = self._download_artwork(order["print_path"])
         job = self.store.create_job(order, sku_id, profile, hashlib.sha256(raw).hexdigest(), secrets.token_urlsafe(18))
         owner, _ = self.store.claim_request(key, "prepare", job["id"], fingerprint)
         if owner:
@@ -547,14 +605,16 @@ class PrintService:
 
     def dashboard(self):
         if self.app.USE_SUPABASE:
-            fields = "id,customer_name,model_name,style_name,status,print_path,mockup_path,created_at_unix"
+            fields = "id,customer_name,model_id,model_name,style_id,style_name,status,print_path,mockup_path,created_at_unix"
             orders = self.app.SUPABASE.table("orders").select(fields).order("created_at_unix", desc=True).limit(200).execute().data or []
         else:
             orders = self.app.commerce.store.local_orders()
             orders.sort(key=lambda row: int(row.get("created_at_unix") or 0), reverse=True)
             orders = orders[:200]
-        finance = self.app.commerce.read().get("order_finance") or {}
+        commerce = self.app.commerce.read()
+        finance = commerce.get("order_finance") or {}
         shop = self.app.cloud_get_json("shop_data", self.app.DATA_FILE, self.app.DEFAULT_SHOP_DATA)
+        bindings = {row["order_id"]: row for row in self.store.bindings()}
         latest = {}
         for job in self.store.list_jobs():
             if job["order_id"] not in latest:
@@ -564,13 +624,26 @@ class PrintService:
         for order in orders:
             order_id = order["id"]
             fin = finance.get(order_id) or {}
-            sku_id = str(fin.get("sku_id") or "")
-            suggestion = self._profile_suggestion(shop, fin.get("model_id"), fin.get("style_id"))
+            finance_sku_id = str(fin.get("sku_id") or "")
+            binding = bindings.get(order_id) or {}
+            candidates = self._sku_candidates(order, commerce, shop) if not finance_sku_id else []
+            candidate_ids = {row["id"] for row in candidates}
+            binding_sku_id = str(binding.get("sku_id") or "")
+            binding_valid = bool(binding_sku_id and binding_sku_id in candidate_ids)
+            sku_id = finance_sku_id or (binding_sku_id if binding_valid else "")
+            model_id = fin.get("model_id") if finance_sku_id else order.get("model_id")
+            style_id = fin.get("style_id") if finance_sku_id else order.get("style_id")
+            suggestion = self._profile_suggestion(shop, model_id, style_id)
             result.append({
                 "order_id": order_id, "customer_name": order.get("customer_name") or "",
                 "model": order.get("model_name") or "", "style": order.get("style_name") or "",
                 "order_status": order.get("status") or "待處理", "time": order.get("created_at_unix"),
                 "has_print": bool(order.get("print_path")), "sku_id": sku_id,
+                "sku_source": "finance" if finance_sku_id else ("print_binding" if binding_valid else ""),
+                "legacy_order": not bool(finance_sku_id),
+                "binding_required": not finance_sku_id and not binding_valid,
+                "sku_candidates": candidates,
+                "suggested_sku_id": self._suggested_sku(order, candidates),
                 "profile_available": bool(sku_id and sku_id in profiles),
                 "profile_suggestion": suggestion,
                 "profile": ({key: profiles[sku_id].get(key) for key in
@@ -644,6 +717,12 @@ def install(app_module):
         profile = service.save_profile(body())
         return app_module.no_cache_json({"status": "success", "profile": profile})
 
+    @app.route("/api/admin/print/binding", methods=["POST"])
+    @guarded
+    def print_binding():
+        binding = service.save_binding(body())
+        return app_module.no_cache_json({"status": "success", "binding": binding})
+
     @app.route("/api/admin/print/prepare", methods=["POST"])
     @guarded
     def print_prepare():
@@ -716,8 +795,8 @@ def install(app_module):
         if request.path == "/admin" and response.status_code == 200 and response.mimetype == "text/html":
             response.direct_passthrough = False
             html = response.get_data(as_text=True)
-            src = "/static/admin-print-center.js?v=20260921a"
+            src = "/static/admin-print-center.js?v=20260921b"
             if src not in html:
-                response.set_data(html.replace("</body>", f'<link rel="stylesheet" href="/static/admin-print-center.css?v=20260921a"><script src="{src}"></script></body>'))
+                response.set_data(html.replace("</body>", f'<link rel="stylesheet" href="/static/admin-print-center.css?v=20260921b"><script src="{src}"></script></body>'))
             response.headers["Cache-Control"] = "no-store"
         return response

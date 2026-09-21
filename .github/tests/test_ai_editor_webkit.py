@@ -271,6 +271,17 @@ def admin_test(browser, base):
     assert '座標原點：治具右下角' in modal_text
     assert 'Channel 固定為 1' in modal_text
     page.locator('#pc-close').click()
+    legacy_order = app_module.commerce.store.local_orders()[0]
+    commerce = app_module.commerce.read()
+    assert commerce['order_finance'].pop(legacy_order['id'], None), legacy_order['id']
+    assert app_module.commerce.store.commit(int(commerce.get('revision', 0)), commerce)
+    page.locator('#pc-reload').click()
+    poll(page, "() => document.querySelector('[data-pc=\"binding\"]') !== null")
+    page.locator('[data-pc="binding"]').first.click()
+    page.locator('#pc-bind-modal.show').wait_for()
+    assert '不會修改營收／成本／庫存資料' in page.locator('#pc-bind-modal').inner_text()
+    assert page.locator('#pc-bind-sku option').count() >= 2
+    page.locator('#pc-bind-close').click()
     print('PRINT_CENTER_A5_RESPONSIVE_FAIL_CLOSED_OK')
 
     template_nav = page.locator('.nav button[data-view="templates"]')

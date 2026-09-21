@@ -21,6 +21,8 @@ The compatibility endpoint `/api/admin/print/start` always fails closed with `DE
 
 Existing model `print_w / print_h / print_x / print_y` values may appear as a suggestion only when all four are explicitly present on that model. Generic style fallback values such as `80 × 160` are never promoted to a production profile. The operator must calibrate the exact model + style and press **儲存列印參數** before the profile becomes usable.
 
+Legacy orders without `commerce_data.order_finance` must use **補綁列印 SKU** before they can enter this flow. The selection is stored only in `print_order_bindings`; it never creates or edits finance snapshots, revenue, cost, stock, or inventory ledger entries. Model/style matches and an old `style_name` colour suffix may preselect a candidate, but an operator must explicitly confirm it. A valid production profile must then be saved before a legacy order can be prepared.
+
 ## Required production configuration
 
 Set these only in the server secret manager:
@@ -46,7 +48,7 @@ Printer status code `6` remains raw-only until the vendor gives one consistent d
 ## Deployment order
 
 1. Keep `YUN_PRINT_ENABLED=false` and take a restorable Supabase database snapshot.
-2. Confirm the existing Print Phase 3.0 migration is present. Phase 3.1 adds no migration.
+2. Confirm the existing Print Phase 3.0 migration is present, then apply `20260921184801_print_order_bindings.sql`. Do not backfill bindings automatically.
 3. Verify RLS remains enabled and `anon` / `authenticated` have no privileges on all print tables; run Supabase security and performance advisors.
 4. Deploy the application with `YUN_PRINT_ENABLED=false` and the HTTPS/token settings present. Confirm the reverse proxy redacts `/api/print/artwork/*`; the repository Gunicorn config already omits request paths.
 5. Calibrate and explicitly save one production profile for the exact model + style. Do not accept a suggested value without physical measurement.
