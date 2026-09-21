@@ -15,7 +15,7 @@
 營運標準：
 
 - 客人只需要負責選商品、設計與送出訂單。
-- 員工主要負責看訂單、確認生產與開始列印。
+- 員工主要負責看訂單、確認生產、送到銳印，並在銳印軟體人工確認打印。
 - 尺寸、高清圖、檔案格式、訂單資料、成本、庫存、打印任務與狀態盡量由系統自動處理。
 - 不要把前台、後台、POS、庫存、打印拆成彼此不相干的系統；它們應共用一致的商品、訂單與生產資料模型。
 
@@ -259,24 +259,18 @@
 - 根據實際手機殼打印區域、mask/cutout 與實體尺寸產生 print-ready artwork。
 - 預覽圖與生產圖是不同用途。
 
-### 在真正自動打印前必須確認
+### A5 Desktop 已確認規格
 
-- 支援檔案格式（PNG/JPG/其他）
-- PNG transparency 是否支援
-- 最大檔案尺寸/解析度
-- 實際 mm 尺寸
-- DPI
-- RGB / CMYK
-- ICC profile
-- 白墨
-- 光油/varnish
-- spot color 的實際值與語意
-- bleed
-- 相機孔/裁切遮罩
-- width/height/left/top 的座標原點
-- A5 UV 實際可打印區域
+- Vendor 支援 PNG / JPG / TIF；本站 canonical production artwork 維持 PNG。
+- 支援透明 PNG，使用 RGB，不指定 ICC。
+- 建議檔案小於 20 MB、像素尺寸不超過 8000 × 8000、300–900 DPI；這些是品質建議，不是網站 hard limit。
+- A5 有效打印範圍為 200 × 230 mm。
+- `width / height / left / top` 依治具坐標，原點在治具右下角。
+- A5 Desktop 的 channel 固定為 `1`。
+- 網站不指定 spot color；白彩與光油由店員在銳印實際打印時選擇。
+- 每個手機型號與殼款仍需以真機校正實際尺寸與定位，angle 也尚未獲得正式確認。
 
-在這些規格沒有確認前，不要假裝「720 DPI 圖」就等於已符合機台生產標準。
+不要把 DPI 建議或既有通用 `80 × 160` fallback 當成已完成的真機校正。
 
 ---
 
@@ -311,7 +305,7 @@
 - Order lifecycle 與 Print Job lifecycle 分離。
 - 一張訂單未來可以安全地處理失敗、重印等情況，而不破壞訂單商務資料。
 - 準備任務與真正開始實體打印分開。
-- 正式上線初期優先採「員工確認後按開始打印」，不要客人一下單就自動讓機台出墨。
+- A5 Desktop 在網站送出 `receiveTask` 後，由店員到銳印軟體人工確認；網站不呼叫 `startPrint` 或 `pushPrint`。
 - 一旦已開始物理打印，不應假設取消一定有效。
 - 必須有 idempotency / duplicate-print protection；重試 API 不能變成印兩次。
 
@@ -351,12 +345,12 @@
 ### 已知主要 API
 
 - `POST /api/Device/receiveTask`：建立/推送打印任務
-- `POST /api/Device/startPrint`：依 taskid 開始打印
+- `POST /api/Device/startPrint`：其他機型可能使用；A5 Desktop active workflow 禁止呼叫
 - `POST /api/Device/cancelTask`：取消尚未打印任務
 - `POST /api/Device/cancelAllTask`
 - `POST /api/Device/getAllTasks`：取得未打印任務，適合 reconciliation
 - `POST /api/Device/getStocks`：設備/channel stock；不要直接等同店內 SKU 庫存
-- `POST /api/Device/pushPrint`：文件用途與 `startPrint` 差異仍需廠商確認
+- `POST /api/Device/pushPrint`：偏自助機流程；A5 Desktop 不使用
 - 清噴頭 / restart / shutdown / maintenance mode 等設備控制 API，非第一階段必要功能
 
 ### receiveTask 重要資料
@@ -369,8 +363,7 @@
 - copies
 - width / height (mm)
 - left / top (mm)
-- spot_color
-- channel
+- channel（A5 Desktop 固定為 `1`）
 - angle
 - callback URL
 
@@ -382,7 +375,7 @@
 
 `/api/print/callback`
 
-接收 taskid 與打印狀態。已知狀態包含 waiting/printing/completed/canceled/fault，以及 feed/output/positioning/stock 等錯誤狀況。
+接收 taskid 與打印狀態。A5 Desktop 店員在銳印確認後會先回傳 `1=打印中`，完成後回傳 `2=打印完成`；其他失敗狀態繼續保存 raw status/msg。
 
 Callback 必須：
 
@@ -405,19 +398,13 @@ Callback 必須：
 
 目前廠商文件對 printer status code `6` 的表格與文字說明有矛盾，實作前必須向廠商確認；在確認前保存 raw code + raw msg，不要硬轉成錯誤語意。
 
-### 仍需廠商回答
+### 仍需真機確認
 
-1. `receiveTask` 後，任務是否會直接出現在現有「銳印」軟體？出現在哪裡？
-2. 人工確認後再打印應使用 `receiveTask + startPrint` 還是 `receiveTask + pushPrint`？
-3. `pushPrint` 與 `startPrint` 的精確差別。
-4. file 支援格式、透明 PNG、最大 MB/解析度。
-5. 推薦 DPI、RGB/CMYK、ICC。
-6. width/height/left/top 原點與 A5 UV 可打印範圍。
-7. spot_color 可用值，以及白墨/彩墨/光油語意。
-8. channel 是否適用此 A5 UV，如何 mapping。
-9. printerCallback URL 要交給哪個廠商端綁定。
-10. 是否有 sandbox / test device，不會真的實體打印。
-11. printer status code 6 到底代表什麼。
+1. 各 model + style 的 `width / height / left / top` 實際校正值。
+2. angle 的實際值；確認前保留店員明確設定或預設 `0`。
+3. 是否有不會出墨的 sandbox / test device。
+4. `getAllTasks` 的任務保留範圍與已打印任務行為。
+5. printer status code `6` 的正式語意。
 
 ---
 
@@ -432,12 +419,10 @@ Callback 必須：
 5. 後台顯示「可生產/缺資料/生產檔錯誤」等準備狀態。
 6. 員工按「準備打印」。
 7. Backend 呼叫 `receiveTask`，保存 vendor `taskid`。
-8. 打印中心顯示等待狀態與設備狀態。
-9. 員工確認後按「開始打印」。
-10. Backend 呼叫 `startPrint`（若廠商確認應使用其他 API，依文件/回覆調整）。
-11. Vendor callback 更新 Print Job 狀態。
-12. 完成後同步顯示訂單/打印完成狀態。
-13. callback 遺失或服務重啟時，可用 `getAllTasks` 等 API 做 reconciliation。
+8. 打印中心顯示「等待銳印確認」與設備狀態。
+9. 店員在銳印軟體人工確認後，A5 Desktop 才開始實體打印。
+10. Vendor callback `1` 將 Print Job 與訂單同步為打印中，callback `2` 同步為完成。
+11. callback 遺失或服務重啟時，可用 `getAllTasks` 等 API 做 reconciliation；不得盲目重送。
 
 ---
 
