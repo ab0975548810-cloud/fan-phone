@@ -2,7 +2,7 @@
   'use strict';
   if(window.__benfuwanPrintCenterInstalled)return;
   window.__benfuwanPrintCenterInstalled=true;
-  let rows=[],busy=false,query='',editing=null;
+  let rows=[],busy=false,query='',editing=null,bindingEditing=null;
   const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const stateClass=s=>s==='UNKNOWN'?'unknown':(s==='FAILED'?'failed':'');
   const date=v=>{if(!v)return '—';const d=typeof v==='number'?new Date(v*1000):new Date(v);return isNaN(d)?'—':new Intl.DateTimeFormat('zh-TW',{timeZone:'Asia/Taipei',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(d)};
@@ -35,13 +35,22 @@
       </div><div class="pc-dialog-actions"><button class="btn alt" id="pc-close">取消</button><button class="btn" id="pc-save">儲存列印參數</button></div></div>`;document.body.appendChild(modal);
       modal.querySelector('#pc-close').onclick=()=>modal.classList.remove('show');modal.querySelector('#pc-save').onclick=saveProfile;
     }
+    if(!document.getElementById('pc-bind-modal')){
+      const modal=document.createElement('div');modal.id='pc-bind-modal';modal.className='pc-modal';modal.innerHTML=`<div class="pc-dialog pc-bind-dialog"><div class="pc-dialog-head">補綁列印 SKU</div><div class="pc-form">
+        <div id="pc-bind-order" class="pc-spec" style="grid-column:1/-1"></div>
+        <div class="pc-suggestion suggested" style="grid-column:1/-1">此為舊訂單，先選擇列印用 SKU，不會修改營收／成本／庫存資料。系統建議只供預選，仍須由店員按下儲存確認。</div>
+        <div class="pc-field" style="grid-column:1/-1"><label for="pc-bind-sku">列印用 SKU</label><select id="pc-bind-sku"></select></div>
+      </div><div class="pc-dialog-actions"><button class="btn alt" id="pc-bind-close">取消</button><button class="btn" id="pc-bind-save">確認補綁</button></div></div>`;document.body.appendChild(modal);
+      modal.querySelector('#pc-bind-close').onclick=()=>modal.classList.remove('show');modal.querySelector('#pc-bind-save').onclick=saveBinding;
+    }
   }
 
   function card(row){
     const j=row.job||null,state=j?.state||'',isVoid=row.order_status==='作廢';
     const thumb=row.preview_url?`<img class="pc-thumb" loading="lazy" src="${esc(row.preview_url)}" alt="訂單預覽">`:'<div class="pc-thumb pc-thumb-empty">無預覽</div>';
     let actions='';
-    if(!j&&!isVoid&&row.has_print)actions+=`<button class="primary" data-pc="prepare" data-order="${esc(row.order_id)}">準備任務</button>`;
+    if(row.binding_required&&!isVoid)actions+=`<button class="primary" data-pc="binding" data-order="${esc(row.order_id)}">補綁列印 SKU</button>`;
+    if(!j&&!isVoid&&row.has_print&&row.sku_id&&(!row.legacy_order||row.profile_available))actions+=`<button class="primary" data-pc="prepare" data-order="${esc(row.order_id)}">準備任務</button>`;
     if(row.sku_id)actions+=`<button data-pc="profile" data-order="${esc(row.order_id)}">設定列印參數</button>`;
     if(j?.state==='PREPARED'&&!j.profile_complete&&row.profile_available)actions+=`<button data-pc="snapshot" data-job="${esc(j.id)}">套用參數快照</button>`;
     if(j?.state==='PREPARED'&&j.profile_complete)actions+=`<button class="primary" data-pc="send" data-job="${esc(j.id)}" ${window.pcVendorReady?'':'disabled title="雲打印未啟用"'}>送到銳印</button>`;
@@ -50,7 +59,7 @@
     if(j&&['UNKNOWN','SENDING','QUEUED','STARTING','PRINTING','CANCELING'].includes(j.state))actions+=`<button data-pc="reconcile" data-job="${esc(j.id)}" ${window.pcVendorConnected?'':'disabled'}>查核雲端</button>`;
     return `<article class="pc-card${isVoid?' void':''}">${thumb}<div><div class="pc-id">${esc(row.order_id)}</div><div class="pc-meta"><b>${esc(row.model)}</b>・${esc(row.style)}<br>${esc(row.customer_name)}｜${esc(row.order_status)}｜${date(row.time)}</div><div class="pc-badges">
       <span class="pc-badge ${row.has_print?'ok':'bad'}">${row.has_print?'有高清生產圖':'缺生產圖'}</span><span class="pc-badge ${row.profile_available?'ok':'bad'}">${row.profile_available?'參數已設定':'列印參數未設定'}</span>${j?`<span class="pc-badge pc-state ${stateClass(state)}">${esc(j.state_label)}</span>`:''}</div>
-      ${j?.vendor_taskid?`<div class="pc-raw">taskid：${esc(j.vendor_taskid)}｜raw ${esc(j.vendor_raw_status||'—')} ${esc(j.vendor_raw_message||'')}</div>`:''}${j?.last_error?`<div class="pc-error">${esc(j.last_error)}</div>`:''}
+      ${row.legacy_order?'<div class="pc-legacy-note">此為舊訂單，先選擇列印用 SKU，不會修改營收／成本／庫存資料。</div>':''}${j?.vendor_taskid?`<div class="pc-raw">taskid：${esc(j.vendor_taskid)}｜raw ${esc(j.vendor_raw_status||'—')} ${esc(j.vendor_raw_message||'')}</div>`:''}${j?.last_error?`<div class="pc-error">${esc(j.last_error)}</div>`:''}
       <div class="pc-actions">${actions||'<span class="pc-raw">目前沒有可執行操作</span>'}</div></div></article>`;
   }
   function filtered(){if(!query)return rows;return rows.filter(r=>[r.order_id,r.customer_name,r.model,r.style,r.order_status,r.job?.vendor_taskid,r.job?.state_label].join(' ').toLowerCase().includes(query))}
@@ -61,7 +70,9 @@
   async function operate(name,id,field='job_id'){
     const k=opKey(name,id);try{await json('/api/admin/print/'+(name==='snapshot'?'profile-snapshot':name),{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':k.value},body:JSON.stringify({[field]:id,idempotency_key:k.value})});sessionStorage.removeItem(k.slot);await load(true)}catch(e){if(e.code!=='RECONCILE_REQUIRED')sessionStorage.removeItem(k.slot);alert(e.message)}
   }
-  function onAction(event){const b=event.target.closest('[data-pc]');if(!b||b.disabled)return;const name=b.dataset.pc;if(name==='profile')return openProfile(b.dataset.order);if(name==='send'&&!confirm('確定把任務送到銳印？送出後仍需店員在銳印人工確認才會打印。'))return;if(name==='cancel'&&!confirm('只能安全取消尚未開始打印的等待任務，確定取消？'))return;operate(name,name==='prepare'?b.dataset.order:b.dataset.job,name==='prepare'?'order_id':'job_id')}
+  function onAction(event){const b=event.target.closest('[data-pc]');if(!b||b.disabled)return;const name=b.dataset.pc;if(name==='binding')return openBinding(b.dataset.order);if(name==='profile')return openProfile(b.dataset.order);if(name==='send'&&!confirm('確定把任務送到銳印？送出後仍需店員在銳印人工確認才會打印。'))return;if(name==='cancel'&&!confirm('只能安全取消尚未開始打印的等待任務，確定取消？'))return;operate(name,name==='prepare'?b.dataset.order:b.dataset.job,name==='prepare'?'order_id':'job_id')}
+  function openBinding(orderId){const row=rows.find(x=>x.order_id===orderId);if(!row?.legacy_order)return alert('這筆訂單已有財務 SKU 快照，不需要補綁');bindingEditing=row;const select=document.getElementById('pc-bind-sku'),candidates=row.sku_candidates||[];document.getElementById('pc-bind-order').textContent=`訂單 ${row.order_id}｜${row.model}・${row.style}`;select.innerHTML='<option value="">請選擇型號、系列與顏色完全相符的 SKU</option>'+candidates.map(s=>`<option value="${esc(s.id)}">${esc(s.model)}｜${esc(s.style)}｜${esc(s.color||'無顏色')}</option>`).join('');select.value=row.suggested_sku_id||'';select.disabled=!candidates.length;if(!candidates.length)select.innerHTML='<option value="">目前找不到相符的 commerce SKU</option>';document.getElementById('pc-bind-save').disabled=!candidates.length;document.getElementById('pc-bind-modal').classList.add('show')}
+  async function saveBinding(){if(!bindingEditing)return;const skuId=document.getElementById('pc-bind-sku').value;if(!skuId)return alert('請明確選擇列印用 SKU');try{await json('/api/admin/print/binding',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({order_id:bindingEditing.order_id,sku_id:skuId})});document.getElementById('pc-bind-modal').classList.remove('show');await load(true)}catch(e){alert(e.message)}}
   function openProfile(orderId){const row=rows.find(x=>x.order_id===orderId);if(!row?.sku_id)return alert('這筆訂單沒有可靠的 SKU 財務快照，不能猜列印參數');editing=row;const saved=row.profile||null,suggestion=row.profile_suggestion||null,p=saved||suggestion||{};document.getElementById('pc-sku').value=row.sku_id;document.getElementById('pc-width').value=p.width_mm??'';document.getElementById('pc-height').value=p.height_mm??'';document.getElementById('pc-left').value=p.left_mm??'';document.getElementById('pc-top').value=p.top_mm??'';document.getElementById('pc-copies').value=saved?.copies??1;document.getElementById('pc-angle').value=saved?.angle??0;const note=document.getElementById('pc-suggestion');note.className='pc-suggestion '+(saved?'saved':suggestion?'suggested':'missing');note.textContent=saved?'目前顯示已儲存的正式 SKU 列印參數。':suggestion?`${suggestion.source}。${suggestion.notice}；按「儲存列印參數」後才會成為正式設定。`:'目前沒有可靠的 model + style 建議值，請完成真機量測後填寫；系統不會套用通用 80×160。';document.getElementById('pc-modal').classList.add('show')}
   async function saveProfile(){if(!editing)return;const payload={sku_id:document.getElementById('pc-sku').value,width_mm:document.getElementById('pc-width').value,height_mm:document.getElementById('pc-height').value,left_mm:document.getElementById('pc-left').value,top_mm:document.getElementById('pc-top').value,copies:document.getElementById('pc-copies').value,angle:document.getElementById('pc-angle').value};try{await json('/api/admin/print/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});document.getElementById('pc-modal').classList.remove('show');if(editing.job?.state==='PREPARED'&&!editing.job.profile_complete&&confirm('列印參數已儲存。要明確套用為這筆尚未送出的固定快照嗎？'))await operate('snapshot',editing.job.id);else await load(true)}catch(e){alert(e.message)}}
   function boot(){install()}

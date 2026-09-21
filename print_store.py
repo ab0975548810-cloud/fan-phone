@@ -45,6 +45,10 @@ class PrintStore:
                     spot_color TEXT NOT NULL, channel TEXT NOT NULL, angle REAL NOT NULL,
                     active INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS print_order_bindings (
+                    order_id TEXT PRIMARY KEY, sku_id TEXT NOT NULL,
+                    source TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS print_jobs (
                     id TEXT PRIMARY KEY, order_id TEXT NOT NULL, attempt_no INTEGER NOT NULL,
                     sku_id TEXT, vendor_taskid TEXT, artwork_path TEXT NOT NULL,
@@ -119,6 +123,41 @@ class PrintStore:
             return self.app.SUPABASE.table("production_profiles").select("*").eq("active", True).execute().data or []
         with self.connection() as db:
             return [self._decode(row) for row in db.execute("SELECT * FROM production_profiles WHERE active=1")]
+
+    def binding(self, order_id):
+        if not order_id:
+            return None
+        if self.app.USE_SUPABASE:
+            rows = (self.app.SUPABASE.table("print_order_bindings").select("*")
+                    .eq("order_id", order_id).limit(1).execute().data or [])
+            return rows[0] if rows else None
+        with self.connection() as db:
+            return self._decode(db.execute(
+                "SELECT * FROM print_order_bindings WHERE order_id=?", (order_id,)
+            ).fetchone())
+
+    def bindings(self):
+        if self.app.USE_SUPABASE:
+            return self.app.SUPABASE.table("print_order_bindings").select("*").execute().data or []
+        with self.connection() as db:
+            return [self._decode(row) for row in db.execute("SELECT * FROM print_order_bindings")]
+
+    def save_binding(self, order_id, sku_id, source="ADMIN_CONFIRMED"):
+        now = utcnow()
+        row = {"order_id": order_id, "sku_id": sku_id, "source": source, "updated_at": now}
+        if self.app.USE_SUPABASE:
+            existing = self.binding(order_id)
+            row["created_at"] = existing.get("created_at") if existing else now
+            self.app.SUPABASE.table("print_order_bindings").upsert(row).execute()
+            return self.binding(order_id)
+        with self.connection(True) as db:
+            old = db.execute("SELECT created_at FROM print_order_bindings WHERE order_id=?", (order_id,)).fetchone()
+            row["created_at"] = old[0] if old else now
+            db.execute("""INSERT INTO print_order_bindings (order_id,sku_id,source,created_at,updated_at)
+                VALUES (:order_id,:sku_id,:source,:created_at,:updated_at)
+                ON CONFLICT(order_id) DO UPDATE SET sku_id=excluded.sku_id,
+                source=excluded.source,updated_at=excluded.updated_at""", row)
+        return self.binding(order_id)
 
     def save_profile(self, profile):
         now = utcnow()

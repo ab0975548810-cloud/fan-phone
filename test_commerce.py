@@ -91,7 +91,7 @@ class CommerceTests(unittest.TestCase):
         if os.environ.get('TEST_POSTGRES_DSN'):
             import psycopg
             with psycopg.connect(os.environ['TEST_POSTGRES_DSN']) as db:
-                db.execute('TRUNCATE orders, app_store')
+                db.execute('TRUNCATE print_order_bindings, orders, app_store')
         self.client = app.app.test_client()
         with self.client.session_transaction() as session:
             session['logged_in'] = True
