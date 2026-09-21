@@ -253,6 +253,7 @@ def admin_test(browser, base):
     print_nav.click()
     poll(page, "() => document.querySelectorAll('#pc-grid .pc-card').length>0 && document.getElementById('view-print-center').classList.contains('active')")
     assert page.locator('#pc-config').get_attribute('class').find('warn') >= 0
+    assert page.locator('[data-pc="start"]').count() == 0
     for width, height in ((390,844),(768,1024),(1440,900)):
         page.set_viewport_size(dict(width=width,height=height))
         metrics = page.evaluate("""() => ({
@@ -262,7 +263,15 @@ def admin_test(browser, base):
           secrets:document.getElementById('view-print-center').textContent.includes('fake-key')
         })""")
         assert metrics['scroll'] <= width + 2 and metrics['view'] > 200 and metrics['cards'] > 0 and not metrics['secrets'], metrics
-    print('PRINT_CENTER_RESPONSIVE_FAIL_CLOSED_OK')
+    profile_button = page.locator('[data-pc="profile"]').first
+    profile_button.click()
+    page.locator('#pc-modal.show').wait_for()
+    modal_text = page.locator('#pc-modal').inner_text()
+    assert 'A5 有效範圍：200 × 230 mm' in modal_text
+    assert '座標原點：治具右下角' in modal_text
+    assert 'Channel 固定為 1' in modal_text
+    page.locator('#pc-close').click()
+    print('PRINT_CENTER_A5_RESPONSIVE_FAIL_CLOSED_OK')
 
     template_nav = page.locator('.nav button[data-view="templates"]')
     template_nav.click()

@@ -98,7 +98,7 @@ class PrintCenterTests(unittest.TestCase):
         response = self.client.post("/api/admin/print/profile", json={
             "sku_id": self.sku_id, "width_mm": 80, "height_mm": 160,
             "left_mm": 1.5, "top_mm": 2.5, "copies": 1,
-            "spot_color": "white", "channel": "A", "angle": 0,
+            "spot_color": "must-be-ignored", "channel": "must-be-ignored", "angle": 0,
         })
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
 
@@ -107,8 +107,8 @@ class PrintCenterTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         return response.get_json()["job"]
 
-    def send(self, job_id, key=None):
-        self.fake.responses["/api/Device/receiveTask"] = {"code": 0, "data": {"taskid": "task-fixture", "status": 0}}
+    def send(self, job_id, key=None, taskid="task-fixture"):
+        self.fake.responses["/api/Device/receiveTask"] = {"code": 0, "data": {"taskid": taskid, "status": 0}}
         return self.post("send", {"job_id": job_id}, key)
 
     def callback(self, taskid, status, msg="fixture", valid=True):
@@ -142,7 +142,8 @@ class PrintCenterTests(unittest.TestCase):
         self.assertEqual(response.get_json()["code"], "VENDOR_NOT_READY")
         app.print_center.store.patch_job(job["id"], {"state": "QUEUED", "vendor_taskid": "fixture-disabled"})
         response = self.post("start", {"job_id": job["id"]})
-        self.assertEqual((response.status_code, response.get_json()["code"]), (503, "VENDOR_NOT_READY"))
+        self.assertEqual((response.status_code, response.get_json()["code"]), (409, "DESKTOP_MANUAL_CONFIRMATION"))
+        self.assertFalse(any(path == "/api/Device/startPrint" for path, _ in self.fake.calls))
 
     def test_enabled_vendor_requires_explicit_https_url_and_token_secret(self):
         self.save_profile();job = self.prepare()
@@ -154,7 +155,7 @@ class PrintCenterTests(unittest.TestCase):
         self.assertEqual((response.status_code, response.get_json()["code"]), (503, "VENDOR_NOT_READY"))
         app.print_center.store.patch_job(job["id"], {"state": "QUEUED", "vendor_taskid": "secure-config-task"})
         response = self.post("start", {"job_id": job["id"]})
-        self.assertEqual((response.status_code, response.get_json()["code"]), (503, "VENDOR_NOT_READY"))
+        self.assertEqual((response.status_code, response.get_json()["code"]), (409, "DESKTOP_MANUAL_CONFIRMATION"))
         self.assertFalse(any(path in ("/api/Device/receiveTask", "/api/Device/startPrint") for path, _ in self.fake.calls))
 
     def test_vendor_artwork_token_is_job_scoped_png_and_revoked_terminal(self):
@@ -175,6 +176,12 @@ class PrintCenterTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         stored = app.print_center.store.job(job["id"])
         self.assertEqual((stored["state"], stored["vendor_taskid"], stored["width_mm"]), ("QUEUED", "task-fixture", 80.0))
+        self.assertEqual((stored["channel"], stored["spot_color"]), ("1", ""))
+        receives = [payload for path, payload in self.fake.calls if path == "/api/Device/receiveTask"]
+        self.assertEqual(len(receives), 1)
+        self.assertEqual(receives[0]["channel"], "1")
+        self.assertNotIn("spot_color", receives[0])
+        self.assertFalse(any(path in ("/api/Device/startPrint", "/api/Device/pushPrint") for path, _ in self.fake.calls))
         self.assertNotIn("fake-key", str(stored))
 
     def test_receive_timeout_locks_unknown_reconcile_recovers_without_resend(self):
@@ -194,23 +201,25 @@ class PrintCenterTests(unittest.TestCase):
         stored = app.print_center.store.job(job["id"])
         self.assertEqual((stored["state"], stored["vendor_taskid"]), ("QUEUED", "recovered-task"))
 
-    def test_start_duplicate_calls_vendor_once(self):
+    def test_start_endpoint_is_always_manual_confirmation_and_never_calls_vendor(self):
         self.save_profile();job = self.prepare();self.assertEqual(self.send(job["id"]).status_code, 200)
-        self.fake.responses["/api/Device/startPrint"] = {"code": 0, "data": {"status": 1}}
         key = "start-fixed-000000001"
-        self.assertEqual(self.post("start", {"job_id": job["id"]}, key).status_code, 200)
-        self.assertEqual(self.post("start", {"job_id": job["id"]}, key).status_code, 200)
-        self.assertEqual(len([c for c in self.fake.calls if c[0] == "/api/Device/startPrint"]), 1)
+        first = self.post("start", {"job_id": job["id"]}, key)
+        second = self.post("start", {"job_id": job["id"]}, key)
+        self.assertEqual((first.status_code, first.get_json()["code"]), (409, "DESKTOP_MANUAL_CONFIRMATION"))
+        self.assertEqual((second.status_code, second.get_json()["code"]), (409, "DESKTOP_MANUAL_CONFIRMATION"))
+        self.assertEqual(app.print_center.store.job(job["id"])["state"], "QUEUED")
+        self.assertFalse(any(path in ("/api/Device/startPrint", "/api/Device/pushPrint") for path, _ in self.fake.calls))
 
     def test_malformed_success_and_unconfirmed_cancel_become_unknown(self):
         with self.assertRaises(VendorAmbiguous):
             YunPrintClient._unpack({})
-        self.save_profile();job = self.prepare();self.assertEqual(self.send(job["id"]).status_code, 200)
-        self.fake.responses["/api/Device/startPrint"] = {}
-        response = self.post("start", {"job_id": job["id"]})
+        self.save_profile();job = self.prepare()
+        self.fake.responses["/api/Device/receiveTask"] = {}
+        response = self.post("send", {"job_id": job["id"]})
         self.assertEqual((response.status_code, response.get_json()["code"]), (503, "RECONCILE_REQUIRED"))
         self.assertEqual(app.print_center.store.job(job["id"])["state"], "UNKNOWN")
-        app.print_center.store.patch_job(job["id"], {"state": "QUEUED", "ambiguous_operation": None})
+        app.print_center.store.patch_job(job["id"], {"state": "QUEUED", "vendor_taskid": "task-fixture", "ambiguous_operation": None})
         self.fake.responses["/api/Device/cancelTask"] = {"code": 0, "data": {}}
         response = self.post("cancel", {"job_id": job["id"]})
         self.assertEqual((response.status_code, response.get_json()["code"]), (503, "RECONCILE_REQUIRED"))
@@ -227,6 +236,21 @@ class PrintCenterTests(unittest.TestCase):
         self.assertEqual(self.post("reconcile", {"job_id": job["id"]}).status_code, 200)
         self.assertEqual(app.print_center.store.job(job["id"])["state"], "UNKNOWN")
         self.assertFalse(any(path in ("/api/Device/receiveTask", "/api/Device/cancelTask") for path, _ in self.fake.calls))
+
+    def test_cancel_is_available_while_waiting_and_blocked_after_printing_callback(self):
+        self.save_profile();job = self.prepare();self.assertEqual(self.send(job["id"], taskid="cancel-waiting").status_code, 200)
+        self.fake.responses["/api/Device/cancelTask"] = {"code": 0, "data": {"status": 3}}
+        self.assertEqual(self.post("cancel", {"job_id": job["id"]}).status_code, 200)
+        self.assertEqual(app.print_center.store.job(job["id"])["state"], "CANCELED")
+        cancel_calls = len([path for path, _ in self.fake.calls if path == "/api/Device/cancelTask"])
+
+        self.order_id = self.create_order();job = self.prepare()
+        self.assertEqual(self.send(job["id"], taskid="printing-task").status_code, 200)
+        self.assertEqual(self.callback("printing-task", 1).status_code, 200)
+        blocked = self.post("cancel", {"job_id": job["id"]})
+        self.assertEqual((blocked.status_code, blocked.get_json()["code"]), (409, "BAD_PRINT_STATE"))
+        self.assertEqual(app.print_center.store.job(job["id"])["state"], "PRINTING")
+        self.assertEqual(len([path for path, _ in self.fake.calls if path == "/api/Device/cancelTask"]), cancel_calls)
 
     def test_callbacks_are_authenticated_idempotent_and_complete_order_safely(self):
         self.save_profile();job = self.prepare();self.assertEqual(self.send(job["id"]).status_code, 200)
@@ -248,6 +272,32 @@ class PrintCenterTests(unittest.TestCase):
         with app.print_center.store.connection() as db:
             self.assertEqual(db.execute("SELECT count(*) FROM print_events WHERE job_id=?", (job["id"],)).fetchone()[0], 3)
 
+    def test_model_calibration_is_suggestion_only_and_generic_style_defaults_are_not_guessed(self):
+        dashboard = self.client.get("/api/admin/print/jobs").get_json()
+        row = next(item for item in dashboard["rows"] if item["order_id"] == self.order_id)
+        self.assertIsNone(row["profile_suggestion"])
+        self.assertEqual(dashboard["platform"]["print_area_mm"], {"width": 200, "height": 230})
+        self.assertEqual(dashboard["platform"]["coordinate_origin"], "治具右下角")
+
+        shop = app.local_load_json(app.DATA_FILE, app.DEFAULT_SHOP_DATA)
+        model = next(item for item in shop["models"] if item["id"] == app.DEFAULT_SHOP_DATA["models"][0]["id"])
+        model.update(print_w=71.25, print_h=148.5, print_x=3.25, print_y=4.75)
+        app.local_save_json(app.DATA_FILE, shop)
+        dashboard = self.client.get("/api/admin/print/jobs").get_json()
+        row = next(item for item in dashboard["rows"] if item["order_id"] == self.order_id)
+        self.assertEqual(row["profile_suggestion"]["width_mm"], 71.25)
+        self.assertIn("iPhone 11 蒙版設定", row["profile_suggestion"]["source"])
+        self.assertFalse(row["profile_available"])
+        job = self.prepare()
+        self.assertFalse(job["profile_complete"])
+
+    def test_print_center_ui_has_a5_guidance_and_no_start_action(self):
+        source = (Path(__file__).parent / "static" / "admin-print-center.js").read_text(encoding="utf-8")
+        self.assertNotIn('data-pc="start"', source)
+        self.assertIn("A5 有效範圍：200 × 230 mm", source)
+        self.assertIn("座標原點：治具右下角", source)
+        self.assertIn("送到銳印", source)
+
     def test_fault_statuses_and_printer_status_six_keep_raw_values(self):
         self.save_profile();job = self.prepare();self.assertEqual(self.send(job["id"]).status_code, 200)
         for status in (3, 4, 5, 6, 7, 8, 11, 12, 99):
@@ -263,13 +313,13 @@ class PrintCenterTests(unittest.TestCase):
             row = db.execute("SELECT raw_status,raw_message FROM printer_status_events").fetchone()
             self.assertEqual(tuple(row), ("6", "vendor ambiguous six"))
 
-    def test_void_order_cannot_prepare_or_start_and_late_callback_does_not_restore(self):
+    def test_void_order_cannot_prepare_and_late_callback_does_not_restore(self):
         self.assertEqual(self.client.post("/api/admin/order_action", json={"order_id": self.order_id, "action": "void", "idempotency_key": "void-order-000000001"}).status_code, 200)
         response = self.post("prepare", {"order_id": self.order_id})
         self.assertEqual((response.status_code, response.get_json()["code"]), (409, "VOID_ORDER"))
         other = self.create_order();self.order_id = other;self.save_profile();job = self.prepare();self.assertEqual(self.send(job["id"]).status_code, 200)
         self.assertEqual(self.client.post("/api/admin/order_action", json={"order_id": other, "action": "void", "idempotency_key": "void-order-000000002"}).status_code, 200)
-        self.assertEqual(self.post("start", {"job_id": job["id"]}).get_json()["code"], "VOID_ORDER")
+        self.assertEqual(self.post("start", {"job_id": job["id"]}).get_json()["code"], "DESKTOP_MANUAL_CONFIRMATION")
         self.assertEqual(self.callback("task-fixture", 2, "late complete").status_code, 200)
         self.assertEqual(app.commerce.store.order(other)["status"], "作廢")
 

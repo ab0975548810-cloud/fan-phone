@@ -134,8 +134,10 @@ class YunPrintClient:
             "height": job["height_mm"],
             "left": job["left_mm"],
             "top": job["top_mm"],
-            "spot_color": job["spot_color"],
-            "channel": job["channel"],
+            # A5 Desktop chooses white/colour/varnish in Ruiyin. The website
+            # must not prescribe a spot-colour mode, and this device channel is
+            # fixed by the vendor at 1 even for legacy stored profiles.
+            "channel": "1",
             "angle": job["angle"],
             "callback": callback_url,
         })
