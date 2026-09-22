@@ -433,6 +433,86 @@ class PrintCenterTests(unittest.TestCase):
                 self.assertEqual(app.print_center.store.job(job_before["id"]), job_before)
                 self.assertEqual(app.commerce.read(), commerce_before)
 
+    def test_new_order_is_durably_prepared_then_received_once_in_background(self):
+        self.save_profile()
+        self.fake.responses["/api/Device/receiveTask"] = {
+            "code": 0, "data": {"taskid": "auto-task-one", "status": 0}}
+        order_id = self.create_order()
+        job = app.print_center.store.latest_job(order_id)
+        self.assertEqual(job["state"], "PREPARED")
+        self.assertEqual([path for path, _ in self.fake.calls if path == "/api/Device/receiveTask"], [])
+        self.assertEqual(len(app.print_center.store.auto_prepared_jobs()), 1)
+
+        app.print_center.dispatch_auto_once()
+        app.print_center.dispatch_auto_once()
+        stored = app.print_center.store.latest_job(order_id)
+        self.assertEqual((stored["state"], stored["vendor_taskid"]), ("QUEUED", "auto-task-one"))
+        self.assertEqual(len([path for path, _ in self.fake.calls if path == "/api/Device/receiveTask"]), 1)
+        self.assertFalse(any(path in ("/api/Device/startPrint", "/api/Device/pushPrint") for path, _ in self.fake.calls))
+
+    def test_checkout_retry_and_redeploy_drain_do_not_duplicate_vendor_task(self):
+        self.save_profile()
+        self.fake.responses["/api/Device/receiveTask"] = {
+            "code": 0, "data": {"taskid": "auto-task-replay", "status": 0}}
+        key = "checkout-auto-replay-0001"
+        payload = {
+            "idempotency_key": key, "print_file": PNG, "mockup_file": PNG,
+            "model_id": app.DEFAULT_SHOP_DATA["models"][0]["id"],
+            "style_id": app.DEFAULT_SHOP_DATA["styles"][0]["id"], "color_name": "透明",
+            "quantity": 1, "customer_name": "重送測試", "payment_method": "現金", "design_json": {},
+        }
+        first_response = self.client.post("/api/create_order", json=payload)
+        second_response = self.client.post("/api/create_order", json=payload)
+        self.assertEqual((first_response.status_code, second_response.status_code), (200, 200))
+        order_id = first_response.get_json()["order_id"]
+        self.assertEqual(second_response.get_json()["order_id"], order_id)
+        first = app.print_center.store.latest_job(order_id)
+        second = app.print_center.enqueue_auto(order_id)["job"]
+        self.assertEqual(first["id"], second["id"])
+        self.assertEqual(len(app.print_center.store.list_jobs()), 1)
+
+        app.print_center.dispatch_auto_once()
+        app.print_center.dispatch_auto_once()
+        self.assertEqual(len([path for path, _ in self.fake.calls if path == "/api/Device/receiveTask"]), 1)
+
+    def test_auto_handoff_skips_missing_profile_disabled_vendor_and_history(self):
+        self.assertIsNone(app.print_center.store.latest_job(self.order_id))
+        self.save_profile()
+        manual = self.prepare()
+        app.print_center.dispatch_auto_once()
+        self.assertEqual(app.print_center.store.job(manual["id"])["state"], "PREPARED")
+        self.assertEqual([path for path, _ in self.fake.calls if path == "/api/Device/receiveTask"], [])
+
+        app.print_center.client = YunPrintClient(env={"CI": "true"})
+        disabled_order = self.create_order()
+        self.assertIsNone(app.print_center.store.latest_job(disabled_order))
+
+    def test_auto_timeout_keeps_checkout_and_locks_unknown_without_resend(self):
+        self.save_profile()
+        self.fake.timeout_paths.add("/api/Device/receiveTask")
+        order_id = self.create_order()
+        self.assertIsNotNone(app.commerce.store.order(order_id))
+        app.print_center.dispatch_auto_once()
+        app.print_center.dispatch_auto_once()
+        job = app.print_center.store.latest_job(order_id)
+        self.assertEqual((job["state"], job["ambiguous_operation"]), ("UNKNOWN", "receiveTask"))
+        self.assertEqual(len([path for path, _ in self.fake.calls if path == "/api/Device/receiveTask"]), 1)
+
+    def test_auto_vendor_rejection_leaves_manual_send_fallback_with_reason(self):
+        self.save_profile()
+        self.fake.responses["/api/Device/receiveTask"] = {"code": 9, "msg": "fixture reject"}
+        order_id = self.create_order()
+        app.print_center.dispatch_auto_once()
+        app.print_center.dispatch_auto_once()
+        job = app.print_center.store.latest_job(order_id)
+        self.assertEqual(job["state"], "PREPARED")
+        self.assertIn("拒絕", job["last_error"])
+        self.assertEqual(len([path for path, _ in self.fake.calls if path == "/api/Device/receiveTask"]), 1)
+        rows = self.client.get("/api/admin/print/jobs").get_json()["rows"]
+        row = next(row for row in rows if row["order_id"] == order_id)
+        self.assertEqual(row["job"]["state"], "PREPARED")
+        self.assertTrue(row["job"]["last_error"])
+
     def test_print_center_ui_has_a5_guidance_and_no_start_action(self):
         source = (Path(__file__).parent / "static" / "admin-print-center.js").read_text(encoding="utf-8")
         admin = (Path(__file__).parent / "admin.html").read_text(encoding="utf-8")

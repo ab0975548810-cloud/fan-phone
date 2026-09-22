@@ -1,10 +1,42 @@
 # Print Center operations
 
-Print Phase 3.1 uses the A5 Desktop manual-confirmation workflow. Customer checkout never creates a vendor task, and the website never starts physical printing.
+Print Phase 3.3 uses the A5 Desktop manual-confirmation workflow. After a new
+order and its commerce transaction are committed, an eligible order is prepared
+durably and a background dispatcher calls `receiveTask`. The website never calls
+`startPrint` or `pushPrint`; physical printing still starts only after an operator
+confirms the task inside Ruiyin.
 
 Active flow:
 
 `準備任務 → 送到銳印（receiveTask）→ 等待銳印確認 → 店員在銳印人工確認 → callback 1 打印中 → callback 2 完成`
+
+## New-order automatic handoff
+
+Automatic handoff applies only to a newly committed, non-void order that has a
+production PNG, an immutable finance SKU, an active formal production profile,
+complete vendor/public artwork configuration, and no active or successful print
+attempt. Legacy bindings are never inferred or promoted by this flow.
+
+Checkout persists a deterministic `prepare` request in the existing
+`print_requests` table. The Gunicorn worker then drains only request keys with the
+Phase 3.3 `auto-prepare-` marker and sends their `PREPARED` jobs with a second
+deterministic `send` request. This provides recovery after a process restart and
+prevents checkout replay, worker retry, or redeploy from creating another active
+job or calling `receiveTask` twice. It does not scan historical orders and needs
+no schema migration.
+
+The vendor call is outside the checkout response path. A disabled vendor,
+missing profile, missing finance SKU, invalid artwork, storage failure, timeout,
+or vendor rejection cannot roll back or fail the committed order. A definite
+vendor rejection leaves the job `PREPARED` with its reason so an operator may use
+the existing manual send action. A timeout, 5xx, malformed success, or unexpected
+disconnect leaves the job `UNKNOWN`; reconcile it before any further send.
+
+Durable preparation still validates and hashes the production PNG immediately
+after the commerce commit, so checkout may include private-storage read latency.
+It never includes the vendor's receive timeout. Moving artwork validation fully
+off-request would require another durable queue record or schema change and is
+outside this no-migration phase.
 
 The compatibility endpoint `/api/admin/print/start` always fails closed with `DESKTOP_MANUAL_CONFIRMATION`. The A5 flow does not call vendor `startPrint` or `pushPrint`.
 
