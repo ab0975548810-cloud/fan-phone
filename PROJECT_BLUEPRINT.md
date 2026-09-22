@@ -509,7 +509,16 @@ Callback 必須：
 - 這條同步路徑不得修改 order finance、營收、成本、庫存或 inventory ledger。
 - model × style、每顏色列印參數與材質覆蓋留待真機證據確認後另案設計。
 
-## 17. 三方合作方式：Owner + ChatGPT + Codex
+## 17. Print Phase 3.3：新訂單自動交接
+
+- 只有 Phase 3.3 上線後新建立的訂單可以自動交接；資格必須以 `auto_print_v1` marker 與訂單、財務快照、庫存交易及 checkout idempotency response 一起原子提交。
+- checkout replay 只有在原始 commerce request record 含有 marker，且 response 的 order id 相符時，才能補做 durable auto prepare。舊 request record 沒有 marker，永遠不得因重播而自動建立新列印 attempt。
+- 新訂單 commit 後若 process 在 auto prepare 前中斷，相同 checkout key 的 replay 必須利用既有 marker 補做交接；不得只用 request-local `replayed` 判斷而失去復原能力。
+- 自動 queue 只掃描帶有 `auto-prepare-` durable request marker 的 `PREPARED` job，不掃描歷史訂單或人工任務。
+- `receiveTask` 必須在 checkout response path 外執行；timeout 或不明結果進入 `UNKNOWN` 並先查核，明確拒絕保留 `PREPARED` 與人工送出入口。
+- 網站仍不得呼叫 `startPrint` 或 `pushPrint`，實體出墨維持銳印軟體人工確認。
+
+## 18. 三方合作方式：Owner + ChatGPT + Codex
 
 - **Owner**：決定店內真正想要的操作方式與商業需求。
 - **ChatGPT**：整理產品需求、架構、驗收條件、風險與 review。

@@ -239,6 +239,14 @@ class PrintService:
         self.wake_dispatcher()
         return {"status": "prepared", "job": job}
 
+    def checkout_auto_eligible(self, order_id, checkout_key):
+        request_row = (self.app.commerce.read().get("requests") or {}).get(checkout_key) or {}
+        response = request_row.get("response") or {}
+        return bool(
+            request_row.get("auto_print_v1") is True
+            and str(response.get("order_id") or "") == str(order_id)
+        )
+
     def dispatch_auto_once(self):
         """Drain durable auto markers once; safe across retries and processes."""
         if not self.vendor_ready:
@@ -713,11 +721,14 @@ def install(app_module):
 
     @wraps(original_create_order)
     def create_order_with_auto_handoff(*args, **kwargs):
+        request_payload = request.get_json(silent=True)
+        checkout_key = str(request.headers.get("Idempotency-Key") or
+                           ((request_payload or {}).get("idempotency_key") if isinstance(request_payload, dict) else "") or "")
         response = app.make_response(original_create_order(*args, **kwargs))
         if response.status_code < 300:
             payload = response.get_json(silent=True)
             order_id = str((payload or {}).get("order_id") or "") if isinstance(payload, dict) else ""
-            if order_id:
+            if order_id and service.checkout_auto_eligible(order_id, checkout_key):
                 try:
                     service.enqueue_auto(order_id)
                 except Exception:

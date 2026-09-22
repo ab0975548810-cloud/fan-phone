@@ -291,7 +291,11 @@ class Commerce:
                 _ledger(data, sku, -qty, 'ORDER_CREATED', order['id'] + ':0', order['id'], 'checkout')
             data['order_finance'][order['id']] = finance
             result = dict(status='success', order_id=order['id'], total=total, msg='訂單建立成功')
-            data['requests'][key] = dict(fingerprint=fingerprint, response=result)
+            # Phase 3.3 eligibility is committed with the order transaction.
+            # Historical request records lack this marker and must never become
+            # auto-print eligible merely because their response is replayed.
+            data['requests'][key] = dict(
+                fingerprint=fingerprint, response=result, auto_print_v1=True)
             return result, order, 'create'
         return self.mutate(update)
 

@@ -80,8 +80,8 @@ class PrintCenterTests(unittest.TestCase):
                 os.environ[name] = value
         self.tmp.cleanup()
 
-    def create_order(self, *, style_id=None, color_name="透明"):
-        key = "checkout-" + uuid.uuid4().hex
+    def create_order(self, *, style_id=None, color_name="透明", key=None):
+        key = key or ("checkout-" + uuid.uuid4().hex)
         response = self.client.post("/api/create_order", json={
             "idempotency_key": key, "print_file": PNG, "mockup_file": PNG,
             "model_id": app.DEFAULT_SHOP_DATA["models"][0]["id"],
@@ -90,6 +90,11 @@ class PrintCenterTests(unittest.TestCase):
         })
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         return response.get_json()["order_id"]
+
+    def remove_auto_marker(self, key):
+        data = app.commerce.read()
+        data["requests"][key].pop("auto_print_v1", None)
+        self.assertTrue(app.commerce.store.commit(int(data.get("revision", 0)), data))
 
     def make_legacy(self, order_id=None):
         order_id = order_id or self.order_id
@@ -474,6 +479,58 @@ class PrintCenterTests(unittest.TestCase):
         app.print_center.dispatch_auto_once()
         app.print_center.dispatch_auto_once()
         self.assertEqual(len([path for path, _ in self.fake.calls if path == "/api/Device/receiveTask"]), 1)
+
+    def test_historical_checkout_replay_without_marker_never_auto_prepares(self):
+        key = "historical-checkout-0001"
+        order_id = self.create_order(key=key)
+        self.remove_auto_marker(key)
+        self.save_profile()
+
+        with mock.patch.object(app.print_center, "enqueue_auto") as enqueue:
+            replayed_order_id = self.create_order(key=key)
+        self.assertEqual(replayed_order_id, order_id)
+        enqueue.assert_not_called()
+        self.assertIsNone(app.print_center.store.latest_job(order_id))
+        self.assertEqual([path for path, _ in self.fake.calls if path == "/api/Device/receiveTask"], [])
+
+    def test_committed_marker_recovers_after_post_commit_enqueue_crash(self):
+        self.save_profile()
+        key = "recover-auto-checkout-001"
+        with mock.patch.object(app.print_center, "enqueue_auto", side_effect=RuntimeError("fixture crash")):
+            order_id = self.create_order(key=key)
+        self.assertIsNone(app.print_center.store.latest_job(order_id))
+        self.assertTrue(app.commerce.read()["requests"][key]["auto_print_v1"])
+
+        self.fake.responses["/api/Device/receiveTask"] = {
+            "code": 0, "data": {"taskid": "recovered-auto-task", "status": 0}}
+        self.assertEqual(self.create_order(key=key), order_id)
+        self.assertEqual(app.print_center.store.latest_job(order_id)["state"], "PREPARED")
+        app.print_center.dispatch_auto_once()
+        app.print_center.dispatch_auto_once()
+        job = app.print_center.store.latest_job(order_id)
+        self.assertEqual((job["state"], job["vendor_taskid"]), ("QUEUED", "recovered-auto-task"))
+        self.assertEqual(len([path for path, _ in self.fake.calls if path == "/api/Device/receiveTask"]), 1)
+
+    def test_historical_replay_never_retries_terminal_failed_or_completed_job(self):
+        self.save_profile()
+        for index, state in enumerate(("FAILED", "COMPLETED"), start=1):
+            with self.subTest(state=state):
+                key = f"historical-terminal-{index:04d}"
+                with mock.patch.object(app.print_center, "enqueue_auto"):
+                    order_id = self.create_order(key=key)
+                self.remove_auto_marker(key)
+                self.order_id = order_id
+                job = self.prepare(f"manual-historical-{index:04d}")
+                app.print_center.store.patch_job(job["id"], {"state": state})
+                count_before = len(app.print_center.store.list_jobs())
+
+                with mock.patch.object(app.print_center, "enqueue_auto") as enqueue:
+                    self.assertEqual(self.create_order(key=key), order_id)
+                enqueue.assert_not_called()
+                latest = app.print_center.store.latest_job(order_id)
+                self.assertEqual((latest["id"], latest["state"]), (job["id"], state))
+                self.assertEqual(len(app.print_center.store.list_jobs()), count_before)
+        self.assertEqual([path for path, _ in self.fake.calls if path == "/api/Device/receiveTask"], [])
 
     def test_auto_handoff_skips_missing_profile_disabled_vendor_and_history(self):
         self.assertIsNone(app.print_center.store.latest_job(self.order_id))

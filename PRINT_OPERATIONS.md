@@ -17,9 +17,15 @@ production PNG, an immutable finance SKU, an active formal production profile,
 complete vendor/public artwork configuration, and no active or successful print
 attempt. Legacy bindings are never inferred or promoted by this flow.
 
-Checkout persists a deterministic `prepare` request in the existing
-`print_requests` table. The Gunicorn worker then drains only request keys with the
-Phase 3.3 `auto-prepare-` marker and sends their `PREPARED` jobs with a second
+The checkout transaction stores `auto_print_v1: true` in the same commerce
+request record as its finance snapshot, inventory mutation, and idempotent
+response. Only that durable marker makes a replay eligible: historical checkout
+records without it can never trigger automatic handoff. After commit, checkout
+persists a deterministic `prepare` request in the existing `print_requests`
+table. If the process stops between commit and prepare, replaying the same
+checkout key sees the marker and safely finishes preparation. The Gunicorn worker
+then drains only request keys with the Phase 3.3 `auto-prepare-` marker and sends
+their `PREPARED` jobs with a second
 deterministic `send` request. This provides recovery after a process restart and
 prevents checkout replay, worker retry, or redeploy from creating another active
 job or calling `receiveTask` twice. It does not scan historical orders and needs
