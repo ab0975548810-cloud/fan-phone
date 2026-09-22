@@ -247,6 +247,45 @@ class PrintStore:
         with self.connection() as db:
             return [self._decode(row) for row in db.execute("SELECT * FROM print_jobs ORDER BY updated_at DESC LIMIT ?", (limit,))]
 
+    def auto_prepared_jobs(self, limit=50):
+        """Return only jobs carrying the durable Phase 3.3 auto marker."""
+        if self.app.USE_SUPABASE:
+            result = []
+            offset = 0
+            page_size = 100
+            while len(result) < limit:
+                jobs = (self.app.SUPABASE.table("print_jobs").select("*")
+                        .eq("state", "PREPARED").order("prepared_at")
+                        .range(offset, offset + page_size - 1).execute().data or [])
+                if not jobs:
+                    break
+                job_ids = [str(job["id"]) for job in jobs]
+                requests = (self.app.SUPABASE.table("print_requests")
+                            .select("job_id,operation,status,request_key")
+                            .in_("job_id", job_ids).like("request_key", "auto-%")
+                            .execute().data or [])
+                prepared = {str(row.get("job_id") or "") for row in requests
+                            if row.get("operation") == "prepare" and row.get("status") == "COMPLETED"
+                            and str(row.get("request_key") or "").startswith("auto-prepare-")}
+                sent = {str(row.get("job_id") or "") for row in requests
+                        if row.get("operation") == "send"
+                        and str(row.get("request_key") or "").startswith("auto-send-")}
+                result.extend(job for job in jobs if str(job["id"]) in prepared - sent)
+                if len(jobs) < page_size:
+                    break
+                offset += page_size
+            return result[:limit]
+        with self.connection() as db:
+            rows = db.execute("""SELECT j.* FROM print_jobs AS j
+                JOIN print_requests AS r ON r.job_id=j.id
+                WHERE r.operation='prepare' AND r.status='COMPLETED'
+                  AND r.request_key LIKE 'auto-prepare-%' AND j.state='PREPARED'
+                  AND NOT EXISTS (SELECT 1 FROM print_requests AS sent
+                    WHERE sent.job_id=j.id AND sent.operation='send'
+                      AND sent.request_key LIKE 'auto-send-%')
+                ORDER BY j.prepared_at LIMIT ?""", (limit,)).fetchall()
+            return [self._decode(row) for row in rows]
+
     def create_job(self, order, sku_id, profile, artwork_sha256, token_nonce):
         now = utcnow()
         prior = self.latest_job(order["id"])

@@ -8,6 +8,7 @@ import json
 import os
 import re
 import secrets
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -20,6 +21,7 @@ from print_vendor import VendorAmbiguous, VendorDisabled, VendorError, YunPrintC
 
 
 _INSTALLED = False
+_AUTO_DISPATCHER = None
 KEY_RE = re.compile(r"^[A-Za-z0-9_-]{16,100}$")
 TERMINAL = {"COMPLETED", "CANCELED", "FAILED"}
 STATE_LABELS = {
@@ -217,6 +219,53 @@ class PrintService:
         except PrintError:
             return False
         return bool(supplied and hmac.compare_digest(expected, str(supplied)))
+
+    @staticmethod
+    def _auto_key(operation, identity):
+        return f"auto-{operation}-{_hash(identity)[:48]}"
+
+    def enqueue_auto(self, order_id):
+        """Durably prepare a committed order for asynchronous receiveTask."""
+        if not self.vendor_ready:
+            return {"status": "skipped", "reason": "VENDOR_NOT_READY"}
+        order = self._order(order_id)
+        self._assert_order_printable(order)
+        sku_id = str(self._finance(order_id).get("sku_id") or "")
+        if not sku_id:
+            return {"status": "skipped", "reason": "FINANCE_SKU_REQUIRED"}
+        if not self.store.profile(sku_id):
+            return {"status": "skipped", "reason": "PROFILE_MISSING"}
+        job = self.prepare(order_id, self._auto_key("prepare", order_id))
+        self.wake_dispatcher()
+        return {"status": "prepared", "job": job}
+
+    def checkout_auto_eligible(self, order_id, checkout_key):
+        request_row = (self.app.commerce.read().get("requests") or {}).get(checkout_key) or {}
+        response = request_row.get("response") or {}
+        return bool(
+            request_row.get("auto_print_v1") is True
+            and str(response.get("order_id") or "") == str(order_id)
+        )
+
+    def dispatch_auto_once(self):
+        """Drain durable auto markers once; safe across retries and processes."""
+        if not self.vendor_ready:
+            return []
+        results = []
+        for job in self.store.auto_prepared_jobs():
+            try:
+                results.append(self.send(job["id"], self._auto_key("send", job["id"])))
+            except (PrintError, PrintConflict) as exc:
+                self.app.app.logger.warning(
+                    "Automatic receiveTask did not complete for %s: %s", job["id"], exc)
+            except Exception:
+                self.app.app.logger.exception("Automatic print dispatch failed for %s", job["id"])
+        return results
+
+    def wake_dispatcher(self):
+        dispatcher = globals().get("_AUTO_DISPATCHER")
+        if dispatcher:
+            dispatcher.wake()
 
     def prepare(self, order_id, key):
         fingerprint = _payload_hash("prepare", order_id)
@@ -665,6 +714,29 @@ def install(app_module):
     service = PrintService(app_module)
     app_module.print_center = service
 
+    # Commerce has committed finance/stock before this hook sees a success or
+    # replay response. Any preparation failure is isolated from checkout.
+    original_create_order = app.view_functions["create_order"]
+    from functools import wraps
+
+    @wraps(original_create_order)
+    def create_order_with_auto_handoff(*args, **kwargs):
+        request_payload = request.get_json(silent=True)
+        checkout_key = str(request.headers.get("Idempotency-Key") or
+                           ((request_payload or {}).get("idempotency_key") if isinstance(request_payload, dict) else "") or "")
+        response = app.make_response(original_create_order(*args, **kwargs))
+        if response.status_code < 300:
+            payload = response.get_json(silent=True)
+            order_id = str((payload or {}).get("order_id") or "") if isinstance(payload, dict) else ""
+            if order_id and service.checkout_auto_eligible(order_id, checkout_key):
+                try:
+                    service.enqueue_auto(order_id)
+                except Exception:
+                    app.logger.exception("Post-commit automatic print preparation failed for %s", order_id)
+        return response
+
+    app.view_functions["create_order"] = create_order_with_auto_handoff
+
     @app.errorhandler(PrintError)
     def print_error(exc):
         return app_module.no_cache_json({"status": "error", "code": exc.code, "msg": str(exc)}, exc.status)
@@ -674,7 +746,6 @@ def install(app_module):
         return app_module.no_cache_json({"status": "error", "code": exc.code, "msg": str(exc)}, exc.status)
 
     def guarded(fn):
-        from functools import wraps
         @wraps(fn)
         def wrapped(*args, **kwargs):
             if not session.get("logged_in"):
@@ -794,3 +865,39 @@ def install(app_module):
                 response.set_data(html.replace("</body>", f'<link rel="stylesheet" href="/static/admin-print-center.css?v=20260921b"><script src="{src}"></script></body>'))
             response.headers["Cache-Control"] = "no-store"
         return response
+
+
+class AutoPrintDispatcher:
+    """Recoverable receiveTask worker; it never starts physical printing."""
+    def __init__(self, service, interval=5):
+        self.service = service
+        self.interval = interval
+        self._event = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run, name="print-auto-dispatch", daemon=True)
+
+    def start(self):
+        if not self._thread.is_alive():
+            self._thread.start()
+
+    def wake(self):
+        self._event.set()
+
+    def _run(self):
+        while True:
+            self._event.wait(self.interval)
+            self._event.clear()
+            try:
+                self.service.dispatch_auto_once()
+            except Exception:
+                self.service.app.app.logger.exception("Automatic print dispatcher cycle failed")
+
+
+def start_auto_dispatcher(app_module):
+    """Start after the Gunicorn worker is ready; tests drain explicitly."""
+    global _AUTO_DISPATCHER
+    if _AUTO_DISPATCHER is None:
+        _AUTO_DISPATCHER = AutoPrintDispatcher(app_module.print_center)
+        _AUTO_DISPATCHER.start()
+    _AUTO_DISPATCHER.wake()
+    return _AUTO_DISPATCHER
