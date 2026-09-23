@@ -24,13 +24,27 @@ os.environ['COMMERCE_DB_PATH'] = str(Path(test_dir.name) / 'commerce.sqlite3')
 os.environ.pop('SUPABASE_URL', None)
 os.environ.pop('SUPABASE_SERVICE_ROLE_KEY', None)
 import app as app_module
+from security_perf import install as install_security
+from supabase_resilience import install as install_supabase_resilience
+from quality_perf_patch import install as install_quality_perf
+from ai_runtime_patch import install as install_ai_runtime
 from admin_perf_patch import install as install_admin_perf
+from order_color_patch import install as install_order_colors
+from asset_category_patch import install as install_asset_categories
 from template_editor_patch import install as install_template_editor
+from order_management_patch import install as install_order_management
 from commerce_patch import install as install_commerce
 from print_center import install as install_print_center
 
+install_security(app_module)
+install_supabase_resilience(app_module)
+install_quality_perf(app_module)
+install_ai_runtime(app_module)
 install_admin_perf(app_module)
+install_order_colors(app_module)
+install_asset_categories(app_module)
 install_template_editor(app_module)
+install_order_management(app_module)
 install_commerce(app_module)
 install_print_center(app_module)
 app_module.app.config['SESSION_COOKIE_SECURE'] = False
@@ -94,6 +108,27 @@ def front_test(browser, base):
     poll(page, "() => typeof shopData !== 'undefined' && Array.isArray(shopData?.models) && shopData.models.length > 0", timeout=10000)
     page.evaluate("""() => {ctx.printW=80;ctx.printH=160;ctx.maskUrl='';navigate('page-editor');initCanvas();editorHasSession=true;window.BenfuwanEditorAccess?.fitCanvas?.();}""")
     add_front_photo(page, 0)
+    layer_listeners = page.evaluate("""() => {
+      const watched=new Set(['touchmove','touchend','touchcancel','mousemove','mouseup','pointermove','pointerup','pointercancel']);
+      const active=new Map(),nativeAdd=document.addEventListener,nativeRemove=document.removeEventListener;
+      document.addEventListener=function(type,listener,options){
+        if(watched.has(type))active.set(listener,type);
+        return nativeAdd.call(this,type,listener,options);
+      };
+      document.removeEventListener=function(type,listener,options){
+        if(watched.has(type))active.delete(listener);
+        return nativeRemove.call(this,type,listener,options);
+      };
+      try{
+        renderLayerList();const once=active.size;
+        for(let i=0;i<20;i++)renderLayerList();
+        return {once,after:active.size};
+      }finally{
+        document.addEventListener=nativeAdd;document.removeEventListener=nativeRemove;
+      }
+    }""")
+    assert layer_listeners['once'] > 0 and layer_listeners['after'] == layer_listeners['once'], layer_listeners
+    print('FRONT_LAYER_LISTENER_OK', layer_listeners['after'])
     metrics = poll(page, """() => {
       const pe=document.getElementById('page-editor'),ob=document.getElementById('object-bar'),tb=document.querySelector('#page-editor>.toolbar'),ws=document.querySelector('#page-editor>.workspace'),shell=document.getElementById('canvas-shell'),row=document.querySelector('#page-editor>.bf-editor-action-row');
       if(!pe||!ob||!tb||!ws||!shell||!row||getComputedStyle(pe).display==='none')return false;

@@ -80,6 +80,15 @@
     }
   }
 
+  let layerDocumentListeners=[];
+  function clearLayerDocumentListeners(){
+    layerDocumentListeners.splice(0).forEach(([type,listener,options])=>document.removeEventListener(type,listener,options));
+  }
+  function addLayerDocumentListener(type,listener,options){
+    document.addEventListener(type,listener,options);
+    layerDocumentListeners.push([type,listener,options]);
+  }
+
   function bindDragHandle(handle,row,box,o){
     if(o.role==='template-bg'){handle.classList.add('locked');handle.title='模板背景固定在最下層';return}
     handle.title='按住並上下拖曳';
@@ -105,16 +114,11 @@
 
     // iPhone / iPad：直接使用原生 touch 事件，不依賴 HTML5 drag 或 pointer capture。
     handle.addEventListener('touchstart',e=>{if(!e.touches?.length)return;lastTouch=Date.now();begin(e.touches[0].clientY,e)},{passive:false});
-    document.addEventListener('touchmove',e=>{if(!dragging||!e.touches?.length)return;move(e.touches[0].clientY,e)},{passive:false});
-    document.addEventListener('touchend',e=>{if(dragging)end(e)},{passive:false});
-    document.addEventListener('touchcancel',e=>{if(dragging)end(e)},{passive:false});
+    addLayerDocumentListener('touchmove',e=>{if(!dragging||!e.touches?.length)return;move(e.touches[0].clientY,e)},{passive:false});
+    addLayerDocumentListener('touchend',e=>{if(dragging)end(e)},{passive:false});
+    addLayerDocumentListener('touchcancel',e=>{if(dragging)end(e)},{passive:false});
 
-    // 電腦滑鼠。
-    handle.addEventListener('mousedown',e=>{if(Date.now()-lastTouch<800||e.button!==0)return;begin(e.clientY,e)});
-    document.addEventListener('mousemove',e=>{if(dragging&&Date.now()-lastTouch>=800)move(e.clientY,e)});
-    document.addEventListener('mouseup',e=>{if(dragging&&Date.now()-lastTouch>=800)end(e)});
-
-    // 支援部分只送 Pointer Events 的裝置；touch 裝置由上面 touch 路徑優先處理。
+    // 支援 Pointer Events 的裝置只走 pointer 路徑，避免同一次滑鼠操作又觸發 mouse 事件。
     if(window.PointerEvent){
       let pointerDragging=false,pointerId=null;
       handle.addEventListener('pointerdown',e=>{
@@ -122,14 +126,20 @@
         if(e.button!==undefined&&e.button!==0)return;
         pointerDragging=true;pointerId=e.pointerId;begin(e.clientY,e);
       });
-      document.addEventListener('pointermove',e=>{if(pointerDragging&&e.pointerId===pointerId)move(e.clientY,e)});
-      document.addEventListener('pointerup',e=>{if(pointerDragging&&e.pointerId===pointerId){pointerDragging=false;pointerId=null;end(e)}});
-      document.addEventListener('pointercancel',e=>{if(pointerDragging&&e.pointerId===pointerId){pointerDragging=false;pointerId=null;end(e)}});
+      addLayerDocumentListener('pointermove',e=>{if(pointerDragging&&e.pointerId===pointerId)move(e.clientY,e)});
+      addLayerDocumentListener('pointerup',e=>{if(pointerDragging&&e.pointerId===pointerId){pointerDragging=false;pointerId=null;end(e)}});
+      addLayerDocumentListener('pointercancel',e=>{if(pointerDragging&&e.pointerId===pointerId){pointerDragging=false;pointerId=null;end(e)}});
+    }else{
+      // 舊版桌面瀏覽器的滑鼠 fallback。
+      handle.addEventListener('mousedown',e=>{if(Date.now()-lastTouch<800||e.button!==0)return;begin(e.clientY,e)});
+      addLayerDocumentListener('mousemove',e=>{if(dragging&&Date.now()-lastTouch>=800)move(e.clientY,e)});
+      addLayerDocumentListener('mouseup',e=>{if(dragging&&Date.now()-lastTouch>=800)end(e)});
     }
   }
 
   window.renderLayerList=function(){
     if(typeof canvas==='undefined'||!canvas||!document.getElementById('layer-list'))return;
+    clearLayerDocumentListeners();
     ensureLayerDragStyles();
     const objs=[...canvas.getObjects()].filter(isLayerObject).reverse();
     const box=document.getElementById('layer-list');box.innerHTML='';
