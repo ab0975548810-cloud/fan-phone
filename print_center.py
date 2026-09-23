@@ -336,17 +336,23 @@ class PrintService:
         # Persist the explicit model edit first. Profile sync is an idempotent
         # batch upsert, so a clear failure can be retried without guessing or
         # duplicating print/commerce transactions.
-        self.app.cloud_save_json("shop_data", self.app.DATA_FILE, shop)
+        try:
+            version = self.app.cloud_compare_and_swap_json(
+                "shop_data", self.app.DATA_FILE, shop, payload.get("expected_version"))
+        except self.app.StaleDataError as exc:
+            raise PrintError(exc.code, str(exc), exc.status) from exc
         try:
             saved = self.store.save_profiles(profiles)
         except Exception as exc:
             self.app.app.logger.exception("Model production profile sync failed")
-            raise PrintError(
+            error = PrintError(
                 "PROFILE_SYNC_FAILED",
                 "型號資料已儲存，但正式列印參數同步失敗；請勿關閉視窗並再次按儲存。",
                 503,
-            ) from exc
-        return {"model_id": model_id, "synced_skus": len(saved)}
+            )
+            error.version = version
+            raise error from exc
+        return {"model_id": model_id, "synced_skus": len(saved), "version": version}
 
     def snapshot_profile(self, job_id, key):
         job = self.store.job(job_id)
@@ -739,7 +745,10 @@ def install(app_module):
 
     @app.errorhandler(PrintError)
     def print_error(exc):
-        return app_module.no_cache_json({"status": "error", "code": exc.code, "msg": str(exc)}, exc.status)
+        payload = {"status": "error", "code": exc.code, "msg": str(exc)}
+        if getattr(exc, "version", None):
+            payload["version"] = exc.version
+        return app_module.no_cache_json(payload, exc.status)
 
     @app.errorhandler(PrintConflict)
     def print_conflict(exc):

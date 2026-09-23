@@ -1,6 +1,7 @@
 import io
 import os
 import sys
+import copy
 import threading
 import tempfile
 import time
@@ -215,6 +216,8 @@ def admin_test(browser, base):
 
     model_color_src = page.locator('script[src*="admin-model-colors.js"]').get_attribute('src')
     assert model_color_src and 'v=20260923b' in model_color_src, model_color_src
+    commerce_src = page.locator('script[src*="admin-commerce-v1.js"]').get_attribute('src')
+    assert commerce_src and 'v=20260923cas1' in commerce_src, commerce_src
     def ux_error(route):
         status = int(route.request.url.rsplit('-', 1)[-1])
         route.fulfill(status=status, content_type='application/json', body='{"status":"error"}')
@@ -342,7 +345,7 @@ def admin_test(browser, base):
             route.fulfill(status=503, content_type='application/json', body='{"status":"error"}')
         else:
             time.sleep(.15)
-            route.fulfill(status=200, content_type='application/json', body='{"status":"success"}')
+            route.fulfill(status=200, content_type='application/json', body='{"status":"success","version":"mock-style-version"}')
     page.route('**/api/admin/save_shop_data', save_style)
     before_styles = page.evaluate("() => shopData.styles.length")
     page.locator('#view-styles .titlebar .btn').click()
@@ -366,6 +369,7 @@ def admin_test(browser, base):
     })""")
     assert len(style_requests) == 2 and saved == {'total':before_styles+1,'count':1,'open':False}, (style_requests,saved)
     page.unroute('**/api/admin/save_shop_data')
+    page.evaluate("() => loadShop(true)")
     print('ADMIN_STYLE_RETRY_DOUBLE_SUBMIT_OK')
     print('MODEL_PROFILE_SINGLE_ENTRY_WEBKIT_OK')
 
@@ -387,7 +391,7 @@ def admin_test(browser, base):
                 route.fulfill(status=503, content_type='application/json', body='{"status":"error"}')
             else:
                 time.sleep(.15)
-                route.fulfill(status=200, content_type='application/json', body='{"status":"success"}')
+                route.fulfill(status=200, content_type='application/json', body='{"status":"success","version":"mock-catalog-version"}')
         page.route('**/api/admin/save_shop_data', respond)
         dialog_start = len(dialogs)
         page.evaluate(action)
@@ -429,8 +433,69 @@ def admin_test(browser, base):
         """() => shopData.styles.some(x=>x.id==='issue29-style') && document.getElementById('styles-body').textContent.includes('Issue29系列') && !shopMutationBusy""",
         """() => !shopData.styles.some(x=>x.id==='issue29-style') && !shopMutationBusy""",
     )
-    page.evaluate("data => {shopData=structuredClone(data);renderBrands();renderModels();renderStyles();window.prompt=window.__issue29Prompt;window.confirm=window.__issue29Confirm;delete window.__issue29Prompt;delete window.__issue29Confirm}", catalog_original)
+    page.evaluate("async () => {await loadShop(true);window.prompt=window.__issue29Prompt;window.confirm=window.__issue29Confirm;delete window.__issue29Prompt;delete window.__issue29Confirm}")
     print('ADMIN_CATALOG_CRUD_STATE_RETRY_DOUBLE_SUBMIT_OK')
+
+    # A second tab/device wins the catalog CAS. This tab must keep its unsaved
+    # inputs and local state across all shop_data write paths until reload.
+    stale_shop = page.evaluate("() => ({data:structuredClone(shopData),version:shopVersion})")
+    winner_shop = copy.deepcopy(stale_shop['data'])
+    winner_shop['brands'].append('CAS 分頁 A')
+    winner = page.request.post(base + '/api/admin/save_shop_data', data={
+        'data': winner_shop, 'expected_version': stale_shop['version'],
+    })
+    assert winner.status == 200, winner.text()
+    winner_version = winner.json()['version']
+    stale_dialog_start = len(dialogs)
+
+    page.evaluate("""() => {openStyleEditor();document.getElementById('style-name').value='CAS 分頁 B 系列';document.getElementById('style-price').value='555'}""")
+    page.evaluate("() => saveStyle()")
+    style_stale = page.evaluate("""() => ({
+      open:document.getElementById('style-modal').classList.contains('show'),
+      input:document.getElementById('style-name').value,
+      local:shopData.styles.some(x=>x.name==='CAS 分頁 B 系列'),
+      version:shopVersion
+    })""")
+    assert style_stale == {'open':True,'input':'CAS 分頁 B 系列','local':False,'version':stale_shop['version']}, style_stale
+    page.locator('#style-modal .mh button').click()
+
+    original_model = stale_shop['data']['models'][0]
+    page.evaluate("id => openModelEditor(id)", original_model['id'])
+    page.locator('#model-name').fill('CAS 分頁 B 型號')
+    page.evaluate("() => saveModel()")
+    model_stale = page.evaluate("""() => ({
+      open:document.getElementById('model-modal').classList.contains('show'),
+      input:document.getElementById('model-name').value,
+      local:shopData.models.some(x=>x.name==='CAS 分頁 B 型號'),
+      version:shopVersion
+    })""")
+    assert model_stale == {'open':True,'input':'CAS 分頁 B 型號','local':False,'version':stale_shop['version']}, model_stale
+    page.locator('#model-modal .mh button').click()
+
+    page.locator('.nav button[data-view="commerce"]').click()
+    poll(page, "() => document.getElementById('view-commerce')?.classList.contains('active')")
+    page.locator('[data-tab="stock"]').click()
+    poll(page, "() => !document.getElementById('pos-stock-panel').hidden")
+    local_price = page.evaluate("""() => {const id=document.querySelector('#pos-series [data-series].selected')?.dataset.series||shopData.styles[0].id;return {id,price:Number(shopData.styles.find(x=>String(x.id)===String(id))?.price)}}""")
+    page.locator('#pos-series-price').fill('888')
+    page.locator('#pos-price-form button').click()
+    poll(page, "() => document.getElementById('pos-message').textContent.includes('資料已被其他分頁或裝置更新')")
+    assert page.locator('#pos-series-price').input_value() == '888'
+    assert page.evaluate("before => Number(shopData.styles.find(x=>String(x.id)===String(before.id))?.price)===before.price", local_price)
+
+    server_after_stale = page.request.get(base + '/api/shop_data').json()
+    assert server_after_stale['version'] == winner_version
+    assert 'CAS 分頁 A' in server_after_stale['data']['brands']
+    assert not any(x.get('name') == 'CAS 分頁 B 系列' for x in server_after_stale['data']['styles'])
+    assert any('資料已被其他分頁或裝置更新，請重新載入後再修改。' in msg for msg in dialogs[stale_dialog_start:]), dialogs[stale_dialog_start:]
+    page.evaluate("() => loadShop(true)")
+    assert page.evaluate("version => shopVersion===version && shopData.brands.includes('CAS 分頁 A')", winner_version)
+    restored = page.request.post(base + '/api/admin/save_shop_data', data={
+        'data': stale_shop['data'], 'expected_version': winner_version,
+    })
+    assert restored.status == 200, restored.text()
+    page.evaluate("() => loadShop(true)")
+    print('ADMIN_CATALOG_MODEL_PRICE_STALE_CAS_OK')
 
     print_nav = page.locator('.nav button[data-view="print-center"]')
     print_nav.click()
@@ -472,7 +537,43 @@ def admin_test(browser, base):
 
     page.locator('#view-templates .titlebar .btn').click()
     poll(page, "() => document.getElementById('template-modal')?.classList.contains('show') && typeof window.fabric !== 'undefined' && typeof visualCanvas !== 'undefined' && !!visualCanvas", timeout=30000)
+    template_editor_src = page.locator('script[src*="admin-template-editor-v2.js"]').get_attribute('src')
+    assert template_editor_src and 'v=20260923cas1' in template_editor_src, template_editor_src
     print('ADMIN_FABRIC_LAZY_OK')
+
+    template_server_original = page.evaluate("() => ({data:structuredClone(templatesData),version:templatesVersion})")
+    template_winner = copy.deepcopy(template_server_original['data'])
+    template_winner['templates'].append({'id':'cas-template-a','name':'CAS 模板 A','category':'熱門','model_id':'*','universal':True})
+    template_winner_response = page.request.post(base + '/api/admin/save_templates', data={
+        'data': template_winner, 'expected_version': template_server_original['version'],
+    })
+    assert template_winner_response.status == 200, template_winner_response.text()
+    template_winner_version = template_winner_response.json()['version']
+    page.route('**/api/admin/upload_image', lambda route: route.fulfill(status=200, content_type='application/json', body='{"status":"success","url":"/static/materials/cas-orphan.png"}'))
+    template_stale_dialog = len(dialogs)
+    page.evaluate("""() => {document.getElementById('tpl-id').value='';document.getElementById('tpl-name').value='CAS 模板 B';document.getElementById('tpl-category').value='熱門'}""")
+    page.evaluate("() => saveTemplate()")
+    template_stale = page.evaluate("""() => ({
+      open:document.getElementById('template-modal').classList.contains('show'),
+      input:document.getElementById('tpl-name').value,
+      local:templatesData.templates.some(x=>x.name==='CAS 模板 B'),
+      version:templatesVersion
+    })""")
+    assert template_stale == {'open':True,'input':'CAS 模板 B','local':False,'version':template_server_original['version']}, template_stale
+    page.unroute('**/api/admin/upload_image')
+    template_server_after = page.request.get(base + '/api/templates').json()
+    assert template_server_after['version'] == template_winner_version
+    assert [row['id'] for row in template_server_after['data']['templates'] if row.get('id') in ('cas-template-a','cas-template-b')] == ['cas-template-a']
+    assert any('資料已被其他分頁或裝置更新，請重新載入後再修改。' in msg for msg in dialogs[template_stale_dialog:]), dialogs[template_stale_dialog:]
+    page.evaluate("() => loadTemplates(true)")
+    reloaded_template = page.evaluate("version => ({version:templatesVersion,hasA:templatesData.templates.some(x=>x.id==='cas-template-a'),input:document.getElementById('tpl-name').value})", template_winner_version)
+    assert reloaded_template == {'version':template_winner_version,'hasA':True,'input':'CAS 模板 B'}, reloaded_template
+    restored_templates = page.request.post(base + '/api/admin/save_templates', data={
+        'data': template_server_original['data'], 'expected_version': template_winner_version,
+    })
+    assert restored_templates.status == 200, restored_templates.text()
+    page.evaluate("() => loadTemplates(true)")
+    print('ADMIN_TEMPLATE_STALE_CAS_OK')
 
     page.evaluate("""() => new Promise((resolve,reject)=>{const c=document.createElement('canvas');c.width=128;c.height=128;const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,128,128);g.fillStyle='#d94d75';g.fillRect(24,16,80,96);fabric.Image.fromURL(c.toDataURL('image/png'),img=>{try{img.set({left:tplW/2,top:tplH/2,originX:'center',originY:'center',scaleX:.8,scaleY:1.1,angle:13,originalName:'admin-test.png'});visualCanvas.add(img);visualCanvas.setActiveObject(img);visualCanvas.requestRenderAll();resolve()}catch(e){reject(e)}});})""")
     before = page.evaluate("""() => {const o=visualCanvas.getActiveObject();return {w:o.getScaledWidth(),h:o.getScaledHeight(),x:o.getCenterPoint().x,y:o.getCenterPoint().y,a:o.angle};}""")
@@ -495,7 +596,7 @@ def admin_test(browser, base):
             route.fulfill(status=503, content_type='application/json', body='{"status":"error"}')
         else:
             time.sleep(.15)
-            route.fulfill(status=200, content_type='application/json', body='{"status":"success"}')
+            route.fulfill(status=200, content_type='application/json', body='{"status":"success","version":"mock-template-version"}')
     page.route('**/api/admin/save_templates', save_template_response)
     page.evaluate("""() => {document.getElementById('tpl-id').value='';document.getElementById('tpl-name').value='Issue29模板';document.getElementById('tpl-category').value='Issue29分類'}""")
     before_template_count = page.evaluate("() => templatesData.templates.length")
@@ -529,7 +630,7 @@ def admin_test(browser, base):
             route.fulfill(status=503, content_type='application/json', body='{"status":"error"}')
         else:
             time.sleep(.15)
-            route.fulfill(status=200, content_type='application/json', body='{"status":"success"}')
+            route.fulfill(status=200, content_type='application/json', body='{"status":"success","version":"mock-template-delete-version"}')
     page.route('**/api/admin/save_templates', delete_template_response)
     delete_dialog_start = len(dialogs)
     page.evaluate("() => Promise.all([deleteTemplate('issue29-delete-template'),deleteTemplate('issue29-delete-template')])")
@@ -540,7 +641,7 @@ def admin_test(browser, base):
     delete_saved = page.evaluate("() => !templatesData.templates.some(x=>x.id==='issue29-delete-template') && !templateDeleteBusy")
     assert len(delete_requests) == 2 and delete_saved, (delete_requests, delete_saved)
     page.unroute('**/api/admin/save_templates')
-    page.evaluate("data => {templatesData=structuredClone(data);renderTemplateTabs();renderTemplates();window.confirm=window.__issue29Confirm;delete window.__issue29Confirm}", template_original)
+    page.evaluate("async () => {await loadTemplates(true);window.confirm=window.__issue29Confirm;delete window.__issue29Confirm}")
     print('ADMIN_TEMPLATE_CRUD_STATE_RETRY_DOUBLE_SUBMIT_OK')
     print('ADMIN_WEBKIT_OK')
     page.close()

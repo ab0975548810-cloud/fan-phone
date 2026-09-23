@@ -175,7 +175,7 @@
       const objects=serializedObjects();setStatus('上傳模板預覽中…');const thumbUrl=await uploadAdminImage(dataUrlToFile(dataUrl,'template.png'),'template');
       const data={id:id||'tpl_'+Date.now(),name,category,universal:true,template_version:3,model_id:'*',reference_model_id,source_print_w:sourcePrintW,source_print_h:sourcePrintH,source_canvas_w:tplW,source_canvas_h:tplH,thumb_url:thumbUrl,slots,objects_json:objects};
       const next=clone(templatesData||{templates:[],categories:['全部','熱門']});next.templates=Array.isArray(next.templates)?next.templates:[];const idx=next.templates.findIndex(x=>x.id===data.id);if(idx>=0)next.templates[idx]=data;else next.templates.push(data);next.categories=Array.isArray(next.categories)?next.categories:[];if(!next.categories.includes('全部'))next.categories.unshift('全部');if(!next.categories.includes(category))next.categories.push(category);
-      setStatus('寫入模板資料中…');await apiJson('/api/admin/save_templates',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(next)});templatesData.templates=next.templates;templatesData.categories=next.categories;renderTemplateTabs();renderTemplates();closeModal('template-modal');alert('模板儲存成功（全型號通用）');
+      setStatus('寫入模板資料中…');await saveTemplates(next);templatesData.templates=next.templates;templatesData.categories=next.categories;renderTemplateTabs();renderTemplates();closeModal('template-modal');alert('模板儲存成功（全型號通用）');
     }catch(e){console.error('[TEMPLATE SAVE]',e);alert('模板儲存失敗：'+(e.message||e));setStatus('儲存失敗，請再試一次')}
     finally{saving=false;if(saveBtn){saveBtn.disabled=false;saveBtn.classList.remove('bf-tpl-saving');saveBtn.innerHTML=oldBtn||'儲存模板'}}
   };

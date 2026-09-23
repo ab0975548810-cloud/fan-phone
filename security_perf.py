@@ -114,7 +114,7 @@ def _serve_cache(key):
 
 def _invalidate(path):
     keys = []
-    if path == '/api/admin/save_shop_data':
+    if path in ('/api/admin/save_shop_data', '/api/admin/commerce_set_style_price', '/api/admin/print/model-profiles'):
         keys.append('/api/shop_data')
     elif path == '/api/admin/save_templates':
         keys.append('/api/templates')

@@ -24,6 +24,7 @@ jobs:
       - run: pip install -r requirements.txt 'psycopg[binary]==3.2.12'
       - name: SQLite transaction and multi-process regression
         run: |
+          python test_catalog_concurrency.py
           python test_commerce.py
           python test_print_center.py
       - name: PostgreSQL schema, privileges, rollback and concurrency

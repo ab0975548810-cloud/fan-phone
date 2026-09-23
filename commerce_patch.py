@@ -455,8 +455,12 @@ def install(app_module):
         if not style:
             raise CommerceError('STYLE_NOT_FOUND', '找不到材質', 404)
         style['price'] = int(round(price))
-        app_module.cloud_save_json('shop_data', app_module.DATA_FILE, shop)
-        return reply(dict(status='success', price=style['price']))
+        try:
+            version = app_module.cloud_compare_and_swap_json(
+                'shop_data', app_module.DATA_FILE, shop, payload.get('expected_version'))
+        except app_module.StaleDataError as exc:
+            raise CommerceError(exc.code, str(exc), exc.status)
+        return reply(dict(status='success', price=style['price'], version=version))
 
     from commerce_phase2 import install as install_phase2
     install_phase2(app_module, guarded)
@@ -502,7 +506,7 @@ def install(app_module):
         if request.path == '/admin' and resp.status_code == 200 and resp.mimetype == 'text/html':
             resp.direct_passthrough = False
             html = resp.get_data(as_text=True)
-            src = '/static/admin-commerce-v1.js?v=20260918d'
+            src = '/static/admin-commerce-v1.js?v=20260923cas1'
             if src not in html:
                 resp.set_data(html.replace('</body>', f'<link rel="stylesheet" href="/static/admin-commerce.css?v=20260918d"><script src="{src}"></script></body>'))
             resp.headers['Cache-Control'] = 'no-store'
