@@ -213,6 +213,27 @@ def admin_test(browser, base):
     else: page.locator('form').evaluate('(f)=>f.submit()')
     page.wait_for_url('**/admin')
 
+    model_color_src = page.locator('script[src*="admin-model-colors.js"]').get_attribute('src')
+    assert model_color_src and 'v=20260923b' in model_color_src, model_color_src
+    def ux_error(route):
+        status = int(route.request.url.rsplit('-', 1)[-1])
+        route.fulfill(status=status, content_type='application/json', body='{"status":"error"}')
+    page.route('**/api/admin/ux-probe-*', ux_error)
+    api_messages = page.evaluate("""async () => {
+      const out={};
+      for(const status of [401,409,503]){
+        try{await apiJson('/api/admin/ux-probe-'+status)}catch(e){out[status]=e.message}
+      }
+      return out;
+    }""")
+    assert api_messages == {
+        '401':'登入已過期，請重新登入後再試',
+        '409':'資料已被其他操作更新，請重新載入後再試',
+        '503':'服務暫時無法使用，請稍後再試'
+    }, api_messages
+    page.unroute('**/api/admin/ux-probe-*')
+    print('ADMIN_API_FEEDBACK_CACHE_KEY_OK')
+
     # POS UI is injected only for authenticated admin and must coexist with the
     # existing order/template editor without leaking private data publicly.
     poll(page, "() => !!window.BenfuwanCommerce && !!document.querySelector('.nav button[data-view=\"commerce\"]')")
@@ -294,7 +315,16 @@ def admin_test(browser, base):
     assert '座標原點在治具右下角' in model_text
     page.locator('#model-x').fill('1.5');page.locator('#model-y').fill('2.5')
     page.locator('#model-w').fill('80');page.locator('#model-h').fill('160');page.locator('#model-angle').fill('0')
-    page.locator('#model-modal .mf .btn').last.click()
+    model_requests = []
+    def save_model(route):
+        model_requests.append(route.request.post_data_json)
+        result = route.fetch()
+        time.sleep(.15)
+        route.fulfill(response=result)
+    page.route('**/api/admin/print/model-profiles', save_model)
+    page.evaluate("() => Promise.all([saveModel(),saveModel()])")
+    assert len(model_requests) == 1, model_requests
+    page.unroute('**/api/admin/print/model-profiles')
     page.locator('#model-modal').wait_for(state='hidden')
     page.locator('.nav button[data-view="styles"]').click()
     poll(page, "() => document.getElementById('view-styles').classList.contains('active') && document.querySelector('#styles-body button')")
@@ -302,6 +332,41 @@ def admin_test(browser, base):
     page.locator('#style-modal.show').wait_for()
     assert page.locator('#style-x,#style-y,#style-w,#style-h').count() == 0
     page.locator('#style-modal .mh button').click()
+
+    style_requests = []
+    dialogs = []
+    page.on('dialog', lambda dialog: (dialogs.append(dialog.message), dialog.dismiss()))
+    def save_style(route):
+        style_requests.append(route.request.post_data_json)
+        if len(style_requests) == 1:
+            route.fulfill(status=503, content_type='application/json', body='{"status":"error"}')
+        else:
+            time.sleep(.15)
+            route.fulfill(status=200, content_type='application/json', body='{"status":"success"}')
+    page.route('**/api/admin/save_shop_data', save_style)
+    before_styles = page.evaluate("() => shopData.styles.length")
+    page.locator('#view-styles .titlebar .btn').click()
+    page.locator('#style-name').fill('重複送出回歸殼款')
+    page.locator('#style-price').fill('490')
+    page.evaluate("() => Promise.all([saveStyle(),saveStyle()])")
+    assert len(style_requests) == 1, style_requests
+    failed = page.evaluate("""() => ({
+      count:shopData.styles.filter(x=>x.name==='重複送出回歸殼款').length,
+      open:document.getElementById('style-modal').classList.contains('show'),
+      value:document.getElementById('style-name').value,
+      disabled:document.getElementById('style-save').disabled
+    })""")
+    assert failed == {'count':0,'open':True,'value':'重複送出回歸殼款','disabled':False}, failed
+    assert any('服務暫時無法使用，請稍後再試' in msg for msg in dialogs), dialogs
+    page.evaluate("() => Promise.all([saveStyle(),saveStyle()])")
+    saved = page.evaluate("""() => ({
+      total:shopData.styles.length,
+      count:shopData.styles.filter(x=>x.name==='重複送出回歸殼款').length,
+      open:document.getElementById('style-modal').classList.contains('show')
+    })""")
+    assert len(style_requests) == 2 and saved == {'total':before_styles+1,'count':1,'open':False}, (style_requests,saved)
+    page.unroute('**/api/admin/save_shop_data')
+    print('ADMIN_STYLE_RETRY_DOUBLE_SUBMIT_OK')
     print('MODEL_PROFILE_SINGLE_ENTRY_WEBKIT_OK')
 
     print_nav = page.locator('.nav button[data-view="print-center"]')
