@@ -11,6 +11,7 @@
     return out;
   };
   const getStyle=id=>id?(shopData.styles||[]).find(x=>String(x.id)===String(id)):null;
+  let savingStyle=false;
 
   function ensureStyles(){
     if(document.getElementById('bf-model-color-style'))return;
@@ -119,6 +120,7 @@
   }
 
   window.saveStyle=async function(){
+    if(savingStyle)return;
     const id=document.getElementById('style-id').value;
     const prev=id?(shopData.styles||[]).find(x=>x.id===id):null;
     const data={
@@ -132,12 +134,17 @@
       status:true
     };
     if(!data.name)return alert('請填材質名稱');
+    const next=structuredClone(shopData),idx=id?next.styles.findIndex(x=>x.id===id):-1;
+    if(idx>=0)next.styles[idx]=data;else next.styles.push(data);
+    const button=document.getElementById('style-save');
+    savingStyle=true;if(button)button.disabled=true;
     try{
-      if(id){const i=shopData.styles.findIndex(x=>x.id===id);shopData.styles[i]=data}else shopData.styles.push(data);
-      await saveShop();
+      await saveShop(next);
+      shopData=next;
       renderStyles();
       closeModal('style-modal');
     }catch(e){alert('儲存失敗：'+(e.message||e))}
+    finally{savingStyle=false;if(button)button.disabled=false}
   };
 
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',ensureUI,{once:true});else ensureUI();

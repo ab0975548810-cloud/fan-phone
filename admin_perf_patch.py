@@ -23,7 +23,7 @@ def install(app_module):
                 # loaded only when the template section/editor is opened.
                 scripts = [
                     '/static/admin-perf.js?v=20260916orders1',
-                    '/static/admin-model-colors.js?v=20260913d',
+                    '/static/admin-model-colors.js?v=20260923b',
                     '/static/admin-asset-categories.js?v=20260913j',
                     '/static/admin-template-loader.js?v=20260916ai2',
                     '/static/admin-orders-v3.js?v=20260917a',
