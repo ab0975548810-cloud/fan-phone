@@ -369,6 +369,69 @@ def admin_test(browser, base):
     print('ADMIN_STYLE_RETRY_DOUBLE_SUBMIT_OK')
     print('MODEL_PROFILE_SINGLE_ENTRY_WEBKIT_OK')
 
+    # Catalog CRUD must not mutate browser state until the server accepts it.
+    catalog_original = page.evaluate("() => structuredClone(shopData)")
+    catalog_fixture = {
+        'brands':['Issue29品牌','Issue29空品牌'],
+        'models':[{'id':'issue29-model','brand':'Issue29品牌','name':'Issue29型號','status':True}],
+        'styles':[{'id':'issue29-style','name':'Issue29系列','price':390,'colors':['透明'],'status':True}],
+    }
+    page.evaluate("() => {window.__issue29Prompt=window.prompt;window.__issue29Confirm=window.confirm}")
+
+    def catalog_case(label, action, failure_check, success_check):
+        page.evaluate("data => {shopData=structuredClone(data);renderBrands();renderModels();renderStyles()}", catalog_fixture)
+        requests = []
+        def respond(route):
+            requests.append(route.request.post_data_json)
+            if len(requests) == 1:
+                route.fulfill(status=503, content_type='application/json', body='{"status":"error"}')
+            else:
+                time.sleep(.15)
+                route.fulfill(status=200, content_type='application/json', body='{"status":"success"}')
+        page.route('**/api/admin/save_shop_data', respond)
+        dialog_start = len(dialogs)
+        page.evaluate(action)
+        failed = page.evaluate(failure_check)
+        assert len(requests) == 1 and failed, (label, requests, failed)
+        assert any('服務暫時無法使用，請稍後再試' in msg for msg in dialogs[dialog_start:]), (label, dialogs[dialog_start:])
+        page.evaluate(action)
+        saved = page.evaluate(success_check)
+        assert len(requests) == 2 and saved, (label, requests, saved)
+        page.unroute('**/api/admin/save_shop_data')
+
+    catalog_case(
+        'addBrand',
+        """() => {window.prompt=()=> 'Issue29新增品牌';return Promise.all([addBrand(),addBrand()])}""",
+        """() => JSON.stringify(shopData)===JSON.stringify({brands:['Issue29品牌','Issue29空品牌'],models:[{id:'issue29-model',brand:'Issue29品牌',name:'Issue29型號',status:true}],styles:[{id:'issue29-style',name:'Issue29系列',price:390,colors:['透明'],status:true}]}) && !shopMutationBusy""",
+        """() => shopData.brands.filter(x=>x==='Issue29新增品牌').length===1 && !shopMutationBusy""",
+    )
+    catalog_case(
+        'editBrand',
+        """() => {window.prompt=()=> 'Issue29品牌改名';return Promise.all([editBrand('Issue29品牌'),editBrand('Issue29品牌')])}""",
+        """() => shopData.brands.includes('Issue29品牌') && !shopData.brands.includes('Issue29品牌改名') && shopData.models[0].brand==='Issue29品牌' && !shopMutationBusy""",
+        """() => !shopData.brands.includes('Issue29品牌') && shopData.brands.filter(x=>x==='Issue29品牌改名').length===1 && shopData.models[0].brand==='Issue29品牌改名' && !shopMutationBusy""",
+    )
+    catalog_case(
+        'deleteBrand',
+        """() => {window.confirm=()=>true;return Promise.all([deleteBrand('Issue29品牌'),deleteBrand('Issue29品牌')])}""",
+        """() => shopData.brands.includes('Issue29品牌') && !shopData.brands.includes('未分類') && shopData.models[0].brand==='Issue29品牌' && !shopMutationBusy""",
+        """() => !shopData.brands.includes('Issue29品牌') && shopData.brands.filter(x=>x==='未分類').length===1 && shopData.models[0].brand==='未分類' && !shopMutationBusy""",
+    )
+    catalog_case(
+        'deleteModel',
+        """() => {window.confirm=()=>true;return Promise.all([deleteModel('issue29-model'),deleteModel('issue29-model')])}""",
+        """() => shopData.models.some(x=>x.id==='issue29-model') && document.getElementById('models-body').textContent.includes('Issue29型號') && !shopMutationBusy""",
+        """() => !shopData.models.some(x=>x.id==='issue29-model') && !shopMutationBusy""",
+    )
+    catalog_case(
+        'deleteStyle',
+        """() => {window.confirm=()=>true;return Promise.all([deleteStyle('issue29-style'),deleteStyle('issue29-style')])}""",
+        """() => shopData.styles.some(x=>x.id==='issue29-style') && document.getElementById('styles-body').textContent.includes('Issue29系列') && !shopMutationBusy""",
+        """() => !shopData.styles.some(x=>x.id==='issue29-style') && !shopMutationBusy""",
+    )
+    page.evaluate("data => {shopData=structuredClone(data);renderBrands();renderModels();renderStyles();window.prompt=window.__issue29Prompt;window.confirm=window.__issue29Confirm;delete window.__issue29Prompt;delete window.__issue29Confirm}", catalog_original)
+    print('ADMIN_CATALOG_CRUD_STATE_RETRY_DOUBLE_SUBMIT_OK')
+
     print_nav = page.locator('.nav button[data-view="print-center"]')
     print_nav.click()
     poll(page, "() => document.querySelectorAll('#pc-grid .pc-card').length>0 && document.getElementById('view-print-center').classList.contains('active')")
@@ -419,6 +482,66 @@ def admin_test(browser, base):
     for k in ('w','h','x','y','a'):
         assert abs(after[k]-before[k]) < .75, (k,before,after)
     assert after['publicSrc'], after
+
+    # Runtime saveTemplate is the lazy-loaded editor-v2 override. Verify its
+    # existing candidate state/busy boundary, then cover deleteTemplate too.
+    template_original = page.evaluate("() => structuredClone(templatesData)")
+    template_save_requests = []
+    template_uploads = []
+    page.route('**/api/admin/upload_image', lambda route: (template_uploads.append(route.request.url), route.fulfill(status=200, content_type='application/json', body='{"status":"success","url":"/static/uploads/issue29-template.png"}')))
+    def save_template_response(route):
+        template_save_requests.append(route.request.post_data_json)
+        if len(template_save_requests) == 1:
+            route.fulfill(status=503, content_type='application/json', body='{"status":"error"}')
+        else:
+            time.sleep(.15)
+            route.fulfill(status=200, content_type='application/json', body='{"status":"success"}')
+    page.route('**/api/admin/save_templates', save_template_response)
+    page.evaluate("""() => {document.getElementById('tpl-id').value='';document.getElementById('tpl-name').value='Issue29模板';document.getElementById('tpl-category').value='Issue29分類'}""")
+    before_template_count = page.evaluate("() => templatesData.templates.length")
+    template_dialog_start = len(dialogs)
+    page.evaluate("() => Promise.all([saveTemplate(),saveTemplate()])")
+    template_failed = page.evaluate("""() => ({
+      count:templatesData.templates.filter(x=>x.name==='Issue29模板').length,
+      open:document.getElementById('template-modal').classList.contains('show'),
+      value:document.getElementById('tpl-name').value,
+      disabled:[...document.querySelectorAll('#template-modal .mf .btn')].find(b=>b.textContent.includes('儲存'))?.disabled||false
+    })""")
+    assert len(template_save_requests) == 1 and len(template_uploads) == 1, (template_save_requests, template_uploads)
+    assert template_failed == {'count':0,'open':True,'value':'Issue29模板','disabled':False}, template_failed
+    assert any('服務暫時無法使用，請稍後再試' in msg for msg in dialogs[template_dialog_start:]), dialogs[template_dialog_start:]
+    page.evaluate("() => Promise.all([saveTemplate(),saveTemplate()])")
+    template_saved = page.evaluate("""() => ({
+      total:templatesData.templates.length,
+      count:templatesData.templates.filter(x=>x.name==='Issue29模板').length,
+      open:document.getElementById('template-modal').classList.contains('show')
+    })""")
+    assert len(template_save_requests) == 2 and len(template_uploads) == 2, (template_save_requests, template_uploads)
+    assert template_saved == {'total':before_template_count+1,'count':1,'open':False}, template_saved
+    page.unroute('**/api/admin/upload_image')
+    page.unroute('**/api/admin/save_templates')
+
+    delete_requests = []
+    page.evaluate("""data => {templatesData=structuredClone(data);templatesData.templates.push({id:'issue29-delete-template',name:'Issue29刪除模板',category:'熱門'});renderTemplateTabs();renderTemplates();window.__issue29Confirm=window.confirm;window.confirm=()=>true}""", template_original)
+    def delete_template_response(route):
+        delete_requests.append(route.request.post_data_json)
+        if len(delete_requests) == 1:
+            route.fulfill(status=503, content_type='application/json', body='{"status":"error"}')
+        else:
+            time.sleep(.15)
+            route.fulfill(status=200, content_type='application/json', body='{"status":"success"}')
+    page.route('**/api/admin/save_templates', delete_template_response)
+    delete_dialog_start = len(dialogs)
+    page.evaluate("() => Promise.all([deleteTemplate('issue29-delete-template'),deleteTemplate('issue29-delete-template')])")
+    delete_failed = page.evaluate("() => templatesData.templates.filter(x=>x.id==='issue29-delete-template').length===1 && document.getElementById('template-grid').textContent.includes('Issue29刪除模板') && !templateDeleteBusy")
+    assert len(delete_requests) == 1 and delete_failed, (delete_requests, delete_failed)
+    assert any('服務暫時無法使用，請稍後再試' in msg for msg in dialogs[delete_dialog_start:]), dialogs[delete_dialog_start:]
+    page.evaluate("() => Promise.all([deleteTemplate('issue29-delete-template'),deleteTemplate('issue29-delete-template')])")
+    delete_saved = page.evaluate("() => !templatesData.templates.some(x=>x.id==='issue29-delete-template') && !templateDeleteBusy")
+    assert len(delete_requests) == 2 and delete_saved, (delete_requests, delete_saved)
+    page.unroute('**/api/admin/save_templates')
+    page.evaluate("data => {templatesData=structuredClone(data);renderTemplateTabs();renderTemplates();window.confirm=window.__issue29Confirm;delete window.__issue29Confirm}", template_original)
+    print('ADMIN_TEMPLATE_CRUD_STATE_RETRY_DOUBLE_SUBMIT_OK')
     print('ADMIN_WEBKIT_OK')
     page.close()
 
