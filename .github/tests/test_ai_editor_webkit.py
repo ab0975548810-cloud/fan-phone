@@ -436,6 +436,54 @@ def admin_test(browser, base):
     page.evaluate("async () => {await loadShop(true);window.prompt=window.__issue29Prompt;window.confirm=window.__issue29Confirm;delete window.__issue29Prompt;delete window.__issue29Confirm}")
     print('ADMIN_CATALOG_CRUD_STATE_RETRY_DOUBLE_SUBMIT_OK')
 
+    # Catalog commit can succeed before production-profile sync fails. The
+    # browser must adopt that committed candidate and returned version so its
+    # next catalog mutation cannot legally CAS stale data over the model edit.
+    partial_before = page.evaluate("() => ({data:structuredClone(shopData),model:structuredClone(shopData.models[0]),version:shopVersion})")
+    partial_model_name = f'Partial Success 型號 {time.time_ns()}'
+    partial_brand = f'部分成功後品牌 {time.time_ns()}'
+    page.evaluate("id => openModelEditor(id)", partial_before['model']['id'])
+    page.locator('#model-name').fill(partial_model_name)
+    partial_dialog_start = len(dialogs)
+    original_save_profiles = app_module.print_center.store.save_profiles
+    def fail_profile_sync(_profiles):
+        raise RuntimeError('browser fixture')
+    app_module.print_center.store.save_profiles = fail_profile_sync
+    try:
+        page.evaluate("() => saveModel()")
+    finally:
+        app_module.print_center.store.save_profiles = original_save_profiles
+    server_partial, server_partial_version = app_module.cloud_get_json_versioned(
+        'shop_data', app_module.DATA_FILE, app_module.DEFAULT_SHOP_DATA)
+    partial_state = page.evaluate("""() => ({
+      open:document.getElementById('model-modal').classList.contains('show'),
+      input:document.getElementById('model-name').value,
+      id:document.getElementById('model-id').value,
+      local:shopData.models.find(x=>x.id===document.getElementById('model-id').value)?.name,
+      version:shopVersion
+    })""")
+    assert partial_state == {
+        'open':True, 'input':partial_model_name, 'id':partial_before['model']['id'],
+        'local':partial_model_name, 'version':server_partial_version,
+    }, partial_state
+    assert server_partial_version != partial_before['version']
+    assert next(row for row in server_partial['models'] if row['id'] == partial_before['model']['id'])['name'] == partial_model_name
+    assert any('型號資料已儲存，但正式列印參數同步失敗' in msg for msg in dialogs[partial_dialog_start:])
+
+    page.evaluate("""async brand => {const old=window.prompt;window.prompt=()=>brand;try{await addBrand()}finally{window.prompt=old}}""", partial_brand)
+    server_after_mutation = page.request.get(base + '/api/shop_data').json()
+    assert partial_brand in server_after_mutation['data']['brands']
+    assert next(row for row in server_after_mutation['data']['models'] if row['id'] == partial_before['model']['id'])['name'] == partial_model_name
+    assert page.evaluate("brand => shopData.brands.includes(brand) && document.getElementById('model-modal').classList.contains('show')", partial_brand)
+    page.evaluate("() => saveModel()")
+    assert 'show' not in page.locator('#model-modal').get_attribute('class')
+    partial_restore = page.request.post(base + '/api/admin/save_shop_data', data={
+        'data':partial_before['data'], 'expected_version':page.evaluate('() => shopVersion'),
+    })
+    assert partial_restore.status == 200, partial_restore.text()
+    page.evaluate("() => loadShop(true)")
+    print('ADMIN_MODEL_PROFILE_PARTIAL_SUCCESS_STATE_OK')
+
     # A second tab/device wins the catalog CAS. This tab must keep its unsaved
     # inputs and local state across all shop_data write paths until reload.
     stale_shop = page.evaluate("() => ({data:structuredClone(shopData),version:shopVersion})")
