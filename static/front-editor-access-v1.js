@@ -47,7 +47,11 @@
       const ratio=Math.min(1,maxW/logicalW,maxH/logicalH);
       const displayW=Math.max(1,Math.floor(logicalW*ratio)),displayH=Math.max(1,Math.floor(logicalH*ratio));
       shell.style.width=displayW+'px';shell.style.height=displayH+'px';
-      if(typeof canvas.setDimensions==='function')canvas.setDimensions({width:displayW,height:displayH},{cssOnly:true});
+      // initCanvas applies its own transform scale. Once this responsive fit
+      // takes over, leaving that transform in place scales Fabric a second
+      // time while the shell and mask keep the cssOnly dimensions.
+      if(canvas.wrapperEl){canvas.wrapperEl.style.transform='none';canvas.wrapperEl.style.transformOrigin=''}
+      if(typeof canvas.setDimensions==='function')canvas.setDimensions({width:displayW+'px',height:displayH+'px'},{cssOnly:true});
       canvas.calcOffset?.();canvas.requestRenderAll?.();
     }catch(e){console.warn('[FRONT UX] canvas fit warning',e)}
   }
