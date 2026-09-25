@@ -4,6 +4,9 @@ import json
 import time
 import base64
 import uuid
+import hashlib
+from contextlib import contextmanager
+from datetime import datetime, timezone
 from commerce_store import CommerceError
 from io import BytesIO
 
@@ -92,6 +95,15 @@ DEFAULT_SHOP_DATA = {
 }
 DEFAULT_ASSETS = {'stickers': [], 'categories': ['全部', '可愛', 'Y2K', '文字']}
 DEFAULT_TEMPLATES = {'templates': [], 'categories': ['全部', '熱門']}
+STALE_DATA_MESSAGE = '資料已被其他分頁或裝置更新，請重新載入後再修改；本次沒有覆蓋伺服器資料。'
+
+
+class StaleDataError(RuntimeError):
+    code = 'STALE_DATA'
+    status = 409
+
+    def __init__(self):
+        super().__init__(STALE_DATA_MESSAGE)
 
 
 def local_load_json(filepath, default_data):
@@ -112,23 +124,131 @@ def local_save_json(filepath, data):
     os.replace(tmp, filepath)
 
 
-def cloud_get_json(key, local_file, default_data):
-    if not USE_SUPABASE:
-        return local_load_json(local_file, default_data)
+@contextmanager
+def _local_store_lock(filepath):
+    lock_path = filepath + '.lock'
+    os.makedirs(os.path.dirname(os.path.abspath(lock_path)), exist_ok=True)
+    handle = open(lock_path, 'a+b')
     try:
-        result = SUPABASE.table('app_store').select('value').eq('key', key).limit(1).execute()
+        if os.name == 'nt':
+            import msvcrt
+            handle.seek(0, os.SEEK_END)
+            if handle.tell() == 0:
+                handle.write(b'\0')
+                handle.flush()
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            handle.seek(0)
+            if os.name == 'nt':
+                import msvcrt
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
+
+
+def _local_json_version(filepath, data):
+    generation_path = filepath + '.version'
+    try:
+        with open(generation_path, 'r', encoding='ascii') as handle:
+            generation = handle.read().strip() or 'legacy'
+    except FileNotFoundError:
+        generation = 'legacy'
+    canonical = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode('utf-8')
+    return f'local:{generation}:{hashlib.sha256(canonical).hexdigest()}'
+
+
+def _save_local_generation(filepath, generation):
+    target = filepath + '.version'
+    tmp = target + '.tmp'
+    with open(tmp, 'w', encoding='ascii') as handle:
+        handle.write(generation)
+    os.replace(tmp, target)
+
+
+def _cloud_get_json_versioned(key, local_file, default_data):
+    if not USE_SUPABASE:
+        with _local_store_lock(local_file):
+            data = local_load_json(local_file, default_data)
+            return data, _local_json_version(local_file, data)
+    try:
+        result = SUPABASE.table('app_store').select('value,updated_at').eq('key', key).limit(1).execute()
         if result.data:
-            return result.data[0].get('value') or default_data
+            row = result.data[0]
+            if not row.get('updated_at'):
+                raise RuntimeError(f'Supabase {key} 缺少 updated_at')
+            return row.get('value') or default_data, str(row['updated_at'])
         seed = local_load_json(local_file, default_data)
-        SUPABASE.table('app_store').upsert({'key': key, 'value': seed}).execute()
-        return seed
+        try:
+            SUPABASE.table('app_store').insert({'key': key, 'value': seed}).execute()
+        except Exception:
+            # Another worker may have inserted the same seed concurrently.
+            pass
+        result = SUPABASE.table('app_store').select('value,updated_at').eq('key', key).limit(1).execute()
+        if not result.data or not result.data[0].get('updated_at'):
+            raise RuntimeError(f'Supabase 無法建立 {key}')
+        row = result.data[0]
+        return row.get('value') or default_data, str(row['updated_at'])
     except Exception as exc:
         raise RuntimeError(f'Supabase 讀取 {key} 失敗：{exc}')
+
+
+def cloud_get_json_versioned(key, local_file, default_data):
+    return _cloud_get_json_versioned(key, local_file, default_data)
+
+
+def cloud_get_json(key, local_file, default_data):
+    return _cloud_get_json_versioned(key, local_file, default_data)[0]
+
+
+def cloud_compare_and_swap_json(key, local_file, data, expected_version):
+    if not isinstance(expected_version, str) or not expected_version:
+        raise StaleDataError()
+    if not isinstance(data, dict):
+        raise ValueError('Payload 必須是 JSON object')
+    if not USE_SUPABASE:
+        with _local_store_lock(local_file):
+            defaults = {'shop_data': DEFAULT_SHOP_DATA, 'templates': DEFAULT_TEMPLATES}
+            current = local_load_json(local_file, defaults.get(key, {}))
+            if _local_json_version(local_file, current) != expected_version:
+                raise StaleDataError()
+            local_save_json(local_file, data)
+            generation = uuid.uuid4().hex
+            _save_local_generation(local_file, generation)
+            return _local_json_version(local_file, data)
+    try:
+        new_timestamp = datetime.now(timezone.utc).isoformat(timespec='microseconds')
+        result = (SUPABASE.table('app_store')
+                  .update({'value': data, 'updated_at': new_timestamp})
+                  .eq('key', key)
+                  .eq('updated_at', expected_version)
+                  .select('updated_at')
+                  .execute())
+        if not result.data:
+            raise StaleDataError()
+        version = result.data[0].get('updated_at')
+        if not version:
+            raise RuntimeError(f'Supabase 儲存 {key} 未回傳版本')
+        return str(version)
+    except StaleDataError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(f'Supabase 儲存 {key} 失敗：{exc}')
 
 
 def cloud_save_json(key, local_file, data):
     if not isinstance(data, dict):
         raise ValueError('Payload 必須是 JSON object')
+    if key in ('shop_data', 'templates'):
+        raise RuntimeError(f'{key} 必須使用帶版本的 compare-and-swap 儲存')
     if not USE_SUPABASE:
         local_save_json(local_file, data)
         return
@@ -359,7 +479,8 @@ def api_health():
 
 @app.route('/api/shop_data', methods=['GET'])
 def get_shop_data():
-    return no_cache_json({'status': 'success', 'data': cloud_get_json('shop_data', DATA_FILE, DEFAULT_SHOP_DATA)})
+    data, version = cloud_get_json_versioned('shop_data', DATA_FILE, DEFAULT_SHOP_DATA)
+    return no_cache_json({'status': 'success', 'data': data, 'version': version})
 
 
 @app.route('/api/assets', methods=['GET'])
@@ -369,7 +490,8 @@ def get_assets():
 
 @app.route('/api/templates', methods=['GET'])
 def get_templates():
-    return no_cache_json({'status': 'success', 'data': cloud_get_json('templates', TEMPLATES_FILE, DEFAULT_TEMPLATES)})
+    data, version = cloud_get_json_versioned('templates', TEMPLATES_FILE, DEFAULT_TEMPLATES)
+    return no_cache_json({'status': 'success', 'data': data, 'version': version})
 
 
 @app.route('/api/ai/remove-background', methods=['POST'])
@@ -720,8 +842,11 @@ def admin_save_shop_data():
     if not session.get('logged_in'):
         return no_cache_json({'status':'error'}, 401)
     try:
-        cloud_save_json('shop_data', DATA_FILE, request.get_json(silent=True) or {})
-        return no_cache_json({'status':'success','msg':'資料儲存成功'})
+        payload = request.get_json(silent=True) or {}
+        version = cloud_compare_and_swap_json('shop_data', DATA_FILE, payload.get('data'), payload.get('expected_version'))
+        return no_cache_json({'status':'success','msg':'資料儲存成功','version':version})
+    except StaleDataError as exc:
+        return no_cache_json({'status':'error','code':exc.code,'msg':str(exc)}, exc.status)
     except Exception as exc:
         return no_cache_json({'status':'error','msg':str(exc)}, 500)
 
@@ -731,8 +856,11 @@ def admin_save_templates():
     if not session.get('logged_in'):
         return no_cache_json({'status':'error'}, 401)
     try:
-        cloud_save_json('templates', TEMPLATES_FILE, request.get_json(silent=True) or {})
-        return no_cache_json({'status':'success','msg':'模板儲存成功'})
+        payload = request.get_json(silent=True) or {}
+        version = cloud_compare_and_swap_json('templates', TEMPLATES_FILE, payload.get('data'), payload.get('expected_version'))
+        return no_cache_json({'status':'success','msg':'模板儲存成功','version':version})
+    except StaleDataError as exc:
+        return no_cache_json({'status':'error','code':exc.code,'msg':str(exc)}, exc.status)
     except Exception as exc:
         return no_cache_json({'status':'error','msg':str(exc)}, 500)
 

@@ -17,7 +17,7 @@
   const active=s=>s.active&&!!styleOf(s.style_id)&&!!modelOf(s.model_id)&&styleOf(s.style_id)?.status!==false&&modelOf(s.model_id)?.status!==false;
   const today=()=>{const p=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());return ['year','month','day'].map(k=>p.find(x=>x.type===k).value).join('-')};
   function message(text,error=false){const box=el('pos-message');if(box){box.textContent=text;box.className='pos-message'+(error?' error':'');box.hidden=!text}}
-  async function api(url,body){const r=await fetch(url,{cache:'no-store',...(body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{})});let j;try{j=await r.json()}catch{throw Error('回應中斷，請重試原操作')};if(!r.ok||j.status!=='success'){const e=Error(j.msg||'操作失敗');e.status=r.status;e.code=j.code;throw e}return j}
+  async function api(url,body){const r=await fetch(url,{cache:'no-store',...(body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{})});let j;try{j=await r.json()}catch{throw Error('回應中斷，請重試原操作')};if(!r.ok||j.status!=='success'){const e=Error(j.code==='STALE_DATA'?'資料已被其他分頁或裝置更新，請重新載入後再修改。':(j.msg||'操作失敗'));e.status=r.status;e.code=j.code;throw e}return j}
   const pendingSlot='bf-pos2-pending';
   // A single durable receipt shared by all tabs on this origin. Web Locks makes
   // check + save/clear atomic across tabs; unsupported storage fails closed.
@@ -103,7 +103,7 @@
     el('pos-series').onclick=e=>{const b=e.target.closest('[data-series]');if(b){series=b.dataset.series;renderStock()}};
     el('pos-skus').oninput=onSkuInput;
     el('pos-skus').onclick=e=>{const b=e.target.closest('[data-receive],[data-adjust]');if(b)stockDialog(b.dataset.receive||b.dataset.adjust,!!b.dataset.adjust)};
-    el('pos-price-form').onsubmit=async e=>{e.preventDefault();try{const j=await api('/api/admin/commerce_set_style_price',{style_id:series,price:Number(el('pos-series-price').value)});styleOf(series).price=j.price;message('系列售價已更新');renderSkus()}catch(e){message(e.message,true)}};
+    el('pos-price-form').onsubmit=async e=>{e.preventDefault();try{const j=await api('/api/admin/commerce_set_style_price',{style_id:series,price:Number(el('pos-series-price').value),expected_version:window.getShopVersion?.()||''});window.setShopVersion?.(j.version);styleOf(series).price=j.price;message('系列售價已更新');renderSkus()}catch(e){message(e.message,true)}};
     el('pos-list').onclick=exportList;el('pos-close').onclick=()=>el('pos-dialog').close();
     el('pos-period').onchange=()=>document.querySelectorAll('.pos-custom').forEach(x=>x.hidden=el('pos-period').value!=='custom');
     el('pos-start').value=el('pos-end').value=today();

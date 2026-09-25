@@ -123,6 +123,32 @@ def install(app_module):
 
     app_module.cloud_get_json = resilient_get
 
+    original_get_versioned = app_module.cloud_get_json_versioned
+
+    @functools.wraps(original_get_versioned)
+    def resilient_get_versioned(key, local_file, default_data):
+        last_exc = None
+        for attempt in range(len(_RETRY_DELAYS) + 1):
+            try:
+                value = original_get_versioned(key, local_file, default_data)
+                _remember_json('versioned:' + str(key), value)
+                return value
+            except Exception as exc:
+                last_exc = exc
+                if not _is_future_jwt(exc):
+                    raise
+                if attempt < len(_RETRY_DELAYS):
+                    delay = _RETRY_DELAYS[attempt]
+                    print(f'[SUPABASE] PGRST303 on versioned {key}; retrying in {delay:.1f}s', flush=True)
+                    time.sleep(delay)
+        stale = _stale_json('versioned:' + str(key))
+        if stale is not None:
+            print(f'[SUPABASE] PGRST303 persists on versioned {key}; serving last-good data', flush=True)
+            return stale
+        raise last_exc
+
+    app_module.cloud_get_json_versioned = resilient_get_versioned
+
     # Upserts are idempotent, so retrying the exact PGRST303 auth rejection is safe.
     original_save = app_module.cloud_save_json
 
@@ -145,6 +171,29 @@ def install(app_module):
         raise last_exc
 
     app_module.cloud_save_json = resilient_save
+
+    original_cas = app_module.cloud_compare_and_swap_json
+
+    @functools.wraps(original_cas)
+    def resilient_cas(key, local_file, data, expected_version):
+        last_exc = None
+        for attempt in range(len(_RETRY_DELAYS) + 1):
+            try:
+                version = original_cas(key, local_file, data, expected_version)
+                _remember_json(key, data)
+                _remember_json('versioned:' + str(key), (data, version))
+                return version
+            except Exception as exc:
+                last_exc = exc
+                if not _is_future_jwt(exc):
+                    raise
+                if attempt < len(_RETRY_DELAYS):
+                    delay = _RETRY_DELAYS[attempt]
+                    print(f'[SUPABASE] PGRST303 while CAS saving {key}; retrying in {delay:.1f}s', flush=True)
+                    time.sleep(delay)
+        raise last_exc
+
+    app_module.cloud_compare_and_swap_json = resilient_cas
 
     app = app_module.app
 

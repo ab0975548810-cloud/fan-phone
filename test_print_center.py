@@ -1,5 +1,6 @@
 """Print Center safety tests. No test in this file can reach the vendor network."""
 import os
+import copy
 import tempfile
 import unittest
 import uuid
@@ -116,13 +117,17 @@ class PrintCenterTests(unittest.TestCase):
         idem = key or ("print-" + uuid.uuid4().hex)
         return self.client.post("/api/admin/print/" + action, json={**payload, "idempotency_key": idem}, headers={"Idempotency-Key": idem})
 
+    def shop_snapshot(self):
+        payload = self.client.get('/api/shop_data').get_json()
+        return payload['data'], payload['version']
+
     def save_profile(self):
-        shop = app.local_load_json(app.DATA_FILE, app.DEFAULT_SHOP_DATA)
+        shop, version = self.shop_snapshot()
         model_id = next(s["model_id"] for s in app.commerce.read()["skus"] if s["id"] == self.sku_id)
         model = next(item for item in shop["models"] if item["id"] == model_id)
         model.update(print_w=80, print_h=160, print_x=1.5, print_y=2.5, print_angle=0)
         response = self.client.post("/api/admin/print/model-profiles", json={
-            "model_id": model_id, "shop_data": shop,
+            "model_id": model_id, "shop_data": shop, "expected_version": version,
         })
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
 
@@ -303,10 +308,11 @@ class PrintCenterTests(unittest.TestCase):
         self.assertEqual(dashboard["platform"]["print_area_mm"], {"width": 200, "height": 230})
         self.assertEqual(dashboard["platform"]["coordinate_origin"], "治具右下角")
 
-        shop = app.local_load_json(app.DATA_FILE, app.DEFAULT_SHOP_DATA)
+        shop, version = self.shop_snapshot()
         model = next(item for item in shop["models"] if item["id"] == app.DEFAULT_SHOP_DATA["models"][0]["id"])
         model.update(print_w=71.25, print_h=148.5, print_x=3.25, print_y=4.75)
         app.local_save_json(app.DATA_FILE, shop)
+        _, version = self.shop_snapshot()
         dashboard = self.client.get("/api/admin/print/jobs").get_json()
         row = next(item for item in dashboard["rows"] if item["order_id"] == self.order_id)
         self.assertFalse(row["profile_available"])
@@ -314,7 +320,7 @@ class PrintCenterTests(unittest.TestCase):
         blocked = self.post("prepare", {"order_id": self.order_id})
         self.assertEqual((blocked.status_code, blocked.get_json()["code"]), (409, "PROFILE_MISSING"))
         saved = self.client.post("/api/admin/print/model-profiles", json={
-            "model_id": model["id"], "shop_data": shop,
+            "model_id": model["id"], "shop_data": shop, "expected_version": version,
         })
         self.assertEqual(saved.status_code, 200, saved.get_data(as_text=True))
         job = self.prepare()
@@ -342,10 +348,10 @@ class PrintCenterTests(unittest.TestCase):
         })
         other_before = app.print_center.store.profile(other["id"])
         commerce_before = app.commerce.read()
-        shop = app.local_load_json(app.DATA_FILE, app.DEFAULT_SHOP_DATA)
+        shop, version = self.shop_snapshot()
         model = next(row for row in shop["models"] if row["id"] == model_id)
         model.update(print_w=72.5, print_h=149.25, print_x=2.75, print_y=4.5, print_angle=1.5)
-        response = self.client.post("/api/admin/print/model-profiles", json={"model_id": model_id, "shop_data": shop})
+        response = self.client.post("/api/admin/print/model-profiles", json={"model_id": model_id, "shop_data": shop, "expected_version": version})
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         self.assertEqual(response.get_json()["synced_skus"], len(active))
         for sku in active:
@@ -359,19 +365,41 @@ class PrintCenterTests(unittest.TestCase):
         self.assertEqual(app.commerce.read(), commerce_before)
 
     def test_model_profile_sync_failure_is_clear_retryable_and_not_a_silent_success(self):
-        shop = app.local_load_json(app.DATA_FILE, app.DEFAULT_SHOP_DATA)
+        shop, version = self.shop_snapshot()
         model = shop["models"][0]
         model.update(print_w=70, print_h=140, print_x=2, print_y=3, print_angle=0)
         commerce_before = app.commerce.read()
         with mock.patch.object(app.print_center.store, "save_profiles", side_effect=RuntimeError("fixture")):
-            response = self.client.post("/api/admin/print/model-profiles", json={"model_id": model["id"], "shop_data": shop})
+            response = self.client.post("/api/admin/print/model-profiles", json={"model_id": model["id"], "shop_data": shop, "expected_version": version})
         self.assertEqual((response.status_code, response.get_json()["code"]), (503, "PROFILE_SYNC_FAILED"))
         self.assertIn("再次按儲存", response.get_json()["msg"])
+        self.assertTrue(response.get_json()["version"])
         self.assertEqual(app.commerce.read(), commerce_before)
         persisted = app.local_load_json(app.DATA_FILE, app.DEFAULT_SHOP_DATA)
         saved_model = next(row for row in persisted["models"] if row["id"] == model["id"])
         self.assertEqual((saved_model["print_w"], saved_model["print_h"]), (70, 140))
         self.assertEqual(self.client.post("/api/admin/print/profile", json={}).status_code, 404)
+
+    def test_stale_model_save_does_not_write_catalog_or_profiles(self):
+        stale_shop, stale_version = self.shop_snapshot()
+        winner = copy.deepcopy(stale_shop)
+        winner['brands'].append('另一個分頁已更新')
+        winner_version = app.cloud_compare_and_swap_json(
+            'shop_data', app.DATA_FILE, winner, stale_version)
+        model = stale_shop['models'][0]
+        model.update(print_w=66, print_h=133, print_x=9, print_y=8, print_angle=7)
+        profiles_before = app.print_center.store.profiles()
+        response = self.client.post('/api/admin/print/model-profiles', json={
+            'model_id': model['id'], 'shop_data': stale_shop,
+            'expected_version': stale_version,
+        })
+        self.assertEqual((response.status_code, response.get_json()['code']), (409, 'STALE_DATA'))
+        current, current_version = self.shop_snapshot()
+        self.assertEqual(current_version, winner_version)
+        self.assertIn('另一個分頁已更新', current['brands'])
+        current_model = next(row for row in current['models'] if row['id'] == model['id'])
+        self.assertNotEqual((current_model.get('print_w'), current_model.get('print_h')), (66, 133))
+        self.assertEqual(app.print_center.store.profiles(), profiles_before)
 
     def test_legacy_order_binding_is_explicit_print_only_and_required_before_prepare(self):
         self.order_id = self.create_order(style_id="style_color", color_name="粉")

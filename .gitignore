@@ -6,6 +6,8 @@ commerce_data.json
 shop_data.json
 assets.json
 templates.json
+*.json.lock
+*.json.version
 orders/
 static/materials/
 static/stickers/
