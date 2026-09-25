@@ -12,7 +12,6 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 import uuid
 
 ROOT = Path(__file__).resolve().parent
@@ -49,7 +48,7 @@ for rel in refs:
     if proc.returncode:
         fail(f"JavaScript syntax: static/{rel}\n{proc.stderr}")
 
-for admin_js in ("admin-orders-v3.js", "admin-commerce-v1.js", "admin-print-center.js"):
+for admin_js in ("admin-orders-v3.js", "admin-commerce-v1.js", "admin-print-center.js", "passkey-client.js"):
     path = ROOT / "static" / admin_js
     if not path.exists():
         fail(f"Missing admin module: static/{admin_js}")
@@ -58,14 +57,19 @@ for admin_js in ("admin-orders-v3.js", "admin-commerce-v1.js", "admin-print-cent
         fail(f"JavaScript syntax: static/{admin_js}\n{proc.stderr}")
 
 
-test_dir = tempfile.TemporaryDirectory()
-os.environ['COMMERCE_DB_PATH'] = str(Path(test_dir.name) / 'commerce.sqlite3')
+test_dir = ROOT / '__pycache__' / f'smoke-test-{os.getpid()}'
+test_dir.mkdir(parents=True, exist_ok=True)
+os.environ['COMMERCE_DB_PATH'] = str(test_dir / 'commerce.sqlite3')
+os.environ['ADMIN_PASSKEYS_FILE'] = str(test_dir / 'admin_passkeys.json')
+os.environ['WEBAUTHN_RP_ID'] = 'localhost'
+os.environ['WEBAUTHN_ORIGIN'] = 'http://localhost'
 os.environ.pop('SUPABASE_URL', None)
 os.environ.pop('SUPABASE_SERVICE_ROLE_KEY', None)
 
 # 3) Import Flask app and install the exact production middleware set.
 app_module = importlib.import_module("app")
 installers = [
+    ("passkey_auth", "install"),
     ("security_perf", "install"),
     ("supabase_resilience", "install"),
     ("quality_perf_patch", "install"),
@@ -96,6 +100,15 @@ for url, expected in checks:
     if response.status_code not in expected:
         fail(f"GET {url}: HTTP {response.status_code}, expected {sorted(expected)}")
 
+login_page = client.get('/login')
+if b'id="passkey-login-button"' not in login_page.data or '使用 Face ID 登入'.encode() not in login_page.data:
+    fail('Login page did not render Face ID as the primary action')
+passkey_status = client.get('/api/auth/passkey/status').get_json() or {}
+if not passkey_status.get('configured') or passkey_status.get('has_credentials'):
+    fail(f'Unexpected initial passkey status: {passkey_status}')
+if client.post('/api/admin/passkey/register/options', json={}).status_code != 401:
+    fail('Passkey registration options were available before password login')
+
 
 # 5) Log in and initialize private POS inventory before creating the order.
 login_resp = client.post(
@@ -114,6 +127,11 @@ if b"admin-commerce-v1.js" not in admin_resp.data:
     fail("Authenticated /admin did not inject admin-commerce-v1.js")
 if b"admin-print-center.js" not in admin_resp.data:
     fail("Authenticated /admin did not inject admin-print-center.js")
+if '登入安全'.encode() not in admin_resp.data or b'id="passkey-enable"' not in admin_resp.data:
+    fail('Authenticated /admin did not expose the login security panel')
+passkey_admin = client.get('/api/admin/passkeys').get_json() or {}
+if not passkey_admin.get('configured') or passkey_admin.get('credentials') != []:
+    fail(f'Unexpected authenticated passkey settings: {passkey_admin}')
 
 sync_resp = client.post("/api/admin/commerce_sync_skus")
 sync_json = sync_resp.get_json() or {}

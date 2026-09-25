@@ -25,3 +25,7 @@ jobs:
           FLASK_SECRET_KEY: smoke-test-secret-only
           SESSION_COOKIE_SECURE: 'false'
         run: python smoke_test.py
+      - name: Run Passkey security regression
+        env:
+          FLASK_SECRET_KEY: passkey-test-secret-only
+        run: python test_passkey_auth.py

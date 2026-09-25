@@ -31,6 +31,7 @@ access_log_format = '%(h)s %(t)s "%(m)s" %(s)s %(b)s "%(a)s"'
 def post_worker_init(worker):
     try:
         import app as app_module
+        from passkey_auth import install as install_passkey_auth
         from security_perf import install as install_security
         from supabase_resilience import install as install_supabase_resilience
         from admin_perf_patch import install as install_admin_perf
@@ -42,6 +43,7 @@ def post_worker_init(worker):
         from ai_runtime_patch import install as install_ai_runtime
         from commerce_patch import install as install_commerce
         from print_center import install as install_print_center, start_auto_dispatcher
+        install_passkey_auth(app_module)
         install_security(app_module)
         install_supabase_resilience(app_module)
         install_quality_perf(app_module)
