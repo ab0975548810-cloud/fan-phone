@@ -440,6 +440,9 @@ def admin_test(browser, base):
     # browser must adopt that committed candidate and returned version so its
     # next catalog mutation cannot legally CAS stale data over the model edit.
     partial_before = page.evaluate("() => ({data:structuredClone(shopData),model:structuredClone(shopData.models[0]),version:shopVersion})")
+    primed_catalog = page.request.get(base + '/api/shop_data')
+    assert primed_catalog.headers.get('x-benfuwan-cache') == 'HIT', primed_catalog.headers
+    assert primed_catalog.json()['version'] == partial_before['version']
     partial_model_name = f'Partial Success 型號 {time.time_ns()}'
     partial_brand = f'部分成功後品牌 {time.time_ns()}'
     page.evaluate("id => openModelEditor(id)", partial_before['model']['id'])
@@ -469,6 +472,12 @@ def admin_test(browser, base):
     assert server_partial_version != partial_before['version']
     assert next(row for row in server_partial['models'] if row['id'] == partial_before['model']['id'])['name'] == partial_model_name
     assert any('型號資料已儲存，但正式列印參數同步失敗' in msg for msg in dialogs[partial_dialog_start:])
+    fresh_after_partial = page.request.get(base + '/api/shop_data')
+    assert fresh_after_partial.headers.get('x-benfuwan-cache') == 'MISS', fresh_after_partial.headers
+    fresh_after_partial_data = fresh_after_partial.json()
+    assert fresh_after_partial_data['version'] == server_partial_version
+    assert next(row for row in fresh_after_partial_data['data']['models'] if row['id'] == partial_before['model']['id'])['name'] == partial_model_name
+    print('ADMIN_MODEL_PROFILE_PARTIAL_SUCCESS_CACHE_INVALIDATION_OK')
 
     page.evaluate("""async brand => {const old=window.prompt;window.prompt=()=>brand;try{await addBrand()}finally{window.prompt=old}}""", partial_brand)
     server_after_mutation = page.request.get(base + '/api/shop_data').json()
@@ -494,6 +503,9 @@ def admin_test(browser, base):
     })
     assert winner.status == 200, winner.text()
     winner_version = winner.json()['version']
+    winner_cached = page.request.get(base + '/api/shop_data')
+    assert winner_cached.headers.get('x-benfuwan-cache') == 'MISS', winner_cached.headers
+    assert winner_cached.json()['version'] == winner_version
     stale_dialog_start = len(dialogs)
 
     page.evaluate("""() => {openStyleEditor();document.getElementById('style-name').value='CAS 分頁 B 系列';document.getElementById('style-price').value='555'}""")
@@ -518,6 +530,9 @@ def admin_test(browser, base):
       version:shopVersion
     })""")
     assert model_stale == {'open':True,'input':'CAS 分頁 B 型號','local':False,'version':stale_shop['version']}, model_stale
+    cache_after_stale = page.request.get(base + '/api/shop_data')
+    assert cache_after_stale.headers.get('x-benfuwan-cache') == 'HIT', cache_after_stale.headers
+    assert cache_after_stale.json()['version'] == winner_version
     page.locator('#model-modal .mh button').click()
 
     page.locator('.nav button[data-view="commerce"]').click()

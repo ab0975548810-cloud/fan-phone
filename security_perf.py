@@ -255,7 +255,18 @@ def install(app_module):
             except Exception:
                 pass
 
-        if request.method in ('POST', 'PUT', 'PATCH', 'DELETE') and 200 <= resp.status_code < 400:
+        partial_catalog_commit = False
+        if (path == '/api/admin/print/model-profiles' and resp.status_code == 503
+                and resp.mimetype == 'application/json'):
+            try:
+                payload = resp.get_json(silent=True) or {}
+                partial_catalog_commit = bool(
+                    payload.get('code') == 'PROFILE_SYNC_FAILED' and payload.get('version'))
+            except Exception:
+                pass
+
+        if (request.method in ('POST', 'PUT', 'PATCH', 'DELETE')
+                and (200 <= resp.status_code < 400 or partial_catalog_commit)):
             _invalidate(path)
 
         if path == '/login' and request.method == 'POST' and 300 <= resp.status_code < 400:
