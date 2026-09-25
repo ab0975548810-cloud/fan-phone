@@ -97,8 +97,39 @@ def add_front_photo(page, variant=0):
     }})''')
 
 
+def assert_front_editor_geometry(page, label):
+    metrics = poll(page, """() => {
+      if(typeof canvas==='undefined'||!canvas?.wrapperEl||!canvas?.lowerCanvasEl)return false;
+      const shell=document.getElementById('canvas-shell'),mask=document.getElementById('phone-mask');
+      if(!shell||!mask||getComputedStyle(mask).display==='none')return false;
+      const rect=el=>{const r=el.getBoundingClientRect();return {left:r.left,top:r.top,width:r.width,height:r.height}};
+      const out={
+        logical:{width:canvas.width,height:canvas.height,lowerWidth:canvas.lowerCanvasEl.width,lowerHeight:canvas.lowerCanvasEl.height},
+        shell:rect(shell),wrapper:rect(canvas.wrapperEl),lower:rect(canvas.lowerCanvasEl),mask:rect(mask),
+        inlineTransform:canvas.wrapperEl.style.transform,computedTransform:getComputedStyle(canvas.wrapperEl).transform
+      };
+      const lowerRect=canvas.lowerCanvasEl.getBoundingClientRect();
+      const pointer=canvas.getPointer({clientX:lowerRect.left+lowerRect.width/2,clientY:lowerRect.top+lowerRect.height/2});
+      out.centerPointer={x:pointer.x,y:pointer.y};
+      return out.shell.width>0&&out.shell.height>0 ? out : false;
+    }""")
+    shell = metrics['shell']
+    for name in ('wrapper', 'lower', 'mask'):
+        rect = metrics[name]
+        for key in ('left', 'top', 'width', 'height'):
+            assert abs(rect[key] - shell[key]) <= 1, (label, name, key, metrics)
+    assert metrics['inlineTransform'] in ('', 'none'), (label, metrics)
+    assert metrics['computedTransform'] == 'none', (label, metrics)
+    assert metrics['logical'] == {'width':240,'height':480,'lowerWidth':240,'lowerHeight':480}, (label, metrics)
+    assert abs(metrics['centerPointer']['x'] - 120) <= 1 and abs(metrics['centerPointer']['y'] - 240) <= 1, (label, metrics)
+    print('FRONT_EDITOR_DISPLAY_GEOMETRY_OK', label, round(shell['width'], 2), round(shell['height'], 2))
+    return metrics
+
+
 def front_test(browser, base):
-    page = browser.new_page(viewport={'width': 390, 'height': 844})
+    # Start with a constrained iPhone viewport so initCanvas installs a
+    # transform below 1, then exercise the responsive owner's cssOnly fit.
+    page = browser.new_page(viewport={'width': 390, 'height': 600})
     responses = [GOOD, BAD]
     page.route('**/api/ai/remove-background', lambda route: route.fulfill(status=200, body=responses.pop(0) if responses else GOOD, content_type='image/png'))
     page.goto(base + '/', wait_until='domcontentloaded')
@@ -107,8 +138,23 @@ def front_test(browser, base):
     # the editor. Otherwise the startup async task can switch pages after the
     # test has entered the editor and produce a false zero-geometry failure.
     poll(page, "() => typeof shopData !== 'undefined' && Array.isArray(shopData?.models) && shopData.models.length > 0", timeout=10000)
-    page.evaluate("""() => {ctx.printW=80;ctx.printH=160;ctx.maskUrl='';navigate('page-editor');initCanvas();editorHasSession=true;window.BenfuwanEditorAccess?.fitCanvas?.();}""")
+    page.evaluate("""() => {
+      const m=document.createElement('canvas');m.width=8;m.height=16;
+      const g=m.getContext('2d');g.clearRect(0,0,8,16);g.fillStyle='#fff';g.fillRect(1,1,6,14);
+      ctx.printW=80;ctx.printH=160;ctx.maskUrl=m.toDataURL('image/png');ctx.printLineUrl=ctx.maskUrl;
+      navigate('page-editor');initCanvas();editorHasSession=true;window.BenfuwanEditorAccess?.fitCanvas?.();
+    }""")
+    assert_front_editor_geometry(page, 'iphone-constrained-unselected')
     add_front_photo(page, 0)
+    page.evaluate("() => window.BenfuwanEditorAccess.fitCanvas()")
+    assert_front_editor_geometry(page, 'iphone-constrained-selected')
+    page.evaluate("""() => {
+      const o=canvas.getActiveObject();o.set({angle:27,scaleX:.82,scaleY:.82});o.setCoords();canvas.requestRenderAll();
+    }""")
+    assert_front_editor_geometry(page, 'iphone-object-transform')
+    page.set_viewport_size({'width':390,'height':844})
+    page.evaluate("() => window.BenfuwanEditorAccess.fitCanvas()")
+    assert_front_editor_geometry(page, 'iphone-expanded-selected')
     layer_listeners = page.evaluate("""() => {
       const watched=new Set(['touchmove','touchend','touchcancel','mousemove','mouseup','pointermove','pointerup','pointercancel']);
       const active=new Map(),nativeAdd=document.addEventListener,nativeRemove=document.removeEventListener;
@@ -158,8 +204,10 @@ def front_test(browser, base):
     assert payload['role'] == 'photo' and payload['left'] == 120, payload
     print('FRONT_ORDER_PAYLOAD_OK', payload['raw'], payload['compact'])
 
-    assert page.evaluate("""() => {const tb=document.querySelector('#page-editor>.toolbar');const b=[...tb.querySelectorAll('button')].find(x=>/openSheet|openTemplates|layer|sticker/i.test(x.getAttribute('onclick')||''))||tb.querySelector('button');b.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));return !canvas.getActiveObject();}"""), 'main toolbar did not release selection'
-    page.evaluate("""() => {const o=canvas.getObjects().find(x=>x.role==='photo');canvas.setActiveObject(o);canvas.requestRenderAll();syncSelection();}""")
+    assert page.evaluate("""() => {const tb=document.querySelector('#page-editor>.toolbar');const b=[...tb.querySelectorAll('button')].find(x=>/openSheet|openTemplates|layer|sticker/i.test(x.getAttribute('onclick')||''))||tb.querySelector('button');b.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));window.BenfuwanEditorAccess.fitCanvas();return !canvas.getActiveObject();}"""), 'main toolbar did not release selection'
+    assert_front_editor_geometry(page, 'iphone-expanded-unselected')
+    page.evaluate("""() => {const o=canvas.getObjects().find(x=>x.role==='photo');canvas.setActiveObject(o);canvas.requestRenderAll();syncSelection();window.BenfuwanEditorAccess.fitCanvas();}""")
+    assert_front_editor_geometry(page, 'iphone-expanded-reselected')
     page.evaluate("() => window.removeBackgroundForActive()")
     good = page.evaluate("""() => {const o=canvas.getActiveObject();return {ai:!!o?.aiBackgroundRemoved,role:o?.role,outline:String(o?.aiOutlineSource||'').startsWith('data:image/'),count:canvas.getObjects().filter(x=>x.role==='photo').length};}""")
     assert good == {'ai':True,'role':'photo','outline':True,'count':1}, good
@@ -167,6 +215,18 @@ def front_test(browser, base):
     page.evaluate("() => window.removeBackgroundForActive()")
     bad = page.evaluate("""() => {const o=canvas.getActiveObject();return {ai:!!o?.aiBackgroundRemoved,name:o?.originalName,count:canvas.getObjects().filter(x=>x.role==='photo').length};}""")
     assert bad['ai'] is False and bad['name']=='test-1.png' and bad['count']==2, bad
+    page.set_viewport_size({'width':768,'height':1024})
+    page.evaluate("() => window.BenfuwanEditorAccess.fitCanvas()")
+    assert_front_editor_geometry(page, 'ipad-selected')
+    page.evaluate("""async () => {
+      await openPreview();
+      await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    }""")
+    preview_state = page.evaluate("() => ({active:document.getElementById('page-preview')?.classList.contains('active'),print:!!ctx.printBase64,mockup:!!ctx.mockupBase64})")
+    assert preview_state == {'active':True,'print':True,'mockup':True}, preview_state
+    preview = page.evaluate("""() => Promise.all([ctx.printBase64,ctx.mockupBase64].map(src=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve({width:img.naturalWidth,height:img.naturalHeight});img.onerror=reject;img.src=src}))).then(([print,mockup])=>({print,mockup,logical:{width:canvas.width,height:canvas.height}}))""")
+    assert preview == {'print':{'width':2268,'height':4535},'mockup':{'width':600,'height':1200},'logical':{'width':240,'height':480}}, preview
+    print('FRONT_EDITOR_PREVIEW_DIMENSIONS_OK', preview)
     print('FRONT_WEBKIT_OK')
     page.close()
 
