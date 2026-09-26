@@ -28,6 +28,14 @@ app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_SECURE'] = os.environ.get('SESSION_COOKIE_SECURE', '').lower() in ('1', 'true', 'yes')
 
+
+def production_admin_password_ready():
+    """Fail closed when production password authentication is not configured safely."""
+    if os.environ.get('BENFUWAN_PRODUCTION') != '1':
+        return True
+    configured = (os.environ.get('ADMIN_PASSWORD') or '').strip()
+    return bool(configured and configured != 'fan123' and len(configured) >= 12)
+
 # === Local fallback ===
 SAVE_DIR = 'orders'
 STATIC_DIR = 'static'
@@ -216,7 +224,11 @@ def cloud_compare_and_swap_json(key, local_file, data, expected_version):
         raise ValueError('Payload 必須是 JSON object')
     if not USE_SUPABASE:
         with _local_store_lock(local_file):
-            defaults = {'shop_data': DEFAULT_SHOP_DATA, 'templates': DEFAULT_TEMPLATES}
+            defaults = {
+                'shop_data': DEFAULT_SHOP_DATA,
+                'templates': DEFAULT_TEMPLATES,
+                'assets': DEFAULT_ASSETS,
+            }
             current = local_load_json(local_file, defaults.get(key, {}))
             if _local_json_version(local_file, current) != expected_version:
                 raise StaleDataError()
@@ -485,7 +497,8 @@ def get_shop_data():
 
 @app.route('/api/assets', methods=['GET'])
 def get_assets():
-    return no_cache_json({'status': 'success', 'data': cloud_get_json('assets', ASSETS_FILE, DEFAULT_ASSETS)})
+    data, version = cloud_get_json_versioned('assets', ASSETS_FILE, DEFAULT_ASSETS)
+    return no_cache_json({'status': 'success', 'data': data, 'version': version})
 
 
 @app.route('/api/templates', methods=['GET'])
@@ -822,6 +835,11 @@ def admin_page():
 @app.route('/login', methods=['GET', 'POST'])
 def login_page():
     if request.method == 'POST':
+        if not production_admin_password_ready():
+            return (
+                '管理員密碼尚未安全設定，請先在正式環境設定至少 12 字元的 ADMIN_PASSWORD。',
+                503,
+            )
         if request.form.get('password') == ADMIN_PASSWORD:
             session['logged_in'] = True
             return redirect(url_for('admin_page'))
@@ -835,6 +853,12 @@ def login_page():
           </form>
         </body>
     '''
+
+
+@app.route('/logout', methods=['POST'])
+def logout():
+    session.clear()
+    return redirect(url_for('login_page'))
 
 
 @app.route('/api/admin/save_shop_data', methods=['POST'])
@@ -886,11 +910,16 @@ def admin_batch_upload_stickers():
     if not session.get('logged_in'):
         return no_cache_json({'status':'error'}, 401)
     try:
+        expected_version = request.form.get('expected_version')
+        if not isinstance(expected_version, str) or not expected_version:
+            raise StaleDataError()
         files = [f for f in request.files.getlist('files') if f and f.filename]
         if not files:
             raise ValueError('沒有選擇檔案')
         category = request.form.get('category', '全部') or '全部'
-        assets = cloud_get_json('assets', ASSETS_FILE, DEFAULT_ASSETS)
+        assets, current_version = cloud_get_json_versioned('assets', ASSETS_FILE, DEFAULT_ASSETS)
+        if current_version != expected_version:
+            raise StaleDataError()
         uploaded = []
         for file in files:
             url = upload_public_file(file, 'stickers')
@@ -900,8 +929,10 @@ def admin_batch_upload_stickers():
         cats = assets.setdefault('categories', ['全部'])
         if category not in cats:
             cats.append(category)
-        cloud_save_json('assets', ASSETS_FILE, assets)
-        return no_cache_json({'status':'success','msg':f'成功批量上傳 {len(uploaded)} 張素材！','data':uploaded})
+        version = cloud_compare_and_swap_json('assets', ASSETS_FILE, assets, expected_version)
+        return no_cache_json({'status':'success','msg':f'成功批量上傳 {len(uploaded)} 張素材！','data':uploaded,'version':version})
+    except StaleDataError as exc:
+        return no_cache_json({'status':'error','code':exc.code,'msg':str(exc)}, exc.status)
     except ValueError as exc:
         return no_cache_json({'status':'error','msg':str(exc)}, 400)
     except Exception as exc:
@@ -913,11 +944,18 @@ def admin_delete_sticker():
     if not session.get('logged_in'):
         return no_cache_json({'status':'error'}, 401)
     try:
-        sticker_id = (request.get_json(silent=True) or {}).get('id')
-        assets = cloud_get_json('assets', ASSETS_FILE, DEFAULT_ASSETS)
+        payload = request.get_json(silent=True) or {}
+        sticker_id = payload.get('id')
+        if not sticker_id:
+            raise ValueError('缺少素材 ID')
+        assets, version = cloud_get_json_versioned('assets', ASSETS_FILE, DEFAULT_ASSETS)
         assets['stickers'] = [s for s in assets.get('stickers', []) if s.get('id') != sticker_id]
-        cloud_save_json('assets', ASSETS_FILE, assets)
-        return no_cache_json({'status':'success','msg':'素材已刪除'})
+        version = cloud_compare_and_swap_json('assets', ASSETS_FILE, assets, payload.get('expected_version'))
+        return no_cache_json({'status':'success','msg':'素材已刪除','version':version})
+    except StaleDataError as exc:
+        return no_cache_json({'status':'error','code':exc.code,'msg':str(exc)}, exc.status)
+    except ValueError as exc:
+        return no_cache_json({'status':'error','msg':str(exc)}, 400)
     except Exception as exc:
         return no_cache_json({'status':'error','msg':str(exc)}, 500)
 
@@ -926,6 +964,8 @@ def admin_delete_sticker():
 def custom_static_orders(filename):
     if USE_SUPABASE:
         return 'Not available in cloud mode', 404
+    if not session.get('logged_in'):
+        return 'Not found', 404
     if not filename.lower().endswith(('.png','.jpg','.jpeg','.webp')):
         return 'Access denied', 403
     return send_from_directory(SAVE_DIR, filename)

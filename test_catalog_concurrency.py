@@ -8,8 +8,10 @@ from pathlib import Path
 from unittest import mock
 
 import app
+import asset_category_patch
 import commerce_patch
 
+asset_category_patch.install(app)
 commerce_patch.install(app)
 
 
@@ -78,11 +80,12 @@ class CatalogConcurrencyTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         root = Path(self.tmp.name)
-        self.old = (app.USE_SUPABASE, app.SUPABASE, app.DATA_FILE, app.TEMPLATES_FILE)
+        self.old = (app.USE_SUPABASE, app.SUPABASE, app.DATA_FILE, app.TEMPLATES_FILE, app.ASSETS_FILE)
         app.USE_SUPABASE = False
         app.SUPABASE = None
         app.DATA_FILE = str(root / 'shop.json')
         app.TEMPLATES_FILE = str(root / 'templates.json')
+        app.ASSETS_FILE = str(root / 'assets.json')
         app.app.config.update(TESTING=True, SESSION_COOKIE_SECURE=False)
         self.a = app.app.test_client()
         self.b = app.app.test_client()
@@ -91,7 +94,7 @@ class CatalogConcurrencyTests(unittest.TestCase):
                 session['logged_in'] = True
 
     def tearDown(self):
-        app.USE_SUPABASE, app.SUPABASE, app.DATA_FILE, app.TEMPLATES_FILE = self.old
+        app.USE_SUPABASE, app.SUPABASE, app.DATA_FILE, app.TEMPLATES_FILE, app.ASSETS_FILE = self.old
         self.tmp.cleanup()
 
     def test_local_catalog_and_template_stale_writes_are_rejected(self):
@@ -148,6 +151,33 @@ class CatalogConcurrencyTests(unittest.TestCase):
         self.assertEqual((response.status_code, response.get_json()['code']), (409, 'STALE_DATA'))
         response = self.a.post('/api/admin/save_templates', json=app.DEFAULT_TEMPLATES)
         self.assertEqual((response.status_code, response.get_json()['code']), (409, 'STALE_DATA'))
+
+        response = self.a.post('/api/admin/delete_sticker', json={'id': 'missing'})
+        self.assertEqual((response.status_code, response.get_json()['code']), (409, 'STALE_DATA'))
+        response = self.a.post('/api/admin/sticker_category', json={'action': 'create', 'name': '缺版本'})
+        self.assertEqual((response.status_code, response.get_json()['code']), (409, 'STALE_DATA'))
+
+    def test_asset_library_stale_writes_are_rejected(self):
+        first_a = self.a.get('/api/assets').get_json()
+        first_b = self.b.get('/api/assets').get_json()
+        self.assertTrue(first_a['version'])
+        self.assertEqual(first_a['version'], first_b['version'])
+
+        saved = self.a.post('/api/admin/sticker_category', json={
+            'action': 'create', 'name': '分頁 A', 'expected_version': first_a['version'],
+        })
+        self.assertEqual(saved.status_code, 200, saved.get_data(as_text=True))
+        version_2 = saved.get_json()['version']
+        self.assertNotEqual(version_2, first_a['version'])
+
+        stale = self.b.post('/api/admin/sticker_category', json={
+            'action': 'create', 'name': '分頁 B', 'expected_version': first_b['version'],
+        })
+        self.assertEqual((stale.status_code, stale.get_json()['code']), (409, 'STALE_DATA'))
+        current = self.b.get('/api/assets').get_json()
+        self.assertEqual(current['version'], version_2)
+        self.assertIn('分頁 A', current['data']['categories'])
+        self.assertNotIn('分頁 B', current['data']['categories'])
 
     def test_commerce_sale_price_cannot_bypass_catalog_version(self):
         first = self.a.get('/api/shop_data').get_json()

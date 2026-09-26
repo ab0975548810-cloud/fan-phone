@@ -131,7 +131,7 @@
       colors:cleanList(document.getElementById('style-colors').value),
       model_colors:collectOverrides(),
       mask_img:document.getElementById('style-mask-url').value||'',
-      status:true
+      status:document.getElementById('style-active')?.checked!==false
     };
     if(!data.name)return alert('請填材質名稱');
     const next=structuredClone(shopData),idx=id?next.styles.findIndex(x=>x.id===id):-1;

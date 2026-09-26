@@ -43,7 +43,9 @@
   window.renderTemplates=function(){
     const list=currentTpl==='全部'?(templatesData.templates||[]):(templatesData.templates||[]).filter(t=>t.category===currentTpl);
     const box=$('template-grid');box.className='grid';
-    box.innerHTML=list.length?list.map(t=>`<div class="card"><button class="del" onclick="deleteTemplate('${esc(t.id)}')">×</button><img loading="lazy" decoding="async" src="${esc(t.thumb_url||'')}"><div class="name">${esc(t.name)}</div><small>${t.universal||t.model_id==='*'?'全型號通用':'舊版指定型號'}</small><div style="margin-top:8px"><button class="btn alt mini" onclick="openTemplateEditor('${esc(t.id)}')">編輯</button></div></div>`).join(''):'<div class="empty">目前沒有模板</div>';
+    box.innerHTML=list.length?list.map(t=>`<div class="card"><button class="del" data-delete-template="${esc(t.id)}">×</button><img loading="lazy" decoding="async" src="${esc(t.thumb_url||'')}"><div class="name">${esc(t.name)}</div><small>${t.universal||t.model_id==='*'?'全型號通用':'舊版指定型號'}</small><div style="margin-top:8px"><button class="btn alt mini" data-edit-template="${esc(t.id)}">編輯</button></div></div>`).join(''):'<div class="empty">目前沒有模板</div>';
+    box.querySelectorAll('[data-delete-template]').forEach(b=>b.onclick=()=>deleteTemplate(b.dataset.deleteTemplate));
+    box.querySelectorAll('[data-edit-template]').forEach(b=>b.onclick=()=>openTemplateEditor(b.dataset.editTemplate));
   };
 
   window.saveTemplate=async function(){
@@ -95,9 +97,11 @@
         slots,
         objects_json:objects
       };
-      if(id){const i=templatesData.templates.findIndex(x=>x.id===id);templatesData.templates[i]=data}else templatesData.templates.push(data);
-      if(!templatesData.categories.includes(category))templatesData.categories.push(category);
-      await apiJson('/api/admin/save_templates',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(templatesData)});
+      const next=structuredClone(templatesData);
+      if(id){const i=next.templates.findIndex(x=>x.id===id);next.templates[i]=data}else next.templates.push(data);
+      if(!next.categories.includes(category))next.categories.push(category);
+      await saveTemplates(next);
+      templatesData=next;
       renderTemplateTabs();renderTemplates();closeModal('template-modal');
       alert('模板已儲存為「全型號通用」');
     }catch(e){alert('模板儲存失敗：'+e.message)}

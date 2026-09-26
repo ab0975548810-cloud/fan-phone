@@ -17,6 +17,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt playwright
-          python -m playwright install --with-deps webkit
+          python -m playwright install --with-deps webkit chromium
       - name: Run WebKit AI/editor regression test
+        run: python .github/tests/test_ai_editor_webkit.py
+      - name: Run Chromium admin/storefront regression test
+        env:
+          BROWSER_ENGINE: chromium
         run: python .github/tests/test_ai_editor_webkit.py

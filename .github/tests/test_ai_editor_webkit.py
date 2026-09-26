@@ -316,8 +316,60 @@ def admin_test(browser, base):
     page.unroute('**/api/admin/passkey/register/verify')
     print('ADMIN_PASSKEY_ENABLE_WEBKIT_OK')
 
+    page.evaluate("() => loadShop()")
+    poll(page, "() => typeof shopLoaded !== 'undefined' && shopLoaded")
+    xss_payload = "品牌');window.__adminStoredXss=1;//"
+    xss_result = page.evaluate("""payload => {
+      const originalData=structuredClone(shopData),originalEdit=window.editBrand;
+      window.__adminStoredXss=0;window.__adminEditedBrand='';
+      window.editBrand=value=>{window.__adminEditedBrand=value};
+      shopData.brands=[payload];renderBrands();
+      const button=document.querySelector('#brands-body [data-edit-brand]');
+      const inlineHandlers=document.querySelectorAll('#brands-body [onclick],#models-body [onclick],#styles-body [onclick]').length;
+      button.click();
+      const result={executed:window.__adminStoredXss,edited:window.__adminEditedBrand,inlineHandlers};
+      window.editBrand=originalEdit;shopData=originalData;renderBrands();renderModels();renderStyles();
+      return result;
+    }""", xss_payload)
+    assert xss_result == {'executed': 0, 'edited': xss_payload, 'inlineHandlers': 0}, xss_result
+    assert page.locator('.top form[action="/logout"] button[type="submit"]').is_visible()
+    print('ADMIN_STORED_DATA_ACTIONS_AND_LOGOUT_OK')
+
+    listing_original = page.evaluate("() => ({data:structuredClone(shopData),version:shopVersion})")
+    model_status_requests = []
+    def model_status_response(route):
+        model_status_requests.append(route.request.post_data_json)
+        route.fulfill(status=200, content_type='application/json', body='{"status":"success","version":"model-status-version"}')
+    page.route('**/api/admin/print/model-profiles', model_status_response)
+    model_id = listing_original['data']['models'][0]['id']
+    page.evaluate("id => {openModelEditor(id);document.getElementById('model-active').checked=false}", model_id)
+    page.evaluate("() => saveModel()")
+    assert len(model_status_requests) == 1
+    assert next(row for row in model_status_requests[0]['shop_data']['models'] if row['id'] == model_id)['status'] is False
+    assert page.evaluate("id => shopData.models.find(row=>row.id===id).status===false && !document.getElementById('model-modal').classList.contains('show')", model_id)
+    page.unroute('**/api/admin/print/model-profiles')
+
+    style_status_requests = []
+    def style_status_response(route):
+        style_status_requests.append(route.request.post_data_json)
+        route.fulfill(status=200, content_type='application/json', body='{"status":"success","version":"style-status-version"}')
+    page.route('**/api/admin/save_shop_data', style_status_response)
+    style_id = listing_original['data']['styles'][0]['id']
+    page.evaluate("id => {openStyleEditor(id);document.getElementById('style-active').checked=false}", style_id)
+    page.evaluate("() => saveStyle()")
+    assert len(style_status_requests) == 1
+    assert next(row for row in style_status_requests[0]['data']['styles'] if row['id'] == style_id)['status'] is False
+    assert page.evaluate("id => shopData.styles.find(row=>row.id===id).status===false && !document.getElementById('style-modal').classList.contains('show')", style_id)
+    page.unroute('**/api/admin/save_shop_data')
+    page.evaluate("snapshot => {shopData=structuredClone(snapshot.data);shopVersion=snapshot.version;renderBrands();renderModels();renderStyles()}", listing_original)
+    print('ADMIN_MODEL_STYLE_LISTING_CONTROL_OK')
+
     model_color_src = page.locator('script[src*="admin-model-colors.js"]').get_attribute('src')
-    assert model_color_src and 'v=20260923b' in model_color_src, model_color_src
+    assert model_color_src and 'v=20260926audit1' in model_color_src, model_color_src
+    asset_category_src = page.locator('script[src*="admin-asset-categories.js"]').get_attribute('src')
+    assert asset_category_src and 'v=20260926audit1' in asset_category_src, asset_category_src
+    template_loader_src = page.locator('script[src*="admin-template-loader.js"]').get_attribute('src')
+    assert template_loader_src and 'v=20260926audit1' in template_loader_src, template_loader_src
     commerce_src = page.locator('script[src*="admin-commerce-v1.js"]').get_attribute('src')
     assert commerce_src and 'v=20260923cas1' in commerce_src, commerce_src
     def ux_error(route):
@@ -662,6 +714,38 @@ def admin_test(browser, base):
     page.evaluate("() => loadShop(true)")
     print('ADMIN_CATALOG_MODEL_PRICE_STALE_CAS_OK')
 
+    page.locator('.nav button[data-view="assets"]').click()
+    poll(page, "() => typeof assetsLoaded !== 'undefined' && assetsLoaded && !!document.getElementById('bf-asset-cat-actions')")
+    asset_before = page.evaluate("() => ({data:structuredClone(assetsData),version:assetsVersion})")
+    asset_a = f'CAS-A-{time.time_ns() % 100000000}'
+    asset_b = f'CAS-B-{time.time_ns() % 100000000}'
+    primed_assets = page.request.get(base + '/api/assets')
+    assert primed_assets.headers.get('x-benfuwan-cache') == 'HIT', primed_assets.headers
+    asset_winner = page.request.post(base + '/api/admin/sticker_category', data={
+        'action': 'create', 'name': asset_a, 'expected_version': asset_before['version'],
+    })
+    assert asset_winner.status == 200, asset_winner.text()
+    asset_winner_version = asset_winner.json()['version']
+    fresh_assets = page.request.get(base + '/api/assets')
+    assert fresh_assets.headers.get('x-benfuwan-cache') == 'MISS', fresh_assets.headers
+    assert fresh_assets.json()['version'] == asset_winner_version
+    asset_dialog_start = len(dialogs)
+    page.evaluate("name => {window.__issue37Prompt=window.prompt;window.prompt=()=>name;document.querySelector('#bf-asset-cat-actions button').click()}", asset_b)
+    poll(page, f"() => assetsVersion==={json.dumps(asset_winner_version)}")
+    asset_stale_state = page.evaluate("""names => ({
+      version:assetsVersion,
+      hasA:assetsData.categories.includes(names.a),
+      hasB:assetsData.categories.includes(names.b)
+    })""", {'a': asset_a, 'b': asset_b})
+    assert asset_stale_state == {'version': asset_winner_version, 'hasA': True, 'hasB': False}, asset_stale_state
+    assert any('資料已被其他分頁或裝置更新' in msg for msg in dialogs[asset_dialog_start:]), dialogs[asset_dialog_start:]
+    asset_restore = page.request.post(base + '/api/admin/sticker_category', data={
+        'action': 'delete', 'name': asset_a, 'expected_version': asset_winner_version,
+    })
+    assert asset_restore.status == 200, asset_restore.text()
+    page.evaluate("async () => {await loadAssets(true);window.prompt=window.__issue37Prompt;delete window.__issue37Prompt}")
+    print('ADMIN_ASSET_STALE_CAS_CACHE_INVALIDATION_OK')
+
     print_nav = page.locator('.nav button[data-view="print-center"]')
     print_nav.click()
     poll(page, "() => document.querySelectorAll('#pc-grid .pc-card').length>0 && document.getElementById('view-print-center').classList.contains('active')")
@@ -699,6 +783,22 @@ def admin_test(browser, base):
     diag = page.evaluate("""() => ({core:!!window.BenfuwanAiRemoveV2,admin:typeof window.bfAdminRemoveBackground,stackReady:!!window.__benfuwanTemplateStackReady,adminFlag:!!window.__bfAdminAiRemoveOnlyV2,models:(shopData?.models||[]).length})""")
     print('ADMIN_STACK_DIAG', diag)
     assert diag['core'] and diag['admin']=='function' and diag['stackReady'] and diag['adminFlag'] and diag['models'] > 0, diag
+
+    template_xss = "template');window.__adminStoredXss=2;//"
+    template_xss_result = page.evaluate("""payload => {
+      const originalData=structuredClone(templatesData),originalOpen=window.openTemplateEditor;
+      window.__adminStoredXss=0;window.__adminEditedTemplate='';
+      window.openTemplateEditor=value=>{window.__adminEditedTemplate=value};
+      templatesData.templates=[{id:payload,name:'安全模板',category:'熱門',model_id:'*',universal:true}];
+      currentTpl='全部';renderTemplates();
+      const inlineHandlers=document.querySelectorAll('#template-grid [onclick]').length;
+      document.querySelector('#template-grid [data-edit-template]').click();
+      const result={executed:window.__adminStoredXss,edited:window.__adminEditedTemplate,inlineHandlers};
+      window.openTemplateEditor=originalOpen;templatesData=originalData;renderTemplates();
+      return result;
+    }""", template_xss)
+    assert template_xss_result == {'executed': 0, 'edited': template_xss, 'inlineHandlers': 0}, template_xss_result
+    print('ADMIN_TEMPLATE_STORED_DATA_ACTIONS_OK')
 
     page.locator('#view-templates .titlebar .btn').click()
     poll(page, "() => document.getElementById('template-modal')?.classList.contains('show') && typeof window.fabric !== 'undefined' && typeof visualCanvas !== 'undefined' && !!visualCanvas", timeout=30000)

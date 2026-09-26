@@ -13,10 +13,13 @@ def install(app_module):
     request = app_module.request
     session = app_module.session
     no_cache_json = app_module.no_cache_json
-    cloud_get_json = app_module.cloud_get_json
-    cloud_save_json = app_module.cloud_save_json
-    assets_file = app_module.ASSETS_FILE
+    cloud_get_json_versioned = app_module.cloud_get_json_versioned
+    cloud_compare_and_swap_json = app_module.cloud_compare_and_swap_json
+    stale_data_error = app_module.StaleDataError
     default_assets = app_module.DEFAULT_ASSETS
+
+    def _assets_file():
+        return app_module.ASSETS_FILE
 
     def _require_admin():
         return bool(session.get('logged_in'))
@@ -38,7 +41,9 @@ def install(app_module):
         try:
             body = request.get_json(silent=True) or {}
             action = str(body.get('action') or '').strip()
-            assets = cloud_get_json('assets', assets_file, default_assets)
+            expected_version = body.get('expected_version')
+            assets_file = _assets_file()
+            assets, _ = cloud_get_json_versioned('assets', assets_file, default_assets)
             cats = assets.setdefault('categories', ['全部'])
             if '全部' not in cats:
                 cats.insert(0, '全部')
@@ -47,8 +52,8 @@ def install(app_module):
                 name = _clean_category(body.get('name'))
                 if name not in cats:
                     cats.append(name)
-                cloud_save_json('assets', assets_file, assets)
-                return no_cache_json({'status': 'success', 'category': name})
+                version = cloud_compare_and_swap_json('assets', assets_file, assets, expected_version)
+                return no_cache_json({'status': 'success', 'category': name, 'version': version})
 
             if action == 'rename':
                 old = _clean_category(body.get('old'))
@@ -64,8 +69,8 @@ def install(app_module):
                     if sticker.get('category') == old:
                         sticker['category'] = new
                         moved += 1
-                cloud_save_json('assets', assets_file, assets)
-                return no_cache_json({'status': 'success', 'category': new, 'moved': moved})
+                version = cloud_compare_and_swap_json('assets', assets_file, assets, expected_version)
+                return no_cache_json({'status': 'success', 'category': new, 'moved': moved, 'version': version})
 
             if action == 'delete':
                 name = _clean_category(body.get('name'))
@@ -77,8 +82,8 @@ def install(app_module):
                     if sticker.get('category') == name:
                         sticker['category'] = '未分類'
                         moved += 1
-                cloud_save_json('assets', assets_file, assets)
-                return no_cache_json({'status': 'success', 'deleted': name, 'moved': moved})
+                version = cloud_compare_and_swap_json('assets', assets_file, assets, expected_version)
+                return no_cache_json({'status': 'success', 'deleted': name, 'moved': moved, 'version': version})
 
             if action == 'move':
                 name = _clean_category(body.get('name'))
@@ -93,8 +98,8 @@ def install(app_module):
                     if str(sticker.get('id')) in wanted:
                         sticker['category'] = name
                         moved += 1
-                cloud_save_json('assets', assets_file, assets)
-                return no_cache_json({'status': 'success', 'category': name, 'moved': moved})
+                version = cloud_compare_and_swap_json('assets', assets_file, assets, expected_version)
+                return no_cache_json({'status': 'success', 'category': name, 'moved': moved, 'version': version})
 
             if action == 'delete_stickers':
                 ids = body.get('ids') or []
@@ -107,10 +112,12 @@ def install(app_module):
                     if str(s.get('id')) not in wanted
                 ]
                 deleted = before - len(assets['stickers'])
-                cloud_save_json('assets', assets_file, assets)
-                return no_cache_json({'status': 'success', 'deleted': deleted})
+                version = cloud_compare_and_swap_json('assets', assets_file, assets, expected_version)
+                return no_cache_json({'status': 'success', 'deleted': deleted, 'version': version})
 
             raise ValueError('不支援的分類操作')
+        except stale_data_error as exc:
+            return no_cache_json({'status': 'error', 'code': exc.code, 'msg': str(exc)}, exc.status)
         except ValueError as exc:
             return no_cache_json({'status': 'error', 'msg': str(exc)}, 400)
         except Exception as exc:
