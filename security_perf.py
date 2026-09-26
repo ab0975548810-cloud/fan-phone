@@ -173,12 +173,22 @@ def install(app_module):
                 return hit
 
         if request.method in ('POST', 'PUT', 'PATCH', 'DELETE'):
-            protected = path == '/login' or path.startswith('/api/admin/') or path in ('/api/create_order', '/api/ai/remove-background')
+            protected = path == '/login' or path.startswith('/api/admin/') or path.startswith('/api/auth/passkey/') or path in ('/api/create_order', '/api/ai/remove-background')
             if protected and not _same_origin():
                 return jsonify({'status': 'error', 'code': 'BAD_ORIGIN', 'msg': '來源驗證失敗，請重新開啟網站後再試'}), 403
 
         ip = _ip()
         if path == '/login' and request.method == 'POST':
+            blocked, retry = _limited('login', ip, 6, 600)
+            if blocked:
+                return _429('登入嘗試太頻繁，請稍後再試', retry)
+
+        if path == '/api/auth/passkey/options' and request.method == 'POST':
+            blocked, retry = _limited('passkey-options', ip, 12, 600)
+            if blocked:
+                return _429('Face ID 登入嘗試太頻繁，請稍後再試', retry)
+
+        if path == '/api/auth/passkey/verify' and request.method == 'POST':
             blocked, retry = _limited('login', ip, 6, 600)
             if blocked:
                 return _429('登入嘗試太頻繁，請稍後再試', retry)
@@ -269,7 +279,8 @@ def install(app_module):
                 and (200 <= resp.status_code < 400 or partial_catalog_commit)):
             _invalidate(path)
 
-        if path == '/login' and request.method == 'POST' and 300 <= resp.status_code < 400:
+        passkey_login_success = path == '/api/auth/passkey/verify' and request.method == 'POST' and 200 <= resp.status_code < 300
+        if (path == '/login' and request.method == 'POST' and 300 <= resp.status_code < 400) or passkey_login_success:
             with _LOCK:
                 _HITS.pop(f'login:{_ip()}', None)
 
@@ -301,7 +312,7 @@ def install(app_module):
         resp.headers['X-Content-Type-Options'] = 'nosniff'
         resp.headers['X-Frame-Options'] = 'DENY'
         resp.headers['Referrer-Policy'] = 'same-origin'
-        resp.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=(), payment=()'
+        resp.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=(), payment=(), publickey-credentials-get=(self), publickey-credentials-create=(self)'
         resp.headers['Content-Security-Policy'] = (
             "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "
             "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data: blob: https:; "

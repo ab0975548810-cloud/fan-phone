@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import sys
 import copy
@@ -20,11 +21,16 @@ os.environ.setdefault('ADMIN_PASSWORD', 'fan123')
 os.environ['SESSION_COOKIE_SECURE'] = 'false'
 os.environ['PORT'] = '8765'
 
-test_dir = tempfile.TemporaryDirectory()
-os.environ['COMMERCE_DB_PATH'] = str(Path(test_dir.name) / 'commerce.sqlite3')
+test_dir = ROOT / '__pycache__' / f'webkit-test-{os.getpid()}'
+test_dir.mkdir(parents=True, exist_ok=True)
+os.environ['COMMERCE_DB_PATH'] = str(test_dir / 'commerce.sqlite3')
+os.environ['ADMIN_PASSKEYS_FILE'] = str(test_dir / 'admin_passkeys.json')
+os.environ['WEBAUTHN_RP_ID'] = '127.0.0.1'
+os.environ['WEBAUTHN_ORIGIN'] = 'http://127.0.0.1:8765'
 os.environ.pop('SUPABASE_URL', None)
 os.environ.pop('SUPABASE_SERVICE_ROLE_KEY', None)
 import app as app_module
+from passkey_auth import install as install_passkey_auth
 from security_perf import install as install_security
 from supabase_resilience import install as install_supabase_resilience
 from quality_perf_patch import install as install_quality_perf
@@ -37,6 +43,7 @@ from order_management_patch import install as install_order_management
 from commerce_patch import install as install_commerce
 from print_center import install as install_print_center
 
+install_passkey_auth(app_module)
 install_security(app_module)
 install_supabase_resilience(app_module)
 install_quality_perf(app_module)
@@ -264,15 +271,50 @@ def checkout_test(browser, base):
 
 def admin_test(browser, base):
     page = browser.new_page(viewport={'width': 1180, 'height': 900})
+    page.add_init_script("""(() => {
+      window.PublicKeyCredential=function(){};window.__passkeyCreateCalls=0;
+      Object.defineProperty(navigator,'credentials',{configurable:true,value:{
+        get:async()=>{throw new DOMException('cancelled','NotAllowedError')},
+        create:async()=>{window.__passkeyCreateCalls++;return {id:'mock-admin-credential',rawId:new Uint8Array([2]).buffer,type:'public-key',authenticatorAttachment:'platform',getClientExtensionResults:()=>({}),response:{clientDataJSON:new Uint8Array([3]).buffer,attestationObject:new Uint8Array([4]).buffer,getTransports:()=>['internal']}}}
+      }});
+    })()""")
     page.on('console', lambda msg: print('ADMIN_CONSOLE', msg.type, msg.text))
     page.on('pageerror', lambda exc: print('ADMIN_PAGEERROR', str(exc)))
     page.route('**/api/ai/remove-background', lambda route: route.fulfill(status=200, body=GOOD, content_type='image/png'))
     page.goto(base + '/login', wait_until='domcontentloaded')
+    page.locator('#password-toggle').click()
     page.locator('input[name="password"]').fill('fan123')
     submit = page.locator('button[type="submit"],input[type="submit"]').first
     if submit.count(): submit.click()
     else: page.locator('form').evaluate('(f)=>f.submit()')
     page.wait_for_url('**/admin')
+
+    # The first setup path is password login, then explicit enablement in the
+    # dedicated login-security view. WebAuthn is mocked only at the browser edge;
+    # cryptographic verification is covered by test_passkey_auth.py.
+    registered = {'value': False, 'verify': None}
+    def passkey_list(route):
+        credentials = [] if not registered['value'] else [{'credential_id':'mock-admin-credential','device_label':'這台裝置的 Passkey','transports':['internal'],'created_at':'2026-09-25T00:00:00+00:00','last_used_at':None}]
+        route.fulfill(status=200, content_type='application/json', body=json.dumps({'status':'success','configured':True,'credentials':credentials}))
+    def passkey_register_options(route):
+        route.fulfill(status=200, content_type='application/json', body=json.dumps({'status':'success','ceremony_id':'mock-register','publicKey':{'challenge':'AQ','rp':{'id':'127.0.0.1','name':'本福丸訂製'},'user':{'id':'Ag','name':'admin','displayName':'本福丸管理員'},'pubKeyCredParams':[{'type':'public-key','alg':-7}]}}))
+    def passkey_register_verify(route):
+        registered['verify'] = route.request.post_data_json
+        registered['value'] = True
+        route.fulfill(status=200, content_type='application/json', body='{"status":"success"}')
+    page.route('**/api/admin/passkeys', passkey_list)
+    page.route('**/api/admin/passkey/register/options', passkey_register_options)
+    page.route('**/api/admin/passkey/register/verify', passkey_register_verify)
+    page.locator('.nav button[data-view="security"]').click()
+    poll(page, "() => document.getElementById('view-security')?.classList.contains('active') && !document.getElementById('passkey-enable').disabled")
+    page.locator('#passkey-enable').click()
+    poll(page, "() => window.__passkeyCreateCalls===1 && document.querySelectorAll('#passkey-list .passkey-item').length===1")
+    assert registered['verify']['ceremony_id'] == 'mock-register'
+    assert registered['verify']['credential']['authenticatorAttachment'] == 'platform'
+    page.unroute('**/api/admin/passkeys')
+    page.unroute('**/api/admin/passkey/register/options')
+    page.unroute('**/api/admin/passkey/register/verify')
+    print('ADMIN_PASSKEY_ENABLE_WEBKIT_OK')
 
     model_color_src = page.locator('script[src*="admin-model-colors.js"]').get_attribute('src')
     assert model_color_src and 'v=20260923b' in model_color_src, model_color_src
@@ -777,6 +819,8 @@ def durable_receipt_test(playwright, base):
         page = context.new_page()
         page.goto(base + '/login', wait_until='domcontentloaded')
         if '/admin' not in page.url:
+            if not page.locator('#password-form').is_visible():
+                page.locator('#password-toggle').click()
             page.locator('input[name="password"]').fill('fan123')
             page.locator('button[type="submit"],input[type="submit"]').first.click()
             page.wait_for_url('**/admin')
@@ -858,13 +902,63 @@ def durable_receipt_test(playwright, base):
                 context.close()
 
 
+def passkey_login_test(browser, base):
+    mock = """(() => {
+      window.PublicKeyCredential=function(){};window.__passkeyGetCalls=0;window.__passkeyMode='success';
+      Object.defineProperty(navigator,'credentials',{configurable:true,value:{
+        create:async()=>null,
+        get:async()=>{window.__passkeyGetCalls++;if(window.__passkeyMode==='cancel')throw new DOMException('cancelled','NotAllowedError');return {id:'mock-login-credential',rawId:new Uint8Array([2]).buffer,type:'public-key',authenticatorAttachment:'platform',getClientExtensionResults:()=>({}),response:{clientDataJSON:new Uint8Array([3]).buffer,authenticatorData:new Uint8Array([4]).buffer,signature:new Uint8Array([5]).buffer,userHandle:null}}}
+      }});
+    })()"""
+    page = browser.new_page(viewport={'width': 390, 'height': 844})
+    page.add_init_script(mock)
+    verify = []
+    page.route('**/api/auth/passkey/status', lambda route: route.fulfill(status=200,content_type='application/json',body='{"status":"success","configured":true,"has_credentials":true}'))
+    page.route('**/api/auth/passkey/options', lambda route: route.fulfill(status=200,content_type='application/json',body='{"status":"success","ceremony_id":"mock-login","publicKey":{"challenge":"AQ","rpId":"127.0.0.1","allowCredentials":[{"type":"public-key","id":"Ag"}],"userVerification":"required"}}'))
+    def verify_login(route):
+        verify.append(route.request.post_data_json)
+        route.fulfill(status=200,content_type='application/json',body='{"status":"success","redirect":"/api/health"}')
+    page.route('**/api/auth/passkey/verify', verify_login)
+    page.goto(base + '/login', wait_until='domcontentloaded')
+    poll(page, "() => !document.getElementById('passkey-login-button').classList.contains('hidden')")
+    assert page.locator('#passkey-login-button').inner_text() == '使用 Face ID 登入'
+    assert page.locator('#passkey-login-button').is_visible() and not page.locator('#password-form').is_visible()
+    assert page.evaluate('() => window.__passkeyGetCalls') == 0
+    page.locator('#passkey-login-button').click()
+    page.wait_for_url('**/api/health')
+    assert len(verify) == 1 and verify[0]['ceremony_id'] == 'mock-login'
+    assert verify[0]['credential']['authenticatorAttachment'] == 'platform'
+    page.close()
+
+    cancelled = browser.new_page(viewport={'width': 390, 'height': 844})
+    cancelled.add_init_script(mock)
+    cancelled.route('**/api/auth/passkey/status', lambda route: route.fulfill(status=200,content_type='application/json',body='{"status":"success","configured":true,"has_credentials":true}'))
+    cancelled.route('**/api/auth/passkey/options', lambda route: route.fulfill(status=200,content_type='application/json',body='{"status":"success","ceremony_id":"mock-cancel","publicKey":{"challenge":"AQ","rpId":"127.0.0.1","allowCredentials":[],"userVerification":"required"}}'))
+    cancelled.goto(base + '/login', wait_until='domcontentloaded')
+    cancelled.evaluate("() => {window.__passkeyMode='cancel'}")
+    cancelled.locator('#passkey-login-button').click()
+    poll(cancelled, "() => document.getElementById('login-message').textContent.includes('已取消 Face ID 驗證')")
+    cancelled.locator('#password-toggle').click()
+    assert cancelled.locator('#password-form').is_visible()
+    cancelled.close()
+
+    unsupported = browser.new_page(viewport={'width': 390, 'height': 844})
+    unsupported.add_init_script("Object.defineProperty(window,'PublicKeyCredential',{configurable:true,value:undefined})")
+    unsupported.goto(base + '/login', wait_until='domcontentloaded')
+    poll(unsupported, "() => document.getElementById('password-form').classList.contains('show')")
+    assert unsupported.locator('#password-form').is_visible()
+    assert not unsupported.locator('#passkey-login-button').is_visible()
+    unsupported.close()
+    print('PASSKEY_LOGIN_WEBKIT_OK')
+
+
 def main():
     server = ServerThread();server.start();time.sleep(.8)
     try:
         with sync_playwright() as p:
             browser = getattr(p, os.environ.get('BROWSER_ENGINE', 'webkit')).launch()
             try:
-                base='http://127.0.0.1:8765';front_test(browser,base);checkout_test(browser,base);admin_test(browser,base)
+                base='http://127.0.0.1:8765';passkey_login_test(browser,base);front_test(browser,base);checkout_test(browser,base);admin_test(browser,base)
                 import runpy
                 runpy.run_path(str(ROOT / '.github/tests/test_pos_dashboard.py'))['dashboard_test'](browser,base,poll)
             finally: browser.close()
