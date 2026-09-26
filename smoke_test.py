@@ -48,7 +48,16 @@ for rel in refs:
     if proc.returncode:
         fail(f"JavaScript syntax: static/{rel}\n{proc.stderr}")
 
-for admin_js in ("admin-orders-v3.js", "admin-commerce-v1.js", "admin-print-center.js", "passkey-client.js"):
+for admin_js in (
+    "admin-orders-v3.js",
+    "admin-commerce-v1.js",
+    "admin-print-center.js",
+    "admin-model-colors.js",
+    "admin-asset-categories.js",
+    "admin-template-loader.js",
+    "admin-universal-templates.js",
+    "passkey-client.js",
+):
     path = ROOT / "static" / admin_js
     if not path.exists():
         fail(f"Missing admin module: static/{admin_js}")

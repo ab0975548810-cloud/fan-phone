@@ -10,6 +10,8 @@ def dashboard_test(browser, base, poll):
     errors=[]
     page.on('pageerror', lambda error: errors.append(str(error)))
     page.goto(base+'/login',wait_until='domcontentloaded')
+    if not page.locator('#password-form').is_visible():
+        page.locator('#password-toggle').click()
     page.locator('input[name="password"]').fill('fan123')
     page.locator('button[type="submit"]').first.click()
     page.wait_for_url('**/admin')

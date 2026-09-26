@@ -95,7 +95,12 @@
     syncBatchUi();renderAssets();
   }
 
-  async function api(body){return apiJson('/api/admin/sticker_category',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})}
+  async function api(body){
+    const r=await apiJson('/api/admin/sticker_category',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...body,expected_version:assetsVersion})});
+    assetsVersion=String(r.version||'');
+    return r;
+  }
+  async function refreshIfStale(error){if(error?.code==='STALE_DATA')await loadAssets(true)}
 
   async function createCategory(){
     const name=(prompt('新增貼紙分類名稱，例如：貓咪','')||'').trim();if(!name)return;
@@ -104,7 +109,7 @@
       await api({action:'create',name});
       if(!assetsData.categories.includes(name))assetsData.categories.push(name);
       currentAsset=name;resetPage();renderAssetTabs();renderAssets();refreshDatalist();
-    }catch(e){alert(e.message||'新增分類失敗')}
+    }catch(e){await refreshIfStale(e);alert(e.message||'新增分類失敗')}
   }
 
   async function renameCategory(){
@@ -119,7 +124,7 @@
       allStickers().forEach(s=>{if((s.category||'未分類')===old)s.category=name});
       currentAsset=name;resetPage();renderAssetTabs();renderAssets();refreshDatalist();
       alert(`分類已改成「${name}」，共整理 ${r.moved||0} 張貼紙`);
-    }catch(e){alert(e.message||'分類改名失敗')}
+    }catch(e){await refreshIfStale(e);alert(e.message||'分類改名失敗')}
   }
 
   async function deleteCategory(){
@@ -134,7 +139,7 @@
       currentAsset='未分類';selected.clear();batchMode=false;resetPage();
       try{await loadAssets(true)}catch(e){renderAssetTabs();renderAssets()}
       refreshDatalist();syncBatchUi();
-    }catch(e){alert(e.message||'刪除分類失敗')}
+    }catch(e){await refreshIfStale(e);alert(e.message||'刪除分類失敗')}
   }
 
   async function moveSelected(){
@@ -148,7 +153,7 @@
       const wanted=new Set(ids);allStickers().forEach(s=>{if(wanted.has(String(s.id)))s.category=name});
       selected.clear();batchMode=false;currentAsset=name;resetPage();renderAssetTabs();renderAssets();refreshDatalist();syncBatchUi();if(input)input.value='';
       alert(`完成，${r.moved||0} 張貼紙已移到「${name}」`);
-    }catch(e){alert(e.message||'批量分類失敗')}
+    }catch(e){await refreshIfStale(e);alert(e.message||'批量分類失敗')}
   }
 
   async function deleteSelected(){
@@ -163,7 +168,7 @@
       if(currentAsset!=='全部'&&!categories().includes(currentAsset))currentAsset='全部';
       renderAssetTabs();renderAssets();refreshDatalist();syncBatchUi();
       alert(`已刪除 ${r.deleted??ids.length} 張貼紙`);
-    }catch(e){alert(e.message||'批量刪除失敗')}
+    }catch(e){await refreshIfStale(e);alert(e.message||'批量刪除失敗')}
   }
 
   function installRenderOverrides(){
@@ -200,17 +205,18 @@
       const fs=[...(e.target.files||[])];if(!fs.length)return;
       const def=currentAsset&&currentAsset!=='全部'&&currentAsset!=='未分類'?currentAsset:'貓咪';
       const cat=(prompt('這批貼紙要放在哪個分類？',def)||'').trim();if(!cat){e.target.value='';return}
-      const fd=new FormData();fs.forEach(f=>fd.append('files',f));fd.append('category',cat);
+      const fd=new FormData();fs.forEach(f=>fd.append('files',f));fd.append('category',cat);fd.append('expected_version',assetsVersion);
       const btn=document.getElementById('bf-sticker-upload-btn');const old=btn?.innerHTML;
       if(btn){btn.classList.add('bf-uploading');btn.innerHTML=`<i class="fa-solid fa-spinner fa-spin"></i> 上傳中 ${fs.length} 張`}
       try{
         const r=await apiJson('/api/admin/batch_upload_stickers',{method:'POST',body:fd});
+        assetsVersion=String(r.version||'');
         const uploaded=Array.isArray(r.data)?r.data:[];
         if(cat!=='未分類'&&!assetsData.categories.includes(cat))assetsData.categories.push(cat);
         if(uploaded.length)assetsData.stickers.push(...uploaded);else assetsLoaded=false;
         currentAsset=cat;resetPage();renderAssetTabs();renderAssets();refreshDatalist();
         alert(`上傳完成，共 ${fs.length} 張`);
-      }catch(err){alert(err.message||'上傳失敗')}
+      }catch(err){await refreshIfStale(err);alert(err.message||'上傳失敗')}
       finally{if(btn){btn.classList.remove('bf-uploading');btn.innerHTML=old||'<i class="fa-solid fa-cloud-arrow-up"></i> 批量上傳'}e.target.value=''}
     };
 
@@ -220,9 +226,10 @@
       assetsData.stickers=allStickers().filter(s=>String(s.id)!==String(id));
       selected.delete(String(id));renderAssetTabs();renderAssets();
       try{
-        await apiJson('/api/admin/delete_sticker',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+        const r=await apiJson('/api/admin/delete_sticker',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,expected_version:assetsVersion})});
+        assetsVersion=String(r.version||'');
       }catch(e){
-        assetsData.stickers=before;renderAssetTabs();renderAssets();alert(e.message||'刪除失敗');
+        if(e?.code==='STALE_DATA')await loadAssets(true);else{assetsData.stickers=before;renderAssetTabs();renderAssets()}alert(e.message||'刪除失敗');
       }
     };
   }

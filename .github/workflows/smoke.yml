@@ -29,3 +29,8 @@ jobs:
         env:
           FLASK_SECRET_KEY: passkey-test-secret-only
         run: python test_passkey_auth.py
+      - name: Run Backend V1 admin security regression
+        env:
+          FLASK_SECRET_KEY: backend-v1-test-secret-only
+          SESSION_COOKIE_SECURE: 'false'
+        run: python test_backend_v1.py

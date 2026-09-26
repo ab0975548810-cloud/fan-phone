@@ -118,7 +118,7 @@ def _invalidate(path):
         keys.append('/api/shop_data')
     elif path == '/api/admin/save_templates':
         keys.append('/api/templates')
-    elif path in ('/api/admin/upload_image', '/api/admin/batch_upload_stickers', '/api/admin/delete_sticker'):
+    elif path in ('/api/admin/upload_image', '/api/admin/batch_upload_stickers', '/api/admin/delete_sticker', '/api/admin/sticker_category'):
         keys += ['/api/assets', '/api/templates']
     with _LOCK:
         for key in keys:
@@ -173,7 +173,7 @@ def install(app_module):
                 return hit
 
         if request.method in ('POST', 'PUT', 'PATCH', 'DELETE'):
-            protected = path == '/login' or path.startswith('/api/admin/') or path.startswith('/api/auth/passkey/') or path in ('/api/create_order', '/api/ai/remove-background')
+            protected = path in ('/login', '/logout', '/api/create_order', '/api/ai/remove-background') or path.startswith('/api/admin/') or path.startswith('/api/auth/passkey/')
             if protected and not _same_origin():
                 return jsonify({'status': 'error', 'code': 'BAD_ORIGIN', 'msg': '來源驗證失敗，請重新開啟網站後再試'}), 403
 

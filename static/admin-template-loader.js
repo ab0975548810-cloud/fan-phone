@@ -5,7 +5,7 @@
   window.__benfuwanTemplateLoaderInstalled=true;
 
   const STACK=[
-    '/static/admin-universal-templates.js?v=20260914h',
+    '/static/admin-universal-templates.js?v=20260926audit1',
     '/static/admin-template-editor-v2.js?v=20260923cas1',
     '/static/admin-template-editor-v3.js?v=20260914h',
     '/static/admin-template-editor-v4.js?v=20260914h',
