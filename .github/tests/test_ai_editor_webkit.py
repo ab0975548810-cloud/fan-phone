@@ -140,11 +140,32 @@ def front_test(browser, base):
     responses = [GOOD, BAD]
     page.route('**/api/ai/remove-background', lambda route: route.fulfill(status=200, body=responses.pop(0) if responses else GOOD, content_type='image/png'))
     page.goto(base + '/', wait_until='domcontentloaded')
-    poll(page, "() => typeof fabric !== 'undefined' && typeof initCanvas === 'function' && !!window.BenfuwanAiRemoveV2 && !!window.removeBackgroundForActive && !!window.BenfuwanEditorAccess && !!window.BenfuwanOrderPayload")
+    poll(page, "() => typeof fabric !== 'undefined' && typeof initCanvas === 'function' && !!window.BenfuwanAiRemoveV2 && !!window.removeBackgroundForActive && !!window.BenfuwanEditorAccess && !!window.BenfuwanOrderPayload && !!window.BenfuwanPrintMask && !!window.BenfuwanProductionHQ")
     # Let the app finish its own initial catalog load/navigation before forcing
     # the editor. Otherwise the startup async task can switch pages after the
     # test has entered the editor and produce a false zero-geometry failure.
     poll(page, "() => typeof shopData !== 'undefined' && Array.isArray(shopData?.models) && shopData.models.length > 0", timeout=10000)
+    mask_normalization = page.evaluate("""async () => {
+      const source=document.createElement('canvas');source.width=12;source.height=20;
+      const g=source.getContext('2d');g.clearRect(0,0,12,20);g.fillStyle='#fff';g.fillRect(2,3,8,14);g.clearRect(4,6,4,6);
+      const image=await new Promise((resolve,reject)=>{const i=new Image();i.onload=()=>resolve(i);i.onerror=reject;i.src=source.toDataURL('image/png')});
+      const normalized=window.BenfuwanPrintMask.normalizeMaskImage(image);
+      const output=window.BenfuwanPrintMask.resampleMask(normalized,80,140);
+      const alpha=output.getContext('2d').getImageData(0,0,80,140).data;
+      let left=80,top=140,right=-1,bottom=-1;
+      for(let y=0;y<140;y++)for(let x=0;x<80;x++)if(alpha[(y*80+x)*4+3]>0){left=Math.min(left,x);top=Math.min(top,y);right=Math.max(right,x);bottom=Math.max(bottom,y)}
+      return {
+        bounds:normalized.bounds,
+        outputBounds:{left,top,right,bottom},
+        holeAlpha:alpha[(60*80+40)*4+3],
+        dimensions:[window.BenfuwanProductionHQ.pixelsForMm(71.63),window.BenfuwanProductionHQ.pixelsForMm(149.61)]
+      };
+    }""")
+    assert mask_normalization['bounds'] == {'left':2,'top':3,'right':9,'bottom':16,'width':8,'height':14}, mask_normalization
+    assert mask_normalization['outputBounds'] == {'left':0,'top':0,'right':79,'bottom':139}, mask_normalization
+    assert mask_normalization['holeAlpha'] == 0, mask_normalization
+    assert mask_normalization['dimensions'] == [2030, 4241], mask_normalization
+    print('FRONT_PRINT_MASK_NORMALIZATION_HOLE_DIMENSIONS_OK', mask_normalization)
     page.evaluate("""() => {
       const m=document.createElement('canvas');m.width=8;m.height=16;
       const g=m.getContext('2d');g.clearRect(0,0,8,16);g.fillStyle='#fff';g.fillRect(1,1,6,14);
@@ -233,7 +254,27 @@ def front_test(browser, base):
     assert preview_state == {'active':True,'print':True,'mockup':True}, preview_state
     preview = page.evaluate("""() => Promise.all([ctx.printBase64,ctx.mockupBase64].map(src=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve({width:img.naturalWidth,height:img.naturalHeight});img.onerror=reject;img.src=src}))).then(([print,mockup])=>({print,mockup,logical:{width:canvas.width,height:canvas.height}}))""")
     assert preview == {'print':{'width':2268,'height':4535},'mockup':{'width':600,'height':1200},'logical':{'width':240,'height':480}}, preview
+    production_meta = page.evaluate("() => structuredClone(ctx.productionMeta)")
+    assert production_meta['dpi'] == 720 and production_meta['width'] == 2268 and production_meta['height'] == 4535, production_meta
+    assert production_meta['maskBounds'] == {'left':1,'top':1,'right':6,'bottom':14,'width':6,'height':14}, production_meta
     print('FRONT_EDITOR_PREVIEW_DIMENSIONS_OK', preview)
+    hq_race = page.evaluate("""async () => {
+      const hq=ctx.printBase64,meta=structuredClone(ctx.productionMeta);
+      await idbDel('cart');cartItem=null;
+      let release;const blocked=new Promise(resolve=>{release=resolve});
+      window.BenfuwanProductionHQ.begin(ctx,async()=>{await blocked;ctx.printBase64=hq;ctx.productionMeta=meta;return meta});
+      ctx.printBase64='preview-fallback';ctx.productionMeta=null;
+      const pending=confirmDesignToCart();
+      await new Promise(resolve=>setTimeout(resolve,0));
+      const before=await idbGet('cart');
+      release();await pending;
+      const after=await idbGet('cart');
+      const result={before:before===null,hq:after?.printBase64===hq,ppm:after?.productionMeta?.ppm,page:document.getElementById('page-cart')?.classList.contains('active')};
+      await idbDel('cart');cartItem=null;updateCartBadge();
+      return result;
+    }""")
+    assert hq_race['before'] and hq_race['hq'] and abs(hq_race['ppm'] - 28.3464567) < 0.0001 and hq_race['page'], hq_race
+    print('FRONT_HQ_CART_RACE_OK', hq_race)
     print('FRONT_WEBKIT_OK')
     page.close()
 
@@ -255,7 +296,15 @@ def checkout_test(browser, base):
     poll(page, "() => !!window.BenfuwanOrderPayload && typeof shopData !== 'undefined' && shopData.models?.length")
     page.evaluate("""async () => {
       const c=document.createElement('canvas');c.width=2;c.height=2;
-      cartItem={modelId:shopData.models[0].id,styleId:shopData.styles[0].id,modelName:shopData.models[0].name,styleName:shopData.styles[0].name,colorName:'透明',quantity:1,payment:'現金',printBase64:c.toDataURL(),designJson:{}};
+      cartItem={modelId:shopData.models[0].id,styleId:shopData.styles[0].id,modelName:shopData.models[0].name,styleName:shopData.styles[0].name,quantity:1,payment:'現金',printBase64:c.toDataURL(),designJson:{}};
+      await idbSet('cart',cartItem);document.getElementById('form-surname').value='測試';await submitOrder();
+    }""")
+    page.wait_for_timeout(100)
+    assert sent == [], sent
+    print('FRONT_SUBMIT_REJECTS_NON_HQ_CART_OK')
+    page.evaluate("""async () => {
+      const c=document.createElement('canvas');c.width=2;c.height=2;
+      cartItem={modelId:shopData.models[0].id,styleId:shopData.styles[0].id,modelName:shopData.models[0].name,styleName:shopData.styles[0].name,colorName:'透明',quantity:1,payment:'現金',printBase64:c.toDataURL(),productionMeta:{ppm:window.BenfuwanProductionHQ.PPM,dpi:720,width:2,height:2},designJson:{}};
       await idbSet('cart',cartItem);document.getElementById('form-surname').value='測試';await submitOrder();
     }""")
     assert len(sent) == 1 and sent[0]['idempotency_key']
