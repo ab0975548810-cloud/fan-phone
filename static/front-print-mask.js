@@ -39,17 +39,51 @@
     return el;
   }
 
-  function validateAlpha(img) {
-    const check = makeCanvas(128, 128);
-    const g = check.getContext('2d', { willReadFrequently: true });
-    g.drawImage(img, 0, 0, 128, 128);
-    const pixels = g.getImageData(0, 0, 128, 128).data;
-    let transparent = false, printable = false;
-    for (let i = 3; i < pixels.length; i += 4) {
-      transparent ||= pixels[i] === 0;
-      printable ||= pixels[i] > 0;
+  function normalizeMaskImage(img) {
+    const sourceWidth = img.naturalWidth || img.width;
+    const sourceHeight = img.naturalHeight || img.height;
+    if (!(sourceWidth > 0 && sourceHeight > 0)) throw new Error('這個型號的可印範圍尚未設定完成，請聯絡店家。');
+    const source = makeCanvas(sourceWidth, sourceHeight);
+    const g = source.getContext('2d', { willReadFrequently: true });
+    g.drawImage(img, 0, 0, sourceWidth, sourceHeight);
+    const pixels = g.getImageData(0, 0, sourceWidth, sourceHeight).data;
+    let left = sourceWidth, top = sourceHeight, right = -1, bottom = -1, transparent = false;
+    for (let y = 0; y < sourceHeight; y++) {
+      for (let x = 0; x < sourceWidth; x++) {
+        const alpha = pixels[(y * sourceWidth + x) * 4 + 3];
+        if (alpha > 0) {
+          if (x < left) left = x;
+          if (x > right) right = x;
+          if (y < top) top = y;
+          if (y > bottom) bottom = y;
+        } else {
+          transparent = true;
+        }
+      }
     }
-    if (!transparent || !printable) throw new Error('這個型號的可印範圍尚未設定完成，請聯絡店家。');
+    if (right < left || bottom < top || !transparent) throw new Error('這個型號的可印範圍尚未設定完成，請聯絡店家。');
+    const width = right - left + 1, height = bottom - top + 1;
+    const normalized = makeCanvas(width, height);
+    const ng = normalized.getContext('2d');
+    ng.drawImage(source, left, top, width, height, 0, 0, width, height);
+    source.width = source.height = 1;
+    return {
+      canvas: normalized,
+      bounds: { left, top, right, bottom, width, height },
+      sourceWidth,
+      sourceHeight
+    };
+  }
+
+  function resampleMask(mask, width, height) {
+    const source = mask && mask.canvas ? mask.canvas : mask;
+    if (!source || !(width > 0 && height > 0)) throw new Error('可印範圍尺寸無效。');
+    const output = makeCanvas(width, height);
+    const g = output.getContext('2d');
+    g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(source, 0, 0, source.width, source.height, 0, 0, width, height);
+    return output;
   }
 
   function ensureClip(target, url, retry = false) {
@@ -69,13 +103,14 @@
       try {
         if (!url) throw new Error('這個型號尚未設定可印範圍，請選擇其他型號或聯絡店家。');
         const img = await loadImage(url, '可印範圍讀取失敗，請稍後重新預覽。');
-        validateAlpha(img);
+        const mask = normalizeMaskImage(img);
         if (canvas !== target || states.get(target) !== state) throw new Error('型號已切換，請重新預覽。');
         state.image = img;
-        state.clip = new fabric.Image(img, {
+        state.mask = mask;
+        state.clip = new fabric.Image(mask.canvas, {
           left: 0, top: 0, originX: 'left', originY: 'top',
-          scaleX: target.width / img.naturalWidth,
-          scaleY: target.height / img.naturalHeight,
+          scaleX: target.width / mask.canvas.width,
+          scaleY: target.height / mask.canvas.height,
           absolutePositioned: true, selectable: false, evented: false,
           excludeFromExport: true
         });
@@ -129,7 +164,7 @@
     return 'data:image/png;base64,' + btoa(strings.join(''));
   }
 
-  function renderPrint(target, maskImage, width, height) {
+  function renderPrint(target, mask, width, height) {
     const hidden = target.getObjects().filter(o => ['guide', 'slot-guide'].includes(o.role));
     const visibility = hidden.map(o => o.visible);
     const originalClip = target.clipPath;
@@ -145,13 +180,27 @@
     }
     const output = makeCanvas(width, height);
     const g = output.getContext('2d');
+    g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = 'high';
     g.drawImage(source, 0, 0, width, height);
+    const maskLayer = resampleMask(mask, width, height);
     g.globalCompositeOperation = 'destination-in';
-    g.drawImage(maskImage, 0, 0, width, height);
+    g.drawImage(maskLayer, 0, 0);
     g.globalCompositeOperation = 'source-over';
     source.width = source.height = 1;
+    maskLayer.width = maskLayer.height = 1;
     return output;
   }
+
+  window.BenfuwanPrintMask = Object.freeze({
+    PIXELS_PER_MM,
+    loadImage,
+    normalizeMaskImage,
+    resampleMask,
+    ensureClip,
+    renderPrint,
+    pixelsForMm: mm => Math.round(Number(mm) * PIXELS_PER_MM)
+  });
 
   window.openPreview = async function () {
     if (typeof canvas === 'undefined' || !canvas || previewBusy) return;
@@ -171,7 +220,7 @@
       if (!(width > 0 && height > 0) || width * height > 16000000) throw new Error('手機殼尺寸設定有誤，請聯絡店家。');
       target.discardActiveObject();
       document.getElementById('object-bar')?.classList.remove('show');
-      const print = renderPrint(target, state.image, width, height);
+      const print = renderPrint(target, state.mask, width, height);
       const printData = withMetricScale(print.toDataURL('image/png'));
       const scale = Math.min(1, 1200 / Math.max(width, height));
       const mockup = makeCanvas(Math.round(width * scale), Math.round(height * scale));
