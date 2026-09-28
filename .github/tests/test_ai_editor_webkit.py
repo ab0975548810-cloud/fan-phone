@@ -169,22 +169,39 @@ def front_test(browser, base):
     page.evaluate("""() => {
       const printMask=document.createElement('canvas');printMask.width=10;printMask.height=20;
       const pg=printMask.getContext('2d');pg.clearRect(0,0,10,20);pg.fillStyle='#fff';pg.fillRect(2,3,6,14);pg.clearRect(3,6,2,4);
-      const previewMask=document.createElement('canvas');previewMask.width=20;previewMask.height=36;
-      const vg=previewMask.getContext('2d');vg.clearRect(0,0,20,36);vg.fillStyle='#e05280';vg.fillRect(4,4,12,28);vg.clearRect(6,10,4,8);
-      ctx.printW=80;ctx.printH=160;ctx.maskUrl=previewMask.toDataURL('image/png');ctx.printLineUrl=printMask.toDataURL('image/png');
+      const previewMask=document.createElement('canvas');previewMask.width=20;previewMask.height=40;
+      const vg=previewMask.getContext('2d');vg.clearRect(0,0,20,40);vg.fillStyle='#e05280';vg.fillRect(4,6,12,28);vg.clearRect(6,12,4,8);
+      vg.fillRect(1,1,1,1);vg.fillRect(18,38,1,1);
+      window.__canonicalPreviewUrl=previewMask.toDataURL('image/png');
+      ctx.printW=80;ctx.printH=160;ctx.maskUrl=window.__canonicalPreviewUrl;ctx.printLineUrl=printMask.toDataURL('image/png');
       navigate('page-editor');initCanvas();editorHasSession=true;window.BenfuwanEditorAccess?.fitCanvas?.();
     }""")
     overlay_alignment = poll(page, """() => {
       const mask=document.getElementById('phone-mask');
-      if(!mask?.complete||mask.naturalWidth!==12||mask.naturalHeight!==28)return false;
+      if(!mask?.complete||mask.naturalWidth!==6||mask.naturalHeight!==14||getComputedStyle(mask).display==='none')return false;
       const c=document.createElement('canvas');c.width=mask.naturalWidth;c.height=mask.naturalHeight;
       const g=c.getContext('2d');g.drawImage(mask,0,0);const p=g.getImageData(0,0,c.width,c.height).data;
       let left=c.width,top=c.height,right=-1,bottom=-1;
       for(let y=0;y<c.height;y++)for(let x=0;x<c.width;x++)if(p[(y*c.width+x)*4+3]>0){left=Math.min(left,x);top=Math.min(top,y);right=Math.max(right,x);bottom=Math.max(bottom,y)}
-      return {size:[c.width,c.height],bounds:{left,top,right,bottom},holeAlpha:p[(10*c.width+4)*4+3]};
+      return {size:[c.width,c.height],bounds:{left,top,right,bottom},topAlpha:p[(0*c.width+3)*4+3],leftAlpha:p[(8*c.width+0)*4+3],rightAlpha:p[(8*c.width+5)*4+3],holeAlpha:p[(5*c.width+1)*4+3]};
     }""")
-    assert overlay_alignment == {'size':[12,28],'bounds':{'left':0,'top':0,'right':11,'bottom':27},'holeAlpha':0}, overlay_alignment
-    print('FRONT_PREVIEW_MASK_NORMALIZED_OK', overlay_alignment)
+    assert overlay_alignment == {'size':[6,14],'bounds':{'left':0,'top':0,'right':5,'bottom':13},'topAlpha':255,'leftAlpha':255,'rightAlpha':255,'holeAlpha':0}, overlay_alignment
+    canonical_mapping = page.evaluate("""async () => {
+      const clip=await window.BenfuwanPrintMask.ensureClip(canvas,ctx.printLineUrl);
+      const overlay=await window.BenfuwanPrintMask.ensurePreviewOverlay(canvas,ctx.maskUrl,clip.mask);
+      return {crop:overlay.overlay.crop,source:[overlay.overlay.sourceWidth,overlay.overlay.sourceHeight],canonical:[overlay.overlay.canvas.width,overlay.overlay.canvas.height]};
+    }""")
+    assert canonical_mapping == {'crop':{'left':4,'top':6,'width':12,'height':28},'source':[20,40],'canonical':[6,14]}, canonical_mapping
+    print('FRONT_PREVIEW_CANONICAL_LANDMARKS_OK', overlay_alignment, canonical_mapping)
+    page.evaluate("""() => {
+      const incompatible=document.createElement('canvas');incompatible.width=20;incompatible.height=36;
+      const g=incompatible.getContext('2d');g.fillStyle='#e05280';g.fillRect(0,0,20,36);
+      ctx.maskUrl=incompatible.toDataURL('image/png');applyCaseBoundaryClip();
+    }""")
+    poll(page, "() => getComputedStyle(document.getElementById('phone-mask')).display==='none'")
+    page.evaluate("() => {ctx.maskUrl=window.__canonicalPreviewUrl;applyCaseBoundaryClip()}")
+    poll(page, "() => {const m=document.getElementById('phone-mask');return getComputedStyle(m).display!=='none'&&m.naturalWidth===6&&m.naturalHeight===14}")
+    print('FRONT_PREVIEW_INCOMPATIBLE_MAPPING_HIDDEN_OK')
     assert_front_editor_geometry(page, 'iphone-constrained-unselected')
     add_front_photo(page, 0)
     page.evaluate("() => window.BenfuwanEditorAccess.fitCanvas()")

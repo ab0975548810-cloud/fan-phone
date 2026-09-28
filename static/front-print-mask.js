@@ -3,6 +3,7 @@
   'use strict';
 
   const PIXELS_PER_MM = 20; // 508 DPI；與 1:1 素材的 20 px/mm 相同。
+  const MAX_RASTER_ROUNDING_PX = 1;
   const states = new WeakMap();
   const overlayStates = new WeakMap();
   let previewBusy = false;
@@ -134,12 +135,15 @@
     if (typeof canvas === 'undefined' || !canvas) return;
     const target = canvas, context = ctx;
     const maskUrl = context.printLineUrl || '', overlayUrl = context.maskUrl || '';
-    Promise.all([
-      ensureClip(target, maskUrl),
-      ensurePreviewOverlay(target, overlayUrl)
-    ]).then(([, overlayState]) => {
+    const overlay = document.getElementById('phone-mask');
+    queueMicrotask(() => {
+      if (canvas === target && ctx === context && overlay) {
+        overlay.removeAttribute('src');
+        overlay.style.display = 'none';
+      }
+    });
+    ensureClip(target, maskUrl).then(async state => [state, await ensurePreviewOverlay(target, overlayUrl, state.mask)]).then(([, overlayState]) => {
       if (canvas !== target || ctx !== context || context.printLineUrl !== maskUrl || context.maskUrl !== overlayUrl) return;
-      const overlay = document.getElementById('phone-mask');
       if (!overlay) return;
       overlay.src = overlayState.dataUrl;
       overlay.style.display = overlayState.dataUrl ? 'block' : 'none';
@@ -207,8 +211,39 @@
     return output;
   }
 
-  function ensurePreviewOverlay(target, url, retry = false) {
-    const key = [url, target.width, target.height].join('|');
+  function mapImageToCanonicalFrame(img, canonical) {
+    const sourceWidth = img.naturalWidth || img.width;
+    const sourceHeight = img.naturalHeight || img.height;
+    if (!canonical || !(sourceWidth > 0 && sourceHeight > 0)) return null;
+    const scaleX = sourceWidth / canonical.sourceWidth;
+    const scaleY = sourceHeight / canonical.sourceHeight;
+    if (Math.abs(canonical.sourceHeight * scaleX - sourceHeight) > MAX_RASTER_ROUNDING_PX ||
+        Math.abs(canonical.sourceWidth * scaleY - sourceWidth) > MAX_RASTER_ROUNDING_PX) return null;
+    const crop = {
+      left: canonical.bounds.left * scaleX,
+      top: canonical.bounds.top * scaleY,
+      width: canonical.bounds.width * scaleX,
+      height: canonical.bounds.height * scaleY
+    };
+    if (crop.left < 0 || crop.top < 0 || crop.left + crop.width > sourceWidth + MAX_RASTER_ROUNDING_PX ||
+        crop.top + crop.height > sourceHeight + MAX_RASTER_ROUNDING_PX) return null;
+    const mapped = makeCanvas(canonical.canvas.width, canonical.canvas.height);
+    const g = mapped.getContext('2d', { willReadFrequently: true });
+    g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(img, crop.left, crop.top, crop.width, crop.height, 0, 0, mapped.width, mapped.height);
+    const pixels = g.getImageData(0, 0, mapped.width, mapped.height).data;
+    let visible = false;
+    for (let i = 3; i < pixels.length; i += 4) {
+      if (pixels[i] > 0) { visible = true; break; }
+    }
+    if (!visible) return null;
+    return { canvas: mapped, crop, sourceWidth, sourceHeight };
+  }
+
+  function ensurePreviewOverlay(target, url, canonical, retry = false) {
+    const geometryKey = canonical ? [canonical.sourceWidth, canonical.sourceHeight, canonical.bounds.left, canonical.bounds.top, canonical.bounds.width, canonical.bounds.height].join(':') : '';
+    const key = [url, target.width, target.height, geometryKey].join('|');
     let state = overlayStates.get(target);
     if (state && state.key === key && !(retry && state.error)) return state.ready;
     state = { key, image: null, overlay: null, dataUrl: '', error: null };
@@ -217,17 +252,18 @@
       try {
         if (!url) return state;
         const img = await loadImage(url, '手機殼預覽讀取失敗，請再試一次。');
-        // Each source can have different authoring padding. Cropping both to
-        // their effective alpha bounds maps them onto the same normalized frame.
-        const overlay = normalizeAlphaImage(img, false, '手機殼預覽尚未設定完成，請聯絡店家。');
+        const overlay = mapImageToCanonicalFrame(img, canonical);
         if (canvas !== target || overlayStates.get(target) !== state) throw new Error('型號已切換，請重新預覽。');
         state.image = img;
         state.overlay = overlay;
-        state.dataUrl = overlay.canvas.toDataURL('image/png');
+        state.dataUrl = overlay ? overlay.canvas.toDataURL('image/png') : '';
+        state.hiddenReason = overlay ? '' : '預覽外框與可印範圍的原始比例不一致，已隱藏外框。';
         return state;
       } catch (error) {
         state.error = error;
-        throw error;
+        state.hiddenReason = '手機殼預覽無法可靠對齊，已隱藏外框。';
+        if (canvas !== target || overlayStates.get(target) !== state) throw error;
+        return state;
       }
     })();
     return state.ready;
@@ -238,6 +274,7 @@
     loadImage,
     normalizeMaskImage,
     resampleMask,
+    mapImageToCanonicalFrame,
     ensureClip,
     ensurePreviewOverlay,
     renderPrint,
@@ -252,10 +289,8 @@
     context.printBase64 = context.mockupBase64 = null;
     setBusy(true, '正在產生高畫質預覽...');
     try {
-      const [state, overlayState] = await Promise.all([
-        ensureClip(target, maskUrl, true),
-        ensurePreviewOverlay(target, overlayUrl, true)
-      ]);
+      const state = await ensureClip(target, maskUrl, true);
+      const overlayState = await ensurePreviewOverlay(target, overlayUrl, state.mask, true);
       if (canvas !== target || ctx !== context || context.printLineUrl !== maskUrl || context.maskUrl !== overlayUrl) throw new Error('型號已切換，請重新預覽。');
       const width = Math.round(Number(context.printW) * PIXELS_PER_MM);
       const height = Math.round(Number(context.printH) * PIXELS_PER_MM);
