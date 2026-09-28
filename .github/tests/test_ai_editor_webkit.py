@@ -167,11 +167,24 @@ def front_test(browser, base):
     assert mask_normalization['dimensions'] == [2030, 4241], mask_normalization
     print('FRONT_PRINT_MASK_NORMALIZATION_HOLE_DIMENSIONS_OK', mask_normalization)
     page.evaluate("""() => {
-      const m=document.createElement('canvas');m.width=8;m.height=16;
-      const g=m.getContext('2d');g.clearRect(0,0,8,16);g.fillStyle='#fff';g.fillRect(1,1,6,14);
-      ctx.printW=80;ctx.printH=160;ctx.maskUrl=m.toDataURL('image/png');ctx.printLineUrl=ctx.maskUrl;
+      const printMask=document.createElement('canvas');printMask.width=10;printMask.height=20;
+      const pg=printMask.getContext('2d');pg.clearRect(0,0,10,20);pg.fillStyle='#fff';pg.fillRect(2,3,6,14);pg.clearRect(3,6,2,4);
+      const previewMask=document.createElement('canvas');previewMask.width=20;previewMask.height=36;
+      const vg=previewMask.getContext('2d');vg.clearRect(0,0,20,36);vg.fillStyle='#e05280';vg.fillRect(4,4,12,28);vg.clearRect(6,10,4,8);
+      ctx.printW=80;ctx.printH=160;ctx.maskUrl=previewMask.toDataURL('image/png');ctx.printLineUrl=printMask.toDataURL('image/png');
       navigate('page-editor');initCanvas();editorHasSession=true;window.BenfuwanEditorAccess?.fitCanvas?.();
     }""")
+    overlay_alignment = poll(page, """() => {
+      const mask=document.getElementById('phone-mask');
+      if(!mask?.complete||mask.naturalWidth!==12||mask.naturalHeight!==28)return false;
+      const c=document.createElement('canvas');c.width=mask.naturalWidth;c.height=mask.naturalHeight;
+      const g=c.getContext('2d');g.drawImage(mask,0,0);const p=g.getImageData(0,0,c.width,c.height).data;
+      let left=c.width,top=c.height,right=-1,bottom=-1;
+      for(let y=0;y<c.height;y++)for(let x=0;x<c.width;x++)if(p[(y*c.width+x)*4+3]>0){left=Math.min(left,x);top=Math.min(top,y);right=Math.max(right,x);bottom=Math.max(bottom,y)}
+      return {size:[c.width,c.height],bounds:{left,top,right,bottom},holeAlpha:p[(10*c.width+4)*4+3]};
+    }""")
+    assert overlay_alignment == {'size':[12,28],'bounds':{'left':0,'top':0,'right':11,'bottom':27},'holeAlpha':0}, overlay_alignment
+    print('FRONT_PREVIEW_MASK_NORMALIZED_OK', overlay_alignment)
     assert_front_editor_geometry(page, 'iphone-constrained-unselected')
     add_front_photo(page, 0)
     page.evaluate("() => window.BenfuwanEditorAccess.fitCanvas()")
@@ -256,7 +269,17 @@ def front_test(browser, base):
     assert preview == {'print':{'width':2268,'height':4535},'mockup':{'width':600,'height':1200},'logical':{'width':240,'height':480}}, preview
     production_meta = page.evaluate("() => structuredClone(ctx.productionMeta)")
     assert production_meta['dpi'] == 720 and production_meta['width'] == 2268 and production_meta['height'] == 4535, production_meta
-    assert production_meta['maskBounds'] == {'left':1,'top':1,'right':6,'bottom':14,'width':6,'height':14}, production_meta
+    assert production_meta['maskBounds'] == {'left':2,'top':3,'right':7,'bottom':16,'width':6,'height':14}, production_meta
+    preview_alpha = page.evaluate("""() => new Promise((resolve,reject)=>{
+      const img=new Image();img.onload=()=>{
+        const c=document.createElement('canvas');c.width=img.naturalWidth;c.height=img.naturalHeight;
+        const g=c.getContext('2d');g.drawImage(img,0,0);const p=g.getImageData(0,0,c.width,c.height).data;
+        const alpha=(x,y)=>p[(y*c.width+x)*4+3];
+        resolve({top:alpha(300,0),left:alpha(0,600),right:alpha(599,600),hole:alpha(200,400)});
+      };img.onerror=reject;img.src=ctx.mockupBase64;
+    })""")
+    assert preview_alpha['top'] > 0 and preview_alpha['left'] > 0 and preview_alpha['right'] > 0 and preview_alpha['hole'] == 0, preview_alpha
+    print('FRONT_PREVIEW_NO_EDGE_LEAK_AND_CAMERA_HOLE_OK', preview_alpha)
     print('FRONT_EDITOR_PREVIEW_DIMENSIONS_OK', preview)
     hq_race = page.evaluate("""async () => {
       const hq=ctx.printBase64,meta=structuredClone(ctx.productionMeta);
