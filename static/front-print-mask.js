@@ -3,7 +3,6 @@
   'use strict';
 
   const PIXELS_PER_MM = 20; // 508 DPI；與 1:1 素材的 20 px/mm 相同。
-  const MAX_RASTER_ROUNDING_PX = 1;
   const states = new WeakMap();
   const overlayStates = new WeakMap();
   let previewBusy = false;
@@ -113,10 +112,13 @@
         if (canvas !== target || states.get(target) !== state) throw new Error('型號已切換，請重新預覽。');
         state.image = img;
         state.mask = mask;
-        state.clip = new fabric.Image(mask.canvas, {
+        // Print mask 與 preview overlay 各自以完整 source frame scale-to-fill
+        // 到同一 editor canvas；兩張素材不必有相同的 raster resolution。
+        // normalized mask 僅保留給既有 production PNG 輸出，不回頭改寫前台座標。
+        state.clip = new fabric.Image(img, {
           left: 0, top: 0, originX: 'left', originY: 'top',
-          scaleX: target.width / mask.canvas.width,
-          scaleY: target.height / mask.canvas.height,
+          scaleX: target.width / img.naturalWidth,
+          scaleY: target.height / img.naturalHeight,
           absolutePositioned: true, selectable: false, evented: false,
           excludeFromExport: true
         });
@@ -136,13 +138,18 @@
     const target = canvas, context = ctx;
     const maskUrl = context.printLineUrl || '', overlayUrl = context.maskUrl || '';
     const overlay = document.getElementById('phone-mask');
+    const editorGuide = document.getElementById('print-area-guide');
+    if (editorGuide) editorGuide.style.display = 'none';
     queueMicrotask(() => {
       if (canvas === target && ctx === context && overlay) {
         overlay.removeAttribute('src');
         overlay.style.display = 'none';
       }
     });
-    ensureClip(target, maskUrl).then(async state => [state, await ensurePreviewOverlay(target, overlayUrl, state.mask)]).then(([, overlayState]) => {
+    ensureClip(target, maskUrl).then(async state => {
+      applyEditorGuide(target, state.image);
+      return [state, await ensurePreviewOverlay(target, overlayUrl)];
+    }).then(([, overlayState]) => {
       if (canvas !== target || ctx !== context || context.printLineUrl !== maskUrl || context.maskUrl !== overlayUrl) return;
       if (!overlay) return;
       overlay.src = overlayState.dataUrl;
@@ -201,7 +208,19 @@
     const g = output.getContext('2d');
     g.imageSmoothingEnabled = true;
     g.imageSmoothingQuality = 'high';
-    g.drawImage(source, 0, 0, width, height);
+    // normalized print mask 已依 alpha bounds 裁切；artwork 必須套用同一個
+    // source-frame crop，兩者才能在最終生產畫布維持完全相同的座標系。
+    const crop = productionCropForMask(mask, target.width, target.height);
+    const sourceScaleX = source.width / target.width;
+    const sourceScaleY = source.height / target.height;
+    g.drawImage(
+      source,
+      crop.left * sourceScaleX,
+      crop.top * sourceScaleY,
+      crop.width * sourceScaleX,
+      crop.height * sourceScaleY,
+      0, 0, width, height
+    );
     const maskLayer = resampleMask(mask, width, height);
     g.globalCompositeOperation = 'destination-in';
     g.drawImage(maskLayer, 0, 0);
@@ -211,39 +230,128 @@
     return output;
   }
 
-  function mapImageToCanonicalFrame(img, canonical) {
+  function productionCropForMask(mask, editorWidth, editorHeight) {
+    const bounds = mask && mask.bounds;
+    const sourceWidth = Number(mask && mask.sourceWidth);
+    const sourceHeight = Number(mask && mask.sourceHeight);
+    const targetWidth = Number(editorWidth);
+    const targetHeight = Number(editorHeight);
+    if (!bounds || !(sourceWidth > 0 && sourceHeight > 0 && targetWidth > 0 && targetHeight > 0)) {
+      throw new Error('可印範圍裁切資料無效。');
+    }
+    const left = Number(bounds.left), top = Number(bounds.top);
+    const width = Number(bounds.width), height = Number(bounds.height);
+    if (!(left >= 0 && top >= 0 && width > 0 && height > 0) || left + width > sourceWidth || top + height > sourceHeight) {
+      throw new Error('可印範圍裁切資料無效。');
+    }
+    return {
+      left: left / sourceWidth * targetWidth,
+      top: top / sourceHeight * targetHeight,
+      width: width / sourceWidth * targetWidth,
+      height: height / sourceHeight * targetHeight
+    };
+  }
+
+  function mapOverlayToPrintFrame(img, targetWidth, targetHeight) {
     const sourceWidth = img.naturalWidth || img.width;
     const sourceHeight = img.naturalHeight || img.height;
-    if (!canonical || !(sourceWidth > 0 && sourceHeight > 0)) return null;
-    const scaleX = sourceWidth / canonical.sourceWidth;
-    const scaleY = sourceHeight / canonical.sourceHeight;
-    if (Math.abs(canonical.sourceHeight * scaleX - sourceHeight) > MAX_RASTER_ROUNDING_PX ||
-        Math.abs(canonical.sourceWidth * scaleY - sourceWidth) > MAX_RASTER_ROUNDING_PX) return null;
-    const crop = {
-      left: canonical.bounds.left * scaleX,
-      top: canonical.bounds.top * scaleY,
-      width: canonical.bounds.width * scaleX,
-      height: canonical.bounds.height * scaleY
-    };
-    if (crop.left < 0 || crop.top < 0 || crop.left + crop.width > sourceWidth + MAX_RASTER_ROUNDING_PX ||
-        crop.top + crop.height > sourceHeight + MAX_RASTER_ROUNDING_PX) return null;
-    const mapped = makeCanvas(canonical.canvas.width, canonical.canvas.height);
+    const width = Math.round(Number(targetWidth));
+    const height = Math.round(Number(targetHeight));
+    if (!(sourceWidth > 0 && sourceHeight > 0 && width > 0 && height > 0)) return null;
+    const mapped = makeCanvas(width, height);
     const g = mapped.getContext('2d', { willReadFrequently: true });
-    g.imageSmoothingEnabled = true;
-    g.imageSmoothingQuality = 'high';
-    g.drawImage(img, crop.left, crop.top, crop.width, crop.height, 0, 0, mapped.width, mapped.height);
-    const pixels = g.getImageData(0, 0, mapped.width, mapped.height).data;
+    g.drawImage(img, 0, 0, width, height);
+    const pixels = g.getImageData(0, 0, width, height).data;
     let visible = false;
     for (let i = 3; i < pixels.length; i += 4) {
       if (pixels[i] > 0) { visible = true; break; }
     }
     if (!visible) return null;
-    return { canvas: mapped, crop, sourceWidth, sourceHeight };
+    return { canvas: mapped, frame: { left: 0, top: 0, width, height }, sourceWidth, sourceHeight };
   }
 
-  function ensurePreviewOverlay(target, url, canonical, retry = false) {
-    const geometryKey = canonical ? [canonical.sourceWidth, canonical.sourceHeight, canonical.bounds.left, canonical.bounds.top, canonical.bounds.width, canonical.bounds.height].join(':') : '';
-    const key = [url, target.width, target.height, geometryKey].join('|');
+  function renderEditorGuide(mask, width, height) {
+    const layer = resampleMask(mask, width, height);
+    const g = layer.getContext('2d', { willReadFrequently: true });
+    const source = g.getImageData(0, 0, width, height);
+    const output = g.createImageData(width, height);
+    const inside = (x, y) => x >= 0 && y >= 0 && x < width && y < height && source.data[(y * width + x) * 4 + 3] > 24;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        if (!inside(x, y)) continue;
+        const offset = (y * width + x) * 4;
+        const edge = !inside(x - 1, y) || !inside(x + 1, y) || !inside(x, y - 1) || !inside(x, y + 1);
+        if (edge && (Math.floor((x + y) / 5) % 2 === 0)) {
+          output.data.set([255, 111, 154, 220], offset);
+        } else {
+          output.data.set([255, 255, 255, 190], offset);
+        }
+      }
+    }
+    g.putImageData(output, 0, 0);
+    return layer;
+  }
+
+  function applyEditorGuide(target, mask) {
+    const shell = document.getElementById('canvas-shell');
+    if (!shell) return;
+    let guide = document.getElementById('print-area-guide');
+    if (!guide) {
+      guide = document.createElement('img');
+      guide.id = 'print-area-guide';
+      guide.alt = '';
+      guide.setAttribute('aria-hidden', 'true');
+      guide.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:fill;pointer-events:none;z-index:0';
+      shell.prepend(guide);
+    }
+    guide.src = renderEditorGuide(mask, target.width, target.height).toDataURL('image/png');
+    guide.style.display = 'block';
+    target.wrapperEl.style.zIndex = '1';
+    const oldGuide = document.getElementById('safe-guide');
+    if (oldGuide) oldGuide.style.display = 'none';
+  }
+
+  function renderPreviewFallback(mask, width, height) {
+    const fill = makeCanvas(width, height);
+    const fg = fill.getContext('2d');
+    fg.fillStyle = '#f8f8f8';
+    fg.fillRect(0, 0, width, height);
+    fg.globalCompositeOperation = 'destination-in';
+    const maskLayer = resampleMask(mask, width, height);
+    fg.drawImage(maskLayer, 0, 0);
+    fg.globalCompositeOperation = 'source-over';
+    maskLayer.width = maskLayer.height = 1;
+    return fill;
+  }
+
+  function renderSourceFramePreview(target, mask, width, height) {
+    const hidden = target.getObjects().filter(o => ['guide', 'slot-guide'].includes(o.role));
+    const visibility = hidden.map(o => o.visible);
+    const originalClip = target.clipPath;
+    let source;
+    try {
+      hidden.forEach(o => { o.visible = false; });
+      target.clipPath = null;
+      source = target.toCanvasElement(Math.max(width / target.width, height / target.height));
+    } finally {
+      target.clipPath = originalClip;
+      hidden.forEach((o, i) => { o.visible = visibility[i]; });
+      target.renderAll();
+    }
+    const output = renderPreviewFallback(mask, width, height);
+    const g = output.getContext('2d');
+    g.drawImage(source, 0, 0, width, height);
+    g.globalCompositeOperation = 'destination-in';
+    const maskLayer = resampleMask(mask, width, height);
+    g.drawImage(maskLayer, 0, 0);
+    g.globalCompositeOperation = 'source-over';
+    source.width = source.height = 1;
+    maskLayer.width = maskLayer.height = 1;
+    return output;
+  }
+
+  function ensurePreviewOverlay(target, url, retry = false) {
+    const key = [url, target.width, target.height].join('|');
     let state = overlayStates.get(target);
     if (state && state.key === key && !(retry && state.error)) return state.ready;
     state = { key, image: null, overlay: null, dataUrl: '', error: null };
@@ -252,12 +360,12 @@
       try {
         if (!url) return state;
         const img = await loadImage(url, '手機殼預覽讀取失敗，請再試一次。');
-        const overlay = mapImageToCanonicalFrame(img, canonical);
+        const overlay = mapOverlayToPrintFrame(img, target.width, target.height);
         if (canvas !== target || overlayStates.get(target) !== state) throw new Error('型號已切換，請重新預覽。');
         state.image = img;
         state.overlay = overlay;
         state.dataUrl = overlay ? overlay.canvas.toDataURL('image/png') : '';
-        state.hiddenReason = overlay ? '' : '預覽外框與可印範圍的原始比例不一致，已隱藏外框。';
+        state.hiddenReason = overlay ? '' : '手機殼預覽圖片無效，已隱藏外框。';
         return state;
       } catch (error) {
         state.error = error;
@@ -274,7 +382,11 @@
     loadImage,
     normalizeMaskImage,
     resampleMask,
-    mapImageToCanonicalFrame,
+    productionCropForMask,
+    mapOverlayToPrintFrame,
+    renderEditorGuide,
+    renderPreviewFallback,
+    renderSourceFramePreview,
     ensureClip,
     ensurePreviewOverlay,
     renderPrint,
@@ -290,7 +402,7 @@
     setBusy(true, '正在產生高畫質預覽...');
     try {
       const state = await ensureClip(target, maskUrl, true);
-      const overlayState = await ensurePreviewOverlay(target, overlayUrl, state.mask, true);
+      const overlayState = await ensurePreviewOverlay(target, overlayUrl, true);
       if (canvas !== target || ctx !== context || context.printLineUrl !== maskUrl || context.maskUrl !== overlayUrl) throw new Error('型號已切換，請重新預覽。');
       const width = Math.round(Number(context.printW) * PIXELS_PER_MM);
       const height = Math.round(Number(context.printH) * PIXELS_PER_MM);
@@ -299,10 +411,10 @@
       document.getElementById('object-bar')?.classList.remove('show');
       const print = renderPrint(target, state.mask, width, height);
       const printData = withMetricScale(print.toDataURL('image/png'));
-      const scale = Math.min(1, 1200 / Math.max(width, height));
-      const mockup = makeCanvas(Math.round(width * scale), Math.round(height * scale));
+      const scale = 1200 / Math.max(target.width, target.height);
+      const frameWidth = Math.round(target.width * scale), frameHeight = Math.round(target.height * scale);
+      const mockup = renderSourceFramePreview(target, state.image, frameWidth, frameHeight);
       const g = mockup.getContext('2d');
-      g.drawImage(print, 0, 0, mockup.width, mockup.height);
       if (overlayState.overlay) g.drawImage(overlayState.overlay.canvas, 0, 0, mockup.width, mockup.height);
       const mockupData = mockup.toDataURL('image/png');
       print.width = print.height = 1;
@@ -312,11 +424,13 @@
       const oldOverlay = document.getElementById('preview-phone-mask');
       if (oldOverlay) oldOverlay.style.display = 'none';
       const checker = document.querySelector('.design-checker');
-      if (checker) checker.style.aspectRatio = width + ' / ' + height;
+      if (checker) checker.style.aspectRatio = target.width + ' / ' + target.height;
       document.getElementById('preview-image').src = mockupData;
       document.getElementById('preview-title').textContent = [context.modelName, context.styleName, context.colorName].filter(Boolean).join('・');
       const info = document.querySelector('.preview-info p');
-      if (info) info.textContent = '請確認照片、文字與貼紙的位置。鏡頭孔及不可印刷的位置不會印上圖案；手機殼外框供預覽參考。';
+      if (info) info.textContent = overlayState.overlay
+        ? '請確認照片、文字與貼紙的位置。鏡頭孔及不可印刷的位置不會印上圖案；手機殼外框供預覽參考。'
+        : '請確認照片、文字與貼紙的位置。此型號暫時隱藏無法可靠對齊的手機殼外框；白色區域代表可印範圍，鏡頭孔不會印上圖案。';
       navigate('page-preview');
     } catch (error) {
       console.error('[PREVIEW]', error);
