@@ -176,35 +176,59 @@ def front_test(browser, base):
     assert mask_normalization['dimensions'] == [2030, 4241], mask_normalization
     print('FRONT_PRINT_MASK_NORMALIZATION_HOLE_DIMENSIONS_OK', mask_normalization)
     fixture_models = PRODUCTION_MASK_CONTRACT['models']
-    profile_audit = page.evaluate("models => window.BenfuwanModelProfile.audit(models)", fixture_models)
+    crystal_style = {'id':'style_1789287807818','name':'晶彩磁吸防摔殼','status':True}
+    profile_audit = page.evaluate("({models,styles}) => window.BenfuwanModelProfile.audit(models,styles)", {'models':fixture_models,'styles':[crystal_style]})
     expected_audit = PRODUCTION_MASK_CONTRACT['expected']
-    assert profile_audit['active'] == expected_audit['active'], profile_audit
+    assert profile_audit['activeModels'] == expected_audit['active'] and profile_audit['activeStyles'] == 1, profile_audit
     assert len(profile_audit['configured']) == expected_audit['configured'], profile_audit
     assert len(profile_audit['incomplete']) == expected_audit['incomplete'], profile_audit
-    assert set(profile_audit['configured']) == {'model_apple_13','model_apple_14','model_apple_14_pro_max','model_apple_17_pro'}, profile_audit
-    blocked_profile = page.evaluate("""models => {
-      shopData.models=models;activeBrand='';resetDesignState(false);renderModels();
-      const before=ctx.modelId,result=selectModel(models.find(model=>model.id==='model_apple_11'));
-      return {before,after:ctx.modelId,result,disabled:document.getElementById('model-next').disabled,badges:document.querySelectorAll('.bf-model-unconfigured .bf-model-config-badge').length,toast:document.getElementById('toast').textContent};
-    }""", fixture_models)
-    assert blocked_profile['before'] is None and blocked_profile['after'] is None and blocked_profile['result'] is False, blocked_profile
-    assert blocked_profile['disabled'] and blocked_profile['badges'] == 17 and '尚未完成' in blocked_profile['toast'], blocked_profile
-    print('FRONT_PRODUCTION_MODEL_PROFILE_AUDIT_OK', profile_audit, blocked_profile['badges'])
-    no_style_fallback = page.evaluate("""models => {
+    assert set(profile_audit['configured']) == {
+        'model_apple_13:style_1789287807818','model_apple_14:style_1789287807818',
+        'model_apple_14_pro_max:style_1789287807818','model_apple_17_pro:style_1789287807818'
+    }, profile_audit
+    blocked_profile = page.evaluate("""({models,crystal}) => {
+      shopData.models=models;shopData.styles=[crystal];activeBrand='';resetDesignState(false);renderModels();
+      const model=models.find(row=>row.id==='model_apple_11'),selected=selectModel(model),styled=selectStyle(crystal);
+      return {selected,styled,modelId:ctx.modelId,styleId:ctx.styleId,modelNext:document.getElementById('model-next').disabled,styleNext:document.getElementById('style-next').disabled,badges:document.querySelectorAll('.bf-style-unconfigured .bf-style-config-badge').length,toast:document.getElementById('toast').textContent};
+    }""", {'models':fixture_models,'crystal':crystal_style})
+    assert blocked_profile['selected'] is True and blocked_profile['styled'] is False, blocked_profile
+    assert blocked_profile['modelId'] == 'model_apple_11' and blocked_profile['styleId'] is None, blocked_profile
+    assert not blocked_profile['modelNext'] and blocked_profile['styleNext'] and blocked_profile['badges'] == 1 and '尚未完成生產設定' in blocked_profile['toast'], blocked_profile
+    print('FRONT_MODEL_STYLE_PROFILE_AUDIT_FAIL_CLOSED_OK', profile_audit, blocked_profile)
+    legacy_crystal_only = page.evaluate("""({models,crystal}) => {
       const model=models.find(row=>row.id==='model_apple_14_pro_max');
       const selected=selectModel(model);
-      const styled=selectStyle({id:'contract-style',name:'契約測試',price:390,mask_img:'style-preview',line_img:'style-print',print_w:99,print_h:199,colors:[]});
-      return {selected,styled,maskUrl:ctx.maskUrl,printLineUrl:ctx.printLineUrl,printW:ctx.printW,printH:ctx.printH};
-    }""", fixture_models)
-    assert no_style_fallback == {
+      const styled=selectStyle(crystal);
+      const mirror=selectStyle({id:'style_mirror',name:'鏡面殼',price:390,mask_img:'style-preview',line_img:'style-print',print_w:99,print_h:199,colors:[]});
+      return {selected,styled,mirror,styleId:ctx.styleId,maskUrl:ctx.maskUrl,printLineUrl:ctx.printLineUrl,printW:ctx.printW,printH:ctx.printH};
+    }""", {'models':fixture_models,'crystal':crystal_style})
+    assert legacy_crystal_only == {
         'selected': True,
         'styled': True,
+        'mirror': False,
+        'styleId': 'style_1789287807818',
         'maskUrl': 'fixture://iphone14-pro-max-preview.png',
         'printLineUrl': 'fixture://iphone14-pro-max-print.png',
         'printW': 85,
         'printH': 166.3,
-    }, no_style_fallback
-    print('FRONT_MODEL_LEVEL_PROFILE_NO_STYLE_FALLBACK_OK', no_style_fallback)
+    }, legacy_crystal_only
+    print('FRONT_LEGACY_ROOT_CRYSTAL_ONLY_NO_STYLE_FALLBACK_OK', legacy_crystal_only)
+
+    style_isolation = page.evaluate("""model => {
+      const configured={...model,case_profiles:{
+        crystal:{preview_mask_img:'fixture://crystal-preview',print_line_img:'fixture://crystal-print',print_w:70,print_h:140,print_x:1,print_y:2},
+        mirror:{preview_mask_img:'fixture://mirror-preview',print_line_img:'fixture://mirror-print',print_w:75,print_h:150,print_x:3,print_y:4}
+      }};
+      const crystal={id:'crystal',name:'晶彩',colors:['透明','粉']},mirror={id:'mirror',name:'鏡面',colors:['銀','黑']};
+      shopData.models=[configured];shopData.styles=[crystal,mirror];selectModel(configured);selectStyle(crystal);
+      const first={mask:ctx.maskUrl,line:ctx.printLineUrl,w:ctx.printW,h:ctx.printH,x:ctx.printX,y:ctx.printY};
+      selectStyle(mirror);const second={mask:ctx.maskUrl,line:ctx.printLineUrl,w:ctx.printW,h:ctx.printH,x:ctx.printX,y:ctx.printY};
+      return {first,second,crystalColors:window.BenfuwanModelColors?.colorsFor?.(crystal,configured.id)||crystal.colors};
+    }""", fixture_models[0])
+    assert style_isolation['first'] == {'mask':'fixture://crystal-preview','line':'fixture://crystal-print','w':70,'h':140,'x':1,'y':2}, style_isolation
+    assert style_isolation['second'] == {'mask':'fixture://mirror-preview','line':'fixture://mirror-print','w':75,'h':150,'x':3,'y':4}, style_isolation
+    print('FRONT_TWO_STYLES_INDEPENDENT_PROFILE_COLOR_SHARED_OK', style_isolation)
+    page.evaluate("({models,crystal}) => {shopData.models=models;shopData.styles=[crystal];resetDesignState(false)}", {'models':fixture_models,'crystal':crystal_style})
 
     mask_fixtures = {
         'iphone13': {'preview': fixture_data_url('iphone13-preview.png'), 'print': fixture_data_url('iphone13-print.png')},
@@ -603,7 +627,12 @@ def admin_test(browser, base):
         route.fulfill(status=200, content_type='application/json', body='{"status":"success","version":"model-status-version"}')
     page.route('**/api/admin/print/model-profiles', model_status_response)
     model_id = listing_original['data']['models'][0]['id']
-    page.evaluate("id => {openModelEditor(id);document.getElementById('model-active').checked=false}", model_id)
+    page.evaluate("""id => {
+      openModelEditor(id);document.getElementById('model-active').checked=false;
+      document.getElementById('model-profile-mask-url').value='fixture://admin-preview';
+      document.getElementById('model-profile-line-url').value='fixture://admin-print';
+      document.getElementById('model-profile-w').value='80';document.getElementById('model-profile-h').value='160';
+    }""", model_id)
     page.evaluate("() => saveModel()")
     assert len(model_status_requests) == 1
     assert next(row for row in model_status_requests[0]['shop_data']['models'] if row['id'] == model_id)['status'] is False
@@ -627,6 +656,8 @@ def admin_test(browser, base):
 
     model_color_src = page.locator('script[src*="admin-model-colors.js"]').get_attribute('src')
     assert model_color_src and 'v=20260926audit1' in model_color_src, model_color_src
+    model_profile_src = page.locator('script[src*="admin-model-profiles.js"]').get_attribute('src')
+    assert model_profile_src and 'v=20260928a' in model_profile_src, model_profile_src
     asset_category_src = page.locator('script[src*="admin-asset-categories.js"]').get_attribute('src')
     assert asset_category_src and 'v=20260926audit1' in asset_category_src, asset_category_src
     template_loader_src = page.locator('script[src*="admin-template-loader.js"]').get_attribute('src')
@@ -731,8 +762,12 @@ def admin_test(browser, base):
     model_text = page.locator('#model-modal').inner_text()
     assert 'A5 有效範圍為 200 × 230 mm' in model_text
     assert '座標原點在治具右下角' in model_text
-    page.locator('#model-x').fill('1.5');page.locator('#model-y').fill('2.5')
-    page.locator('#model-w').fill('80');page.locator('#model-h').fill('160');page.locator('#model-angle').fill('0')
+    page.evaluate("""() => {
+      document.getElementById('model-profile-mask-url').value='fixture://admin-preview';
+      document.getElementById('model-profile-line-url').value='fixture://admin-print';
+    }""")
+    page.locator('#model-profile-x').fill('1.5');page.locator('#model-profile-y').fill('2.5')
+    page.locator('#model-profile-w').fill('80');page.locator('#model-profile-h').fill('160');page.locator('#model-profile-angle').fill('0')
     model_requests = []
     def save_model(route):
         model_requests.append(route.request.post_data_json)
@@ -742,6 +777,7 @@ def admin_test(browser, base):
     page.route('**/api/admin/print/model-profiles', save_model)
     page.evaluate("() => Promise.all([saveModel(),saveModel()])")
     assert len(model_requests) == 1, model_requests
+    assert model_requests[0]['style_id'] and model_requests[0]['model_id'], model_requests
     page.unroute('**/api/admin/print/model-profiles')
     page.locator('#model-modal').wait_for(state='hidden')
     page.locator('.nav button[data-view="styles"]').click()

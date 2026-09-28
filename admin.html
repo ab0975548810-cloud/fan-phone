@@ -43,7 +43,7 @@
           </div>
           <div id="model-admin-view" class="admin-subview">
             <div class="titlebar"><b>型號管理</b><button class="btn" onclick="openModelEditor()"><i class="fa-solid fa-plus"></i> 新增型號</button></div>
-            <div class="table-wrap"><table class="tbl"><thead><tr><th style="width:60px">序號</th><th>品牌</th><th>顯示名稱</th><th>預覽遮罩</th><th>打印線圖</th><th style="width:170px">操作</th></tr></thead><tbody id="models-body"></tbody></table></div>
+            <div class="table-wrap"><table class="tbl"><thead><tr><th style="width:60px">序號</th><th>品牌</th><th>顯示名稱</th><th>各殼款生產設定</th><th style="width:170px">操作</th></tr></thead><tbody id="models-body"></tbody></table></div>
           </div>
         </div>
       </section>
@@ -76,11 +76,9 @@
 
 <div class="modal" id="model-modal"><div class="box"><div class="mh"><span id="model-title">型號設定</span><button class="btn danger mini" onclick="closeModal('model-modal')">關閉</button></div><div class="mb">
 <input type="hidden" id="model-id"><div class="row"><div class="field"><label>品牌</label><select id="model-brand"></select></div><div class="field"><label>型號名稱</label><input id="model-name"></div></div>
-<div class="row"><div class="field"><label>預覽遮罩 PNG</label><div class="upload"><img id="model-mask-img"><input id="model-mask-url" type="hidden"><button class="btn alt mini" onclick="document.getElementById('model-mask-file').click()">上傳遮罩</button><input id="model-mask-file" type="file" accept="image/png,image/jpeg,image/webp" hidden onchange="uploadModelImage(event,'mask')"></div></div><div class="field"><label>打印線圖 PNG</label><div class="upload"><img id="model-line-img"><input id="model-line-url" type="hidden"><button class="btn alt mini" onclick="document.getElementById('model-line-file').click()">上傳線圖</button><input id="model-line-file" type="file" accept="image/png,image/jpeg,image/webp" hidden onchange="uploadModelImage(event,'line')"></div></div></div>
-<div class="notice"><b>A5 Desktop 列印參數</b><br>X / Y 是治具定位，座標原點在治具右下角；W / H 是實際列印尺寸。A5 有效範圍為 200 × 230 mm。儲存後會同步到此型號所有啟用中的商品 SKU。</div>
-<div class="row four"><div class="field"><label>定位 X mm</label><input id="model-x" type="number" step="0.1"></div><div class="field"><label>定位 Y mm</label><input id="model-y" type="number" step="0.1"></div><div class="field"><label>列印 W mm</label><input id="model-w" type="number" step="0.1" min="0.001"></div><div class="field"><label>列印 H mm</label><input id="model-h" type="number" step="0.1" min="0.001"></div></div>
-<div class="field"><label>角度（預設 0°）</label><input id="model-angle" type="number" step="0.1" value="0"></div><div class="field"><label><input id="model-active" type="checkbox" style="width:auto;margin-right:7px" checked> 前台上架並可接單</label></div>
-</div><div class="mf"><button class="btn danger" onclick="closeModal('model-modal')">取消</button><button class="btn" id="model-save" onclick="saveModel()">儲存</button></div></div></div>
+<div id="model-profile-admin"><div class="notice">殼款設定載入中…</div></div>
+<div class="field"><label><input id="model-active" type="checkbox" style="width:auto;margin-right:7px" checked> 前台上架並可接單</label></div>
+</div><div class="mf"><button class="btn danger" onclick="closeModal('model-modal')">取消</button><button class="btn" id="model-save" onclick="saveModel()">儲存目前殼款</button></div></div></div>
 
 <div class="modal" id="style-modal"><div class="box"><div class="mh"><span>材質設定</span><button class="btn danger mini" onclick="closeModal('style-modal')">關閉</button></div><div class="mb">
 <input id="style-id" type="hidden"><div class="row"><div class="field"><label>材質名稱</label><input id="style-name"></div><div class="field"><label>售價</label><input id="style-price" type="number" min="1"></div></div><div class="field"><label>顏色（用逗號分隔）</label><input id="style-colors" placeholder="透明, 黑, 粉"></div><div class="field"><label><input id="style-active" type="checkbox" style="width:auto;margin-right:7px" checked> 前台上架並可接單</label></div>

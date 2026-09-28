@@ -53,6 +53,7 @@ for admin_js in (
     "admin-commerce-v1.js",
     "admin-print-center.js",
     "admin-model-colors.js",
+    "admin-model-profiles.js",
     "admin-asset-categories.js",
     "admin-template-loader.js",
     "admin-universal-templates.js",
@@ -136,6 +137,8 @@ if b"admin-commerce-v1.js" not in admin_resp.data:
     fail("Authenticated /admin did not inject admin-commerce-v1.js")
 if b"admin-print-center.js" not in admin_resp.data:
     fail("Authenticated /admin did not inject admin-print-center.js")
+if b"admin-model-profiles.js" not in admin_resp.data:
+    fail("Authenticated /admin did not inject admin-model-profiles.js")
 if '登入安全'.encode() not in admin_resp.data or b'id="passkey-enable"' not in admin_resp.data:
     fail('Authenticated /admin did not expose the login security panel')
 passkey_admin = client.get('/api/admin/passkeys').get_json() or {}

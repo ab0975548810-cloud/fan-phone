@@ -22,6 +22,7 @@ from print_vendor import VendorAmbiguous, VendorDisabled, VendorError, YunPrintC
 
 _INSTALLED = False
 _AUTO_DISPATCHER = None
+LEGACY_CRYSTAL_STYLE_ID = "style_1789287807818"
 KEY_RE = re.compile(r"^[A-Za-z0-9_-]{16,100}$")
 TERMINAL = {"COMPLETED", "CANCELED", "FAILED"}
 STATE_LABELS = {
@@ -74,6 +75,32 @@ def _as_decimal(value, name, *, positive=False):
     if not number.is_finite() or (positive and number <= 0) or number < -10000 or number > 10000:
         raise PrintError("BAD_PROFILE", f"{name} 超出範圍", 400)
     return float(number.quantize(Decimal(".001")))
+
+
+def _model_style_profile(model, style_id):
+    """Resolve an explicit model/style profile, with one-way crystal legacy compatibility."""
+    if not isinstance(model, dict) or not style_id:
+        return None
+    profiles = model.get("case_profiles")
+    if isinstance(profiles, dict) and style_id in profiles:
+        return profiles.get(style_id) if isinstance(profiles.get(style_id), dict) else None
+    return model if style_id == LEGACY_CRYSTAL_STYLE_ID else None
+
+
+def _complete_model_style_profile(model, style_id):
+    profile = _model_style_profile(model, style_id)
+    if not profile:
+        return None
+    if not str(profile.get("preview_mask_img") or "").strip():
+        return None
+    if not str(profile.get("print_line_img") or "").strip():
+        return None
+    try:
+        if Decimal(str(profile.get("print_w"))) <= 0 or Decimal(str(profile.get("print_h"))) <= 0:
+            return None
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    return profile
 
 
 def _safe_payload(payload):
@@ -170,6 +197,18 @@ class PrintService:
         if needs_artwork and not order.get("print_path"):
             raise PrintError("PRINT_FILE_REQUIRED", "缺少高清生產圖，無法準備列印")
 
+    def _assert_style_configured(self, order):
+        model_id = str(order.get("model_id") or "").strip()
+        style_id = str(order.get("style_id") or "").strip()
+        shop = self.app.cloud_get_json("shop_data", self.app.DATA_FILE, self.app.DEFAULT_SHOP_DATA)
+        model = next((row for row in (shop.get("models") or [])
+                      if str(row.get("id") or "") == model_id), None)
+        if not _complete_model_style_profile(model, style_id):
+            raise PrintError(
+                "PRODUCTION_STYLE_NOT_CONFIGURED",
+                "這筆訂單的型號與殼款尚未完成生產設定，禁止建立或送出列印任務。",
+            )
+
     def _download_artwork(self, path):
         if not path:
             raise PrintError("PRINT_FILE_REQUIRED", "找不到高清生產圖")
@@ -230,6 +269,10 @@ class PrintService:
             return {"status": "skipped", "reason": "VENDOR_NOT_READY"}
         order = self._order(order_id)
         self._assert_order_printable(order)
+        try:
+            self._assert_style_configured(order)
+        except PrintError as exc:
+            return {"status": "skipped", "reason": exc.code}
         sku_id = str(self._finance(order_id).get("sku_id") or "")
         if not sku_id:
             return {"status": "skipped", "reason": "FINANCE_SKU_REQUIRED"}
@@ -289,6 +332,7 @@ class PrintService:
             candidates = self._sku_candidates(order, commerce, shop)
             if not sku_id or sku_id not in {row["id"] for row in candidates}:
                 raise PrintError("SKU_BINDING_REQUIRED", "舊訂單必須先明確補綁列印 SKU")
+        self._assert_style_configured(order)
         profile = self.store.profile(sku_id)
         if not profile:
             raise PrintError("PROFILE_MISSING", "請先到「品牌及型號」儲存此型號的列印參數")
@@ -302,23 +346,31 @@ class PrintService:
     def save_model_profiles(self, payload):
         shop = payload.get("shop_data")
         model_id = str(payload.get("model_id") or "").strip()
+        style_id = str(payload.get("style_id") or "").strip()
         if (not isinstance(shop, dict) or not isinstance(shop.get("models"), list)
-                or not isinstance(shop.get("styles"), list) or not model_id):
-            raise PrintError("BAD_MODEL_PROFILE", "型號列印參數格式錯誤", 400)
+                or not isinstance(shop.get("styles"), list) or not model_id or not style_id):
+            raise PrintError("BAD_MODEL_PROFILE", "型號與殼款列印參數格式錯誤", 400)
         model = next((row for row in (shop.get("models") or [])
                       if str(row.get("id") or "") == model_id), None)
         if not model:
             raise PrintError("BAD_MODEL_PROFILE", "找不到要儲存的型號", 400)
+        if not any(str(row.get("id") or "") == style_id for row in (shop.get("styles") or [])):
+            raise PrintError("BAD_MODEL_PROFILE", "找不到要儲存的殼款", 400)
+        source_profile = _complete_model_style_profile(model, style_id)
+        if not source_profile:
+            raise PrintError("BAD_MODEL_PROFILE", "預覽遮罩、打印線圖與列印尺寸必須完整", 400)
         profile_values = {
-            "width_mm": _as_decimal(model.get("print_w"), "寬度", positive=True),
-            "height_mm": _as_decimal(model.get("print_h"), "高度", positive=True),
-            "left_mm": _as_decimal(model.get("print_x", 0), "水平定位 X"),
-            "top_mm": _as_decimal(model.get("print_y", 0), "垂直定位 Y"),
-            "angle": _as_decimal(model.get("print_angle", 0), "角度"),
+            "width_mm": _as_decimal(source_profile.get("print_w"), "寬度", positive=True),
+            "height_mm": _as_decimal(source_profile.get("print_h"), "高度", positive=True),
+            "left_mm": _as_decimal(source_profile.get("print_x", 0), "水平定位 X"),
+            "top_mm": _as_decimal(source_profile.get("print_y", 0), "垂直定位 Y"),
+            "angle": _as_decimal(source_profile.get("print_angle", 0), "角度"),
         }
         commerce_before = self.app.commerce.read()
         active_skus = [row for row in (commerce_before.get("skus") or [])
-                       if row.get("active") is not False and str(row.get("model_id") or "") == model_id]
+                       if row.get("active") is not False
+                       and str(row.get("model_id") or "") == model_id
+                       and str(row.get("style_id") or "") == style_id]
         current = {row["sku_id"]: row for row in self.store.profiles()}
         profiles = []
         for sku in active_skus:
@@ -352,7 +404,7 @@ class PrintService:
             )
             error.version = version
             raise error from exc
-        return {"model_id": model_id, "synced_skus": len(saved), "version": version}
+        return {"model_id": model_id, "style_id": style_id, "synced_skus": len(saved), "version": version}
 
     def snapshot_profile(self, job_id, key):
         job = self.store.job(job_id)
@@ -413,6 +465,7 @@ class PrintService:
             raise PrintError("BAD_PRINT_STATE", "目前任務狀態不可送到銳印")
         if not job.get("profile_complete"):
             raise PrintError("PROFILE_MISSING", "列印參數未設定，不可送到銳印")
+        self._assert_style_configured(order)
         if not self.vendor_ready:
             raise PrintError("VENDOR_NOT_READY", "雲打印憑證、HTTPS public URL 或生產圖密鑰尚未完整設定", 503)
         base = self._base_url()
@@ -431,10 +484,12 @@ class PrintService:
             self.store.finish_request(key, "FAILED", {"code": "CONCURRENT_OPERATION"})
             raise PrintError("CONCURRENT_OPERATION", "另一個列印操作正在執行")
         try:
-            self._assert_order_printable(self._order(claimed["order_id"]))
+            claimed_order = self._order(claimed["order_id"])
+            self._assert_order_printable(claimed_order)
+            self._assert_style_configured(claimed_order)
         except PrintError:
-            self.store.patch_job(job_id, {"state": "PREPARED", "last_error": "送出前訂單已作廢"}, ("SENDING",))
-            self.store.finish_request(key, "FAILED", {"job_id": job_id, "code": "VOID_ORDER"})
+            self.store.patch_job(job_id, {"state": "PREPARED", "last_error": "送出前訂單或生產設定已失效"}, ("SENDING",))
+            self.store.finish_request(key, "FAILED", {"job_id": job_id, "code": "SEND_PREFLIGHT_FAILED"})
             raise
         token = self.artwork_token(claimed)
         file_url = f"{base}/api/print/artwork/{claimed['id']}/{token}"
