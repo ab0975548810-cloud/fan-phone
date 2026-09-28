@@ -3,9 +3,6 @@
   'use strict';
 
   const PIXELS_PER_MM = 20; // 508 DPI；與 1:1 素材的 20 px/mm 相同。
-  const MAX_RASTER_ROUNDING_PX = 1;
-  const OVERLAY_AUDIT_MAX_EDGE = 256;
-  const MAX_DROPPED_OVERLAY_ALPHA_RATIO = 0.02;
   const states = new WeakMap();
   const overlayStates = new WeakMap();
   let previewBusy = false;
@@ -115,10 +112,12 @@
         if (canvas !== target || states.get(target) !== state) throw new Error('型號已切換，請重新預覽。');
         state.image = img;
         state.mask = mask;
-        state.clip = new fabric.Image(mask.canvas, {
+        // Editor、print mask 與 preview overlay 共用素材原始 canvas/origin。
+        // normalized mask 僅保留給既有 production PNG 輸出，不回頭改寫前台座標。
+        state.clip = new fabric.Image(img, {
           left: 0, top: 0, originX: 'left', originY: 'top',
-          scaleX: target.width / mask.canvas.width,
-          scaleY: target.height / mask.canvas.height,
+          scaleX: target.width / img.naturalWidth,
+          scaleY: target.height / img.naturalHeight,
           absolutePositioned: true, selectable: false, evented: false,
           excludeFromExport: true
         });
@@ -147,8 +146,8 @@
       }
     });
     ensureClip(target, maskUrl).then(async state => {
-      applyEditorGuide(target, state.mask);
-      return [state, await ensurePreviewOverlay(target, overlayUrl, state.mask)];
+      applyEditorGuide(target, state.image);
+      return [state, await ensurePreviewOverlay(target, overlayUrl, state.image)];
     }).then(([, overlayState]) => {
       if (canvas !== target || ctx !== context || context.printLineUrl !== maskUrl || context.maskUrl !== overlayUrl) return;
       if (!overlay) return;
@@ -218,57 +217,22 @@
     return output;
   }
 
-  function mapImageToCanonicalFrame(img, canonical) {
+  function mapOverlayToPrintFrame(img, printImage) {
     const sourceWidth = img.naturalWidth || img.width;
     const sourceHeight = img.naturalHeight || img.height;
-    if (!canonical || !(sourceWidth > 0 && sourceHeight > 0)) return null;
-    const scaleX = sourceWidth / canonical.sourceWidth;
-    const scaleY = sourceHeight / canonical.sourceHeight;
-    if (Math.abs(canonical.sourceHeight * scaleX - sourceHeight) > MAX_RASTER_ROUNDING_PX ||
-        Math.abs(canonical.sourceWidth * scaleY - sourceWidth) > MAX_RASTER_ROUNDING_PX) return null;
-    const crop = {
-      left: canonical.bounds.left * scaleX,
-      top: canonical.bounds.top * scaleY,
-      width: canonical.bounds.width * scaleX,
-      height: canonical.bounds.height * scaleY
-    };
-    if (crop.left < 0 || crop.top < 0 || crop.left + crop.width > sourceWidth + MAX_RASTER_ROUNDING_PX ||
-        crop.top + crop.height > sourceHeight + MAX_RASTER_ROUNDING_PX) return null;
-    const auditScale = Math.min(1, OVERLAY_AUDIT_MAX_EDGE / Math.max(sourceWidth, sourceHeight));
-    const auditWidth = Math.max(1, Math.round(sourceWidth * auditScale));
-    const auditHeight = Math.max(1, Math.round(sourceHeight * auditScale));
-    const audit = makeCanvas(auditWidth, auditHeight);
-    const ag = audit.getContext('2d', { willReadFrequently: true });
-    ag.drawImage(img, 0, 0, auditWidth, auditHeight);
-    const auditPixels = ag.getImageData(0, 0, auditWidth, auditHeight).data;
-    const auditCrop = {
-      left: crop.left * auditWidth / sourceWidth,
-      top: crop.top * auditHeight / sourceHeight,
-      right: (crop.left + crop.width) * auditWidth / sourceWidth,
-      bottom: (crop.top + crop.height) * auditHeight / sourceHeight
-    };
-    let visibleAlpha = 0, droppedAlpha = 0;
-    for (let y = 0; y < auditHeight; y++) {
-      for (let x = 0; x < auditWidth; x++) {
-        if (auditPixels[(y * auditWidth + x) * 4 + 3] === 0) continue;
-        visibleAlpha++;
-        if (x + .5 < auditCrop.left || x + .5 > auditCrop.right || y + .5 < auditCrop.top || y + .5 > auditCrop.bottom) droppedAlpha++;
-      }
-    }
-    audit.width = audit.height = 1;
-    if (!visibleAlpha || droppedAlpha / visibleAlpha > MAX_DROPPED_OVERLAY_ALPHA_RATIO) return null;
-    const mapped = makeCanvas(canonical.canvas.width, canonical.canvas.height);
+    const printWidth = printImage && (printImage.naturalWidth || printImage.width);
+    const printHeight = printImage && (printImage.naturalHeight || printImage.height);
+    if (!(sourceWidth > 0 && sourceHeight > 0) || sourceWidth !== printWidth || sourceHeight !== printHeight) return null;
+    const mapped = makeCanvas(sourceWidth, sourceHeight);
     const g = mapped.getContext('2d', { willReadFrequently: true });
-    g.imageSmoothingEnabled = true;
-    g.imageSmoothingQuality = 'high';
-    g.drawImage(img, crop.left, crop.top, crop.width, crop.height, 0, 0, mapped.width, mapped.height);
+    g.drawImage(img, 0, 0);
     const pixels = g.getImageData(0, 0, mapped.width, mapped.height).data;
     let visible = false;
     for (let i = 3; i < pixels.length; i += 4) {
       if (pixels[i] > 0) { visible = true; break; }
     }
     if (!visible) return null;
-    return { canvas: mapped, crop, sourceWidth, sourceHeight };
+    return { canvas: mapped, frame: { left: 0, top: 0, width: sourceWidth, height: sourceHeight }, sourceWidth, sourceHeight };
   }
 
   function renderEditorGuide(mask, width, height) {
@@ -324,8 +288,34 @@
     return fill;
   }
 
-  function ensurePreviewOverlay(target, url, canonical, retry = false) {
-    const geometryKey = canonical ? [canonical.sourceWidth, canonical.sourceHeight, canonical.bounds.left, canonical.bounds.top, canonical.bounds.width, canonical.bounds.height].join(':') : '';
+  function renderSourceFramePreview(target, mask, width, height) {
+    const hidden = target.getObjects().filter(o => ['guide', 'slot-guide'].includes(o.role));
+    const visibility = hidden.map(o => o.visible);
+    const originalClip = target.clipPath;
+    let source;
+    try {
+      hidden.forEach(o => { o.visible = false; });
+      target.clipPath = null;
+      source = target.toCanvasElement(Math.max(width / target.width, height / target.height));
+    } finally {
+      target.clipPath = originalClip;
+      hidden.forEach((o, i) => { o.visible = visibility[i]; });
+      target.renderAll();
+    }
+    const output = renderPreviewFallback(mask, width, height);
+    const g = output.getContext('2d');
+    g.drawImage(source, 0, 0, width, height);
+    g.globalCompositeOperation = 'destination-in';
+    const maskLayer = resampleMask(mask, width, height);
+    g.drawImage(maskLayer, 0, 0);
+    g.globalCompositeOperation = 'source-over';
+    source.width = source.height = 1;
+    maskLayer.width = maskLayer.height = 1;
+    return output;
+  }
+
+  function ensurePreviewOverlay(target, url, printImage, retry = false) {
+    const geometryKey = printImage ? [printImage.naturalWidth || printImage.width, printImage.naturalHeight || printImage.height].join(':') : '';
     const key = [url, target.width, target.height, geometryKey].join('|');
     let state = overlayStates.get(target);
     if (state && state.key === key && !(retry && state.error)) return state.ready;
@@ -335,12 +325,12 @@
       try {
         if (!url) return state;
         const img = await loadImage(url, '手機殼預覽讀取失敗，請再試一次。');
-        const overlay = mapImageToCanonicalFrame(img, canonical);
+        const overlay = mapOverlayToPrintFrame(img, printImage);
         if (canvas !== target || overlayStates.get(target) !== state) throw new Error('型號已切換，請重新預覽。');
         state.image = img;
         state.overlay = overlay;
         state.dataUrl = overlay ? overlay.canvas.toDataURL('image/png') : '';
-        state.hiddenReason = overlay ? '' : '預覽外框與可印範圍的原始比例不一致，已隱藏外框。';
+        state.hiddenReason = overlay ? '' : '預覽外框與可印範圍不是同一原始畫布，已隱藏外框。';
         return state;
       } catch (error) {
         state.error = error;
@@ -357,9 +347,10 @@
     loadImage,
     normalizeMaskImage,
     resampleMask,
-    mapImageToCanonicalFrame,
+    mapOverlayToPrintFrame,
     renderEditorGuide,
     renderPreviewFallback,
+    renderSourceFramePreview,
     ensureClip,
     ensurePreviewOverlay,
     renderPrint,
@@ -375,7 +366,7 @@
     setBusy(true, '正在產生高畫質預覽...');
     try {
       const state = await ensureClip(target, maskUrl, true);
-      const overlayState = await ensurePreviewOverlay(target, overlayUrl, state.mask, true);
+      const overlayState = await ensurePreviewOverlay(target, overlayUrl, state.image, true);
       if (canvas !== target || ctx !== context || context.printLineUrl !== maskUrl || context.maskUrl !== overlayUrl) throw new Error('型號已切換，請重新預覽。');
       const width = Math.round(Number(context.printW) * PIXELS_PER_MM);
       const height = Math.round(Number(context.printH) * PIXELS_PER_MM);
@@ -384,15 +375,10 @@
       document.getElementById('object-bar')?.classList.remove('show');
       const print = renderPrint(target, state.mask, width, height);
       const printData = withMetricScale(print.toDataURL('image/png'));
-      const scale = Math.min(1, 1200 / Math.max(width, height));
-      const mockup = makeCanvas(Math.round(width * scale), Math.round(height * scale));
+      const frameWidth = state.image.naturalWidth, frameHeight = state.image.naturalHeight;
+      const scale = Math.min(1, 1200 / Math.max(frameWidth, frameHeight));
+      const mockup = renderSourceFramePreview(target, state.image, Math.round(frameWidth * scale), Math.round(frameHeight * scale));
       const g = mockup.getContext('2d');
-      if (!overlayState.overlay) {
-        const fallback = renderPreviewFallback(state.mask, mockup.width, mockup.height);
-        g.drawImage(fallback, 0, 0);
-        fallback.width = fallback.height = 1;
-      }
-      g.drawImage(print, 0, 0, mockup.width, mockup.height);
       if (overlayState.overlay) g.drawImage(overlayState.overlay.canvas, 0, 0, mockup.width, mockup.height);
       const mockupData = mockup.toDataURL('image/png');
       print.width = print.height = 1;
@@ -402,7 +388,7 @@
       const oldOverlay = document.getElementById('preview-phone-mask');
       if (oldOverlay) oldOverlay.style.display = 'none';
       const checker = document.querySelector('.design-checker');
-      if (checker) checker.style.aspectRatio = width + ' / ' + height;
+      if (checker) checker.style.aspectRatio = frameWidth + ' / ' + frameHeight;
       document.getElementById('preview-image').src = mockupData;
       document.getElementById('preview-title').textContent = [context.modelName, context.styleName, context.colorName].filter(Boolean).join('・');
       const info = document.querySelector('.preview-info p');
