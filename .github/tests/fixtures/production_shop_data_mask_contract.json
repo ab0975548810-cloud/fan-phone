@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-09-28T16:58:00+08:00",
+  "captured_at": "2026-09-28T17:58:00+08:00",
   "source": "https://fanphone.zeabur.app/api/shop_data",
   "expected": {
     "active": 21,
@@ -10,6 +10,12 @@
     "iphone13": {
       "preview_url": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/dad1f65bfca745bc8787066fddad8557.png",
       "print_url": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/7c8547907bed410295680c08659ae21a.png",
+      "original_canvas": [1863, 3594],
+      "fixture_canvas": [186, 359]
+    },
+    "iphone14": {
+      "preview_url": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/dd7ec7bc9b5e48bba05b0d67bc927fc4.png",
+      "print_url": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/d63a4d36c0c4485fac83d3b6415bb296.png",
       "original_canvas": [1863, 3594],
       "fixture_canvas": [186, 359]
     },
@@ -38,7 +44,7 @@
     {"id":"model_apple_13","name":"iPhone 13","status":true,"preview_mask_img":"fixture://iphone13-preview.png","print_line_img":"fixture://iphone13-print.png","print_w":78.87,"print_h":152.15},
     {"id":"model_apple_13_pro","name":"iPhone 13 Pro","status":true},
     {"id":"model_apple_13_pro_max","name":"iPhone 13 Pro Max","status":true},
-    {"id":"model_apple_14","name":"iPhone 14","status":true,"preview_mask_img":"fixture://iphone13-preview.png","print_line_img":"fixture://iphone13-print.png","print_w":78.87,"print_h":152.15},
+    {"id":"model_apple_14","name":"iPhone 14","status":true,"preview_mask_img":"fixture://iphone14-preview.png","print_line_img":"fixture://iphone14-print.png","print_w":78.87,"print_h":152.15},
     {"id":"model_apple_14_pro","name":"iPhone 14 Pro","status":true},
     {"id":"model_apple_14_pro_max","name":"iPhone 14 Pro Max","status":true,"preview_mask_img":"fixture://iphone14-pro-max-preview.png","print_line_img":"fixture://iphone14-pro-max-print.png","print_w":85,"print_h":166.3},
     {"id":"model_apple_15","name":"iPhone 15","status":true},

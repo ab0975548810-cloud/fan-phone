@@ -205,66 +205,101 @@ def front_test(browser, base):
     print('FRONT_MODEL_LEVEL_PROFILE_NO_STYLE_FALLBACK_OK', no_style_fallback)
 
     mask_fixtures = {
-        'iphone13Preview': fixture_data_url('iphone13-preview.png'),
-        'iphone13Print': fixture_data_url('iphone13-print.png'),
-        'iphone14ProMaxPreview': fixture_data_url('iphone14-pro-max-preview.png'),
-        'iphone14ProMaxPrint': fixture_data_url('iphone14-pro-max-print.png'),
-        'iphone17ProPreview': fixture_data_url('iphone17-pro-preview.png'),
-        'iphone17ProPrint': fixture_data_url('iphone17-pro-print.png'),
+        'iphone13': {'preview': fixture_data_url('iphone13-preview.png'), 'print': fixture_data_url('iphone13-print.png')},
+        'iphone14': {'preview': fixture_data_url('iphone14-preview.png'), 'print': fixture_data_url('iphone14-print.png')},
+        'iphone14ProMax': {'preview': fixture_data_url('iphone14-pro-max-preview.png'), 'print': fixture_data_url('iphone14-pro-max-print.png')},
+        'iphone17Pro': {'preview': fixture_data_url('iphone17-pro-preview.png'), 'print': fixture_data_url('iphone17-pro-print.png')},
     }
     source_contract = page.evaluate("""async fixtures => {
       const load=src=>new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=reject;image.src=src});
-      const verify=async(previewUrl,printUrl)=>{
-        const preview=await load(previewUrl),print=await load(printUrl);
-        const mapped=window.BenfuwanPrintMask.mapOverlayToPrintFrame(preview,print);
-        if(!mapped)return {mapped:false,preview:[preview.naturalWidth,preview.naturalHeight],print:[print.naturalWidth,print.naturalHeight]};
-        const expected=document.createElement('canvas');expected.width=preview.naturalWidth;expected.height=preview.naturalHeight;
-        const expectedContext=expected.getContext('2d',{willReadFrequently:true});expectedContext.drawImage(preview,0,0);
-        const a=expectedContext.getImageData(0,0,expected.width,expected.height).data;
+      const alphaStats=canvas=>{
+        const {width,height}=canvas,g=canvas.getContext('2d',{willReadFrequently:true}),p=g.getImageData(0,0,width,height).data;
+        let visible=0,transparent=0,left=width,top=height,right=-1,bottom=-1;
+        for(let y=0;y<height;y++)for(let x=0;x<width;x++){const a=p[(y*width+x)*4+3];if(a>24){visible++;left=Math.min(left,x);top=Math.min(top,y);right=Math.max(right,x);bottom=Math.max(bottom,y)}else transparent++}
+        let insideTransparent=0;if(right>=left&&bottom>=top)for(let y=top;y<=bottom;y++)for(let x=left;x<=right;x++)if(p[(y*width+x)*4+3]<=24)insideTransparent++;
+        return {visible,transparent,insideTransparent,bounds:{left,top,right,bottom}};
+      };
+      const verify=async(pair)=>{
+        const preview=await load(pair.preview),print=await load(pair.print),target=[240,480];
+        const mapped=window.BenfuwanPrintMask.mapOverlayToPrintFrame(preview,...target);
+        const expected=document.createElement('canvas');expected.width=target[0];expected.height=target[1];
+        const expectedContext=expected.getContext('2d',{willReadFrequently:true});expectedContext.drawImage(preview,0,0,...target);
+        const a=expectedContext.getImageData(0,0,...target).data;
         const b=mapped.canvas.getContext('2d').getImageData(0,0,mapped.canvas.width,mapped.canvas.height).data;
         let changed=0;for(let i=0;i<a.length;i++)if(a[i]!==b[i])changed++;
-        return {mapped:true,preview:[preview.naturalWidth,preview.naturalHeight],print:[print.naturalWidth,print.naturalHeight],output:[mapped.canvas.width,mapped.canvas.height],frame:mapped.frame,changed};
+        const printTarget=window.BenfuwanPrintMask.resampleMask(print,...target);
+        return {preview:[preview.naturalWidth,preview.naturalHeight],print:[print.naturalWidth,print.naturalHeight],output:[mapped.canvas.width,mapped.canvas.height],frame:mapped.frame,changed,previewAlpha:alphaStats(mapped.canvas),printAlpha:alphaStats(printTarget)};
       };
-      return {
-        iphone13:await verify(fixtures.iphone13Preview,fixtures.iphone13Print),
-        iphone14ProMax:await verify(fixtures.iphone14ProMaxPreview,fixtures.iphone14ProMaxPrint),
-        iphone17Pro:await verify(fixtures.iphone17ProPreview,fixtures.iphone17ProPrint)
-      };
+      const results=Object.fromEntries(await Promise.all(Object.entries(fixtures).map(async([name,pair])=>[name,await verify(pair)])));
+      const empty=document.createElement('canvas');empty.width=20;empty.height=40;
+      results.invalidTransparent=window.BenfuwanPrintMask.mapOverlayToPrintFrame(empty,240,480)===null;
+      return results;
     }""", mask_fixtures)
-    assert source_contract['iphone13']['mapped'] and source_contract['iphone13']['changed'] == 0, source_contract
-    assert source_contract['iphone14ProMax']['mapped'] and source_contract['iphone14ProMax']['changed'] == 0, source_contract
-    assert source_contract['iphone14ProMax']['output'] == [172,336] and source_contract['iphone14ProMax']['frame'] == {'left':0,'top':0,'width':172,'height':336}, source_contract
-    assert not source_contract['iphone17Pro']['mapped'] and source_contract['iphone17Pro']['preview'] == [188,368] and source_contract['iphone17Pro']['print'] == [90,175], source_contract
-    print('FRONT_PRODUCTION_ASSET_SOURCE_FRAME_CONTRACT_OK', source_contract)
+    expected_sources = {
+        'iphone13': ([186,359], [186,359]),
+        'iphone14': ([186,359], [186,359]),
+        'iphone14ProMax': ([172,336], [172,336]),
+        'iphone17Pro': ([188,368], [90,175]),
+    }
+    for name, (preview_source, print_source) in expected_sources.items():
+        result = source_contract[name]
+        assert result['preview'] == preview_source and result['print'] == print_source, (name, result)
+        assert result['output'] == [240,480] and result['frame'] == {'left':0,'top':0,'width':240,'height':480}, (name, result)
+        assert result['changed'] == 0, (name, result)
+        assert result['previewAlpha']['visible'] > 0 and result['printAlpha']['visible'] > 0, (name, result)
+        assert result['printAlpha']['transparent'] > 0 and result['printAlpha']['insideTransparent'] > 0, (name, result)
+    assert source_contract['invalidTransparent'] is True, source_contract
+    print('FRONT_FOUR_MODEL_FULL_FRAME_TARGET_CONTRACT_OK', source_contract)
+
+    page.evaluate("""() => {navigate('page-editor');initCanvas();editorHasSession=true;window.BenfuwanEditorAccess?.fitCanvas?.()}""")
+    editor_contract = page.evaluate("""async ({fixtures,models}) => {
+      const ids={iphone13:'model_apple_13',iphone14:'model_apple_14',iphone14ProMax:'model_apple_14_pro_max',iphone17Pro:'model_apple_17_pro'};
+      const alphaStats=canvas=>{const p=canvas.getContext('2d',{willReadFrequently:true}).getImageData(0,0,canvas.width,canvas.height).data;let visible=0,transparent=0;for(let i=3;i<p.length;i+=4)(p[i]>24?visible++:transparent++);return {visible,transparent}};
+      const results={};
+      for(const [name,pair] of Object.entries(fixtures)){
+        const model=models.find(row=>row.id===ids[name]);
+        ctx.modelId=model.id;ctx.modelName=model.name;ctx.maskUrl=pair.preview;ctx.printLineUrl=pair.print;ctx.printW=model.print_w;ctx.printH=model.print_h;
+        const clip=await window.BenfuwanPrintMask.ensureClip(canvas,pair.print,true);
+        const overlay=await window.BenfuwanPrintMask.ensurePreviewOverlay(canvas,pair.preview,true);
+        const guide=window.BenfuwanPrintMask.renderEditorGuide(clip.image,canvas.width,canvas.height);
+        const review=window.BenfuwanPrintMask.renderPreviewFallback(clip.image,canvas.width,canvas.height);
+        review.getContext('2d').drawImage(overlay.overlay.canvas,0,0,review.width,review.height);
+        results[name]={target:[canvas.width,canvas.height],clipSource:[clip.image.naturalWidth,clip.image.naturalHeight],clipTarget:[Math.round(clip.clip.getScaledWidth()),Math.round(clip.clip.getScaledHeight())],overlaySource:[overlay.image.naturalWidth,overlay.image.naturalHeight],overlayTarget:[overlay.overlay.canvas.width,overlay.overlay.canvas.height],guide:[guide.width,guide.height],review:[review.width,review.height],guideAlpha:alphaStats(guide),reviewAlpha:alphaStats(review)};
+      }
+      return results;
+    }""", {'fixtures': mask_fixtures, 'models': fixture_models})
+    for name, result in editor_contract.items():
+        assert result['clipTarget'] == result['target'] and result['overlayTarget'] == result['target'], (name, result)
+        assert result['guide'] == result['target'] and result['review'] == result['target'], (name, result)
+        assert result['guideAlpha']['visible'] > 0 and result['guideAlpha']['transparent'] > 0, (name, result)
+        assert result['reviewAlpha']['visible'] > 0 and result['reviewAlpha']['transparent'] > 0, (name, result)
+    print('FRONT_FOUR_MODEL_EDITOR_REVIEW_TARGET_CONSISTENCY_OK', editor_contract)
 
     page.evaluate("""fixtures => {
       ctx.modelId='model_apple_14_pro_max';ctx.modelName='iPhone 14 Pro Max';ctx.styleId='style_crystal';ctx.styleName='晶彩磁吸防摔殼';
-      ctx.printW=80;ctx.printH=160;ctx.maskUrl=fixtures.iphone14ProMaxPreview;ctx.printLineUrl=fixtures.iphone14ProMaxPrint;
-      navigate('page-editor');initCanvas();editorHasSession=true;window.BenfuwanEditorAccess?.fitCanvas?.();
+      ctx.printW=80;ctx.printH=160;ctx.maskUrl=fixtures.iphone14ProMax.preview;ctx.printLineUrl=fixtures.iphone14ProMax.print;
+      initCanvas();editorHasSession=true;window.BenfuwanEditorAccess?.fitCanvas?.();applyCaseBoundaryClip();
     }""", mask_fixtures)
     overlay_alignment = poll(page, """() => {
       const mask=document.getElementById('phone-mask');
-      if(!mask?.complete||mask.naturalWidth!==172||mask.naturalHeight!==336||getComputedStyle(mask).display==='none')return false;
+      if(!mask?.complete||mask.naturalWidth!==240||mask.naturalHeight!==480||getComputedStyle(mask).display==='none')return false;
       return {size:[mask.naturalWidth,mask.naturalHeight],display:getComputedStyle(mask).display};
     }""")
-    assert overlay_alignment == {'size':[172,336],'display':'block'}, overlay_alignment
+    assert overlay_alignment == {'size':[240,480],'display':'block'}, overlay_alignment
     print('FRONT_IPHONE_14_PRO_MAX_SOURCE_FRAME_OVERLAY_OK', overlay_alignment)
 
     page.evaluate("""fixtures => {
-      ctx.modelId='model_apple_17_pro';ctx.modelName='iPhone 17 Pro';ctx.maskUrl=fixtures.iphone17ProPreview;ctx.printLineUrl=fixtures.iphone17ProPrint;applyCaseBoundaryClip();
+      ctx.modelId='model_apple_17_pro';ctx.modelName='iPhone 17 Pro';ctx.maskUrl=fixtures.iphone17Pro.preview;ctx.printLineUrl=fixtures.iphone17Pro.print;applyCaseBoundaryClip();
     }""", mask_fixtures)
-    fail_closed = poll(page, """() => {
+    mixed_resolution = poll(page, """() => {
       const overlay=document.getElementById('phone-mask'),guide=document.getElementById('print-area-guide');
-      if(getComputedStyle(overlay).display!=='none'||!guide?.complete||getComputedStyle(guide).display==='none')return false;
-      const c=document.createElement('canvas');c.width=guide.naturalWidth;c.height=guide.naturalHeight;
-      const g=c.getContext('2d');g.drawImage(guide,0,0);const p=g.getImageData(0,0,c.width,c.height).data;
-      let visible=0,transparent=0;for(let i=3;i<p.length;i+=4)(p[i]>0?visible++:transparent++);
-      return {visible,transparent,size:[c.width,c.height]};
+      if(getComputedStyle(overlay).display==='none'||overlay.naturalWidth!==240||overlay.naturalHeight!==480||!guide?.complete||getComputedStyle(guide).display==='none')return false;
+      return {overlay:[overlay.naturalWidth,overlay.naturalHeight],guide:[guide.naturalWidth,guide.naturalHeight],display:getComputedStyle(overlay).display};
     }""")
-    assert fail_closed['visible'] > 1000 and fail_closed['transparent'] > 1000 and fail_closed['size'] == [240,480], fail_closed
-    page.evaluate("""fixtures => {ctx.modelId='model_apple_14_pro_max';ctx.modelName='iPhone 14 Pro Max';ctx.maskUrl=fixtures.iphone14ProMaxPreview;ctx.printLineUrl=fixtures.iphone14ProMaxPrint;applyCaseBoundaryClip()}""", mask_fixtures)
-    poll(page, "() => {const m=document.getElementById('phone-mask');return getComputedStyle(m).display!=='none'&&m.naturalWidth===172&&m.naturalHeight===336}")
-    print('FRONT_IPHONE_17_PRO_SOURCE_MISMATCH_FAIL_CLOSED_OK', fail_closed)
+    assert mixed_resolution == {'overlay':[240,480],'guide':[240,480],'display':'block'}, mixed_resolution
+    page.evaluate("""fixtures => {ctx.modelId='model_apple_14_pro_max';ctx.modelName='iPhone 14 Pro Max';ctx.maskUrl=fixtures.iphone14ProMax.preview;ctx.printLineUrl=fixtures.iphone14ProMax.print;applyCaseBoundaryClip()}""", mask_fixtures)
+    poll(page, "() => {const m=document.getElementById('phone-mask');return getComputedStyle(m).display!=='none'&&m.naturalWidth===240&&m.naturalHeight===480}")
+    print('FRONT_IPHONE_17_PRO_MIXED_RASTER_FULL_FRAME_OK', mixed_resolution)
     assert_front_editor_geometry(page, 'iphone-constrained-unselected')
     add_front_photo(page, 0)
     page.evaluate("() => window.BenfuwanEditorAccess.fitCanvas()")
@@ -346,7 +381,7 @@ def front_test(browser, base):
     preview_state = page.evaluate("() => ({active:document.getElementById('page-preview')?.classList.contains('active'),print:!!ctx.printBase64,mockup:!!ctx.mockupBase64})")
     assert preview_state == {'active':True,'print':True,'mockup':True}, preview_state
     preview = page.evaluate("""() => Promise.all([ctx.printBase64,ctx.mockupBase64].map(src=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve({width:img.naturalWidth,height:img.naturalHeight});img.onerror=reject;img.src=src}))).then(([print,mockup])=>({print,mockup,logical:{width:canvas.width,height:canvas.height}}))""")
-    assert preview == {'print':{'width':2268,'height':4535},'mockup':{'width':172,'height':336},'logical':{'width':240,'height':480}}, preview
+    assert preview == {'print':{'width':2268,'height':4535},'mockup':{'width':600,'height':1200},'logical':{'width':240,'height':480}}, preview
     production_meta = page.evaluate("() => structuredClone(ctx.productionMeta)")
     assert production_meta['dpi'] == 720 and production_meta['width'] == 2268 and production_meta['height'] == 4535, production_meta
     assert production_meta['maskBounds'] == {'left':10,'top':8,'right':161,'bottom':327,'width':152,'height':320}, production_meta
@@ -355,7 +390,7 @@ def front_test(browser, base):
         const c=document.createElement('canvas');c.width=img.naturalWidth;c.height=img.naturalHeight;
         const g=c.getContext('2d');g.drawImage(img,0,0);const p=g.getImageData(0,0,c.width,c.height).data;
         const alpha=(x,y)=>p[(y*c.width+x)*4+3];
-        resolve({outside:alpha(0,0),frame:alpha(86,4),body:alpha(100,200),camera:alpha(45,50)});
+        resolve({outside:alpha(0,0),frame:alpha(300,14),body:alpha(349,714),camera:alpha(157,179)});
       };img.onerror=reject;img.src=ctx.mockupBase64;
     })""")
     assert preview_alpha['outside'] == 0 and preview_alpha['frame'] > 0 and preview_alpha['body'] > 0 and preview_alpha['camera'] == 0, preview_alpha

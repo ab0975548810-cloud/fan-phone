@@ -112,7 +112,8 @@
         if (canvas !== target || states.get(target) !== state) throw new Error('型號已切換，請重新預覽。');
         state.image = img;
         state.mask = mask;
-        // Editor、print mask 與 preview overlay 共用素材原始 canvas/origin。
+        // Print mask 與 preview overlay 各自以完整 source frame scale-to-fill
+        // 到同一 editor canvas；兩張素材不必有相同的 raster resolution。
         // normalized mask 僅保留給既有 production PNG 輸出，不回頭改寫前台座標。
         state.clip = new fabric.Image(img, {
           left: 0, top: 0, originX: 'left', originY: 'top',
@@ -147,7 +148,7 @@
     });
     ensureClip(target, maskUrl).then(async state => {
       applyEditorGuide(target, state.image);
-      return [state, await ensurePreviewOverlay(target, overlayUrl, state.image)];
+      return [state, await ensurePreviewOverlay(target, overlayUrl)];
     }).then(([, overlayState]) => {
       if (canvas !== target || ctx !== context || context.printLineUrl !== maskUrl || context.maskUrl !== overlayUrl) return;
       if (!overlay) return;
@@ -217,22 +218,22 @@
     return output;
   }
 
-  function mapOverlayToPrintFrame(img, printImage) {
+  function mapOverlayToPrintFrame(img, targetWidth, targetHeight) {
     const sourceWidth = img.naturalWidth || img.width;
     const sourceHeight = img.naturalHeight || img.height;
-    const printWidth = printImage && (printImage.naturalWidth || printImage.width);
-    const printHeight = printImage && (printImage.naturalHeight || printImage.height);
-    if (!(sourceWidth > 0 && sourceHeight > 0) || sourceWidth !== printWidth || sourceHeight !== printHeight) return null;
-    const mapped = makeCanvas(sourceWidth, sourceHeight);
+    const width = Math.round(Number(targetWidth));
+    const height = Math.round(Number(targetHeight));
+    if (!(sourceWidth > 0 && sourceHeight > 0 && width > 0 && height > 0)) return null;
+    const mapped = makeCanvas(width, height);
     const g = mapped.getContext('2d', { willReadFrequently: true });
-    g.drawImage(img, 0, 0);
-    const pixels = g.getImageData(0, 0, mapped.width, mapped.height).data;
+    g.drawImage(img, 0, 0, width, height);
+    const pixels = g.getImageData(0, 0, width, height).data;
     let visible = false;
     for (let i = 3; i < pixels.length; i += 4) {
       if (pixels[i] > 0) { visible = true; break; }
     }
     if (!visible) return null;
-    return { canvas: mapped, frame: { left: 0, top: 0, width: sourceWidth, height: sourceHeight }, sourceWidth, sourceHeight };
+    return { canvas: mapped, frame: { left: 0, top: 0, width, height }, sourceWidth, sourceHeight };
   }
 
   function renderEditorGuide(mask, width, height) {
@@ -284,6 +285,7 @@
     fg.globalCompositeOperation = 'destination-in';
     const maskLayer = resampleMask(mask, width, height);
     fg.drawImage(maskLayer, 0, 0);
+    fg.globalCompositeOperation = 'source-over';
     maskLayer.width = maskLayer.height = 1;
     return fill;
   }
@@ -314,9 +316,8 @@
     return output;
   }
 
-  function ensurePreviewOverlay(target, url, printImage, retry = false) {
-    const geometryKey = printImage ? [printImage.naturalWidth || printImage.width, printImage.naturalHeight || printImage.height].join(':') : '';
-    const key = [url, target.width, target.height, geometryKey].join('|');
+  function ensurePreviewOverlay(target, url, retry = false) {
+    const key = [url, target.width, target.height].join('|');
     let state = overlayStates.get(target);
     if (state && state.key === key && !(retry && state.error)) return state.ready;
     state = { key, image: null, overlay: null, dataUrl: '', error: null };
@@ -325,12 +326,12 @@
       try {
         if (!url) return state;
         const img = await loadImage(url, '手機殼預覽讀取失敗，請再試一次。');
-        const overlay = mapOverlayToPrintFrame(img, printImage);
+        const overlay = mapOverlayToPrintFrame(img, target.width, target.height);
         if (canvas !== target || overlayStates.get(target) !== state) throw new Error('型號已切換，請重新預覽。');
         state.image = img;
         state.overlay = overlay;
         state.dataUrl = overlay ? overlay.canvas.toDataURL('image/png') : '';
-        state.hiddenReason = overlay ? '' : '預覽外框與可印範圍不是同一原始畫布，已隱藏外框。';
+        state.hiddenReason = overlay ? '' : '手機殼預覽圖片無效，已隱藏外框。';
         return state;
       } catch (error) {
         state.error = error;
@@ -366,7 +367,7 @@
     setBusy(true, '正在產生高畫質預覽...');
     try {
       const state = await ensureClip(target, maskUrl, true);
-      const overlayState = await ensurePreviewOverlay(target, overlayUrl, state.image, true);
+      const overlayState = await ensurePreviewOverlay(target, overlayUrl, true);
       if (canvas !== target || ctx !== context || context.printLineUrl !== maskUrl || context.maskUrl !== overlayUrl) throw new Error('型號已切換，請重新預覽。');
       const width = Math.round(Number(context.printW) * PIXELS_PER_MM);
       const height = Math.round(Number(context.printH) * PIXELS_PER_MM);
@@ -375,9 +376,9 @@
       document.getElementById('object-bar')?.classList.remove('show');
       const print = renderPrint(target, state.mask, width, height);
       const printData = withMetricScale(print.toDataURL('image/png'));
-      const frameWidth = state.image.naturalWidth, frameHeight = state.image.naturalHeight;
-      const scale = Math.min(1, 1200 / Math.max(frameWidth, frameHeight));
-      const mockup = renderSourceFramePreview(target, state.image, Math.round(frameWidth * scale), Math.round(frameHeight * scale));
+      const scale = 1200 / Math.max(target.width, target.height);
+      const frameWidth = Math.round(target.width * scale), frameHeight = Math.round(target.height * scale);
+      const mockup = renderSourceFramePreview(target, state.image, frameWidth, frameHeight);
       const g = mockup.getContext('2d');
       if (overlayState.overlay) g.drawImage(overlayState.overlay.canvas, 0, 0, mockup.width, mockup.height);
       const mockupData = mockup.toDataURL('image/png');
@@ -388,7 +389,7 @@
       const oldOverlay = document.getElementById('preview-phone-mask');
       if (oldOverlay) oldOverlay.style.display = 'none';
       const checker = document.querySelector('.design-checker');
-      if (checker) checker.style.aspectRatio = frameWidth + ' / ' + frameHeight;
+      if (checker) checker.style.aspectRatio = target.width + ' / ' + target.height;
       document.getElementById('preview-image').src = mockupData;
       document.getElementById('preview-title').textContent = [context.modelName, context.styleName, context.colorName].filter(Boolean).join('・');
       const info = document.querySelector('.preview-info p');
