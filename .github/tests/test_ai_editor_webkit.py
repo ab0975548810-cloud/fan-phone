@@ -218,8 +218,9 @@ def front_test(browser, base):
         const preview=await load(previewUrl),print=await load(printUrl);
         const mapped=window.BenfuwanPrintMask.mapOverlayToPrintFrame(preview,print);
         if(!mapped)return {mapped:false,preview:[preview.naturalWidth,preview.naturalHeight],print:[print.naturalWidth,print.naturalHeight]};
-        const expected=document.createElement('canvas');expected.width=preview.naturalWidth;expected.height=preview.naturalHeight;expected.getContext('2d').drawImage(preview,0,0);
-        const a=expected.getContext('2d').getImageData(0,0,expected.width,expected.height).data;
+        const expected=document.createElement('canvas');expected.width=preview.naturalWidth;expected.height=preview.naturalHeight;
+        const expectedContext=expected.getContext('2d',{willReadFrequently:true});expectedContext.drawImage(preview,0,0);
+        const a=expectedContext.getImageData(0,0,expected.width,expected.height).data;
         const b=mapped.canvas.getContext('2d').getImageData(0,0,mapped.canvas.width,mapped.canvas.height).data;
         let changed=0;for(let i=0;i<a.length;i++)if(a[i]!==b[i])changed++;
         return {mapped:true,preview:[preview.naturalWidth,preview.naturalHeight],print:[print.naturalWidth,print.naturalHeight],output:[mapped.canvas.width,mapped.canvas.height],frame:mapped.frame,changed};
