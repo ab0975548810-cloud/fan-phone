@@ -4,6 +4,7 @@
 
   const PIXELS_PER_MM = 20; // 508 DPI；與 1:1 素材的 20 px/mm 相同。
   const states = new WeakMap();
+  const overlayStates = new WeakMap();
   let previewBusy = false;
 
   function safeAssetUrl(url) {
@@ -39,10 +40,10 @@
     return el;
   }
 
-  function normalizeMaskImage(img) {
+  function normalizeAlphaImage(img, requireTransparency, message) {
     const sourceWidth = img.naturalWidth || img.width;
     const sourceHeight = img.naturalHeight || img.height;
-    if (!(sourceWidth > 0 && sourceHeight > 0)) throw new Error('這個型號的可印範圍尚未設定完成，請聯絡店家。');
+    if (!(sourceWidth > 0 && sourceHeight > 0)) throw new Error(message);
     const source = makeCanvas(sourceWidth, sourceHeight);
     const g = source.getContext('2d', { willReadFrequently: true });
     g.drawImage(img, 0, 0, sourceWidth, sourceHeight);
@@ -61,7 +62,7 @@
         }
       }
     }
-    if (right < left || bottom < top || !transparent) throw new Error('這個型號的可印範圍尚未設定完成，請聯絡店家。');
+    if (right < left || bottom < top || (requireTransparency && !transparent)) throw new Error(message);
     const width = right - left + 1, height = bottom - top + 1;
     const normalized = makeCanvas(width, height);
     const ng = normalized.getContext('2d');
@@ -73,6 +74,10 @@
       sourceWidth,
       sourceHeight
     };
+  }
+
+  function normalizeMaskImage(img) {
+    return normalizeAlphaImage(img, true, '這個型號的可印範圍尚未設定完成，請聯絡店家。');
   }
 
   function resampleMask(mask, width, height) {
@@ -127,8 +132,18 @@
 
   window.applyCaseBoundaryClip = function () {
     if (typeof canvas === 'undefined' || !canvas) return;
-    const target = canvas;
-    ensureClip(target, ctx.printLineUrl || '').catch(error => {
+    const target = canvas, context = ctx;
+    const maskUrl = context.printLineUrl || '', overlayUrl = context.maskUrl || '';
+    Promise.all([
+      ensureClip(target, maskUrl),
+      ensurePreviewOverlay(target, overlayUrl)
+    ]).then(([, overlayState]) => {
+      if (canvas !== target || ctx !== context || context.printLineUrl !== maskUrl || context.maskUrl !== overlayUrl) return;
+      const overlay = document.getElementById('phone-mask');
+      if (!overlay) return;
+      overlay.src = overlayState.dataUrl;
+      overlay.style.display = overlayState.dataUrl ? 'block' : 'none';
+    }).catch(error => {
       if (canvas === target && typeof toast === 'function') toast(/[\u3400-\u9fff]/.test(error.message) ? error.message : '可印範圍無法讀取，請聯絡店家。');
     });
   };
@@ -192,12 +207,39 @@
     return output;
   }
 
+  function ensurePreviewOverlay(target, url, retry = false) {
+    const key = [url, target.width, target.height].join('|');
+    let state = overlayStates.get(target);
+    if (state && state.key === key && !(retry && state.error)) return state.ready;
+    state = { key, image: null, overlay: null, dataUrl: '', error: null };
+    overlayStates.set(target, state);
+    state.ready = (async () => {
+      try {
+        if (!url) return state;
+        const img = await loadImage(url, '手機殼預覽讀取失敗，請再試一次。');
+        // Each source can have different authoring padding. Cropping both to
+        // their effective alpha bounds maps them onto the same normalized frame.
+        const overlay = normalizeAlphaImage(img, false, '手機殼預覽尚未設定完成，請聯絡店家。');
+        if (canvas !== target || overlayStates.get(target) !== state) throw new Error('型號已切換，請重新預覽。');
+        state.image = img;
+        state.overlay = overlay;
+        state.dataUrl = overlay.canvas.toDataURL('image/png');
+        return state;
+      } catch (error) {
+        state.error = error;
+        throw error;
+      }
+    })();
+    return state.ready;
+  }
+
   window.BenfuwanPrintMask = Object.freeze({
     PIXELS_PER_MM,
     loadImage,
     normalizeMaskImage,
     resampleMask,
     ensureClip,
+    ensurePreviewOverlay,
     renderPrint,
     pixelsForMm: mm => Math.round(Number(mm) * PIXELS_PER_MM)
   });
@@ -210,9 +252,9 @@
     context.printBase64 = context.mockupBase64 = null;
     setBusy(true, '正在產生高畫質預覽...');
     try {
-      const [state, overlay] = await Promise.all([
+      const [state, overlayState] = await Promise.all([
         ensureClip(target, maskUrl, true),
-        overlayUrl ? loadImage(overlayUrl, '手機殼預覽讀取失敗，請再試一次。') : Promise.resolve(null)
+        ensurePreviewOverlay(target, overlayUrl, true)
       ]);
       if (canvas !== target || ctx !== context || context.printLineUrl !== maskUrl || context.maskUrl !== overlayUrl) throw new Error('型號已切換，請重新預覽。');
       const width = Math.round(Number(context.printW) * PIXELS_PER_MM);
@@ -226,7 +268,7 @@
       const mockup = makeCanvas(Math.round(width * scale), Math.round(height * scale));
       const g = mockup.getContext('2d');
       g.drawImage(print, 0, 0, mockup.width, mockup.height);
-      if (overlay) g.drawImage(overlay, 0, 0, mockup.width, mockup.height);
+      if (overlayState.overlay) g.drawImage(overlayState.overlay.canvas, 0, 0, mockup.width, mockup.height);
       const mockupData = mockup.toDataURL('image/png');
       print.width = print.height = 1;
       mockup.width = mockup.height = 1;
