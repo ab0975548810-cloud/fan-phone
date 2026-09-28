@@ -166,6 +166,24 @@ def front_test(browser, base):
     assert mask_normalization['holeAlpha'] == 0, mask_normalization
     assert mask_normalization['dimensions'] == [2030, 4241], mask_normalization
     print('FRONT_PRINT_MASK_NORMALIZATION_HOLE_DIMENSIONS_OK', mask_normalization)
+    multi_model_geometry = page.evaluate("""async () => {
+      const image=source=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=reject;img.src=source.toDataURL('image/png')});
+      const printMask=document.createElement('canvas');printMask.width=16;printMask.height=32;
+      const pg=printMask.getContext('2d');pg.fillStyle='#fff';pg.fillRect(2,1,12,30);pg.clearRect(3,3,5,7);
+      const previewMask=document.createElement('canvas');previewMask.width=16;previewMask.height=32;
+      const vg=previewMask.getContext('2d');vg.fillStyle='#e05280';vg.fillRect(0,0,16,2);vg.fillRect(0,30,16,2);vg.fillRect(0,0,2,32);vg.fillRect(14,0,2,32);vg.fillRect(2,2,7,9);vg.clearRect(3,3,5,7);
+      const canonical=window.BenfuwanPrintMask.normalizeMaskImage(await image(printMask));
+      const overlay=window.BenfuwanPrintMask.mapImageToCanonicalFrame(await image(previewMask),canonical);
+      const guide=window.BenfuwanPrintMask.renderEditorGuide(canonical,160,320);
+      const fallback=window.BenfuwanPrintMask.renderPreviewFallback(canonical,160,320);
+      const alpha=(canvas,x,y)=>canvas.getContext('2d').getImageData(x,y,1,1).data[3];
+      return {model:'iPhone 14 Pro Max',overlayHidden:overlay===null,guideBody:alpha(guide,110,200),guideCamera:alpha(guide,30,40),previewBody:alpha(fallback,110,200),previewCamera:alpha(fallback,30,40),bounds:canonical.bounds};
+    }""")
+    assert multi_model_geometry['model'] == 'iPhone 14 Pro Max' and multi_model_geometry['overlayHidden'], multi_model_geometry
+    assert multi_model_geometry['guideBody'] > 0 and multi_model_geometry['guideCamera'] == 0, multi_model_geometry
+    assert multi_model_geometry['previewBody'] > 0 and multi_model_geometry['previewCamera'] == 0, multi_model_geometry
+    assert multi_model_geometry['bounds'] == {'left':2,'top':1,'right':13,'bottom':30,'width':12,'height':30}, multi_model_geometry
+    print('FRONT_IPHONE_14_PRO_MAX_FAIL_CLOSED_GEOMETRY_OK', multi_model_geometry)
     page.evaluate("""() => {
       const printMask=document.createElement('canvas');printMask.width=10;printMask.height=20;
       const pg=printMask.getContext('2d');pg.clearRect(0,0,10,20);pg.fillStyle='#fff';pg.fillRect(2,3,6,14);pg.clearRect(3,6,2,4);
@@ -198,10 +216,18 @@ def front_test(browser, base):
       const g=incompatible.getContext('2d');g.fillStyle='#e05280';g.fillRect(0,0,20,36);
       ctx.maskUrl=incompatible.toDataURL('image/png');applyCaseBoundaryClip();
     }""")
-    poll(page, "() => getComputedStyle(document.getElementById('phone-mask')).display==='none'")
+    fail_closed = poll(page, """() => {
+      const overlay=document.getElementById('phone-mask'),guide=document.getElementById('print-area-guide');
+      if(getComputedStyle(overlay).display!=='none'||!guide?.complete||getComputedStyle(guide).display==='none')return false;
+      const c=document.createElement('canvas');c.width=guide.naturalWidth;c.height=guide.naturalHeight;
+      const g=c.getContext('2d');g.drawImage(guide,0,0);const p=g.getImageData(0,0,c.width,c.height).data;
+      const alpha=(x,y)=>p[(y*c.width+x)*4+3];
+      return {body:alpha(180,300),camera:alpha(60,150),size:[c.width,c.height]};
+    }""")
+    assert fail_closed['body'] > 0 and fail_closed['camera'] == 0 and fail_closed['size'] == [240,480], fail_closed
     page.evaluate("() => {ctx.maskUrl=window.__canonicalPreviewUrl;applyCaseBoundaryClip()}")
     poll(page, "() => {const m=document.getElementById('phone-mask');return getComputedStyle(m).display!=='none'&&m.naturalWidth===6&&m.naturalHeight===14}")
-    print('FRONT_PREVIEW_INCOMPATIBLE_MAPPING_HIDDEN_OK')
+    print('FRONT_IPHONE_17_PRO_FAIL_CLOSED_GUIDE_OK', fail_closed)
     assert_front_editor_geometry(page, 'iphone-constrained-unselected')
     add_front_photo(page, 0)
     page.evaluate("() => window.BenfuwanEditorAccess.fitCanvas()")

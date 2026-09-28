@@ -4,6 +4,8 @@
 
   const PIXELS_PER_MM = 20; // 508 DPI；與 1:1 素材的 20 px/mm 相同。
   const MAX_RASTER_ROUNDING_PX = 1;
+  const OVERLAY_AUDIT_MAX_EDGE = 256;
+  const MAX_DROPPED_OVERLAY_ALPHA_RATIO = 0.02;
   const states = new WeakMap();
   const overlayStates = new WeakMap();
   let previewBusy = false;
@@ -136,13 +138,18 @@
     const target = canvas, context = ctx;
     const maskUrl = context.printLineUrl || '', overlayUrl = context.maskUrl || '';
     const overlay = document.getElementById('phone-mask');
+    const editorGuide = document.getElementById('print-area-guide');
+    if (editorGuide) editorGuide.style.display = 'none';
     queueMicrotask(() => {
       if (canvas === target && ctx === context && overlay) {
         overlay.removeAttribute('src');
         overlay.style.display = 'none';
       }
     });
-    ensureClip(target, maskUrl).then(async state => [state, await ensurePreviewOverlay(target, overlayUrl, state.mask)]).then(([, overlayState]) => {
+    ensureClip(target, maskUrl).then(async state => {
+      applyEditorGuide(target, state.mask);
+      return [state, await ensurePreviewOverlay(target, overlayUrl, state.mask)];
+    }).then(([, overlayState]) => {
       if (canvas !== target || ctx !== context || context.printLineUrl !== maskUrl || context.maskUrl !== overlayUrl) return;
       if (!overlay) return;
       overlay.src = overlayState.dataUrl;
@@ -227,6 +234,29 @@
     };
     if (crop.left < 0 || crop.top < 0 || crop.left + crop.width > sourceWidth + MAX_RASTER_ROUNDING_PX ||
         crop.top + crop.height > sourceHeight + MAX_RASTER_ROUNDING_PX) return null;
+    const auditScale = Math.min(1, OVERLAY_AUDIT_MAX_EDGE / Math.max(sourceWidth, sourceHeight));
+    const auditWidth = Math.max(1, Math.round(sourceWidth * auditScale));
+    const auditHeight = Math.max(1, Math.round(sourceHeight * auditScale));
+    const audit = makeCanvas(auditWidth, auditHeight);
+    const ag = audit.getContext('2d', { willReadFrequently: true });
+    ag.drawImage(img, 0, 0, auditWidth, auditHeight);
+    const auditPixels = ag.getImageData(0, 0, auditWidth, auditHeight).data;
+    const auditCrop = {
+      left: crop.left * auditWidth / sourceWidth,
+      top: crop.top * auditHeight / sourceHeight,
+      right: (crop.left + crop.width) * auditWidth / sourceWidth,
+      bottom: (crop.top + crop.height) * auditHeight / sourceHeight
+    };
+    let visibleAlpha = 0, droppedAlpha = 0;
+    for (let y = 0; y < auditHeight; y++) {
+      for (let x = 0; x < auditWidth; x++) {
+        if (auditPixels[(y * auditWidth + x) * 4 + 3] === 0) continue;
+        visibleAlpha++;
+        if (x + .5 < auditCrop.left || x + .5 > auditCrop.right || y + .5 < auditCrop.top || y + .5 > auditCrop.bottom) droppedAlpha++;
+      }
+    }
+    audit.width = audit.height = 1;
+    if (!visibleAlpha || droppedAlpha / visibleAlpha > MAX_DROPPED_OVERLAY_ALPHA_RATIO) return null;
     const mapped = makeCanvas(canonical.canvas.width, canonical.canvas.height);
     const g = mapped.getContext('2d', { willReadFrequently: true });
     g.imageSmoothingEnabled = true;
@@ -239,6 +269,59 @@
     }
     if (!visible) return null;
     return { canvas: mapped, crop, sourceWidth, sourceHeight };
+  }
+
+  function renderEditorGuide(mask, width, height) {
+    const layer = resampleMask(mask, width, height);
+    const g = layer.getContext('2d', { willReadFrequently: true });
+    const source = g.getImageData(0, 0, width, height);
+    const output = g.createImageData(width, height);
+    const inside = (x, y) => x >= 0 && y >= 0 && x < width && y < height && source.data[(y * width + x) * 4 + 3] > 24;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        if (!inside(x, y)) continue;
+        const offset = (y * width + x) * 4;
+        const edge = !inside(x - 1, y) || !inside(x + 1, y) || !inside(x, y - 1) || !inside(x, y + 1);
+        if (edge && (Math.floor((x + y) / 5) % 2 === 0)) {
+          output.data.set([255, 111, 154, 220], offset);
+        } else {
+          output.data.set([255, 255, 255, 190], offset);
+        }
+      }
+    }
+    g.putImageData(output, 0, 0);
+    return layer;
+  }
+
+  function applyEditorGuide(target, mask) {
+    const shell = document.getElementById('canvas-shell');
+    if (!shell) return;
+    let guide = document.getElementById('print-area-guide');
+    if (!guide) {
+      guide = document.createElement('img');
+      guide.id = 'print-area-guide';
+      guide.alt = '';
+      guide.setAttribute('aria-hidden', 'true');
+      guide.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:fill;pointer-events:none;z-index:0';
+      shell.prepend(guide);
+    }
+    guide.src = renderEditorGuide(mask, target.width, target.height).toDataURL('image/png');
+    guide.style.display = 'block';
+    target.wrapperEl.style.zIndex = '1';
+    const oldGuide = document.getElementById('safe-guide');
+    if (oldGuide) oldGuide.style.display = 'none';
+  }
+
+  function renderPreviewFallback(mask, width, height) {
+    const fill = makeCanvas(width, height);
+    const fg = fill.getContext('2d');
+    fg.fillStyle = '#f8f8f8';
+    fg.fillRect(0, 0, width, height);
+    fg.globalCompositeOperation = 'destination-in';
+    const maskLayer = resampleMask(mask, width, height);
+    fg.drawImage(maskLayer, 0, 0);
+    maskLayer.width = maskLayer.height = 1;
+    return fill;
   }
 
   function ensurePreviewOverlay(target, url, canonical, retry = false) {
@@ -275,6 +358,8 @@
     normalizeMaskImage,
     resampleMask,
     mapImageToCanonicalFrame,
+    renderEditorGuide,
+    renderPreviewFallback,
     ensureClip,
     ensurePreviewOverlay,
     renderPrint,
@@ -302,6 +387,11 @@
       const scale = Math.min(1, 1200 / Math.max(width, height));
       const mockup = makeCanvas(Math.round(width * scale), Math.round(height * scale));
       const g = mockup.getContext('2d');
+      if (!overlayState.overlay) {
+        const fallback = renderPreviewFallback(state.mask, mockup.width, mockup.height);
+        g.drawImage(fallback, 0, 0);
+        fallback.width = fallback.height = 1;
+      }
       g.drawImage(print, 0, 0, mockup.width, mockup.height);
       if (overlayState.overlay) g.drawImage(overlayState.overlay.canvas, 0, 0, mockup.width, mockup.height);
       const mockupData = mockup.toDataURL('image/png');
@@ -316,7 +406,9 @@
       document.getElementById('preview-image').src = mockupData;
       document.getElementById('preview-title').textContent = [context.modelName, context.styleName, context.colorName].filter(Boolean).join('・');
       const info = document.querySelector('.preview-info p');
-      if (info) info.textContent = '請確認照片、文字與貼紙的位置。鏡頭孔及不可印刷的位置不會印上圖案；手機殼外框供預覽參考。';
+      if (info) info.textContent = overlayState.overlay
+        ? '請確認照片、文字與貼紙的位置。鏡頭孔及不可印刷的位置不會印上圖案；手機殼外框供預覽參考。'
+        : '請確認照片、文字與貼紙的位置。此型號暫時隱藏無法可靠對齊的手機殼外框；白色區域代表可印範圍，鏡頭孔不會印上圖案。';
       navigate('page-preview');
     } catch (error) {
       console.error('[PREVIEW]', error);
