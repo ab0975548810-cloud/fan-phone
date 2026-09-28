@@ -163,12 +163,14 @@ def front_test(browser, base):
       for(let y=0;y<140;y++)for(let x=0;x<80;x++)if(alpha[(y*80+x)*4+3]>0){left=Math.min(left,x);top=Math.min(top,y);right=Math.max(right,x);bottom=Math.max(bottom,y)}
       return {
         bounds:normalized.bounds,
+        artworkCrop:window.BenfuwanPrintMask.productionCropForMask(normalized,240,480),
         outputBounds:{left,top,right,bottom},
         holeAlpha:alpha[(60*80+40)*4+3],
         dimensions:[window.BenfuwanProductionHQ.pixelsForMm(71.63),window.BenfuwanProductionHQ.pixelsForMm(149.61)]
       };
     }""")
     assert mask_normalization['bounds'] == {'left':2,'top':3,'right':9,'bottom':16,'width':8,'height':14}, mask_normalization
+    assert mask_normalization['artworkCrop'] == {'left':40,'top':72,'width':160,'height':336}, mask_normalization
     assert mask_normalization['outputBounds'] == {'left':0,'top':0,'right':79,'bottom':139}, mask_normalization
     assert mask_normalization['holeAlpha'] == 0, mask_normalization
     assert mask_normalization['dimensions'] == [2030, 4241], mask_normalization
@@ -250,6 +252,78 @@ def front_test(browser, base):
         assert result['printAlpha']['transparent'] > 0 and result['printAlpha']['insideTransparent'] > 0, (name, result)
     assert source_contract['invalidTransparent'] is True, source_contract
     print('FRONT_FOUR_MODEL_FULL_FRAME_TARGET_CONTRACT_OK', source_contract)
+
+    production_crop_contract = page.evaluate("""async ({fixtures,models}) => {
+      const ids={iphone13:'model_apple_13',iphone14:'model_apple_14',iphone14ProMax:'model_apple_14_pro_max',iphone17Pro:'model_apple_17_pro'};
+      const load=src=>new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=reject;image.src=src});
+      const robustOpaquePoint=canvas=>{
+        const g=canvas.getContext('2d',{willReadFrequently:true}),p=g.getImageData(0,0,canvas.width,canvas.height).data,radius=3;
+        const opaque=(x,y)=>p[(y*canvas.width+x)*4+3]>240;
+        let best=null,bestDistance=Infinity;
+        for(let y=radius;y<canvas.height-radius;y++)for(let x=radius;x<canvas.width-radius;x++){
+          let solid=true;
+          for(let yy=y-radius;solid&&yy<=y+radius;yy++)for(let xx=x-radius;xx<=x+radius;xx++)if(!opaque(xx,yy)){solid=false;break}
+          if(!solid)continue;
+          const distance=(x-canvas.width*.67)**2+(y-canvas.height*.67)**2;
+          if(distance<bestDistance){best={x,y,radius};bestDistance=distance}
+        }
+        if(!best)throw new Error('production fixture has no opaque landmark area');
+        return best;
+      };
+      const transparentInside=canvas=>{
+        const p=canvas.getContext('2d',{willReadFrequently:true}).getImageData(0,0,canvas.width,canvas.height).data;
+        let inside=0;
+        for(let y=1;y<canvas.height-1;y++)for(let x=1;x<canvas.width-1;x++)if(p[(y*canvas.width+x)*4+3]===0)inside++;
+        return inside;
+      };
+      const results={};
+      for(const [name,pair] of Object.entries(fixtures)){
+        const print=await load(pair.print),mask=window.BenfuwanPrintMask.normalizeMaskImage(print);
+        const editorWidth=240,editorHeight=480,outputWidth=480,outputHeight=960;
+        const crop=window.BenfuwanPrintMask.productionCropForMask(mask,editorWidth,editorHeight);
+        const landmark=robustOpaquePoint(mask.canvas);
+        const centerX=(mask.bounds.left+landmark.x+.5)/mask.sourceWidth*editorWidth;
+        const centerY=(mask.bounds.top+landmark.y+.5)/mask.sourceHeight*editorHeight;
+        const markerWidth=(landmark.radius*2+1)/mask.sourceWidth*editorWidth;
+        const markerHeight=(landmark.radius*2+1)/mask.sourceHeight*editorHeight;
+        const element=document.createElement('canvas');
+        const artwork=new fabric.StaticCanvas(element,{width:editorWidth,height:editorHeight,renderOnAddRemove:false});
+        artwork.add(new fabric.Rect({left:centerX,top:centerY,originX:'center',originY:'center',width:markerWidth,height:markerHeight,fill:'#ff0000',strokeWidth:0,objectCaching:false}));
+        artwork.renderAll();
+        const output=window.BenfuwanPrintMask.renderPrint(artwork,mask,outputWidth,outputHeight);
+        const pixels=output.getContext('2d',{willReadFrequently:true}).getImageData(0,0,outputWidth,outputHeight).data;
+        let count=0,sumX=0,sumY=0;
+        for(let y=0;y<outputHeight;y++)for(let x=0;x<outputWidth;x++){
+          const offset=(y*outputWidth+x)*4;
+          if(pixels[offset]>180&&pixels[offset+1]<80&&pixels[offset+2]<80&&pixels[offset+3]>40){count++;sumX+=x+.5;sumY+=y+.5}
+        }
+        if(!count)throw new Error('production landmark was clipped');
+        const expectedX=(landmark.x+.5)/mask.bounds.width*outputWidth;
+        const expectedY=(landmark.y+.5)/mask.bounds.height*outputHeight;
+        const model=models.find(row=>row.id===ids[name]);
+        results[name]={
+          source:[mask.sourceWidth,mask.sourceHeight],bounds:mask.bounds,crop,
+          landmark:{expected:[expectedX,expectedY],actual:[sumX/count,sumY/count],pixels:count},
+          cameraTransparent:transparentInside(mask.canvas),
+          hq:[window.BenfuwanProductionHQ.pixelsForMm(model.print_w),window.BenfuwanProductionHQ.pixelsForMm(model.print_h)]
+        };
+        artwork.dispose();output.width=output.height=1;
+      }
+      return results;
+    }""", {'fixtures': mask_fixtures, 'models': fixture_models})
+    expected_hq_dimensions = {
+        'iphone13': [2236,4313],
+        'iphone14': [2236,4313],
+        'iphone14ProMax': [2409,4714],
+        'iphone17Pro': [2030,4241],
+    }
+    for name, result in production_crop_contract.items():
+        expected_x, expected_y = result['landmark']['expected']
+        actual_x, actual_y = result['landmark']['actual']
+        assert abs(actual_x - expected_x) <= 3 and abs(actual_y - expected_y) <= 3, (name, result)
+        assert result['landmark']['pixels'] > 20 and result['cameraTransparent'] > 0, (name, result)
+        assert result['hq'] == expected_hq_dimensions[name], (name, result)
+    print('FRONT_FOUR_MODEL_PRODUCTION_SHARED_CROP_LANDMARK_CAMERA_HQ_OK', production_crop_contract)
 
     page.evaluate("""() => {navigate('page-editor');initCanvas();editorHasSession=true;window.BenfuwanEditorAccess?.fitCanvas?.()}""")
     editor_contract = page.evaluate("""async ({fixtures,models}) => {

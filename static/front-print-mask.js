@@ -208,7 +208,19 @@
     const g = output.getContext('2d');
     g.imageSmoothingEnabled = true;
     g.imageSmoothingQuality = 'high';
-    g.drawImage(source, 0, 0, width, height);
+    // normalized print mask 已依 alpha bounds 裁切；artwork 必須套用同一個
+    // source-frame crop，兩者才能在最終生產畫布維持完全相同的座標系。
+    const crop = productionCropForMask(mask, target.width, target.height);
+    const sourceScaleX = source.width / target.width;
+    const sourceScaleY = source.height / target.height;
+    g.drawImage(
+      source,
+      crop.left * sourceScaleX,
+      crop.top * sourceScaleY,
+      crop.width * sourceScaleX,
+      crop.height * sourceScaleY,
+      0, 0, width, height
+    );
     const maskLayer = resampleMask(mask, width, height);
     g.globalCompositeOperation = 'destination-in';
     g.drawImage(maskLayer, 0, 0);
@@ -216,6 +228,28 @@
     source.width = source.height = 1;
     maskLayer.width = maskLayer.height = 1;
     return output;
+  }
+
+  function productionCropForMask(mask, editorWidth, editorHeight) {
+    const bounds = mask && mask.bounds;
+    const sourceWidth = Number(mask && mask.sourceWidth);
+    const sourceHeight = Number(mask && mask.sourceHeight);
+    const targetWidth = Number(editorWidth);
+    const targetHeight = Number(editorHeight);
+    if (!bounds || !(sourceWidth > 0 && sourceHeight > 0 && targetWidth > 0 && targetHeight > 0)) {
+      throw new Error('可印範圍裁切資料無效。');
+    }
+    const left = Number(bounds.left), top = Number(bounds.top);
+    const width = Number(bounds.width), height = Number(bounds.height);
+    if (!(left >= 0 && top >= 0 && width > 0 && height > 0) || left + width > sourceWidth || top + height > sourceHeight) {
+      throw new Error('可印範圍裁切資料無效。');
+    }
+    return {
+      left: left / sourceWidth * targetWidth,
+      top: top / sourceHeight * targetHeight,
+      width: width / sourceWidth * targetWidth,
+      height: height / sourceHeight * targetHeight
+    };
   }
 
   function mapOverlayToPrintFrame(img, targetWidth, targetHeight) {
@@ -348,6 +382,7 @@
     loadImage,
     normalizeMaskImage,
     resampleMask,
+    productionCropForMask,
     mapOverlayToPrintFrame,
     renderEditorGuide,
     renderPreviewFallback,
