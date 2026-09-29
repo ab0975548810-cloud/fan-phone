@@ -146,6 +146,7 @@ def assert_front_editor_geometry(page, label):
 def front_test(browser, base):
     # Start with a constrained iPhone viewport so initCanvas installs a
     # transform below 1, then exercise the responsive owner's cssOnly fit.
+    browser_engine = os.environ.get('BROWSER_ENGINE', 'webkit').lower()
     page = browser.new_page(viewport={'width': 390, 'height': 600})
     responses = [GOOD, BAD]
     page.route('**/api/ai/remove-background', lambda route: route.fulfill(status=200, body=responses.pop(0) if responses else GOOD, content_type='image/png'))
@@ -574,6 +575,110 @@ def front_test(browser, base):
       const o=canvas.getActiveObject();o.set({angle:27,scaleX:.82,scaleY:.82});o.setCoords();canvas.requestRenderAll();
     }""")
     assert_front_editor_geometry(page, 'iphone-object-transform')
+    position_controls = page.evaluate("""() => {
+      const o=canvas.getActiveObject(),near=(a,b)=>Math.abs(a-b)<.001;
+      const start=o.getCenterPoint(),before={angle:o.angle,scaleX:o.scaleX,scaleY:o.scaleY,opacity:o.opacity,clipPath:o.clipPath};
+      nudgeActive(0,-1);const up=o.getCenterPoint();
+      nudgeActive(0,1);const down=o.getCenterPoint();
+      nudgeActive(-1,0);const left=o.getCenterPoint();
+      nudgeActive(1,0);const right=o.getCenterPoint();
+      centerActive('horizontal');const horizontal=o.getCenterPoint();
+      centerActive('vertical');const bothFromAxes=o.getCenterPoint();
+      o.setPositionByOrigin(new fabric.Point(17,23),'center','center');o.setCoords();
+      centerActive('both');const full=o.getCenterPoint();
+      return {
+        step:{up:[up.x-start.x,up.y-start.y],down:[down.x-up.x,down.y-up.y],left:[left.x-down.x,left.y-down.y],right:[right.x-left.x,right.y-left.y]},
+        horizontal:[horizontal.x,horizontal.y],bothFromAxes:[bothFromAxes.x,bothFromAxes.y],full:[full.x,full.y],canvas:[canvas.width,canvas.height],
+        preserved:near(o.angle,before.angle)&&near(o.scaleX,before.scaleX)&&near(o.scaleY,before.scaleY)&&o.opacity===before.opacity&&o.clipPath===before.clipPath
+      };
+    }""")
+    assert position_controls['step'] == {'up':[0,-1],'down':[0,1],'left':[-1,0],'right':[1,0]}, position_controls
+    assert abs(position_controls['horizontal'][0] - position_controls['canvas'][0] / 2) < .001, position_controls
+    assert abs(position_controls['bothFromAxes'][0] - position_controls['canvas'][0] / 2) < .001 and abs(position_controls['bothFromAxes'][1] - position_controls['canvas'][1] / 2) < .001, position_controls
+    assert position_controls['full'] == [position_controls['canvas'][0] / 2, position_controls['canvas'][1] / 2], position_controls
+    assert position_controls['preserved'], position_controls
+    print('FRONT_OBJECT_NUDGE_AND_CENTER_OK', position_controls['step'], position_controls['full'])
+
+    page.evaluate("() => openAdjustSheet()")
+    page.wait_for_timeout(350)
+    slider_css = page.evaluate("""() => {
+      const opacity=document.getElementById('opacity-range'),angle=document.getElementById('angle-range'),body=document.querySelector('#sheet-adjust .sheet-body');
+      const style=getComputedStyle(opacity),thumb=getComputedStyle(opacity,'::-webkit-slider-thumb');
+      return {opacityHeight:opacity.getBoundingClientRect().height,angleHeight:angle.getBoundingClientRect().height,touchAction:style.touchAction,bodyScroll:body.scrollTop,thumbWidth:thumb.width};
+    }""")
+    assert slider_css['opacityHeight'] >= 44 and slider_css['angleHeight'] >= 44, slider_css
+    assert slider_css['touchAction'] == 'none', slider_css
+    page.evaluate("""() => {
+      window.__rangeTrusted=[];
+      for(const id of ['opacity-range','angle-range'])for(const type of ['pointerdown','input','change'])document.getElementById(id).addEventListener(type,event=>window.__rangeTrusted.push({id,type,trusted:event.isTrusted}));
+    }""")
+    page.wait_for_timeout(250)
+    opacity_slider = page.locator('#opacity-range')
+    opacity_box = opacity_slider.bounding_box()
+    assert opacity_box, 'opacity slider missing'
+    opacity_slider.click(position={'x': opacity_box['width'] - 1, 'y': opacity_box['height'] / 2})
+    assert float(opacity_slider.input_value()) >= 98, opacity_slider.input_value()
+    opacity_history = page.evaluate("() => historyStack.length")
+    opacity_y = opacity_box['y'] + opacity_box['height'] / 2
+    if browser_engine == 'webkit':
+        opacity_slider.hover(position={'x': opacity_box['width'] - 1, 'y': opacity_box['height'] / 2})
+        page.mouse.down()
+        page.mouse.move(opacity_box['x'] + opacity_box['width'] * .4, opacity_y, steps=12)
+        opacity_live = page.evaluate("() => ({value:+document.getElementById('opacity-range').value,opacity:canvas.getActiveObject().opacity,history:historyStack.length,scroll:document.querySelector('#sheet-adjust .sheet-body').scrollTop})")
+        assert opacity_live['history'] == opacity_history, opacity_live
+        page.mouse.up()
+    else:
+        opacity_slider.click(position={'x': opacity_box['width'] * .4, 'y': opacity_box['height'] / 2})
+        opacity_live = page.evaluate("() => ({value:+document.getElementById('opacity-range').value,opacity:canvas.getActiveObject().opacity,history:historyStack.length,scroll:document.querySelector('#sheet-adjust .sheet-body').scrollTop})")
+    assert 34 <= opacity_live['value'] <= 46 and abs(opacity_live['opacity'] - opacity_live['value'] / 100) < .001, opacity_live
+    assert opacity_live['scroll'] == slider_css['bodyScroll'], opacity_live
+    page.wait_for_timeout(100)
+    assert page.evaluate("() => historyStack.length") == opacity_history + 1, 'opacity drag should record exactly one history entry'
+
+    angle_slider = page.locator('#angle-range')
+    angle_box = angle_slider.bounding_box()
+    assert angle_box, 'angle slider missing'
+    angle_slider.click(position={'x': angle_box['width'] / 2, 'y': angle_box['height'] / 2})
+    assert abs(float(angle_slider.input_value())) <= 2, angle_slider.input_value()
+    angle_history = page.evaluate("() => historyStack.length")
+    angle_y = angle_box['y'] + angle_box['height'] / 2
+    if browser_engine == 'webkit':
+        angle_slider.hover(position={'x': angle_box['width'] / 2, 'y': angle_box['height'] / 2})
+        page.mouse.down()
+        page.mouse.move(angle_box['x'] + angle_box['width'] * .75, angle_y, steps=12)
+        angle_live = page.evaluate("() => ({value:+document.getElementById('angle-range').value,angle:canvas.getActiveObject().angle,history:historyStack.length,scroll:document.querySelector('#sheet-adjust .sheet-body').scrollTop})")
+        assert angle_live['history'] == angle_history, angle_live
+        page.mouse.up()
+    else:
+        angle_slider.click(position={'x': angle_box['width'] * .75, 'y': angle_box['height'] / 2})
+        angle_live = page.evaluate("() => ({value:+document.getElementById('angle-range').value,angle:canvas.getActiveObject().angle,history:historyStack.length,scroll:document.querySelector('#sheet-adjust .sheet-body').scrollTop})")
+    assert 80 <= angle_live['value'] <= 100 and abs(angle_live['angle'] - angle_live['value']) < .001, angle_live
+    assert angle_live['scroll'] == slider_css['bodyScroll'], angle_live
+    page.wait_for_timeout(100)
+    assert page.evaluate("() => historyStack.length") == angle_history + 1, 'angle drag should record exactly one history entry'
+    trusted_events = page.evaluate("() => window.__rangeTrusted")
+    assert trusted_events and all(event['trusted'] for event in trusted_events), trusted_events
+    for slider_id in ('opacity-range', 'angle-range'):
+        assert any(event['id'] == slider_id and event['type'] == 'pointerdown' for event in trusted_events), trusted_events
+        assert any(event['id'] == slider_id and event['type'] == 'input' for event in trusted_events), trusted_events
+        assert any(event['id'] == slider_id and event['type'] == 'change' for event in trusted_events), trusted_events
+    page.evaluate("""() => {closeSheets();const o=canvas.getActiveObject();o.set({opacity:1,angle:27});o.setCoords();canvas.requestRenderAll()}""")
+    print('FRONT_RANGE_POINTER_INTERACTION_OK', browser_engine, opacity_live['value'], angle_live['value'], slider_css)
+
+    font_result = page.evaluate("""async () => {
+      document.getElementById('text-input').value='本福丸可愛粉圓';
+      document.getElementById('text-font').value='jf-openhuninn';
+      document.getElementById('text-bold').checked=false;
+      await addTextFromControls();
+      const o=canvas.getActiveObject();
+      await ensureCanvasFonts();
+      const serialized=canvas.toJSON(CUSTOM_PROPS).objects.find(item=>item.role==='text');
+      const exported=canvas.toDataURL({format:'png',multiplier:1});
+      return {family:o?.fontFamily,loaded:document.fonts.check('16px "jf-openhuninn"','本福丸可愛粉圓'),serialized:serialized?.fontFamily,exported:exported.startsWith('data:image/png;base64,'),option:document.querySelector('#text-font option[value="jf-openhuninn"]')?.textContent};
+    }""")
+    assert font_result == {'family':'jf-openhuninn','loaded':True,'serialized':'jf-openhuninn','exported':True,'option':'可愛粉圓'}, font_result
+    page.evaluate("""() => {const photo=canvas.getObjects().find(o=>o.role==='photo');canvas.setActiveObject(photo);canvas.requestRenderAll();syncSelection()}""")
+    print('FRONT_HUNINN_FONT_EXPORT_OK', font_result)
     page.set_viewport_size({'width':390,'height':844})
     page.evaluate("() => window.BenfuwanEditorAccess.fitCanvas()")
     assert_front_editor_geometry(page, 'iphone-expanded-selected')
