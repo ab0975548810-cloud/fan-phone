@@ -608,13 +608,16 @@ def front_test(browser, base):
     assert slider_css['opacityHeight'] >= 44 and slider_css['angleHeight'] >= 44, slider_css
     assert slider_css['touchAction'] == 'none', slider_css
     page.wait_for_timeout(250)
-    opacity_box = page.locator('#opacity-range').bounding_box()
+    opacity_slider = page.locator('#opacity-range')
+    opacity_box = opacity_slider.bounding_box()
     assert opacity_box, 'opacity slider missing'
+    opacity_slider.click(position={'x': opacity_box['width'] - 1, 'y': opacity_box['height'] / 2})
+    assert float(opacity_slider.input_value()) >= 98, opacity_slider.input_value()
     opacity_history = page.evaluate("() => historyStack.length")
     opacity_y = opacity_box['y'] + opacity_box['height'] / 2
-    page.mouse.move(opacity_box['x'] + opacity_box['width'] - 14, opacity_y)
+    opacity_slider.hover(position={'x': opacity_box['width'] - 1, 'y': opacity_box['height'] / 2})
     page.mouse.down()
-    page.mouse.move(opacity_box['x'] + 14 + (opacity_box['width'] - 28) * .4, opacity_y, steps=12)
+    page.mouse.move(opacity_box['x'] + opacity_box['width'] * .4, opacity_y, steps=12)
     opacity_live = page.evaluate("() => ({value:+document.getElementById('opacity-range').value,opacity:canvas.getActiveObject().opacity,history:historyStack.length,scroll:document.querySelector('#sheet-adjust .sheet-body').scrollTop})")
     assert 34 <= opacity_live['value'] <= 46 and abs(opacity_live['opacity'] - opacity_live['value'] / 100) < .001, opacity_live
     assert opacity_live['history'] == opacity_history and opacity_live['scroll'] == slider_css['bodyScroll'], opacity_live
@@ -622,14 +625,16 @@ def front_test(browser, base):
     page.wait_for_timeout(100)
     assert page.evaluate("() => historyStack.length") == opacity_history + 1, 'opacity drag should record exactly one history entry'
 
-    angle_box = page.locator('#angle-range').bounding_box()
+    angle_slider = page.locator('#angle-range')
+    angle_box = angle_slider.bounding_box()
     assert angle_box, 'angle slider missing'
+    angle_slider.click(position={'x': angle_box['width'] / 2, 'y': angle_box['height'] / 2})
+    assert abs(float(angle_slider.input_value())) <= 2, angle_slider.input_value()
     angle_history = page.evaluate("() => historyStack.length")
     angle_y = angle_box['y'] + angle_box['height'] / 2
-    current_angle_ratio = (float(page.locator('#angle-range').input_value()) + 180) / 360
-    page.mouse.move(angle_box['x'] + 14 + (angle_box['width'] - 28) * current_angle_ratio, angle_y)
+    angle_slider.hover(position={'x': angle_box['width'] / 2, 'y': angle_box['height'] / 2})
     page.mouse.down()
-    page.mouse.move(angle_box['x'] + 14 + (angle_box['width'] - 28) * .75, angle_y, steps=12)
+    page.mouse.move(angle_box['x'] + angle_box['width'] * .75, angle_y, steps=12)
     angle_live = page.evaluate("() => ({value:+document.getElementById('angle-range').value,angle:canvas.getActiveObject().angle,history:historyStack.length,scroll:document.querySelector('#sheet-adjust .sheet-body').scrollTop})")
     assert 80 <= angle_live['value'] <= 100 and abs(angle_live['angle'] - angle_live['value']) < .001, angle_live
     assert angle_live['history'] == angle_history and angle_live['scroll'] == slider_css['bodyScroll'], angle_live
