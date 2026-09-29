@@ -104,6 +104,9 @@ def add_front_photo(page, variant=0):
     page.evaluate(f'''() => new Promise((resolve,reject)=>{{
       const c=document.createElement('canvas');c.width=128;c.height=128;const g=c.getContext('2d');
       g.fillStyle='{ '#fff6fa' if variant == 0 else '#e8f4ff' }';g.fillRect(0,0,128,128);
+      // Deliberately varied border forces this fixture through the AI fallback;
+      // the separate solid-background regression covers the local connected path.
+      ['#ffcad8','#c9e7ff','#ffe6a8','#d8c9ff'].forEach((color,index)=>{{g.fillStyle=color;if(index===0)g.fillRect(0,0,128,5);if(index===1)g.fillRect(0,123,128,5);if(index===2)g.fillRect(0,0,5,128);if(index===3)g.fillRect(123,0,5,128)}});
       g.fillStyle='{ '#e05280' if variant == 0 else '#356edb' }';g.fillRect(28,20,72,90);
       fabric.Image.fromURL(c.toDataURL('image/png'),img=>{{
         try{{img.set({{left:canvas.width/2,top:canvas.height/2,originX:'center',originY:'center',role:'photo',originalName:'test-{variant}.png'}});styleEditableObject(img);canvas.add(img);canvas.setActiveObject(img);canvas.requestRenderAll();syncSelection();resolve();}}catch(e){{reject(e)}}
@@ -203,6 +206,64 @@ def front_test(browser, base):
     assert upload_regression['maxBytes'] == 50 * 1024 * 1024 and upload_regression['maxPixels'] == 32_000_000 and upload_regression['maxEdge'] == 8192, upload_regression
     assert '像素過大' in upload_regression['pixelError'] and '50MB' in upload_regression['byteError'], upload_regression
     print('FRONT_HIGH_RES_PNG_TIFF_UPLOAD_OK', upload_regression)
+    universal_remove = page.evaluate("""async () => {
+      const core=window.BenfuwanAiRemoveV2,source=document.createElement('canvas');source.width=640;source.height=480;
+      const g=source.getContext('2d',{alpha:true});g.fillStyle='#f7d8e1';g.fillRect(0,0,640,480);
+      g.fillStyle='#c52f67';g.fillRect(90,80,180,300);
+      g.fillStyle='#fff';g.beginPath();g.arc(500,110,42,0,Math.PI*2);g.fill();
+      g.strokeStyle='#111';g.lineWidth=8;g.stroke();
+      const input=await core.sourceBlobFromElement(source,{maxEdge:4096,maxBytes:6*1024*1024});
+      const result=await core.universalRemoveFromElement(source,{localOnly:true});
+      const output=await new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=reject;image.src=URL.createObjectURL(result.blob)});
+      const c=document.createElement('canvas');c.width=output.naturalWidth;c.height=output.naturalHeight;const cg=c.getContext('2d',{willReadFrequently:true});cg.drawImage(output,0,0);
+      const alpha=(x,y)=>cg.getImageData(x,y,1,1).data[3];
+      return {inputType:input.type,mode:result.mode,type:result.blob.type,width:output.naturalWidth,height:output.naturalHeight,corner:alpha(0,0),main:alpha(150,200),isolatedWhite:alpha(500,110)};
+    }""")
+    assert universal_remove['inputType'] == 'image/png' and universal_remove['type'] == 'image/png', universal_remove
+    assert universal_remove['mode'] == 'edge-connected', universal_remove
+    assert (universal_remove['width'], universal_remove['height']) == (640, 480), universal_remove
+    assert universal_remove['corner'] == 0 and universal_remove['main'] > 250 and universal_remove['isolatedWhite'] > 250, universal_remove
+    print('FRONT_UNIVERSAL_CONNECTED_BACKGROUND_HIGH_RES_OK', universal_remove)
+    transparent_decontaminate = page.evaluate("""async () => {
+      const core=window.BenfuwanAiRemoveV2,source=document.createElement('canvas');source.width=96;source.height=96;
+      const g=source.getContext('2d',{alpha:true,willReadFrequently:true}),image=g.createImageData(96,96),d=image.data;
+      const pixel=(x,y,r,g,b,a)=>{const i=(y*96+x)*4;d[i]=r;d[i+1]=g;d[i+2]=b;d[i+3]=a};
+      for(let y=32;y<64;y++)for(let x=32;x<64;x++)pixel(x,y,255,255,255,255);
+      for(let y=31;y<=64;y++)for(let x=31;x<=64;x++)if(x===31||x===64||y===31||y===64)pixel(x,y,255,255,255,64);
+      g.putImageData(image,0,0);
+      const result=await core.universalRemoveFromElement(source,{localOnly:true}),output=await new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=reject;image.src=URL.createObjectURL(result.blob)});
+      const c=document.createElement('canvas');c.width=96;c.height=96;const cg=c.getContext('2d',{willReadFrequently:true});cg.drawImage(output,0,0);const sample=(x,y)=>Array.from(cg.getImageData(x,y,1,1).data);
+      return {mode:result.mode,type:result.blob.type,opaqueWhite:sample(40,40),halo:sample(31,40),transparent:sample(0,0)};
+    }""")
+    assert transparent_decontaminate['mode'] == 'transparent-decontaminated' and transparent_decontaminate['type'] == 'image/png', transparent_decontaminate
+    assert transparent_decontaminate['opaqueWhite'] == [255,255,255,255], transparent_decontaminate
+    assert transparent_decontaminate['halo'][3] < 40 and transparent_decontaminate['transparent'][3] == 0, transparent_decontaminate
+    print('FRONT_TRANSPARENT_PNG_DECONTAMINATE_OPAQUE_WHITE_OK', transparent_decontaminate)
+    transparent_stripes = page.evaluate("""async () => {
+      const core=window.BenfuwanAiRemoveV2,w=2030,h=4241,source=document.createElement('canvas');source.width=w;source.height=h;
+      const g=source.getContext('2d',{alpha:true,willReadFrequently:true});g.clearRect(0,0,w,h);g.fillStyle='rgba(255,255,255,.25)';g.fillRect(599,999,832,2202);g.fillStyle='#fff';g.fillRect(600,1000,830,2200);
+      const contextPrototype=CanvasRenderingContext2D.prototype,nativeGetImageData=contextPrototype.getImageData,NativeArray=window.Uint8ClampedArray,fullBytes=w*h*4;
+      let maxReadRows=0,fullReads=0,fullCopies=0,blob;
+      contextPrototype.getImageData=function(x,y,width,height){if(this.canvas.width===w&&this.canvas.height===h){maxReadRows=Math.max(maxReadRows,height);if(width*height===w*h)fullReads++}return nativeGetImageData.call(this,x,y,width,height)};
+      window.Uint8ClampedArray=new Proxy(NativeArray,{construct(target,args,newTarget){const value=args[0],length=typeof value==='number'?value:Number(value?.length||0);if(length>=fullBytes)fullCopies++;return Reflect.construct(target,args,newTarget)}});
+      try{blob=await core.decontaminateTransparentElement(source,{stripeRows:384})}finally{contextPrototype.getImageData=nativeGetImageData;window.Uint8ClampedArray=NativeArray}
+      const output=await new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=reject;image.src=URL.createObjectURL(blob)});
+      g.clearRect(0,0,w,h);g.drawImage(output,0,0);const sample=(x,y)=>Array.from(g.getImageData(x,y,1,1).data);
+      return {type:blob.type,width:output.naturalWidth,height:output.naturalHeight,opaqueWhite:sample(700,1500),halo:sample(599,1500),transparent:sample(0,0),maxReadRows,fullReads,fullCopies};
+    }""")
+    assert transparent_stripes['type'] == 'image/png' and (transparent_stripes['width'], transparent_stripes['height']) == (2030,4241), transparent_stripes
+    assert transparent_stripes['opaqueWhite'] == [255,255,255,255] and transparent_stripes['halo'][3] < 40 and transparent_stripes['transparent'][3] == 0, transparent_stripes
+    assert transparent_stripes['maxReadRows'] <= 386 and transparent_stripes['fullReads'] == 0 and transparent_stripes['fullCopies'] == 0, transparent_stripes
+    print('FRONT_HIGH_RES_TRANSPARENT_STRIPE_DECONTAMINATE_OK', transparent_stripes)
+    high_res_cache = page.evaluate("""async () => {
+      const core=window.BenfuwanAiRemoveV2;
+      const make=(w,h)=>{const c=document.createElement('canvas');c.width=w;c.height=h;const g=c.getContext('2d',{alpha:true});g.clearRect(0,0,w,h);g.fillStyle='#fff';g.fillRect(w*.25,h*.25,w*.5,h*.5);return c};
+      const small=make(1200,2400),large=make(2400,4800),smallKey=await core.cacheIdentityFromElement(small),largeKey=await core.cacheIdentityFromElement(large),result=await core.universalRemoveFromElement(large,{localOnly:true});
+      const output=await new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=reject;image.src=URL.createObjectURL(result.blob)}),answer={smallKey,largeKey,mode:result.mode,width:output.naturalWidth,height:output.naturalHeight,type:result.blob.type};small.width=small.height=large.width=large.height=1;return answer;
+    }""")
+    assert high_res_cache['smallKey'] and high_res_cache['largeKey'] and high_res_cache['smallKey'] != high_res_cache['largeKey'], high_res_cache
+    assert (high_res_cache['width'], high_res_cache['height']) == (2400,4800) and high_res_cache['type'] == 'image/png', high_res_cache
+    print('FRONT_HIGH_RES_CACHE_IDENTITY_AND_OUTPUT_DIMENSIONS_OK', high_res_cache['mode'], high_res_cache['width'], high_res_cache['height'])
     # Let the app finish its own initial catalog load/navigation before forcing
     # the editor. Otherwise the startup async task can switch pages after the
     # test has entered the editor and produce a false zero-geometry failure.
@@ -768,7 +829,7 @@ def admin_test(browser, base):
     asset_category_src = page.locator('script[src*="admin-asset-categories.js"]').get_attribute('src')
     assert asset_category_src and 'v=20260926audit1' in asset_category_src, asset_category_src
     template_loader_src = page.locator('script[src*="admin-template-loader.js"]').get_attribute('src')
-    assert template_loader_src and 'v=20260929style1' in template_loader_src, template_loader_src
+    assert template_loader_src and 'v=20260929universal1' in template_loader_src, template_loader_src
     commerce_src = page.locator('script[src*="admin-commerce-v1.js"]').get_attribute('src')
     assert commerce_src and 'v=20260923cas1' in commerce_src, commerce_src
     def ux_error(route):
