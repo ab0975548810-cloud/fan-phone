@@ -229,24 +229,31 @@ def front_test(browser, base):
     assert style_isolation['second'] == {'mask':'fixture://mirror-preview','line':'fixture://mirror-print','w':75,'h':150,'x':3,'y':4}, style_isolation
     print('FRONT_TWO_STYLES_INDEPENDENT_PROFILE_COLOR_SHARED_OK', style_isolation)
     template_geometry = page.evaluate("""() => {
-      const model={id:'tpl-model',case_profiles:{
+      const model={id:'tpl-model',preview_mask_img:'fixture://legacy-crystal-preview',print_line_img:'fixture://legacy-crystal-print',print_w:72,print_h:142,case_profiles:{
         crystal:{preview_mask_img:'fixture://cp',print_line_img:'fixture://cl',print_w:70,print_h:140},
         mirror:{preview_mask_img:'fixture://mp',print_line_img:'fixture://ml',print_w:75,print_h:150}
       }};
       shopData.models=[model];ctx.printW=75;ctx.printH=150;ctx.printLineUrl='fixture://target';
       const crystal=BenfuwanTemplateGeometry.sourceGeometry({reference_model_id:'tpl-model',reference_style_id:'crystal'});
       const mirror=BenfuwanTemplateGeometry.sourceGeometry({reference_model_id:'tpl-model',reference_style_id:'mirror'});
-      const legacy=BenfuwanTemplateGeometry.sourceGeometry({reference_model_id:'tpl-model',source_print_w:68,source_print_h:138,source_canvas_w:136,source_canvas_h:276});
+      const legacyTemplate={model_id:'*',universal:true,reference_model_id:'tpl-model',source_print_w:68,source_print_h:138,source_canvas_w:136,source_canvas_h:276};
+      const legacy=BenfuwanTemplateGeometry.sourceGeometry(legacyTemplate);
+      const explicitLegacyCrystal=BenfuwanTemplateGeometry.sourceGeometry({...legacyTemplate,reference_style_id:BenfuwanModelProfile.LEGACY_CRYSTAL_STYLE_ID});
+      const oldMirror=BenfuwanTemplateGeometry.sourceGeometry({...legacyTemplate,case_style_id:'mirror'});
       let failed=false;try{BenfuwanTemplateGeometry.sourceGeometry({reference_model_id:'tpl-model'})}catch(e){failed=true}
       const target=BenfuwanTemplateGeometry.targetGeometry();
-      return {crystal:{w:crystal.w,h:crystal.h},mirror:{w:mirror.w,h:mirror.h},legacy:{w:legacy.w,h:legacy.h},failed,target:{w:target.w,h:target.h,mask:target.mask}};
+      return {crystal:{w:crystal.w,h:crystal.h,mask:crystal.mask},mirror:{w:mirror.w,h:mirror.h,mask:mirror.mask},legacy:{w:legacy.w,h:legacy.h,mask:legacy.mask},explicitLegacyCrystal:{w:explicitLegacyCrystal.w,h:explicitLegacyCrystal.h,mask:explicitLegacyCrystal.mask},oldMirror:{w:oldMirror.w,h:oldMirror.h,mask:oldMirror.mask},failed,target:{w:target.w,h:target.h,mask:target.mask}};
     }""")
     assert template_geometry == {
-        'crystal': {'w':70,'h':140}, 'mirror': {'w':75,'h':150},
-        'legacy': {'w':68,'h':138}, 'failed': True,
+        'crystal': {'w':70,'h':140,'mask':'fixture://cl'},
+        'mirror': {'w':75,'h':150,'mask':'fixture://ml'},
+        'legacy': {'w':68,'h':138,'mask':'fixture://legacy-crystal-print'},
+        'explicitLegacyCrystal': {'w':68,'h':138,'mask':'fixture://legacy-crystal-print'},
+        'oldMirror': {'w':68,'h':138,'mask':'fixture://ml'},
+        'failed': True,
         'target': {'w':75,'h':150,'mask':'fixture://target'},
     }, template_geometry
-    print('FRONT_TEMPLATE_MODEL_STYLE_SOURCE_TARGET_GEOMETRY_OK', template_geometry)
+    print('FRONT_TEMPLATE_LEGACY_CRYSTAL_MASK_AND_EXPLICIT_STYLE_PRECEDENCE_OK', template_geometry)
     page.evaluate("({models,crystal}) => {shopData.models=models;shopData.styles=[crystal];resetDesignState(false)}", {'models':fixture_models,'crystal':crystal_style})
 
     mask_fixtures = {

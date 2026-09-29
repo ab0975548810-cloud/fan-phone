@@ -84,7 +84,9 @@
   function positive(value){const n=Number(value);return n>0?n:0}
   function sourceGeometry(tpl){
     const sourceModel=(shopData.models||[]).find(m=>String(m.id)===String(tpl.reference_model_id||''))||{};
-    const styleId=String(tpl.reference_style_id||tpl.case_style_id||'');
+    const explicitStyleId=String(tpl.reference_style_id||tpl.case_style_id||'');
+    const legacyCrystalId=String(window.BenfuwanModelProfile?.LEGACY_CRYSTAL_STYLE_ID||'');
+    const styleId=explicitStyleId||((isUniversal(tpl)&&legacyCrystalId)?legacyCrystalId:'');
     const profile=styleId?window.BenfuwanModelProfile?.profileFor?.(sourceModel,styleId):null;
     const canvasW=positive(tpl.source_canvas_w),canvasH=positive(tpl.source_canvas_h);
     const w=positive(tpl.source_print_w)||positive(profile?.printW)||(canvasW?canvasW/2:0);
