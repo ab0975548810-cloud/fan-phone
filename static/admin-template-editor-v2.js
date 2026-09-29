@@ -8,6 +8,16 @@
   const isText=o=>o&&['text','textbox','i-text'].includes(o.type);
   const clone=v=>JSON.parse(JSON.stringify(v));
 
+  function referenceGeometry(allowStoredLegacy=false){
+    const profile=window.benfuwanTemplateReferenceProfile?.();
+    if(profile)return {w:Number(profile.print_w),h:Number(profile.print_h),profile};
+    const old=window.__bfEditingTemplate;
+    if(allowStoredLegacy&&!$('tpl-style')?.value&&Number(old?.source_print_w)>0&&Number(old?.source_print_h)>0){
+      return {w:Number(old.source_print_w),h:Number(old.source_print_h),legacy:true};
+    }
+    return null;
+  }
+
   function proxyUrl(url){
     url=String(url||'').trim();
     if(!url||url.startsWith('data:')||url.startsWith('blob:')||url.startsWith('/'))return url;
@@ -153,7 +163,7 @@
   }
 
   window.initEditor=function(slots=[],objectsJson=null,fallback=''){
-    ensureUi();if(!window.fabric)return;const id=$('tpl-model').value;if(!id)return;const m=shopData.models.find(x=>x.id===id);const w=Number(m?.print_w)||80,h=Number(m?.print_h)||160;tplW=w*VISUAL_SCALE;tplH=h*VISUAL_SCALE;$('canvas-wrap').style.width=tplW+'px';$('canvas-wrap').style.height=tplH+'px';if(visualCanvas){visualCanvas.dispose();visualCanvas=null}$('tpl-canvas').width=tplW;$('tpl-canvas').height=tplH;visualCanvas=new fabric.Canvas('tpl-canvas',{width:tplW,height:tplH,backgroundColor:'#fff',preserveObjectStacking:true});hookCanvas();
+    ensureUi();if(!window.fabric)return;const id=$('tpl-model').value;if(!id)return;const geometry=referenceGeometry(true);if(!geometry){alert('此型號的此殼款尚未配置生產資料');return false}const w=geometry.w,h=geometry.h;tplW=w*VISUAL_SCALE;tplH=h*VISUAL_SCALE;$('canvas-wrap').style.width=tplW+'px';$('canvas-wrap').style.height=tplH+'px';if(visualCanvas){visualCanvas.dispose();visualCanvas=null}$('tpl-canvas').width=tplW;$('tpl-canvas').height=tplH;visualCanvas=new fabric.Canvas('tpl-canvas',{width:tplW,height:tplH,backgroundColor:'#fff',preserveObjectStacking:true});hookCanvas();
     const draw=()=>drawSlots(slots||[]);const prepared=prepareObjectsForEditor(objectsJson);
     if(prepared&&Array.isArray(prepared.objects)&&prepared.objects.length){visualCanvas.loadFromJSON(prepared,()=>{visualCanvas.getObjects().forEach(o=>{if(o.isTplBg){o.selectable=false;o.evented=false;visualCanvas.sendToBack(o)}});draw();visualCanvas.renderAll();setStatus('模板內容已載入')});return}
     if(fallback){addBackgroundFromSource(proxyUrl(fallback),fallback).then(()=>{draw();setStatus('模板底圖已載入')}).catch(err=>{console.error(err);draw();setStatus('底圖讀取失敗，請重新上傳')});return}draw();
@@ -166,14 +176,15 @@
   }
 
   window.saveTemplate=async function(){
-    if(saving)return;const id=$('tpl-id').value,name=$('tpl-name').value.trim(),category=$('tpl-category').value.trim()||'熱門',reference_model_id=$('tpl-model').value;if(!name||!reference_model_id||!visualCanvas)return alert('請填模板名稱並選擇設計基準型號');
-    const ref=(shopData.models||[]).find(x=>x.id===reference_model_id);const sourcePrintW=Number(ref?.print_w)||80,sourcePrintH=Number(ref?.print_h)||160;const slots=[],slotObjs=[];visualCanvas.getObjects().forEach(o=>{if(o.isSlot){slots.push({id:o.slotId||'slot_'+Date.now(),x:o.left/VISUAL_SCALE,y:o.top/VISUAL_SCALE,w:o.width*o.scaleX/VISUAL_SCALE,h:o.height*o.scaleY/VISUAL_SCALE});slotObjs.push(o)}});
+    if(saving)return;const id=$('tpl-id').value,name=$('tpl-name').value.trim(),category=$('tpl-category').value.trim()||'熱門',reference_model_id=$('tpl-model').value,reference_style_id=$('tpl-style').value;if(!name||!reference_model_id||!reference_style_id||!visualCanvas)return alert('請填模板名稱並選擇設計基準型號與殼款');
+    const geometry=referenceGeometry(false);if(!geometry)return alert('此型號的此殼款尚未配置生產資料');const sourcePrintW=geometry.w,sourcePrintH=geometry.h;const slots=[],slotObjs=[];visualCanvas.getObjects().forEach(o=>{if(o.isSlot){slots.push({id:o.slotId||'slot_'+Date.now(),x:o.left/VISUAL_SCALE,y:o.top/VISUAL_SCALE,w:o.width*o.scaleX/VISUAL_SCALE,h:o.height*o.scaleY/VISUAL_SCALE});slotObjs.push(o)}});
     const saveBtn=[...document.querySelectorAll('#template-modal .mf .btn')].find(b=>b.textContent.includes('儲存'));const oldBtn=saveBtn?.innerHTML;saving=true;if(saveBtn){saveBtn.disabled=true;saveBtn.classList.add('bf-tpl-saving');saveBtn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> 儲存中'}
     try{
       visualCanvas.discardActiveObject();slotObjs.forEach(o=>o.set('opacity',0));visualCanvas.renderAll();let dataUrl;try{dataUrl=visualCanvas.toDataURL({format:'png',multiplier:2})}finally{slotObjs.forEach(o=>o.set('opacity',1));visualCanvas.renderAll()}
       if(!dataUrl||!dataUrl.startsWith('data:image/png'))throw new Error('預覽圖輸出失敗');
       const objects=serializedObjects();setStatus('上傳模板預覽中…');const thumbUrl=await uploadAdminImage(dataUrlToFile(dataUrl,'template.png'),'template');
-      const data={id:id||'tpl_'+Date.now(),name,category,universal:true,template_version:3,model_id:'*',reference_model_id,source_print_w:sourcePrintW,source_print_h:sourcePrintH,source_canvas_w:tplW,source_canvas_h:tplH,thumb_url:thumbUrl,slots,objects_json:objects};
+      const old=id?(templatesData.templates||[]).find(x=>x.id===id):null;
+      const data={...(old||{}),id:id||'tpl_'+Date.now(),name,category,universal:true,template_version:3,model_id:'*',reference_model_id,reference_style_id,source_print_w:sourcePrintW,source_print_h:sourcePrintH,source_canvas_w:tplW,source_canvas_h:tplH,thumb_url:thumbUrl,slots,objects_json:objects};
       const next=clone(templatesData||{templates:[],categories:['全部','熱門']});next.templates=Array.isArray(next.templates)?next.templates:[];const idx=next.templates.findIndex(x=>x.id===data.id);if(idx>=0)next.templates[idx]=data;else next.templates.push(data);next.categories=Array.isArray(next.categories)?next.categories:[];if(!next.categories.includes('全部'))next.categories.unshift('全部');if(!next.categories.includes(category))next.categories.push(category);
       setStatus('寫入模板資料中…');await saveTemplates(next);templatesData.templates=next.templates;templatesData.categories=next.categories;renderTemplateTabs();renderTemplates();closeModal('template-modal');alert('模板儲存成功（全型號通用）');
     }catch(e){console.error('[TEMPLATE SAVE]',e);alert('模板儲存失敗：'+(e.message||e));setStatus('儲存失敗，請再試一次')}

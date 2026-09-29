@@ -203,11 +203,38 @@ class PrintService:
         shop = self.app.cloud_get_json("shop_data", self.app.DATA_FILE, self.app.DEFAULT_SHOP_DATA)
         model = next((row for row in (shop.get("models") or [])
                       if str(row.get("id") or "") == model_id), None)
-        if not _complete_model_style_profile(model, style_id):
+        profile = _complete_model_style_profile(model, style_id)
+        if not profile:
             raise PrintError(
                 "PRODUCTION_STYLE_NOT_CONFIGURED",
                 "這筆訂單的型號與殼款尚未完成生產設定，禁止建立或送出列印任務。",
             )
+        return profile
+
+    def _materialize_sku_profile(self, order, sku_id):
+        """Derive a missing color SKU row from its configured model/style geometry."""
+        source = self._assert_style_configured(order)
+        existing = self.store.profile(sku_id)
+        if existing:
+            return existing
+        commerce = self.app.commerce.read()
+        sku = next((row for row in (commerce.get("skus") or [])
+                    if str(row.get("id") or "") == str(sku_id)), None)
+        if (not sku or sku.get("active") is False
+                or str(sku.get("model_id") or "") != str(order.get("model_id") or "")
+                or str(sku.get("style_id") or "") != str(order.get("style_id") or "")):
+            raise PrintError("PROFILE_MISSING", "找不到可套用生產設定的商品 SKU")
+        return self.store.materialize_profile({
+            "sku_id": str(sku_id),
+            "width_mm": _as_decimal(source.get("print_w"), "寬度", positive=True),
+            "height_mm": _as_decimal(source.get("print_h"), "高度", positive=True),
+            "left_mm": _as_decimal(source.get("print_x", 0), "水平定位 X"),
+            "top_mm": _as_decimal(source.get("print_y", 0), "垂直定位 Y"),
+            "angle": _as_decimal(source.get("print_angle", 0), "角度"),
+            "copies": 1,
+            "spot_color": "",
+            "channel": "1",
+        })
 
     def _download_artwork(self, path):
         if not path:
@@ -276,7 +303,7 @@ class PrintService:
         sku_id = str(self._finance(order_id).get("sku_id") or "")
         if not sku_id:
             return {"status": "skipped", "reason": "FINANCE_SKU_REQUIRED"}
-        if not self.store.profile(sku_id):
+        if not self._materialize_sku_profile(order, sku_id):
             return {"status": "skipped", "reason": "PROFILE_MISSING"}
         job = self.prepare(order_id, self._auto_key("prepare", order_id))
         self.wake_dispatcher()
@@ -332,8 +359,7 @@ class PrintService:
             candidates = self._sku_candidates(order, commerce, shop)
             if not sku_id or sku_id not in {row["id"] for row in candidates}:
                 raise PrintError("SKU_BINDING_REQUIRED", "舊訂單必須先明確補綁列印 SKU")
-        self._assert_style_configured(order)
-        profile = self.store.profile(sku_id)
+        profile = self._materialize_sku_profile(order, sku_id)
         if not profile:
             raise PrintError("PROFILE_MISSING", "請先到「品牌及型號」儲存此型號的列印參數")
         raw = self._download_artwork(order["print_path"])

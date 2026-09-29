@@ -228,6 +228,25 @@ def front_test(browser, base):
     assert style_isolation['first'] == {'mask':'fixture://crystal-preview','line':'fixture://crystal-print','w':70,'h':140,'x':1,'y':2}, style_isolation
     assert style_isolation['second'] == {'mask':'fixture://mirror-preview','line':'fixture://mirror-print','w':75,'h':150,'x':3,'y':4}, style_isolation
     print('FRONT_TWO_STYLES_INDEPENDENT_PROFILE_COLOR_SHARED_OK', style_isolation)
+    template_geometry = page.evaluate("""() => {
+      const model={id:'tpl-model',case_profiles:{
+        crystal:{preview_mask_img:'fixture://cp',print_line_img:'fixture://cl',print_w:70,print_h:140},
+        mirror:{preview_mask_img:'fixture://mp',print_line_img:'fixture://ml',print_w:75,print_h:150}
+      }};
+      shopData.models=[model];ctx.printW=75;ctx.printH=150;ctx.printLineUrl='fixture://target';
+      const crystal=BenfuwanTemplateGeometry.sourceGeometry({reference_model_id:'tpl-model',reference_style_id:'crystal'});
+      const mirror=BenfuwanTemplateGeometry.sourceGeometry({reference_model_id:'tpl-model',reference_style_id:'mirror'});
+      const legacy=BenfuwanTemplateGeometry.sourceGeometry({reference_model_id:'tpl-model',source_print_w:68,source_print_h:138,source_canvas_w:136,source_canvas_h:276});
+      let failed=false;try{BenfuwanTemplateGeometry.sourceGeometry({reference_model_id:'tpl-model'})}catch(e){failed=true}
+      const target=BenfuwanTemplateGeometry.targetGeometry();
+      return {crystal:{w:crystal.w,h:crystal.h},mirror:{w:mirror.w,h:mirror.h},legacy:{w:legacy.w,h:legacy.h},failed,target:{w:target.w,h:target.h,mask:target.mask}};
+    }""")
+    assert template_geometry == {
+        'crystal': {'w':70,'h':140}, 'mirror': {'w':75,'h':150},
+        'legacy': {'w':68,'h':138}, 'failed': True,
+        'target': {'w':75,'h':150,'mask':'fixture://target'},
+    }, template_geometry
+    print('FRONT_TEMPLATE_MODEL_STYLE_SOURCE_TARGET_GEOMETRY_OK', template_geometry)
     page.evaluate("({models,crystal}) => {shopData.models=models;shopData.styles=[crystal];resetDesignState(false)}", {'models':fixture_models,'crystal':crystal_style})
 
     mask_fixtures = {
@@ -657,11 +676,11 @@ def admin_test(browser, base):
     model_color_src = page.locator('script[src*="admin-model-colors.js"]').get_attribute('src')
     assert model_color_src and 'v=20260926audit1' in model_color_src, model_color_src
     model_profile_src = page.locator('script[src*="admin-model-profiles.js"]').get_attribute('src')
-    assert model_profile_src and 'v=20260928a' in model_profile_src, model_profile_src
+    assert model_profile_src and 'v=20260929style1' in model_profile_src, model_profile_src
     asset_category_src = page.locator('script[src*="admin-asset-categories.js"]').get_attribute('src')
     assert asset_category_src and 'v=20260926audit1' in asset_category_src, asset_category_src
     template_loader_src = page.locator('script[src*="admin-template-loader.js"]').get_attribute('src')
-    assert template_loader_src and 'v=20260926audit1' in template_loader_src, template_loader_src
+    assert template_loader_src and 'v=20260929style1' in template_loader_src, template_loader_src
     commerce_src = page.locator('script[src*="admin-commerce-v1.js"]').get_attribute('src')
     assert commerce_src and 'v=20260923cas1' in commerce_src, commerce_src
     def ux_error(route):
@@ -1097,11 +1116,68 @@ def admin_test(browser, base):
     assert template_xss_result == {'executed': 0, 'edited': template_xss, 'inlineHandlers': 0}, template_xss_result
     print('ADMIN_TEMPLATE_STORED_DATA_ACTIONS_OK')
 
+    template_fixture_profile = page.evaluate("""() => {
+      const models=(shopData?.models||[]).filter(item=>item?.status!==false);
+      const styles=(shopData?.styles||[]).filter(item=>item?.status!==false);
+      if(!models.length||!styles.length)return null;
+      for(const model of models){
+        model.case_profiles={...(model.case_profiles||{})};
+        for(const style of styles){
+          if(!window.BenfuwanCaseProfiles?.complete(model.case_profiles[style.id])){
+            model.case_profiles[style.id]={
+              preview_mask_img:model.preview_mask_img||'fixture://template-preview',
+              print_line_img:model.print_line_img||'fixture://template-print',
+              print_x:1,print_y:2,print_w:70,print_h:140,print_angle:0
+            };
+          }
+        }
+      }
+      return {models:models.length,styles:styles.length};
+    }""")
+    assert template_fixture_profile, template_fixture_profile
     page.locator('#view-templates .titlebar .btn').click()
-    poll(page, "() => document.getElementById('template-modal')?.classList.contains('show') && typeof window.fabric !== 'undefined' && typeof visualCanvas !== 'undefined' && !!visualCanvas", timeout=30000)
+    poll(page, "() => document.getElementById('template-modal')?.classList.contains('show')", timeout=30000)
+    template_open_diag = page.evaluate("""() => ({canvas:!!visualCanvas,model:document.getElementById('tpl-model')?.value,style:document.getElementById('tpl-style')?.value,profile:!!window.benfuwanTemplateReferenceProfile?.(),dialogs:window.__templateOpenDialogs||[]})""")
+    print('ADMIN_TEMPLATE_OPEN_DIAG', template_open_diag)
+    assert template_open_diag['canvas'], template_open_diag
     template_editor_src = page.locator('script[src*="admin-template-editor-v2.js"]').get_attribute('src')
-    assert template_editor_src and 'v=20260923cas1' in template_editor_src, template_editor_src
+    assert template_editor_src and 'v=20260929style1' in template_editor_src, template_editor_src
     print('ADMIN_FABRIC_LAZY_OK')
+
+    template_contract = page.evaluate("""async () => {
+      const originalShop=structuredClone(shopData),originalTemplates=structuredClone(templatesData),originalSave=window.saveTemplates,originalUpload=window.uploadAdminImage;
+      const model={id:'geometry-model',name:'幾何型號',brand:'Apple',status:true,case_profiles:{
+        crystal:{preview_mask_img:'fixture://crystal-preview',print_line_img:'fixture://crystal-print',print_w:70,print_h:140,print_x:1,print_y:2,print_angle:0},
+        mirror:{preview_mask_img:'fixture://mirror-preview',print_line_img:'fixture://mirror-print',print_w:75,print_h:150,print_x:3,print_y:4,print_angle:90}
+      }};
+      shopData={brands:['Apple'],models:[model],styles:[{id:'crystal',name:'晶彩',status:true},{id:'mirror',name:'鏡面',status:true},{id:'missing',name:'未配置',status:true}]};
+      const modelSelect=document.getElementById('tpl-model'),styleSelect=document.getElementById('tpl-style');
+      modelSelect.innerHTML='<option value="geometry-model">幾何型號</option>';modelSelect.value='geometry-model';
+      styleSelect.innerHTML='<option value="crystal">晶彩</option><option value="mirror">鏡面</option><option value="missing">未配置</option>';
+      window.__bfEditingTemplate=null;
+      styleSelect.value='crystal';initEditor();const crystal={w:tplW,h:tplH};
+      styleSelect.value='mirror';initEditor();const mirror={w:tplW,h:tplH};
+      const beforeMissing={w:tplW,h:tplH};styleSelect.value='missing';const missingResult=initEditor();const afterMissing={w:tplW,h:tplH};
+      const old={id:'legacy-style-template',name:'舊殼款模板',category:'熱門',model_id:'*',universal:true,case_style_id:'crystal',reference_model_id:'geometry-model',source_print_w:70,source_print_h:140,slots:[],objects_json:{version:'5.3.0',objects:[]}};
+      templatesData={templates:[old],categories:['全部','熱門']};window.__bfEditingTemplate=old;
+      document.getElementById('tpl-id').value=old.id;document.getElementById('tpl-name').value=old.name;document.getElementById('tpl-category').value=old.category;styleSelect.value='crystal';initEditor([],old.objects_json,'');
+      let captured=null;window.uploadAdminImage=async()=>'/static/uploads/geometry-template.png';window.saveTemplates=async next=>{captured=structuredClone(next);return {version:'geometry-version'}};
+      await saveTemplate();
+      const saved=captured.templates.find(row=>row.id===old.id);
+      window.saveTemplates=originalSave;window.uploadAdminImage=originalUpload;shopData=originalShop;templatesData=originalTemplates;window.__bfEditingTemplate=null;
+      return {crystal,mirror,beforeMissing,afterMissing,missingResult,saved:{case_style_id:saved.case_style_id,reference_style_id:saved.reference_style_id,source_print_w:saved.source_print_w,source_print_h:saved.source_print_h}};
+    }""")
+    assert template_contract == {
+        'crystal': {'w':140,'h':280}, 'mirror': {'w':150,'h':300},
+        'beforeMissing': {'w':150,'h':300}, 'afterMissing': {'w':150,'h':300},
+        'missingResult': False,
+        'saved': {'case_style_id':'crystal','reference_style_id':'crystal','source_print_w':70,'source_print_h':140},
+    }, template_contract
+    assert any('此型號的此殼款尚未配置生產資料' in msg for msg in dialogs), dialogs
+    print('ADMIN_TEMPLATE_MODEL_STYLE_GEOMETRY_LEGACY_STYLE_OK', template_contract)
+
+    page.locator('#view-templates .titlebar .btn').click()
+    poll(page, "() => document.getElementById('template-modal')?.classList.contains('show') && !!visualCanvas", timeout=30000)
 
     template_server_original = page.evaluate("() => ({data:structuredClone(templatesData),version:templatesVersion})")
     template_winner = copy.deepcopy(template_server_original['data'])

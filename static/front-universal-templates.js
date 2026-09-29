@@ -81,15 +81,28 @@
   function boxPx(frac,w,h){return {x:frac.x*w,y:frac.y*h,w:frac.w*w,h:frac.h*h}}
   function mapPoint(v,srcStart,srcSize,dstStart,dstSize){const n=(Number(v)-srcStart)/Math.max(1,srcSize);return dstStart+clamp(n,.025,.975)*dstSize}
 
-  async function adaptUniversal(tpl){
+  function positive(value){const n=Number(value);return n>0?n:0}
+  function sourceGeometry(tpl){
     const sourceModel=(shopData.models||[]).find(m=>String(m.id)===String(tpl.reference_model_id||''))||{};
-    const targetModel=(shopData.models||[]).find(m=>String(m.id)===String(ctx.modelId||''))||{};
-    const sourceW=Math.max(1,Number(tpl.source_print_w)||Number(sourceModel.print_w)||80);
-    const sourceH=Math.max(1,Number(tpl.source_print_h)||Number(sourceModel.print_h)||160);
-    const targetW=Math.max(1,Number(ctx.printW)||Number(targetModel.print_w)||80);
-    const targetH=Math.max(1,Number(ctx.printH)||Number(targetModel.print_h)||160);
-    const sourceMask=sourceModel.print_line_img||sourceModel.line_img||'';
-    const targetMask=ctx.printLineUrl||targetModel.print_line_img||targetModel.line_img||'';
+    const styleId=String(tpl.reference_style_id||tpl.case_style_id||'');
+    const profile=styleId?window.BenfuwanModelProfile?.profileFor?.(sourceModel,styleId):null;
+    const canvasW=positive(tpl.source_canvas_w),canvasH=positive(tpl.source_canvas_h);
+    const w=positive(tpl.source_print_w)||positive(profile?.printW)||(canvasW?canvasW/2:0);
+    const h=positive(tpl.source_print_h)||positive(profile?.printH)||(canvasH?canvasH/2:0);
+    if(!w||!h)throw new Error('模板缺少可驗證的 model + style source geometry');
+    return {model:sourceModel,w,h,mask:profile?.ready?profile.printUrl:''};
+  }
+  function targetGeometry(){
+    const w=positive(ctx.printW),h=positive(ctx.printH);
+    if(!w||!h)throw new Error('目前殼款缺少生產尺寸');
+    return {w,h,mask:String(ctx.printLineUrl||'')};
+  }
+  window.BenfuwanTemplateGeometry=Object.freeze({sourceGeometry,targetGeometry});
+
+  async function adaptUniversal(tpl){
+    const source=sourceGeometry(tpl),target=targetGeometry();
+    const sourceW=source.w,sourceH=source.h,targetW=target.w,targetH=target.h;
+    const sourceMask=source.mask,targetMask=target.mask;
     const [sourceFrac,targetFrac]=await Promise.all([maskBox(sourceMask),maskBox(targetMask)]);
 
     const adapted=deepClone(tpl);
@@ -157,8 +170,7 @@
     }).catch(err=>{
       console.error('[FRONT] template auto-fit failed',err);
       if(typeof setBusy==='function')setBusy(false);
-      if(typeof toast==='function')toast('模板自動對位失敗，已使用基本比例套用');
-      originalApplyTemplate(tpl,done);
+      if(typeof toast==='function')toast('模板缺少可驗證的基準尺寸，請聯絡店家更新模板');
     });
   };
 

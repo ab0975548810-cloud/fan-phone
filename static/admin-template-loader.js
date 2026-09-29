@@ -5,8 +5,8 @@
   window.__benfuwanTemplateLoaderInstalled=true;
 
   const STACK=[
-    '/static/admin-universal-templates.js?v=20260926audit1',
-    '/static/admin-template-editor-v2.js?v=20260923cas1',
+    '/static/admin-universal-templates.js?v=20260929style1',
+    '/static/admin-template-editor-v2.js?v=20260929style1',
     '/static/admin-template-editor-v3.js?v=20260914h',
     '/static/admin-template-editor-v4.js?v=20260914h',
     '/static/admin-template-editor-v4-fix.js?v=20260914h',
@@ -35,11 +35,12 @@
 
   const baseOpen=window.openTemplateEditor;
   if(typeof baseOpen==='function'){
-    window.openTemplateEditor=async function(...args){
+    const lazyOpen=async function(...args){
       const btn=document.querySelector('#view-templates .titlebar .btn');
       const old=btn?.innerHTML;if(btn){btn.disabled=true;btn.textContent='載入編輯器…'}
-      try{await ensure();return baseOpen.apply(this,args)}catch(e){console.error(e);alert(e.message||'模板編輯器載入失敗')}finally{if(btn){btn.disabled=false;if(old!=null)btn.innerHTML=old}}
+      try{await ensure();const current=window.openTemplateEditor;return (current!==lazyOpen?current:baseOpen).apply(this,args)}catch(e){console.error(e);alert(e.message||'模板編輯器載入失敗')}finally{if(btn){btn.disabled=false;if(old!=null)btn.innerHTML=old}}
     };
+    window.openTemplateEditor=lazyOpen;
   }
 
   document.addEventListener('click',ev=>{

@@ -136,6 +136,26 @@ class PrintCenterTests(unittest.TestCase):
         })
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
 
+    def add_color_sku(self, color):
+        shop, version = self.shop_snapshot()
+        model_id = app.DEFAULT_SHOP_DATA["models"][0]["id"]
+        style_id = app.DEFAULT_SHOP_DATA["styles"][0]["id"]
+        style = next(row for row in shop["styles"] if row["id"] == style_id)
+        mapping = style.get("model_colors") if isinstance(style.get("model_colors"), dict) else {}
+        colors = list(mapping.get(model_id) or style.get("colors") or [])
+        if color not in colors:
+            colors.append(color)
+        style["model_colors"] = {**mapping, model_id: colors}
+        saved = self.client.post("/api/admin/save_shop_data", json={
+            "data": shop, "expected_version": version,
+        })
+        self.assertEqual(saved.status_code, 200, saved.get_data(as_text=True))
+        synced = self.client.post("/api/admin/commerce_sync_skus")
+        self.assertEqual(synced.status_code, 200, synced.get_data(as_text=True))
+        return next(row for row in app.commerce.read()["skus"]
+                    if row["model_id"] == model_id and row["style_id"] == style_id
+                    and row["color"] == color)
+
     def prepare(self, key=None):
         response = self.post("prepare", {"order_id": self.order_id}, key)
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
@@ -306,7 +326,7 @@ class PrintCenterTests(unittest.TestCase):
         with app.print_center.store.connection() as db:
             self.assertEqual(db.execute("SELECT count(*) FROM print_events WHERE job_id=?", (job["id"],)).fetchone()[0], 3)
 
-    def test_model_geometry_is_not_a_formal_profile_until_explicit_save(self):
+    def test_complete_case_profile_materializes_missing_sku_on_prepare(self):
         dashboard = self.client.get("/api/admin/print/jobs").get_json()
         row = next(item for item in dashboard["rows"] if item["order_id"] == self.order_id)
         self.assertNotIn("profile_suggestion", row)
@@ -326,15 +346,15 @@ class PrintCenterTests(unittest.TestCase):
         row = next(item for item in dashboard["rows"] if item["order_id"] == self.order_id)
         self.assertFalse(row["profile_available"])
         self.assertIsNone(row["profile"])
-        blocked = self.post("prepare", {"order_id": self.order_id})
-        self.assertEqual((blocked.status_code, blocked.get_json()["code"]), (409, "PROFILE_MISSING"))
-        saved = self.client.post("/api/admin/print/model-profiles", json={
-            "model_id": model["id"], "style_id": style_id,
-            "shop_data": shop, "expected_version": version,
-        })
-        self.assertEqual(saved.status_code, 200, saved.get_data(as_text=True))
-        job = self.prepare()
+        prepared = self.post("prepare", {"order_id": self.order_id})
+        self.assertEqual(prepared.status_code, 200, prepared.get_data(as_text=True))
+        job = prepared.get_json()["job"]
         self.assertTrue(job["profile_complete"])
+        profile = app.print_center.store.profile(self.sku_id)
+        self.assertEqual(
+            (profile["width_mm"], profile["height_mm"], profile["left_mm"], profile["top_mm"]),
+            (71.25, 148.5, 3.25, 4.75),
+        )
 
     def test_model_style_save_syncs_matching_active_colors_only_and_preserves_commerce(self):
         data = app.commerce.read()
@@ -465,6 +485,64 @@ class PrintCenterTests(unittest.TestCase):
         self.assertEqual(job["sku_id"], self.sku_id)
         self.assertTrue(job["profile_complete"])
         self.assertEqual(app.commerce.read(), commerce_before)
+
+    def test_new_color_manual_prepare_materializes_profile_from_case_profile(self):
+        self.save_profile()
+        sku = self.add_color_sku("新色")
+        self.assertIsNone(app.print_center.store.profile(sku["id"]))
+        ready_client = app.print_center.client
+        app.print_center.client = YunPrintClient(env={"CI": "true"})
+        try:
+            self.order_id = self.create_order(color_name="新色")
+        finally:
+            app.print_center.client = ready_client
+        job = self.prepare()
+        profile = app.print_center.store.profile(sku["id"])
+        self.assertEqual(job["sku_id"], sku["id"])
+        self.assertEqual(
+            (profile["width_mm"], profile["height_mm"], profile["left_mm"],
+             profile["top_mm"], profile["angle"], profile["copies"],
+             profile["channel"], profile["spot_color"]),
+            (80.0, 160.0, 1.5, 2.5, 0.0, 1, "1", ""),
+        )
+
+    def test_new_color_auto_enqueue_materializes_profile_before_early_check(self):
+        self.save_profile()
+        sku = self.add_color_sku("自動色")
+        self.assertIsNone(app.print_center.store.profile(sku["id"]))
+        self.order_id = self.create_order(color_name="自動色")
+        profile = app.print_center.store.profile(sku["id"])
+        job = app.print_center.store.active_job(self.order_id)
+        self.assertIsNotNone(profile)
+        self.assertIsNotNone(job)
+        self.assertEqual(job["sku_id"], sku["id"])
+        self.assertEqual(
+            (profile["width_mm"], profile["height_mm"], profile["left_mm"],
+             profile["top_mm"], profile["angle"]),
+            (80.0, 160.0, 1.5, 2.5, 0.0),
+        )
+
+    def test_materialization_does_not_replace_existing_calibrated_profile(self):
+        self.save_profile()
+        sku = self.add_color_sku("校正色")
+        app.print_center.store.save_profile({
+            "sku_id": sku["id"], "width_mm": 77, "height_mm": 155,
+            "left_mm": 7, "top_mm": 8, "copies": 2, "spot_color": "",
+            "channel": "1", "angle": 9,
+        })
+        ready_client = app.print_center.client
+        app.print_center.client = YunPrintClient(env={"CI": "true"})
+        try:
+            self.order_id = self.create_order(color_name="校正色")
+        finally:
+            app.print_center.client = ready_client
+        self.prepare()
+        profile = app.print_center.store.profile(sku["id"])
+        self.assertEqual(
+            (profile["width_mm"], profile["height_mm"], profile["left_mm"],
+             profile["top_mm"], profile["angle"], profile["copies"]),
+            (77.0, 155.0, 7.0, 8.0, 9.0, 2),
+        )
 
     def test_stale_sku_profile_cannot_bypass_missing_model_style_configuration(self):
         app.print_center.store.save_profile({

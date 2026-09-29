@@ -23,9 +23,10 @@
 
   window.saveTemplate=async function(){
     const c=window.visualCanvas;if(!c)return alert('模板畫布尚未準備好');
-    const id=by('tpl-id')?.value||'',name=by('tpl-name')?.value.trim()||'',category=by('tpl-category')?.value.trim()||'熱門',reference_model_id=by('tpl-model')?.value||'';
-    if(!name||!reference_model_id)return alert('請填名稱並選擇設計基準型號');
-    const ref=(shopData.models||[]).find(x=>String(x.id)===String(reference_model_id))||{},W=Math.max(1,Number(tplW)||c.width||160),H=Math.max(1,Number(tplH)||c.height||320);
+    const id=by('tpl-id')?.value||'',name=by('tpl-name')?.value.trim()||'',category=by('tpl-category')?.value.trim()||'熱門',reference_model_id=by('tpl-model')?.value||'',reference_style_id=by('tpl-style')?.value||'';
+    if(!name||!reference_model_id||!reference_style_id)return alert('請填名稱並選擇設計基準型號與殼款');
+    const profile=window.benfuwanTemplateReferenceProfile?.();if(!profile)return alert('此型號的此殼款尚未配置生產資料');
+    const W=Math.max(1,Number(tplW)||c.width),H=Math.max(1,Number(tplH)||c.height);
     const all=c.getObjects(),slotObjs=all.filter(o=>o.isSlot),layoutObjects=all.filter(o=>!o.isSlot).map(o=>serializeObject(o,W,H)),layoutSlots=slotObjs.map(o=>slotRecord(o,W,H));
     const legacy=c.toJSON(CUSTOM);legacy.objects=(legacy.objects||[]).filter(o=>!o.isSlot).map(o=>{if(o.publicSrc){o.src=o.publicSrc;delete o.crossOrigin}return o});
     const old=id?(templatesData.templates||[]).find(x=>x.id===id):null;
@@ -35,7 +36,7 @@
 
     try{
       const blob=await (await fetch(dataUrl)).blob(),thumb=await uploadAdminImage(new File([blob],'template-thumb.png',{type:'image/png'}),'template');
-      const data={...(old||{}),id:id||('tpl_'+Date.now()),name,category,universal:true,template_version:3,model_id:'*',reference_model_id,source_print_w:Number(ref.print_w)||80,source_print_h:Number(ref.print_h)||160,source_canvas_w:W,source_canvas_h:H,thumb_url:thumb,slots:layoutSlots.map(s=>legacySlot(s,W,H)),objects_json:legacy,layout_v3:{version:3,source_w:W,source_h:H,objects:layoutObjects,slots:layoutSlots}};
+      const data={...(old||{}),id:id||('tpl_'+Date.now()),name,category,universal:true,template_version:3,model_id:'*',reference_model_id,reference_style_id,source_print_w:Number(profile.print_w),source_print_h:Number(profile.print_h),source_canvas_w:W,source_canvas_h:H,thumb_url:thumb,slots:layoutSlots.map(s=>legacySlot(s,W,H)),objects_json:legacy,layout_v3:{version:3,source_w:W,source_h:H,objects:layoutObjects,slots:layoutSlots}};
       if(id){const i=templatesData.templates.findIndex(x=>x.id===id);if(i>=0)templatesData.templates[i]=data;else templatesData.templates.push(data)}else templatesData.templates.push(data);
       if(!templatesData.categories.includes(category))templatesData.categories.push(category);
       await apiJson('/api/admin/save_templates',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(templatesData)});renderTemplateTabs?.();renderTemplates?.();closeModal?.('template-modal');alert('模板已儲存 ✓（新版跨型號精準座標）');

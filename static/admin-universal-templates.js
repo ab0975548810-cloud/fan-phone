@@ -9,16 +9,39 @@
     return list.find(m=>m.name==='iPhone 13')||list.find(m=>m.status!==false)||list[0]||null;
   };
 
+  function caseProfile(modelId,styleId){
+    const model=(shopData.models||[]).find(m=>String(m.id)===String(modelId));
+    const profile=window.BenfuwanCaseProfiles?.profileFor?.(model,String(styleId||''));
+    return window.BenfuwanCaseProfiles?.complete?.(profile)?profile:null;
+  }
+
+  function populateReferenceStyles(preferred='',allowBlank=false){
+    const select=$('tpl-style'),modelId=$('tpl-model')?.value;if(!select)return '';
+    const styles=(shopData.styles||[]).filter(s=>s&&s.status!==false&&s.id);
+    const options=styles.map(s=>{
+      const ready=!!caseProfile(modelId,s.id);
+      return `<option value="${esc(s.id)}">${esc(s.name||s.id)}${ready?'':'（尚未配置）'}</option>`;
+    }).join('');
+    select.innerHTML=(allowBlank?'<option value="">請選擇基準殼款</option>':'')+options;
+    const wanted=styles.some(s=>String(s.id)===String(preferred))?String(preferred):'';
+    select.value=wanted||(allowBlank?'':String(styles.find(s=>caseProfile(modelId,s.id))?.id||styles[0]?.id||''));
+    return select.value;
+  }
+
+  window.benfuwanTemplateReferenceProfile=()=>caseProfile($('tpl-model')?.value,$('tpl-style')?.value);
+
   function relabelUi(){
     const sel=document.getElementById('tpl-model');
     if(!sel)return;
     const field=sel.closest('.field');
     const label=field?.querySelector('label');
     if(label)label.textContent='設計基準型號（不限制客人型號）';
+    const styleLabel=document.getElementById('tpl-style')?.closest('.field')?.querySelector('label');
+    if(styleLabel)styleLabel.textContent='設計基準殼款（決定來源畫布比例）';
     if(field&&!field.querySelector('.bf-universal-note')){
       const note=document.createElement('div');
       note.className='bf-universal-note notice';
-      note.innerHTML='模板會儲存成 <b>全型號通用</b>。這裡選的型號只決定你編輯時看到的畫布比例，客人前台會依他選的手機型號自動套用。';
+      note.innerHTML='模板會儲存成 <b>全型號通用</b>。基準型號與殼款共同決定來源畫布比例；客人前台會依已選殼款的生產尺寸自動套用。';
       field.appendChild(note);
     }
   }
@@ -27,6 +50,7 @@
     try{
       await Promise.all([loadShop(),loadAssets(),loadTemplates(),ensureFabric()]);
       const t=id?templatesData.templates.find(x=>x.id===id):null;
+      window.__bfEditingTemplate=t||null;
       const ref=pickReferenceModel();
       $('tpl-id').value=id;
       $('tpl-name').value=t?.name||'';
@@ -34,6 +58,10 @@
       $('tpl-model').innerHTML=(shopData.models||[]).filter(m=>m.status!==false).map(m=>`<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('');
       const refId=t?.reference_model_id || (t?.model_id && t.model_id!=='*'?t.model_id:'') || ref?.id || shopData.models?.[0]?.id || '';
       $('tpl-model').value=refId;
+      const preferredStyle=t?.reference_style_id||t?.case_style_id||'';
+      populateReferenceStyles(preferredStyle,Boolean(t&&!preferredStyle));
+      $('tpl-model').onchange=()=>{populateReferenceStyles('',false);initEditor()};
+      $('tpl-style').onchange=()=>initEditor();
       relabelUi();
       openModal('template-modal');
       setTimeout(()=>initEditor(t?.slots||[],t?.objects_json||null,t?.thumb_url||''),30);
@@ -52,12 +80,13 @@
     const id=$('tpl-id').value,
       name=$('tpl-name').value.trim(),
       category=$('tpl-category').value.trim()||'熱門',
-      reference_model_id=$('tpl-model').value;
-    if(!name||!reference_model_id||!visualCanvas)return alert('請填名稱並選擇設計基準型號');
+      reference_model_id=$('tpl-model').value,
+      reference_style_id=$('tpl-style').value;
+    if(!name||!reference_model_id||!reference_style_id||!visualCanvas)return alert('請填名稱並選擇設計基準型號與殼款');
 
-    const ref=(shopData.models||[]).find(x=>x.id===reference_model_id);
-    const sourcePrintW=Number(ref?.print_w)||80,
-      sourcePrintH=Number(ref?.print_h)||160;
+    const profile=caseProfile(reference_model_id,reference_style_id);
+    if(!profile)return alert('此型號的此殼款尚未配置生產資料');
+    const sourcePrintW=Number(profile.print_w),sourcePrintH=Number(profile.print_h);
     const slots=[],slotObjs=[];
     visualCanvas.getObjects().forEach(o=>{
       if(o.isSlot){
@@ -82,13 +111,15 @@
     try{
       const blob=await (await fetch(dataUrl)).blob();
       const url=await uploadAdminImage(new File([blob],'template.png',{type:'image/png'}),'template');
-      const data={
+      const old=id?(templatesData.templates||[]).find(x=>x.id===id):null;
+      const data={...(old||{}),
         id:id||'tpl_'+Date.now(),
         name,category,
         universal:true,
         template_version:2,
         model_id:'*',
         reference_model_id,
+        reference_style_id,
         source_print_w:sourcePrintW,
         source_print_h:sourcePrintH,
         source_canvas_w:tplW,

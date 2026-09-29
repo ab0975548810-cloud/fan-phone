@@ -19,6 +19,7 @@
     if (Object.prototype.hasOwnProperty.call(profiles, styleId)) return profiles[styleId] || {};
     return styleId === LEGACY_CRYSTAL_STYLE_ID ? model : null;
   }
+  window.BenfuwanCaseProfiles = Object.freeze({LEGACY_CRYSTAL_STYLE_ID, profileFor, complete});
 
   function ensureStyles() {
     if (document.getElementById('bf-model-profile-admin-style')) return;
