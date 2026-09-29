@@ -789,7 +789,7 @@ def admin_test(browser, base):
     asset_category_src = page.locator('script[src*="admin-asset-categories.js"]').get_attribute('src')
     assert asset_category_src and 'v=20260926audit1' in asset_category_src, asset_category_src
     template_loader_src = page.locator('script[src*="admin-template-loader.js"]').get_attribute('src')
-    assert template_loader_src and 'v=20260929style1' in template_loader_src, template_loader_src
+    assert template_loader_src and 'v=20260929universal1' in template_loader_src, template_loader_src
     commerce_src = page.locator('script[src*="admin-commerce-v1.js"]').get_attribute('src')
     assert commerce_src and 'v=20260923cas1' in commerce_src, commerce_src
     def ux_error(route):
