@@ -36,11 +36,10 @@
   function centerOf(o,w,h){const ox=o.originX||'left',oy=o.originY||'top';return {x:(Number(o.left)||0)+(ox==='left'?w/2:ox==='right'?-w/2:0),y:(Number(o.top)||0)+(oy==='top'?h/2:oy==='bottom'?-h/2:0)}}
 
   async function precise(tpl){
-    const target=(shopData.models||[]).find(m=>String(m.id)===String(ctx.modelId||''))||{};
-    const source=(shopData.models||[]).find(m=>String(m.id)===String(tpl.reference_model_id||''))||{};
-    const sourceW=Math.max(1,Number(tpl.source_print_w)||Number(source.print_w)||80),sourceH=Math.max(1,Number(tpl.source_print_h)||Number(source.print_h)||160),targetW=Math.max(1,Number(ctx.printW)||Number(target.print_w)||80),targetH=Math.max(1,Number(ctx.printH)||Number(target.print_h)||160);
+    const source=window.BenfuwanTemplateGeometry.sourceGeometry(tpl),target=window.BenfuwanTemplateGeometry.targetGeometry();
+    const sourceW=source.w,sourceH=source.h,targetW=target.w,targetH=target.h;
     const sourceRawW=Math.max(1,Number(tpl.source_canvas_w)||sourceW*2),sourceRawH=Math.max(1,Number(tpl.source_canvas_h)||sourceH*2),targetRawW=targetW*2,targetRawH=targetH*2;
-    const rx=targetRawW/sourceRawW,ry=targetRawH/sourceRawH,uniform=Math.min(rx,ry),m=await maskMap(ctx.printLineUrl||target.print_line_img||target.line_img||'');
+    const rx=targetRawW/sourceRawW,ry=targetRawH/sourceRawH,uniform=Math.min(rx,ry),m=await maskMap(target.mask);
     const out=clone(tpl);
     out.universal=false;
     out.model_id=ctx.modelId;
@@ -64,7 +63,7 @@
   window.applyTemplate=function(tpl,done){
     if(!isUniversal(tpl)||typeof previousApply!=='function')return previousApply?.(tpl,done);
     if(typeof setBusy==='function')setBusy(true,'正在精準對位模板...');
-    precise(tpl).then(adapted=>previousApply(adapted,()=>{if(typeof setBusy==='function')setBusy(false);done?.()})).catch(err=>{console.error('[FRONT] precision template fit failed',err);if(typeof setBusy==='function')setBusy(false);previousApply(tpl,done)});
+    precise(tpl).then(adapted=>previousApply(adapted,()=>{if(typeof setBusy==='function')setBusy(false);done?.()})).catch(err=>{console.error('[FRONT] precision template fit failed',err);if(typeof setBusy==='function')setBusy(false);if(typeof toast==='function')toast('模板缺少可驗證的基準尺寸，請聯絡店家更新模板')});
   };
   console.info('[FRONT] single-pass precision template positioning enabled');
 })();

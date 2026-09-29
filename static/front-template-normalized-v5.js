@@ -24,10 +24,10 @@ function centerFromRaw(o,sw,sh){
   const iw=Math.max(1,Number(o.width)||1),ih=Math.max(1,Number(o.height)||1),sx=Math.abs(Number(o.scaleX)||1),sy=Math.abs(Number(o.scaleY)||1),w=iw*sx,h=ih*sy,ox=o.originX||'left',oy=o.originY||'top';let cx=Number(o.left)||0,cy=Number(o.top)||0;if(ox==='left')cx+=w/2;else if(ox==='right')cx-=w/2;if(oy==='top')cy+=h/2;else if(oy==='bottom')cy-=h/2;return{x:cx/sw,y:cy/sh,w:w/sw,h:h/sh};
 }
 async function adapt(tpl){
-  const target=(shopData.models||[]).find(m=>String(m.id)===String(ctx.modelId||''))||{},source=(shopData.models||[]).find(m=>String(m.id)===String(tpl.reference_model_id||''))||{};
-  const tw=Math.max(1,Number(ctx.printW)||Number(target.print_w)||80),th=Math.max(1,Number(ctx.printH)||Number(target.print_h)||160),swmm=Math.max(1,Number(tpl.source_print_w)||Number(source.print_w)||80),shmm=Math.max(1,Number(tpl.source_print_h)||Number(source.print_h)||160);
+  const source=window.BenfuwanTemplateGeometry.sourceGeometry(tpl),target=window.BenfuwanTemplateGeometry.targetGeometry();
+  const tw=target.w,th=target.h,swmm=source.w,shmm=source.h;
   const tcw=tw*2,tch=th*2,scw=Math.max(1,Number(tpl.source_canvas_w)||swmm*2),sch=Math.max(1,Number(tpl.source_canvas_h)||shmm*2);
-  const [sb,tb]=await Promise.all([box(source.print_line_img||source.line_img||''),box(ctx.printLineUrl||target.print_line_img||target.line_img||'')]);
+  const [sb,tb]=await Promise.all([box(source.mask),box(target.mask)]);
   const sSafe={x:sb.x*scw,y:sb.y*sch,w:sb.w*scw,h:sb.h*sch},tSafe={x:tb.x*tcw,y:tb.y*tch,w:tb.w*tcw,h:tb.h*tch};
   const scale=Math.min(tSafe.w/Math.max(1,sSafe.w),tSafe.h/Math.max(1,sSafe.h));
   const out=clone(tpl);out.universal=false;out.model_id=ctx.modelId;out.template_version=1;
@@ -36,6 +36,6 @@ async function adapt(tpl){
   out.slots=(tpl.slots||[]).map(s=>{const cx=(Number(s.x)||0)+(Number(s.w)||0)/2,cy=(Number(s.y)||0)+(Number(s.h)||0)/2,sx=sb.x*swmm,sy=sb.y*shmm,sww=sb.w*swmm,shh=sb.h*shmm,tx=tb.x*tw,ty=tb.y*th,tww=tb.w*tw,thh=tb.h*th,rrx=(cx-sx)/Math.max(1,sww),rry=(cy-sy)/Math.max(1,shh),u=Math.min(tww/Math.max(1,sww),thh/Math.max(1,shh)),w=(Number(s.w)||0)*u,h=(Number(s.h)||0)*u,ncx=tx+rrx*tww,ncy=ty+rry*thh;return{...s,x:ncx-w/2,y:ncy-h/2,w,h}});
   if(out.thumb_url)out.thumb_url=proxy(out.thumb_url);return out;
 }
-window.applyTemplate=function(tpl,done){if(!isUniversal(tpl)||typeof previous!=='function')return previous?.(tpl,done);setBusy?.(true,'正在快速套用模板...');adapt(tpl).then(x=>previous(x,()=>{setBusy?.(false);done?.()})).catch(e=>{console.error('[TPL V5]',e);setBusy?.(false);previous(tpl,done)})};
+window.applyTemplate=function(tpl,done){if(!isUniversal(tpl)||typeof previous!=='function')return previous?.(tpl,done);setBusy?.(true,'正在快速套用模板...');adapt(tpl).then(x=>previous(x,()=>{setBusy?.(false);done?.()})).catch(e=>{console.error('[TPL V5]',e);setBusy?.(false);toast?.('模板缺少可驗證的基準尺寸，請聯絡店家更新模板')})};
 console.info('[FRONT] normalized safe-area template v5 enabled');
 })();

@@ -180,6 +180,29 @@ class PrintStore:
                 active=1,updated_at=excluded.updated_at""", row)
         return self.profile(profile["sku_id"])
 
+    def materialize_profile(self, profile):
+        """Create a derived SKU profile once without replacing a calibrated row."""
+        now = utcnow()
+        row = {**profile, "active": True, "created_at": now, "updated_at": now}
+        if self.app.USE_SUPABASE:
+            (self.app.SUPABASE.table("production_profiles")
+             .upsert(row, on_conflict="sku_id", ignore_duplicates=True).execute())
+            current = self.profile(profile["sku_id"])
+            if not current:
+                (self.app.SUPABASE.table("production_profiles").update(row)
+                 .eq("sku_id", profile["sku_id"]).eq("active", False).execute())
+            return self.profile(profile["sku_id"])
+        with self.connection(True) as db:
+            db.execute("""INSERT INTO production_profiles
+                (sku_id,width_mm,height_mm,left_mm,top_mm,copies,spot_color,channel,angle,active,created_at,updated_at)
+                VALUES (:sku_id,:width_mm,:height_mm,:left_mm,:top_mm,:copies,:spot_color,:channel,:angle,1,:created_at,:updated_at)
+                ON CONFLICT(sku_id) DO UPDATE SET width_mm=excluded.width_mm,height_mm=excluded.height_mm,
+                left_mm=excluded.left_mm,top_mm=excluded.top_mm,copies=excluded.copies,
+                spot_color=excluded.spot_color,channel=excluded.channel,angle=excluded.angle,
+                active=1,updated_at=excluded.updated_at
+                WHERE production_profiles.active=0""", row)
+        return self.profile(profile["sku_id"])
+
     def save_profiles(self, profiles):
         """Upsert a model's active SKU profiles as one database statement."""
         profiles = list(profiles or [])

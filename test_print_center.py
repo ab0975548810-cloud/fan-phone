@@ -123,13 +123,38 @@ class PrintCenterTests(unittest.TestCase):
 
     def save_profile(self):
         shop, version = self.shop_snapshot()
-        model_id = next(s["model_id"] for s in app.commerce.read()["skus"] if s["id"] == self.sku_id)
+        sku = next(s for s in app.commerce.read()["skus"] if s["id"] == self.sku_id)
+        model_id, style_id = sku["model_id"], sku["style_id"]
         model = next(item for item in shop["models"] if item["id"] == model_id)
-        model.update(print_w=80, print_h=160, print_x=1.5, print_y=2.5, print_angle=0)
+        model.setdefault("case_profiles", {})[style_id] = {
+            "preview_mask_img": "fixture://preview.png", "print_line_img": "fixture://print.png",
+            "print_w": 80, "print_h": 160, "print_x": 1.5, "print_y": 2.5, "print_angle": 0,
+        }
         response = self.client.post("/api/admin/print/model-profiles", json={
-            "model_id": model_id, "shop_data": shop, "expected_version": version,
+            "model_id": model_id, "style_id": style_id,
+            "shop_data": shop, "expected_version": version,
         })
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+
+    def add_color_sku(self, color):
+        shop, version = self.shop_snapshot()
+        model_id = app.DEFAULT_SHOP_DATA["models"][0]["id"]
+        style_id = app.DEFAULT_SHOP_DATA["styles"][0]["id"]
+        style = next(row for row in shop["styles"] if row["id"] == style_id)
+        mapping = style.get("model_colors") if isinstance(style.get("model_colors"), dict) else {}
+        colors = list(mapping.get(model_id) or style.get("colors") or [])
+        if color not in colors:
+            colors.append(color)
+        style["model_colors"] = {**mapping, model_id: colors}
+        saved = self.client.post("/api/admin/save_shop_data", json={
+            "data": shop, "expected_version": version,
+        })
+        self.assertEqual(saved.status_code, 200, saved.get_data(as_text=True))
+        synced = self.client.post("/api/admin/commerce_sync_skus")
+        self.assertEqual(synced.status_code, 200, synced.get_data(as_text=True))
+        return next(row for row in app.commerce.read()["skus"]
+                    if row["model_id"] == model_id and row["style_id"] == style_id
+                    and row["color"] == color)
 
     def prepare(self, key=None):
         response = self.post("prepare", {"order_id": self.order_id}, key)
@@ -161,7 +186,7 @@ class PrintCenterTests(unittest.TestCase):
 
     def test_missing_credentials_and_missing_profile_fail_closed(self):
         response = self.post("prepare", {"order_id": self.order_id})
-        self.assertEqual((response.status_code, response.get_json()["code"]), (409, "PROFILE_MISSING"))
+        self.assertEqual((response.status_code, response.get_json()["code"]), (409, "PRODUCTION_STYLE_NOT_CONFIGURED"))
         self.assertEqual(app.print_center.store.list_jobs(), [])
         self.save_profile()
         job = self.prepare()
@@ -301,7 +326,7 @@ class PrintCenterTests(unittest.TestCase):
         with app.print_center.store.connection() as db:
             self.assertEqual(db.execute("SELECT count(*) FROM print_events WHERE job_id=?", (job["id"],)).fetchone()[0], 3)
 
-    def test_model_geometry_is_not_a_formal_profile_until_explicit_save(self):
+    def test_complete_case_profile_materializes_missing_sku_on_prepare(self):
         dashboard = self.client.get("/api/admin/print/jobs").get_json()
         row = next(item for item in dashboard["rows"] if item["order_id"] == self.order_id)
         self.assertNotIn("profile_suggestion", row)
@@ -310,37 +335,45 @@ class PrintCenterTests(unittest.TestCase):
 
         shop, version = self.shop_snapshot()
         model = next(item for item in shop["models"] if item["id"] == app.DEFAULT_SHOP_DATA["models"][0]["id"])
-        model.update(print_w=71.25, print_h=148.5, print_x=3.25, print_y=4.75)
+        style_id = app.DEFAULT_SHOP_DATA["styles"][0]["id"]
+        model.setdefault("case_profiles", {})[style_id] = {
+            "preview_mask_img": "fixture://preview.png", "print_line_img": "fixture://print.png",
+            "print_w": 71.25, "print_h": 148.5, "print_x": 3.25, "print_y": 4.75,
+        }
         app.local_save_json(app.DATA_FILE, shop)
         _, version = self.shop_snapshot()
         dashboard = self.client.get("/api/admin/print/jobs").get_json()
         row = next(item for item in dashboard["rows"] if item["order_id"] == self.order_id)
         self.assertFalse(row["profile_available"])
         self.assertIsNone(row["profile"])
-        blocked = self.post("prepare", {"order_id": self.order_id})
-        self.assertEqual((blocked.status_code, blocked.get_json()["code"]), (409, "PROFILE_MISSING"))
-        saved = self.client.post("/api/admin/print/model-profiles", json={
-            "model_id": model["id"], "shop_data": shop, "expected_version": version,
-        })
-        self.assertEqual(saved.status_code, 200, saved.get_data(as_text=True))
-        job = self.prepare()
+        prepared = self.post("prepare", {"order_id": self.order_id})
+        self.assertEqual(prepared.status_code, 200, prepared.get_data(as_text=True))
+        job = prepared.get_json()["job"]
         self.assertTrue(job["profile_complete"])
+        profile = app.print_center.store.profile(self.sku_id)
+        self.assertEqual(
+            (profile["width_mm"], profile["height_mm"], profile["left_mm"], profile["top_mm"]),
+            (71.25, 148.5, 3.25, 4.75),
+        )
 
-    def test_model_save_syncs_all_active_skus_and_preserves_commerce_and_copies(self):
+    def test_model_style_save_syncs_matching_active_colors_only_and_preserves_commerce(self):
         data = app.commerce.read()
         model_id = app.DEFAULT_SHOP_DATA["models"][0]["id"]
-        model_skus = [row for row in data["skus"] if row["model_id"] == model_id]
+        style_id = "style_color"
+        model_skus = [row for row in data["skus"] if row["model_id"] == model_id and row["style_id"] == style_id]
         self.assertGreater(len(model_skus), 2)
         inactive = model_skus[-1]
         inactive["active"] = False
         self.assertTrue(app.commerce.store.commit(int(data["revision"]), data))
-        active = [row for row in app.commerce.read()["skus"] if row["model_id"] == model_id and row["active"]]
+        active = [row for row in app.commerce.read()["skus"]
+                  if row["model_id"] == model_id and row["style_id"] == style_id and row["active"]]
         app.print_center.store.save_profile({
             "sku_id": active[0]["id"], "width_mm": 1, "height_mm": 2,
             "left_mm": 3, "top_mm": 4, "copies": 3, "spot_color": "old",
             "channel": "9", "angle": 5,
         })
-        other = next(row for row in app.commerce.read()["skus"] if row["model_id"] != model_id)
+        other = next(row for row in app.commerce.read()["skus"]
+                     if row["model_id"] == model_id and row["style_id"] != style_id)
         app.print_center.store.save_profile({
             "sku_id": other["id"], "width_mm": 61, "height_mm": 121,
             "left_mm": 6, "top_mm": 7, "copies": 2, "spot_color": "",
@@ -350,8 +383,14 @@ class PrintCenterTests(unittest.TestCase):
         commerce_before = app.commerce.read()
         shop, version = self.shop_snapshot()
         model = next(row for row in shop["models"] if row["id"] == model_id)
-        model.update(print_w=72.5, print_h=149.25, print_x=2.75, print_y=4.5, print_angle=1.5)
-        response = self.client.post("/api/admin/print/model-profiles", json={"model_id": model_id, "shop_data": shop, "expected_version": version})
+        model.setdefault("case_profiles", {})[style_id] = {
+            "preview_mask_img": "fixture://color-preview.png", "print_line_img": "fixture://color-print.png",
+            "print_w": 72.5, "print_h": 149.25, "print_x": 2.75, "print_y": 4.5, "print_angle": 1.5,
+        }
+        response = self.client.post("/api/admin/print/model-profiles", json={
+            "model_id": model_id, "style_id": style_id,
+            "shop_data": shop, "expected_version": version,
+        })
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         self.assertEqual(response.get_json()["synced_skus"], len(active))
         for sku in active:
@@ -367,17 +406,25 @@ class PrintCenterTests(unittest.TestCase):
     def test_model_profile_sync_failure_is_clear_retryable_and_not_a_silent_success(self):
         shop, version = self.shop_snapshot()
         model = shop["models"][0]
-        model.update(print_w=70, print_h=140, print_x=2, print_y=3, print_angle=0)
+        style_id = shop["styles"][0]["id"]
+        model.setdefault("case_profiles", {})[style_id] = {
+            "preview_mask_img": "fixture://preview.png", "print_line_img": "fixture://print.png",
+            "print_w": 70, "print_h": 140, "print_x": 2, "print_y": 3, "print_angle": 0,
+        }
         commerce_before = app.commerce.read()
         with mock.patch.object(app.print_center.store, "save_profiles", side_effect=RuntimeError("fixture")):
-            response = self.client.post("/api/admin/print/model-profiles", json={"model_id": model["id"], "shop_data": shop, "expected_version": version})
+            response = self.client.post("/api/admin/print/model-profiles", json={
+                "model_id": model["id"], "style_id": style_id,
+                "shop_data": shop, "expected_version": version,
+            })
         self.assertEqual((response.status_code, response.get_json()["code"]), (503, "PROFILE_SYNC_FAILED"))
         self.assertIn("再次按儲存", response.get_json()["msg"])
         self.assertTrue(response.get_json()["version"])
         self.assertEqual(app.commerce.read(), commerce_before)
         persisted = app.local_load_json(app.DATA_FILE, app.DEFAULT_SHOP_DATA)
         saved_model = next(row for row in persisted["models"] if row["id"] == model["id"])
-        self.assertEqual((saved_model["print_w"], saved_model["print_h"]), (70, 140))
+        saved_profile = saved_model["case_profiles"][style_id]
+        self.assertEqual((saved_profile["print_w"], saved_profile["print_h"]), (70, 140))
         self.assertEqual(self.client.post("/api/admin/print/profile", json={}).status_code, 404)
 
     def test_stale_model_save_does_not_write_catalog_or_profiles(self):
@@ -387,18 +434,22 @@ class PrintCenterTests(unittest.TestCase):
         winner_version = app.cloud_compare_and_swap_json(
             'shop_data', app.DATA_FILE, winner, stale_version)
         model = stale_shop['models'][0]
-        model.update(print_w=66, print_h=133, print_x=9, print_y=8, print_angle=7)
+        style_id = stale_shop['styles'][0]['id']
+        model.setdefault('case_profiles', {})[style_id] = {
+            'preview_mask_img': 'fixture://preview.png', 'print_line_img': 'fixture://print.png',
+            'print_w': 66, 'print_h': 133, 'print_x': 9, 'print_y': 8, 'print_angle': 7,
+        }
         profiles_before = app.print_center.store.profiles()
         response = self.client.post('/api/admin/print/model-profiles', json={
             'model_id': model['id'], 'shop_data': stale_shop,
-            'expected_version': stale_version,
+            'style_id': style_id, 'expected_version': stale_version,
         })
         self.assertEqual((response.status_code, response.get_json()['code']), (409, 'STALE_DATA'))
         current, current_version = self.shop_snapshot()
         self.assertEqual(current_version, winner_version)
         self.assertIn('另一個分頁已更新', current['brands'])
         current_model = next(row for row in current['models'] if row['id'] == model['id'])
-        self.assertNotEqual((current_model.get('print_w'), current_model.get('print_h')), (66, 133))
+        self.assertNotEqual(current_model.get('case_profiles', {}).get(style_id, {}).get('print_w'), 66)
         self.assertEqual(app.print_center.store.profiles(), profiles_before)
 
     def test_legacy_order_binding_is_explicit_print_only_and_required_before_prepare(self):
@@ -427,12 +478,107 @@ class PrintCenterTests(unittest.TestCase):
         self.assertNotIn(self.order_id, app.commerce.read()["order_finance"])
 
         missing_profile = self.post("prepare", {"order_id": self.order_id})
-        self.assertEqual((missing_profile.status_code, missing_profile.get_json()["code"]), (409, "PROFILE_MISSING"))
+        self.assertEqual((missing_profile.status_code, missing_profile.get_json()["code"]),
+                         (409, "PRODUCTION_STYLE_NOT_CONFIGURED"))
         self.save_profile()
         job = self.prepare()
         self.assertEqual(job["sku_id"], self.sku_id)
         self.assertTrue(job["profile_complete"])
         self.assertEqual(app.commerce.read(), commerce_before)
+
+    def test_new_color_manual_prepare_materializes_profile_from_case_profile(self):
+        self.save_profile()
+        sku = self.add_color_sku("新色")
+        self.assertIsNone(app.print_center.store.profile(sku["id"]))
+        ready_client = app.print_center.client
+        app.print_center.client = YunPrintClient(env={"CI": "true"})
+        try:
+            self.order_id = self.create_order(color_name="新色")
+        finally:
+            app.print_center.client = ready_client
+        job = self.prepare()
+        profile = app.print_center.store.profile(sku["id"])
+        self.assertEqual(job["sku_id"], sku["id"])
+        self.assertEqual(
+            (profile["width_mm"], profile["height_mm"], profile["left_mm"],
+             profile["top_mm"], profile["angle"], profile["copies"],
+             profile["channel"], profile["spot_color"]),
+            (80.0, 160.0, 1.5, 2.5, 0.0, 1, "1", ""),
+        )
+
+    def test_new_color_auto_enqueue_materializes_profile_before_early_check(self):
+        self.save_profile()
+        sku = self.add_color_sku("自動色")
+        self.assertIsNone(app.print_center.store.profile(sku["id"]))
+        self.order_id = self.create_order(color_name="自動色")
+        profile = app.print_center.store.profile(sku["id"])
+        job = app.print_center.store.active_job(self.order_id)
+        self.assertIsNotNone(profile)
+        self.assertIsNotNone(job)
+        self.assertEqual(job["sku_id"], sku["id"])
+        self.assertEqual(
+            (profile["width_mm"], profile["height_mm"], profile["left_mm"],
+             profile["top_mm"], profile["angle"]),
+            (80.0, 160.0, 1.5, 2.5, 0.0),
+        )
+
+    def test_materialization_does_not_replace_existing_calibrated_profile(self):
+        self.save_profile()
+        sku = self.add_color_sku("校正色")
+        app.print_center.store.save_profile({
+            "sku_id": sku["id"], "width_mm": 77, "height_mm": 155,
+            "left_mm": 7, "top_mm": 8, "copies": 2, "spot_color": "",
+            "channel": "1", "angle": 9,
+        })
+        ready_client = app.print_center.client
+        app.print_center.client = YunPrintClient(env={"CI": "true"})
+        try:
+            self.order_id = self.create_order(color_name="校正色")
+        finally:
+            app.print_center.client = ready_client
+        self.prepare()
+        profile = app.print_center.store.profile(sku["id"])
+        self.assertEqual(
+            (profile["width_mm"], profile["height_mm"], profile["left_mm"],
+             profile["top_mm"], profile["angle"], profile["copies"]),
+            (77.0, 155.0, 7.0, 8.0, 9.0, 2),
+        )
+
+    def test_stale_sku_profile_cannot_bypass_missing_model_style_configuration(self):
+        app.print_center.store.save_profile({
+            "sku_id": self.sku_id, "width_mm": 80, "height_mm": 160,
+            "left_mm": 0, "top_mm": 0, "copies": 1, "spot_color": "",
+            "channel": "1", "angle": 0,
+        })
+        response = self.post("prepare", {"order_id": self.order_id})
+        self.assertEqual((response.status_code, response.get_json()["code"]),
+                         (409, "PRODUCTION_STYLE_NOT_CONFIGURED"))
+        self.assertEqual(app.print_center.store.list_jobs(), [])
+
+    def test_legacy_root_profile_maps_only_to_crystal_style(self):
+        model = {
+            "preview_mask_img": "fixture://legacy-preview.png",
+            "print_line_img": "fixture://legacy-print.png",
+            "print_w": 70, "print_h": 140,
+        }
+        crystal = print_center._complete_model_style_profile(model, print_center.LEGACY_CRYSTAL_STYLE_ID)
+        self.assertIs(crystal, model)
+        self.assertIsNone(print_center._complete_model_style_profile(model, "style_mirror"))
+        model["case_profiles"] = {print_center.LEGACY_CRYSTAL_STYLE_ID: {}}
+        self.assertIsNone(print_center._complete_model_style_profile(model, print_center.LEGACY_CRYSTAL_STYLE_ID))
+
+    def test_vendor_send_rechecks_model_style_configuration(self):
+        self.save_profile()
+        job = self.prepare()
+        shop, _ = self.shop_snapshot()
+        order = app.commerce.store.order(self.order_id)
+        model = next(row for row in shop["models"] if row["id"] == order["model_id"])
+        model.get("case_profiles", {}).pop(order["style_id"], None)
+        app.local_save_json(app.DATA_FILE, shop)
+        response = self.send(job["id"])
+        self.assertEqual((response.status_code, response.get_json()["code"]),
+                         (409, "PRODUCTION_STYLE_NOT_CONFIGURED"))
+        self.assertFalse(any(path == "/api/Device/receiveTask" for path, _ in self.fake.calls))
 
     def test_legacy_binding_rejects_void_orders_and_finance_orders(self):
         finance_order = self.client.post("/api/admin/print/binding", json={"order_id": self.order_id, "sku_id": self.sku_id})
@@ -606,9 +752,12 @@ class PrintCenterTests(unittest.TestCase):
         self.assertNotIn("id='pc-modal'", source)
         self.assertNotIn('id="pc-modal"', source)
         self.assertIn("請到「品牌及型號」設定列印參數", source)
-        self.assertIn("A5 有效範圍為 200 × 230 mm", admin)
-        self.assertIn("座標原點在治具右下角", admin)
-        self.assertIn('id="model-angle"', admin)
+        self.assertIn('id="model-profile-admin"', admin)
+        profile_admin = (Path(__file__).parent / "static" / "admin-model-profiles.js").read_text(encoding="utf-8")
+        self.assertIn("A5 有效範圍為 200 × 230 mm", profile_admin)
+        self.assertIn("座標原點在治具右下角", profile_admin)
+        self.assertIn("model-profile-angle", profile_admin)
+        self.assertIn("style_id: activeStyleId", profile_admin)
         self.assertNotIn('id="style-x"', admin)
         self.assertNotIn('id="style-y"', admin)
         self.assertNotIn('id="style-w"', admin)

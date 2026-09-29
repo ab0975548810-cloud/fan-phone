@@ -176,35 +176,85 @@ def front_test(browser, base):
     assert mask_normalization['dimensions'] == [2030, 4241], mask_normalization
     print('FRONT_PRINT_MASK_NORMALIZATION_HOLE_DIMENSIONS_OK', mask_normalization)
     fixture_models = PRODUCTION_MASK_CONTRACT['models']
-    profile_audit = page.evaluate("models => window.BenfuwanModelProfile.audit(models)", fixture_models)
+    crystal_style = {'id':'style_1789287807818','name':'晶彩磁吸防摔殼','status':True}
+    profile_audit = page.evaluate("({models,styles}) => window.BenfuwanModelProfile.audit(models,styles)", {'models':fixture_models,'styles':[crystal_style]})
     expected_audit = PRODUCTION_MASK_CONTRACT['expected']
-    assert profile_audit['active'] == expected_audit['active'], profile_audit
+    assert profile_audit['activeModels'] == expected_audit['active'] and profile_audit['activeStyles'] == 1, profile_audit
     assert len(profile_audit['configured']) == expected_audit['configured'], profile_audit
     assert len(profile_audit['incomplete']) == expected_audit['incomplete'], profile_audit
-    assert set(profile_audit['configured']) == {'model_apple_13','model_apple_14','model_apple_14_pro_max','model_apple_17_pro'}, profile_audit
-    blocked_profile = page.evaluate("""models => {
-      shopData.models=models;activeBrand='';resetDesignState(false);renderModels();
-      const before=ctx.modelId,result=selectModel(models.find(model=>model.id==='model_apple_11'));
-      return {before,after:ctx.modelId,result,disabled:document.getElementById('model-next').disabled,badges:document.querySelectorAll('.bf-model-unconfigured .bf-model-config-badge').length,toast:document.getElementById('toast').textContent};
-    }""", fixture_models)
-    assert blocked_profile['before'] is None and blocked_profile['after'] is None and blocked_profile['result'] is False, blocked_profile
-    assert blocked_profile['disabled'] and blocked_profile['badges'] == 17 and '尚未完成' in blocked_profile['toast'], blocked_profile
-    print('FRONT_PRODUCTION_MODEL_PROFILE_AUDIT_OK', profile_audit, blocked_profile['badges'])
-    no_style_fallback = page.evaluate("""models => {
+    assert set(profile_audit['configured']) == {
+        'model_apple_13:style_1789287807818','model_apple_14:style_1789287807818',
+        'model_apple_14_pro_max:style_1789287807818','model_apple_17_pro:style_1789287807818'
+    }, profile_audit
+    blocked_profile = page.evaluate("""({models,crystal}) => {
+      shopData.models=models;shopData.styles=[crystal];activeBrand='';resetDesignState(false);renderModels();
+      const model=models.find(row=>row.id==='model_apple_11'),selected=selectModel(model),styled=selectStyle(crystal);
+      return {selected,styled,modelId:ctx.modelId,styleId:ctx.styleId,modelNext:document.getElementById('model-next').disabled,styleNext:document.getElementById('style-next').disabled,badges:document.querySelectorAll('.bf-style-unconfigured .bf-style-config-badge').length,toast:document.getElementById('toast').textContent};
+    }""", {'models':fixture_models,'crystal':crystal_style})
+    assert blocked_profile['selected'] is True and blocked_profile['styled'] is False, blocked_profile
+    assert blocked_profile['modelId'] == 'model_apple_11' and blocked_profile['styleId'] is None, blocked_profile
+    assert not blocked_profile['modelNext'] and blocked_profile['styleNext'] and blocked_profile['badges'] == 1 and '尚未完成生產設定' in blocked_profile['toast'], blocked_profile
+    print('FRONT_MODEL_STYLE_PROFILE_AUDIT_FAIL_CLOSED_OK', profile_audit, blocked_profile)
+    legacy_crystal_only = page.evaluate("""({models,crystal}) => {
       const model=models.find(row=>row.id==='model_apple_14_pro_max');
       const selected=selectModel(model);
-      const styled=selectStyle({id:'contract-style',name:'契約測試',price:390,mask_img:'style-preview',line_img:'style-print',print_w:99,print_h:199,colors:[]});
-      return {selected,styled,maskUrl:ctx.maskUrl,printLineUrl:ctx.printLineUrl,printW:ctx.printW,printH:ctx.printH};
-    }""", fixture_models)
-    assert no_style_fallback == {
+      const styled=selectStyle(crystal);
+      const mirror=selectStyle({id:'style_mirror',name:'鏡面殼',price:390,mask_img:'style-preview',line_img:'style-print',print_w:99,print_h:199,colors:[]});
+      return {selected,styled,mirror,styleId:ctx.styleId,maskUrl:ctx.maskUrl,printLineUrl:ctx.printLineUrl,printW:ctx.printW,printH:ctx.printH};
+    }""", {'models':fixture_models,'crystal':crystal_style})
+    assert legacy_crystal_only == {
         'selected': True,
         'styled': True,
+        'mirror': False,
+        'styleId': 'style_1789287807818',
         'maskUrl': 'fixture://iphone14-pro-max-preview.png',
         'printLineUrl': 'fixture://iphone14-pro-max-print.png',
         'printW': 85,
         'printH': 166.3,
-    }, no_style_fallback
-    print('FRONT_MODEL_LEVEL_PROFILE_NO_STYLE_FALLBACK_OK', no_style_fallback)
+    }, legacy_crystal_only
+    print('FRONT_LEGACY_ROOT_CRYSTAL_ONLY_NO_STYLE_FALLBACK_OK', legacy_crystal_only)
+
+    style_isolation = page.evaluate("""model => {
+      const configured={...model,case_profiles:{
+        crystal:{preview_mask_img:'fixture://crystal-preview',print_line_img:'fixture://crystal-print',print_w:70,print_h:140,print_x:1,print_y:2},
+        mirror:{preview_mask_img:'fixture://mirror-preview',print_line_img:'fixture://mirror-print',print_w:75,print_h:150,print_x:3,print_y:4}
+      }};
+      const crystal={id:'crystal',name:'晶彩',colors:['透明','粉']},mirror={id:'mirror',name:'鏡面',colors:['銀','黑']};
+      shopData.models=[configured];shopData.styles=[crystal,mirror];selectModel(configured);selectStyle(crystal);
+      const first={mask:ctx.maskUrl,line:ctx.printLineUrl,w:ctx.printW,h:ctx.printH,x:ctx.printX,y:ctx.printY};
+      selectStyle(mirror);const second={mask:ctx.maskUrl,line:ctx.printLineUrl,w:ctx.printW,h:ctx.printH,x:ctx.printX,y:ctx.printY};
+      return {first,second,crystalColors:window.BenfuwanModelColors?.colorsFor?.(crystal,configured.id)||crystal.colors};
+    }""", fixture_models[0])
+    assert style_isolation['first'] == {'mask':'fixture://crystal-preview','line':'fixture://crystal-print','w':70,'h':140,'x':1,'y':2}, style_isolation
+    assert style_isolation['second'] == {'mask':'fixture://mirror-preview','line':'fixture://mirror-print','w':75,'h':150,'x':3,'y':4}, style_isolation
+    print('FRONT_TWO_STYLES_INDEPENDENT_PROFILE_COLOR_SHARED_OK', style_isolation)
+    template_geometry = page.evaluate("""() => {
+      const model={id:'tpl-model',preview_mask_img:'fixture://legacy-crystal-preview',print_line_img:'fixture://legacy-crystal-print',print_w:72,print_h:142,case_profiles:{
+        crystal:{preview_mask_img:'fixture://cp',print_line_img:'fixture://cl',print_w:70,print_h:140},
+        mirror:{preview_mask_img:'fixture://mp',print_line_img:'fixture://ml',print_w:75,print_h:150}
+      }};
+      shopData.models=[model];ctx.printW=75;ctx.printH=150;ctx.printLineUrl='fixture://target';
+      const crystal=BenfuwanTemplateGeometry.sourceGeometry({reference_model_id:'tpl-model',reference_style_id:'crystal'});
+      const mirror=BenfuwanTemplateGeometry.sourceGeometry({reference_model_id:'tpl-model',reference_style_id:'mirror'});
+      const legacyTemplate={model_id:'*',universal:true,reference_model_id:'tpl-model',source_print_w:68,source_print_h:138,source_canvas_w:136,source_canvas_h:276};
+      const legacy=BenfuwanTemplateGeometry.sourceGeometry(legacyTemplate);
+      const explicitLegacyCrystal=BenfuwanTemplateGeometry.sourceGeometry({...legacyTemplate,reference_style_id:BenfuwanModelProfile.LEGACY_CRYSTAL_STYLE_ID});
+      const oldMirror=BenfuwanTemplateGeometry.sourceGeometry({...legacyTemplate,case_style_id:'mirror'});
+      let failed=false;try{BenfuwanTemplateGeometry.sourceGeometry({reference_model_id:'tpl-model'})}catch(e){failed=true}
+      const target=BenfuwanTemplateGeometry.targetGeometry();
+      return {crystal:{w:crystal.w,h:crystal.h,mask:crystal.mask},mirror:{w:mirror.w,h:mirror.h,mask:mirror.mask},legacy:{w:legacy.w,h:legacy.h,mask:legacy.mask},explicitLegacyCrystal:{w:explicitLegacyCrystal.w,h:explicitLegacyCrystal.h,mask:explicitLegacyCrystal.mask},oldMirror:{w:oldMirror.w,h:oldMirror.h,mask:oldMirror.mask},failed,target:{w:target.w,h:target.h,mask:target.mask}};
+    }""")
+    assert template_geometry == {
+        'crystal': {'w':70,'h':140,'mask':'fixture://cl'},
+        'mirror': {'w':75,'h':150,'mask':'fixture://ml'},
+        'legacy': {'w':68,'h':138,'mask':'fixture://legacy-crystal-print'},
+        'explicitLegacyCrystal': {'w':68,'h':138,'mask':'fixture://legacy-crystal-print'},
+        'oldMirror': {'w':68,'h':138,'mask':'fixture://ml'},
+        'failed': True,
+        'target': {'w':75,'h':150,'mask':'fixture://target'},
+    }, template_geometry
+    print('FRONT_TEMPLATE_LEGACY_CRYSTAL_MASK_AND_EXPLICIT_STYLE_PRECEDENCE_OK', template_geometry)
+    page.evaluate("({models,crystal}) => {shopData.models=models;shopData.styles=[crystal];resetDesignState(false)}", {'models':fixture_models,'crystal':crystal_style})
 
     mask_fixtures = {
         'iphone13': {'preview': fixture_data_url('iphone13-preview.png'), 'print': fixture_data_url('iphone13-print.png')},
@@ -603,7 +653,12 @@ def admin_test(browser, base):
         route.fulfill(status=200, content_type='application/json', body='{"status":"success","version":"model-status-version"}')
     page.route('**/api/admin/print/model-profiles', model_status_response)
     model_id = listing_original['data']['models'][0]['id']
-    page.evaluate("id => {openModelEditor(id);document.getElementById('model-active').checked=false}", model_id)
+    page.evaluate("""id => {
+      openModelEditor(id);document.getElementById('model-active').checked=false;
+      document.getElementById('model-profile-mask-url').value='fixture://admin-preview';
+      document.getElementById('model-profile-line-url').value='fixture://admin-print';
+      document.getElementById('model-profile-w').value='80';document.getElementById('model-profile-h').value='160';
+    }""", model_id)
     page.evaluate("() => saveModel()")
     assert len(model_status_requests) == 1
     assert next(row for row in model_status_requests[0]['shop_data']['models'] if row['id'] == model_id)['status'] is False
@@ -627,10 +682,12 @@ def admin_test(browser, base):
 
     model_color_src = page.locator('script[src*="admin-model-colors.js"]').get_attribute('src')
     assert model_color_src and 'v=20260926audit1' in model_color_src, model_color_src
+    model_profile_src = page.locator('script[src*="admin-model-profiles.js"]').get_attribute('src')
+    assert model_profile_src and 'v=20260929style1' in model_profile_src, model_profile_src
     asset_category_src = page.locator('script[src*="admin-asset-categories.js"]').get_attribute('src')
     assert asset_category_src and 'v=20260926audit1' in asset_category_src, asset_category_src
     template_loader_src = page.locator('script[src*="admin-template-loader.js"]').get_attribute('src')
-    assert template_loader_src and 'v=20260926audit1' in template_loader_src, template_loader_src
+    assert template_loader_src and 'v=20260929style1' in template_loader_src, template_loader_src
     commerce_src = page.locator('script[src*="admin-commerce-v1.js"]').get_attribute('src')
     assert commerce_src and 'v=20260923cas1' in commerce_src, commerce_src
     def ux_error(route):
@@ -731,8 +788,12 @@ def admin_test(browser, base):
     model_text = page.locator('#model-modal').inner_text()
     assert 'A5 有效範圍為 200 × 230 mm' in model_text
     assert '座標原點在治具右下角' in model_text
-    page.locator('#model-x').fill('1.5');page.locator('#model-y').fill('2.5')
-    page.locator('#model-w').fill('80');page.locator('#model-h').fill('160');page.locator('#model-angle').fill('0')
+    page.evaluate("""() => {
+      document.getElementById('model-profile-mask-url').value='fixture://admin-preview';
+      document.getElementById('model-profile-line-url').value='fixture://admin-print';
+    }""")
+    page.locator('#model-profile-x').fill('1.5');page.locator('#model-profile-y').fill('2.5')
+    page.locator('#model-profile-w').fill('80');page.locator('#model-profile-h').fill('160');page.locator('#model-profile-angle').fill('0')
     model_requests = []
     def save_model(route):
         model_requests.append(route.request.post_data_json)
@@ -742,6 +803,7 @@ def admin_test(browser, base):
     page.route('**/api/admin/print/model-profiles', save_model)
     page.evaluate("() => Promise.all([saveModel(),saveModel()])")
     assert len(model_requests) == 1, model_requests
+    assert model_requests[0]['style_id'] and model_requests[0]['model_id'], model_requests
     page.unroute('**/api/admin/print/model-profiles')
     page.locator('#model-modal').wait_for(state='hidden')
     page.locator('.nav button[data-view="styles"]').click()
@@ -1061,11 +1123,68 @@ def admin_test(browser, base):
     assert template_xss_result == {'executed': 0, 'edited': template_xss, 'inlineHandlers': 0}, template_xss_result
     print('ADMIN_TEMPLATE_STORED_DATA_ACTIONS_OK')
 
+    template_fixture_profile = page.evaluate("""() => {
+      const models=(shopData?.models||[]).filter(item=>item?.status!==false);
+      const styles=(shopData?.styles||[]).filter(item=>item?.status!==false);
+      if(!models.length||!styles.length)return null;
+      for(const model of models){
+        model.case_profiles={...(model.case_profiles||{})};
+        for(const style of styles){
+          if(!window.BenfuwanCaseProfiles?.complete(model.case_profiles[style.id])){
+            model.case_profiles[style.id]={
+              preview_mask_img:model.preview_mask_img||'fixture://template-preview',
+              print_line_img:model.print_line_img||'fixture://template-print',
+              print_x:1,print_y:2,print_w:70,print_h:140,print_angle:0
+            };
+          }
+        }
+      }
+      return {models:models.length,styles:styles.length};
+    }""")
+    assert template_fixture_profile, template_fixture_profile
     page.locator('#view-templates .titlebar .btn').click()
-    poll(page, "() => document.getElementById('template-modal')?.classList.contains('show') && typeof window.fabric !== 'undefined' && typeof visualCanvas !== 'undefined' && !!visualCanvas", timeout=30000)
+    poll(page, "() => document.getElementById('template-modal')?.classList.contains('show')", timeout=30000)
+    template_open_diag = page.evaluate("""() => ({canvas:!!visualCanvas,model:document.getElementById('tpl-model')?.value,style:document.getElementById('tpl-style')?.value,profile:!!window.benfuwanTemplateReferenceProfile?.(),dialogs:window.__templateOpenDialogs||[]})""")
+    print('ADMIN_TEMPLATE_OPEN_DIAG', template_open_diag)
+    assert template_open_diag['canvas'], template_open_diag
     template_editor_src = page.locator('script[src*="admin-template-editor-v2.js"]').get_attribute('src')
-    assert template_editor_src and 'v=20260923cas1' in template_editor_src, template_editor_src
+    assert template_editor_src and 'v=20260929style1' in template_editor_src, template_editor_src
     print('ADMIN_FABRIC_LAZY_OK')
+
+    template_contract = page.evaluate("""async () => {
+      const originalShop=structuredClone(shopData),originalTemplates=structuredClone(templatesData),originalSave=window.saveTemplates,originalUpload=window.uploadAdminImage;
+      const model={id:'geometry-model',name:'幾何型號',brand:'Apple',status:true,case_profiles:{
+        crystal:{preview_mask_img:'fixture://crystal-preview',print_line_img:'fixture://crystal-print',print_w:70,print_h:140,print_x:1,print_y:2,print_angle:0},
+        mirror:{preview_mask_img:'fixture://mirror-preview',print_line_img:'fixture://mirror-print',print_w:75,print_h:150,print_x:3,print_y:4,print_angle:90}
+      }};
+      shopData={brands:['Apple'],models:[model],styles:[{id:'crystal',name:'晶彩',status:true},{id:'mirror',name:'鏡面',status:true},{id:'missing',name:'未配置',status:true}]};
+      const modelSelect=document.getElementById('tpl-model'),styleSelect=document.getElementById('tpl-style');
+      modelSelect.innerHTML='<option value="geometry-model">幾何型號</option>';modelSelect.value='geometry-model';
+      styleSelect.innerHTML='<option value="crystal">晶彩</option><option value="mirror">鏡面</option><option value="missing">未配置</option>';
+      window.__bfEditingTemplate=null;
+      styleSelect.value='crystal';initEditor();const crystal={w:tplW,h:tplH};
+      styleSelect.value='mirror';initEditor();const mirror={w:tplW,h:tplH};
+      const beforeMissing={w:tplW,h:tplH};styleSelect.value='missing';const missingResult=initEditor();const afterMissing={w:tplW,h:tplH};
+      const old={id:'legacy-style-template',name:'舊殼款模板',category:'熱門',model_id:'*',universal:true,case_style_id:'crystal',reference_model_id:'geometry-model',source_print_w:70,source_print_h:140,slots:[],objects_json:{version:'5.3.0',objects:[]}};
+      templatesData={templates:[old],categories:['全部','熱門']};window.__bfEditingTemplate=old;
+      document.getElementById('tpl-id').value=old.id;document.getElementById('tpl-name').value=old.name;document.getElementById('tpl-category').value=old.category;styleSelect.value='crystal';initEditor([],old.objects_json,'');
+      let captured=null;window.uploadAdminImage=async()=>'/static/uploads/geometry-template.png';window.saveTemplates=async next=>{captured=structuredClone(next);return {version:'geometry-version'}};
+      await saveTemplate();
+      const saved=captured.templates.find(row=>row.id===old.id);
+      window.saveTemplates=originalSave;window.uploadAdminImage=originalUpload;shopData=originalShop;templatesData=originalTemplates;window.__bfEditingTemplate=null;
+      return {crystal,mirror,beforeMissing,afterMissing,missingResult,saved:{case_style_id:saved.case_style_id,reference_style_id:saved.reference_style_id,source_print_w:saved.source_print_w,source_print_h:saved.source_print_h}};
+    }""")
+    assert template_contract == {
+        'crystal': {'w':140,'h':280}, 'mirror': {'w':150,'h':300},
+        'beforeMissing': {'w':150,'h':300}, 'afterMissing': {'w':150,'h':300},
+        'missingResult': False,
+        'saved': {'case_style_id':'crystal','reference_style_id':'crystal','source_print_w':70,'source_print_h':140},
+    }, template_contract
+    assert any('此型號的此殼款尚未配置生產資料' in msg for msg in dialogs), dialogs
+    print('ADMIN_TEMPLATE_MODEL_STYLE_GEOMETRY_LEGACY_STYLE_OK', template_contract)
+
+    page.locator('#view-templates .titlebar .btn').click()
+    poll(page, "() => document.getElementById('template-modal')?.classList.contains('show') && !!visualCanvas", timeout=30000)
 
     template_server_original = page.evaluate("() => ({data:structuredClone(templatesData),version:templatesVersion})")
     template_winner = copy.deepcopy(template_server_original['data'])
