@@ -224,6 +224,30 @@ def front_test(browser, base):
     assert (universal_remove['width'], universal_remove['height']) == (640, 480), universal_remove
     assert universal_remove['corner'] == 0 and universal_remove['main'] > 250 and universal_remove['isolatedWhite'] > 250, universal_remove
     print('FRONT_UNIVERSAL_CONNECTED_BACKGROUND_HIGH_RES_OK', universal_remove)
+    transparent_decontaminate = page.evaluate("""async () => {
+      const core=window.BenfuwanAiRemoveV2,source=document.createElement('canvas');source.width=96;source.height=96;
+      const g=source.getContext('2d',{alpha:true,willReadFrequently:true}),image=g.createImageData(96,96),d=image.data;
+      const pixel=(x,y,r,g,b,a)=>{const i=(y*96+x)*4;d[i]=r;d[i+1]=g;d[i+2]=b;d[i+3]=a};
+      for(let y=32;y<64;y++)for(let x=32;x<64;x++)pixel(x,y,255,255,255,255);
+      for(let y=31;y<=64;y++)for(let x=31;x<=64;x++)if(x===31||x===64||y===31||y===64)pixel(x,y,255,255,255,64);
+      g.putImageData(image,0,0);
+      const result=await core.universalRemoveFromElement(source,{localOnly:true}),output=await new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=reject;image.src=URL.createObjectURL(result.blob)});
+      const c=document.createElement('canvas');c.width=96;c.height=96;const cg=c.getContext('2d',{willReadFrequently:true});cg.drawImage(output,0,0);const sample=(x,y)=>Array.from(cg.getImageData(x,y,1,1).data);
+      return {mode:result.mode,type:result.blob.type,opaqueWhite:sample(40,40),halo:sample(31,40),transparent:sample(0,0)};
+    }""")
+    assert transparent_decontaminate['mode'] == 'transparent-decontaminated' and transparent_decontaminate['type'] == 'image/png', transparent_decontaminate
+    assert transparent_decontaminate['opaqueWhite'] == [255,255,255,255], transparent_decontaminate
+    assert transparent_decontaminate['halo'][3] < 40 and transparent_decontaminate['transparent'][3] == 0, transparent_decontaminate
+    print('FRONT_TRANSPARENT_PNG_DECONTAMINATE_OPAQUE_WHITE_OK', transparent_decontaminate)
+    high_res_cache = page.evaluate("""async () => {
+      const core=window.BenfuwanAiRemoveV2;
+      const make=(w,h)=>{const c=document.createElement('canvas');c.width=w;c.height=h;const g=c.getContext('2d',{alpha:true});g.clearRect(0,0,w,h);g.fillStyle='#fff';g.fillRect(w*.25,h*.25,w*.5,h*.5);return c};
+      const small=make(1200,2400),large=make(2400,4800),smallKey=await core.cacheIdentityFromElement(small),largeKey=await core.cacheIdentityFromElement(large),result=await core.universalRemoveFromElement(large,{localOnly:true});
+      const output=await new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=reject;image.src=URL.createObjectURL(result.blob)}),answer={smallKey,largeKey,mode:result.mode,width:output.naturalWidth,height:output.naturalHeight,type:result.blob.type};small.width=small.height=large.width=large.height=1;return answer;
+    }""")
+    assert high_res_cache['smallKey'] and high_res_cache['largeKey'] and high_res_cache['smallKey'] != high_res_cache['largeKey'], high_res_cache
+    assert (high_res_cache['width'], high_res_cache['height']) == (2400,4800) and high_res_cache['type'] == 'image/png', high_res_cache
+    print('FRONT_HIGH_RES_CACHE_IDENTITY_AND_OUTPUT_DIMENSIONS_OK', high_res_cache['mode'], high_res_cache['width'], high_res_cache['height'])
     # Let the app finish its own initial catalog load/navigation before forcing
     # the editor. Otherwise the startup async task can switch pages after the
     # test has entered the editor and produce a false zero-geometry failure.

@@ -59,8 +59,7 @@
     busy=true;if(btn){btn.disabled=true;btn.textContent='通用去背處理中…'}
     if(typeof setBusy==='function')setBusy(true,'正在保留全部圖案並移除外圍背景…');
     try{
-      const fingerprintSource=await core.sourceBlobFromElement(el,{maxEdge:1200,maxBytes:5.5*1024*1024});
-      const hash=await core.fingerprint(fingerprintSource),key=hash?('ai-cache-v3:'+hash):'';
+      const identity=await core.cacheIdentityFromElement(el,{maxEdge:1200,maxBytes:5.5*1024*1024}),key=identity?('ai-cache-v4:'+identity):'';
       let out=await cacheGet(key),fromCache=false;
       if(out instanceof Blob&&out.size){
         try{await core.validate(out);fromCache=true}catch(e){console.warn('[FRONT AI] invalid cached result removed',e);await cacheDelete(key);out=null}

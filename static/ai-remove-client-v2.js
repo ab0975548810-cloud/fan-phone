@@ -89,6 +89,39 @@
     const blob=await canvasBlob(out,'image/png');out.width=out.height=1;return blob;
   }
 
+  async function decontaminateTransparentElement(el,opts={}){
+    const size=elementSize(el),maxPixels=Math.max(1_000_000,Number(opts.maxPixels||32_000_000));
+    if(!size.width||!size.height||size.width*size.height>maxPixels)throw new Error('原圖像素過大，無法安全清理透明邊緣');
+    const out=drawElement(el,size.width,size.height),g=out.getContext('2d',{alpha:true,willReadFrequently:true}),image=g.getImageData(0,0,size.width,size.height),d=image.data,w=size.width,h=size.height;
+    const bins=new Map();let edgeCount=0;
+    const isTransparent=p=>p<0||p>=w*h||d[p*4+3]<12;
+    for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+      const p=y*w+x,i=p*4,a=d[i+3];if(a<=8||a>=247)continue;
+      if(!((x&&isTransparent(p-1))||(x+1<w&&isTransparent(p+1))||(y&&isTransparent(p-w))||(y+1<h&&isTransparent(p+w))))continue;
+      edgeCount++;const key=((d[i]>>4)<<8)|((d[i+1]>>4)<<4)|(d[i+2]>>4);let row=bins.get(key);if(!row){row=[0,0,0,0];bins.set(key,row)}row[0]++;row[1]+=d[i];row[2]+=d[i+1];row[3]+=d[i+2];
+    }
+    let best=null;for(const row of bins.values())if(!best||row[0]>best[0])best=row;
+    const matte=best&&edgeCount? [best[1]/best[0],best[2]/best[0],best[3]/best[0]]:null,matteShare=best&&edgeCount?best[0]/edgeCount:0;
+    if(matte){
+      const source=new Uint8ClampedArray(d);
+      const sourceTransparent=p=>p<0||p>=w*h||source[p*4+3]<12;
+      for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+        const p=y*w+x,i=p*4,a=source[i+3];if(a<=8||a>=247)continue;
+        if(!((x&&sourceTransparent(p-1))||(x+1<w&&sourceTransparent(p+1))||(y&&sourceTransparent(p-w))||(y+1<h&&sourceTransparent(p+w))))continue;
+        const whiteLike=source[i]>224&&source[i+1]>224&&source[i+2]>224&&Math.max(source[i],source[i+1],source[i+2])-Math.min(source[i],source[i+1],source[i+2])<24;
+        if(!whiteLike&&!(matteShare>=.12&&colorDistance(source,i,matte)<=42))continue;
+        let bestNeighbor=-1,bestAlpha=a;
+        for(let oy=-1;oy<=1;oy++)for(let ox=-1;ox<=1;ox++){
+          if(!ox&&!oy)continue;const nx=x+ox,ny=y+oy;if(nx<0||nx>=w||ny<0||ny>=h)continue;const ni=(ny*w+nx)*4,na=source[ni+3];if(na>bestAlpha){bestAlpha=na;bestNeighbor=ni}
+        }
+        if(bestNeighbor>=0){d[i]=source[bestNeighbor];d[i+1]=source[bestNeighbor+1];d[i+2]=source[bestNeighbor+2]}
+        const choke=Math.min(40,8+Math.round((255-a)*.12));d[i+3]=Math.max(0,a-choke);
+      }
+      g.putImageData(image,0,0);
+    }
+    const blob=await canvasBlob(out,'image/png');out.width=out.height=1;return blob;
+  }
+
   async function request(blob,filename='photo.png',opts={}){
     if(!(blob instanceof Blob)||!blob.size)throw new Error('沒有可送給 AI 的圖片');const timeoutMs=Math.max(30000,Number(opts.timeoutMs||195000)),controller=typeof AbortController!=='undefined'?new AbortController():null,timer=controller?setTimeout(()=>controller.abort(),timeoutMs):null;
     try{const fd=new FormData();fd.append('image',blob,filename||'photo.png');const r=await fetch('/api/ai/remove-background',{method:'POST',body:fd,cache:'no-store',signal:controller?.signal});if(!r.ok){let msg='AI 摳圖失敗';try{const j=await r.clone().json();msg=j?.msg||j?.error||msg}catch(e){try{const t=(await r.text()).trim();if(t)msg=t.slice(0,180)}catch(_) {}}throw new Error(msg+'（HTTP '+r.status+'）')}const out=await r.blob();if(!out.size)throw new Error('AI 沒有回傳圖片');return out}catch(e){if(e?.name==='AbortError')throw new Error('AI 處理逾時，原圖已保留，請再試一次');throw e}finally{if(timer)clearTimeout(timer)}
@@ -96,17 +129,24 @@
 
   async function universalRemoveFromElement(el,opts={}){
     const local=await connectedBackgroundMask(el,opts);
-    if(local?.kind==='already-transparent')return {blob:await compositeWithMask(el,null,opts),mode:'already-transparent',analysis:local};
+    if(local?.kind==='already-transparent'){
+      const blob=await decontaminateTransparentElement(el,opts);await validate(blob);return {blob,mode:'transparent-decontaminated',analysis:local};
+    }
     if(local?.mask&&local.confidence>=Number(opts.localConfidence||.58)){const blob=await compositeWithMask(el,local.mask,{...opts,backgroundColor:local.background});local.mask.width=local.mask.height=1;await validate(blob);return {blob,mode:'edge-connected',analysis:local}}
     if(opts.localOnly)throw new Error('圖片背景較複雜，需要 AI 協助去背');
-    const input=await sourceBlobFromElement(el,{maxEdge:opts.aiMaxEdge||1800,maxBytes:opts.maxBytes||5.5*1024*1024,maxPixels:opts.maxPixels}),ai=await request(input,opts.filename||'photo.png',{timeoutMs:opts.timeoutMs});await validate(ai);
+    const input=await sourceBlobFromElement(el,{maxEdge:opts.aiMaxEdge||4096,maxBytes:opts.maxBytes||5.5*1024*1024,maxPixels:opts.maxPixels}),ai=await request(input,opts.filename||'photo.png',{timeoutMs:opts.timeoutMs});await validate(ai);
     const blob=await compositeWithMask(el,ai,opts);await validate(blob);return {blob,mode:'ai-mask',input,analysis:local};
   }
 
   function blobToDataURL(blob){return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result||''));r.onerror=()=>reject(r.error||new Error('AI 圖片讀取失敗'));r.readAsDataURL(blob)})}
   async function fingerprint(blob,version='universal-bg-v3'){if(!window.crypto?.subtle||!(blob instanceof Blob))return '';try{const prefix=new TextEncoder().encode(version+'|'),body=new Uint8Array(await blob.arrayBuffer()),all=new Uint8Array(prefix.length+body.length);all.set(prefix);all.set(body,prefix.length);const hash=await crypto.subtle.digest('SHA-256',all.buffer);return [...new Uint8Array(hash)].map(b=>b.toString(16).padStart(2,'0')).join('')}catch(e){return ''}}
+  async function cacheIdentityFromElement(el,opts={}){
+    const size=elementSize(el);if(!size.width||!size.height)return '';
+    const normalized=await sourceBlobFromElement(el,{maxEdge:opts.maxEdge||1200,maxBytes:opts.maxBytes||5.5*1024*1024,maxPixels:opts.maxPixels}),hash=await fingerprint(normalized,'universal-bg-v4-normalized');
+    return hash?['universal-bg-v4',size.width,size.height,hash].join(':'):'';
+  }
   async function validateWithRetry(blob){try{return await validate(blob)}catch(e){if(!/讀取|格式/.test(String(e?.message||'')))throw e;await sleep(40);return validate(blob)}}
 
-  window.BenfuwanAiRemoveV2={sourceBlobFromElement,request,validate:validateWithRetry,blobToDataURL,fingerprint,elementSize,connectedBackgroundMask,compositeWithMask,universalRemoveFromElement,version:'3.0-universal-high-resolution'};
-  console.info('[AI REMOVE] universal high-resolution client v3 ready');
+  window.BenfuwanAiRemoveV2={sourceBlobFromElement,request,validate:validateWithRetry,blobToDataURL,fingerprint,cacheIdentityFromElement,elementSize,connectedBackgroundMask,compositeWithMask,decontaminateTransparentElement,universalRemoveFromElement,version:'4.0-transparent-decontaminate'};
+  console.info('[AI REMOVE] universal high-resolution client v4 ready');
 })();
