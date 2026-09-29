@@ -1,4 +1,4 @@
-/* 本福丸前台：照片選取時，底部工具列直接提供 AI 去背；去背後同位置改成描邊 */
+/* 本福丸前台：照片選取時提供通用去背；去背後同位置改成描邊。 */
 (function(){
   'use strict';
   if(window.__benfuwanAiContextInstalled)return;
@@ -24,11 +24,11 @@
       b.innerHTML='<i class="fa-solid fa-border-style"></i>描邊';
       b.onclick=()=>window.openAiOutlineSheet?.();
     }else{
-      b.title='AI 去背';
-      b.innerHTML='<i class="fa-solid fa-wand-magic-sparkles"></i>AI去背';
+      b.title='通用去背';
+      b.innerHTML='<i class="fa-solid fa-wand-magic-sparkles"></i>通用去背';
       b.onclick=async()=>{
         if(typeof window.removeBackgroundForActive!=='function'){
-          if(typeof toast==='function')toast('AI 去背功能尚未載入');
+          if(typeof toast==='function')toast('通用去背功能尚未載入');
           return;
         }
         try{
@@ -56,7 +56,7 @@
   function boot(){
     wrapSelection();
     setTimeout(refreshAiContextButton,0);
-    console.info('[FRONT] contextual AI button enabled: AI remove -> outline');
+    console.info('[FRONT] contextual button enabled: universal remove -> outline');
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();

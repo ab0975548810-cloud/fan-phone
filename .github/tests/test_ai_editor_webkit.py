@@ -104,6 +104,9 @@ def add_front_photo(page, variant=0):
     page.evaluate(f'''() => new Promise((resolve,reject)=>{{
       const c=document.createElement('canvas');c.width=128;c.height=128;const g=c.getContext('2d');
       g.fillStyle='{ '#fff6fa' if variant == 0 else '#e8f4ff' }';g.fillRect(0,0,128,128);
+      // Deliberately varied border forces this fixture through the AI fallback;
+      // the separate solid-background regression covers the local connected path.
+      ['#ffcad8','#c9e7ff','#ffe6a8','#d8c9ff'].forEach((color,index)=>{{g.fillStyle=color;if(index===0)g.fillRect(0,0,128,5);if(index===1)g.fillRect(0,123,128,5);if(index===2)g.fillRect(0,0,5,128);if(index===3)g.fillRect(123,0,5,128)}});
       g.fillStyle='{ '#e05280' if variant == 0 else '#356edb' }';g.fillRect(28,20,72,90);
       fabric.Image.fromURL(c.toDataURL('image/png'),img=>{{
         try{{img.set({{left:canvas.width/2,top:canvas.height/2,originX:'center',originY:'center',role:'photo',originalName:'test-{variant}.png'}});styleEditableObject(img);canvas.add(img);canvas.setActiveObject(img);canvas.requestRenderAll();syncSelection();resolve();}}catch(e){{reject(e)}}
@@ -203,6 +206,24 @@ def front_test(browser, base):
     assert upload_regression['maxBytes'] == 50 * 1024 * 1024 and upload_regression['maxPixels'] == 32_000_000 and upload_regression['maxEdge'] == 8192, upload_regression
     assert '像素過大' in upload_regression['pixelError'] and '50MB' in upload_regression['byteError'], upload_regression
     print('FRONT_HIGH_RES_PNG_TIFF_UPLOAD_OK', upload_regression)
+    universal_remove = page.evaluate("""async () => {
+      const core=window.BenfuwanAiRemoveV2,source=document.createElement('canvas');source.width=640;source.height=480;
+      const g=source.getContext('2d',{alpha:true});g.fillStyle='#f7d8e1';g.fillRect(0,0,640,480);
+      g.fillStyle='#c52f67';g.fillRect(90,80,180,300);
+      g.fillStyle='#fff';g.beginPath();g.arc(500,110,42,0,Math.PI*2);g.fill();
+      g.strokeStyle='#111';g.lineWidth=8;g.stroke();
+      const input=await core.sourceBlobFromElement(source,{maxEdge:4096,maxBytes:6*1024*1024});
+      const result=await core.universalRemoveFromElement(source,{localOnly:true});
+      const output=await new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=reject;image.src=URL.createObjectURL(result.blob)});
+      const c=document.createElement('canvas');c.width=output.naturalWidth;c.height=output.naturalHeight;const cg=c.getContext('2d',{willReadFrequently:true});cg.drawImage(output,0,0);
+      const alpha=(x,y)=>cg.getImageData(x,y,1,1).data[3];
+      return {inputType:input.type,mode:result.mode,type:result.blob.type,width:output.naturalWidth,height:output.naturalHeight,corner:alpha(0,0),main:alpha(150,200),isolatedWhite:alpha(500,110)};
+    }""")
+    assert universal_remove['inputType'] == 'image/png' and universal_remove['type'] == 'image/png', universal_remove
+    assert universal_remove['mode'] == 'edge-connected', universal_remove
+    assert (universal_remove['width'], universal_remove['height']) == (640, 480), universal_remove
+    assert universal_remove['corner'] == 0 and universal_remove['main'] > 250 and universal_remove['isolatedWhite'] > 250, universal_remove
+    print('FRONT_UNIVERSAL_CONNECTED_BACKGROUND_HIGH_RES_OK', universal_remove)
     # Let the app finish its own initial catalog load/navigation before forcing
     # the editor. Otherwise the startup async task can switch pages after the
     # test has entered the editor and produce a false zero-geometry failure.
