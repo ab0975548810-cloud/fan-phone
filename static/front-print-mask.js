@@ -7,6 +7,14 @@
   const overlayStates = new WeakMap();
   let previewBusy = false;
 
+  function previewDpr() {
+    return Math.max(1, Math.min(Number(window.devicePixelRatio) || 1, 3));
+  }
+
+  function backingSize(logicalSize, pixelRatio) {
+    return Math.max(1, Math.round(Number(logicalSize) * pixelRatio));
+  }
+
   function safeAssetUrl(url) {
     url = String(url || '').trim();
     if (!url || url.startsWith('data:') || url.startsWith('blob:') || url.startsWith('/')) return url;
@@ -252,36 +260,45 @@
     };
   }
 
-  function mapOverlayToPrintFrame(img, targetWidth, targetHeight) {
+  function mapOverlayToPrintFrame(img, targetWidth, targetHeight, pixelRatio = previewDpr()) {
     const sourceWidth = img.naturalWidth || img.width;
     const sourceHeight = img.naturalHeight || img.height;
     const width = Math.round(Number(targetWidth));
     const height = Math.round(Number(targetHeight));
     if (!(sourceWidth > 0 && sourceHeight > 0 && width > 0 && height > 0)) return null;
-    const mapped = makeCanvas(width, height);
+    const dpr = Math.max(1, Math.min(Number(pixelRatio) || 1, 3));
+    const mapped = makeCanvas(backingSize(width, dpr), backingSize(height, dpr));
     const g = mapped.getContext('2d', { willReadFrequently: true });
-    g.drawImage(img, 0, 0, width, height);
-    const pixels = g.getImageData(0, 0, width, height).data;
+    g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(img, 0, 0, mapped.width, mapped.height);
+    const pixels = g.getImageData(0, 0, mapped.width, mapped.height).data;
     let visible = false;
     for (let i = 3; i < pixels.length; i += 4) {
       if (pixels[i] > 0) { visible = true; break; }
     }
     if (!visible) return null;
-    return { canvas: mapped, frame: { left: 0, top: 0, width, height }, sourceWidth, sourceHeight };
+    return { canvas: mapped, frame: { left: 0, top: 0, width, height }, sourceWidth, sourceHeight, pixelRatio: dpr };
   }
 
-  function renderEditorGuide(mask, width, height) {
-    const layer = resampleMask(mask, width, height);
+  function renderEditorGuide(mask, width, height, pixelRatio = previewDpr()) {
+    const logicalWidth = Math.round(Number(width)), logicalHeight = Math.round(Number(height));
+    const dpr = Math.max(1, Math.min(Number(pixelRatio) || 1, 3));
+    const backingWidth = backingSize(logicalWidth, dpr), backingHeight = backingSize(logicalHeight, dpr);
+    const layer = resampleMask(mask, backingWidth, backingHeight);
     const g = layer.getContext('2d', { willReadFrequently: true });
-    const source = g.getImageData(0, 0, width, height);
-    const output = g.createImageData(width, height);
-    const inside = (x, y) => x >= 0 && y >= 0 && x < width && y < height && source.data[(y * width + x) * 4 + 3] > 24;
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
+    g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = 'high';
+    const source = g.getImageData(0, 0, backingWidth, backingHeight);
+    const output = g.createImageData(backingWidth, backingHeight);
+    const edgeRadius = Math.max(1, Math.round(dpr)), dashSize = Math.max(1, Math.round(5 * dpr));
+    const inside = (x, y) => x >= 0 && y >= 0 && x < backingWidth && y < backingHeight && source.data[(y * backingWidth + x) * 4 + 3] > 24;
+    for (let y = 0; y < backingHeight; y++) {
+      for (let x = 0; x < backingWidth; x++) {
         if (!inside(x, y)) continue;
-        const offset = (y * width + x) * 4;
-        const edge = !inside(x - 1, y) || !inside(x + 1, y) || !inside(x, y - 1) || !inside(x, y + 1);
-        if (edge && (Math.floor((x + y) / 5) % 2 === 0)) {
+        const offset = (y * backingWidth + x) * 4;
+        const edge = !inside(x - edgeRadius, y) || !inside(x + edgeRadius, y) || !inside(x, y - edgeRadius) || !inside(x, y + edgeRadius);
+        if (edge && (Math.floor((x + y) / dashSize) % 2 === 0)) {
           output.data.set([255, 111, 154, 220], offset);
         } else {
           output.data.set([255, 255, 255, 190], offset);
@@ -351,7 +368,8 @@
   }
 
   function ensurePreviewOverlay(target, url, retry = false) {
-    const key = [url, target.width, target.height].join('|');
+    const dpr = previewDpr();
+    const key = [url, target.width, target.height, dpr].join('|');
     let state = overlayStates.get(target);
     if (state && state.key === key && !(retry && state.error)) return state.ready;
     state = { key, image: null, overlay: null, dataUrl: '', error: null };
@@ -360,7 +378,7 @@
       try {
         if (!url) return state;
         const img = await loadImage(url, '手機殼預覽讀取失敗，請再試一次。');
-        const overlay = mapOverlayToPrintFrame(img, target.width, target.height);
+        const overlay = mapOverlayToPrintFrame(img, target.width, target.height, dpr);
         if (canvas !== target || overlayStates.get(target) !== state) throw new Error('型號已切換，請重新預覽。');
         state.image = img;
         state.overlay = overlay;
@@ -379,6 +397,7 @@
 
   window.BenfuwanPrintMask = Object.freeze({
     PIXELS_PER_MM,
+    previewDpr,
     loadImage,
     normalizeMaskImage,
     resampleMask,
