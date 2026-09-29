@@ -89,37 +89,45 @@
     const blob=await canvasBlob(out,'image/png');out.width=out.height=1;return blob;
   }
 
+  function estimateTransparentMatte(el,size,opts={}){
+    const maxEdge=Math.max(128,Math.min(512,Number(opts.matteAnalysisMaxEdge||512))),ratio=Math.min(1,maxEdge/Math.max(size.width,size.height)),w=Math.max(1,Math.round(size.width*ratio)),h=Math.max(1,Math.round(size.height*ratio));
+    const c=drawElement(el,w,h),g=c.getContext('2d',{alpha:true,willReadFrequently:true}),image=g.getImageData(0,0,w,h),d=image.data,bins=new Map();let edgeCount=0;
+    const transparent=(x,y)=>d[(y*w+x)*4+3]<12;
+    for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+      const i=(y*w+x)*4,a=d[i+3];if(a<=8||a>=247)continue;
+      if(!((x&&transparent(x-1,y))||(x+1<w&&transparent(x+1,y))||(y&&transparent(x,y-1))||(y+1<h&&transparent(x,y+1))))continue;
+      edgeCount++;const key=((d[i]>>4)<<8)|((d[i+1]>>4)<<4)|(d[i+2]>>4);let row=bins.get(key);if(!row){row=[0,0,0,0];bins.set(key,row)}row[0]++;row[1]+=d[i];row[2]+=d[i+1];row[3]+=d[i+2];
+    }
+    let best=null;for(const row of bins.values())if(!best||row[0]>best[0])best=row;c.width=c.height=1;
+    return best&&edgeCount?{color:[best[1]/best[0],best[2]/best[0],best[3]/best[0]],share:best[0]/edgeCount}:null;
+  }
+
   async function decontaminateTransparentElement(el,opts={}){
     const size=elementSize(el),maxPixels=Math.max(1_000_000,Number(opts.maxPixels||32_000_000));
     if(!size.width||!size.height||size.width*size.height>maxPixels)throw new Error('原圖像素過大，無法安全清理透明邊緣');
-    const out=drawElement(el,size.width,size.height),g=out.getContext('2d',{alpha:true,willReadFrequently:true}),image=g.getImageData(0,0,size.width,size.height),d=image.data,w=size.width,h=size.height;
-    const bins=new Map();let edgeCount=0;
-    const isTransparent=p=>p<0||p>=w*h||d[p*4+3]<12;
-    for(let y=0;y<h;y++)for(let x=0;x<w;x++){
-      const p=y*w+x,i=p*4,a=d[i+3];if(a<=8||a>=247)continue;
-      if(!((x&&isTransparent(p-1))||(x+1<w&&isTransparent(p+1))||(y&&isTransparent(p-w))||(y+1<h&&isTransparent(p+w))))continue;
-      edgeCount++;const key=((d[i]>>4)<<8)|((d[i+1]>>4)<<4)|(d[i+2]>>4);let row=bins.get(key);if(!row){row=[0,0,0,0];bins.set(key,row)}row[0]++;row[1]+=d[i];row[2]+=d[i+1];row[3]+=d[i+2];
-    }
-    let best=null;for(const row of bins.values())if(!best||row[0]>best[0])best=row;
-    const matte=best&&edgeCount? [best[1]/best[0],best[2]/best[0],best[3]/best[0]]:null,matteShare=best&&edgeCount?best[0]/edgeCount:0;
-    if(matte){
-      const source=new Uint8ClampedArray(d);
-      const sourceTransparent=p=>p<0||p>=w*h||source[p*4+3]<12;
-      for(let y=0;y<h;y++)for(let x=0;x<w;x++){
-        const p=y*w+x,i=p*4,a=source[i+3];if(a<=8||a>=247)continue;
-        if(!((x&&sourceTransparent(p-1))||(x+1<w&&sourceTransparent(p+1))||(y&&sourceTransparent(p-w))||(y+1<h&&sourceTransparent(p+w))))continue;
+    const w=size.width,h=size.height,matte=estimateTransparentMatte(el,size,opts),stripeRows=clamp(Math.round(Number(opts.stripeRows||384)),256,512);
+    const out=drawElement(el,w,h),g=out.getContext('2d',{alpha:true,willReadFrequently:true}),stripeCanvas=document.createElement('canvas');stripeCanvas.width=w;
+    for(let top=0,stripe=0;top<h;top+=stripeRows,stripe++){
+      const rows=Math.min(stripeRows,h-top),readTop=Math.max(0,top-1),readBottom=Math.min(h,top+rows+1),readRows=readBottom-readTop,coreOffset=top-readTop;
+      stripeCanvas.height=readRows;const stripeContext=stripeCanvas.getContext('2d',{alpha:true,willReadFrequently:true});stripeContext.drawImage(el,0,readTop,w,readRows,0,0,w,readRows);
+      const sourceImage=stripeContext.getImageData(0,0,w,readRows),source=sourceImage.data,outputImage=g.createImageData(w,rows),output=outputImage.data,coreStart=coreOffset*w*4;
+      output.set(source.subarray(coreStart,coreStart+rows*w*4));
+      const transparent=(x,y)=>source[(y*w+x)*4+3]<12;
+      for(let y=0;y<rows;y++)for(let x=0;x<w;x++){
+        const sy=y+coreOffset,i=(sy*w+x)*4,oi=(y*w+x)*4,a=source[i+3];if(a<=8||a>=247)continue;
+        if(!((x&&transparent(x-1,sy))||(x+1<w&&transparent(x+1,sy))||(top+y&&transparent(x,sy-1))||(top+y+1<h&&transparent(x,sy+1))))continue;
         const whiteLike=source[i]>224&&source[i+1]>224&&source[i+2]>224&&Math.max(source[i],source[i+1],source[i+2])-Math.min(source[i],source[i+1],source[i+2])<24;
-        if(!whiteLike&&!(matteShare>=.12&&colorDistance(source,i,matte)<=42))continue;
+        if(!whiteLike&&!(matte?.share>=.12&&colorDistance(source,i,matte.color)<=42))continue;
         let bestNeighbor=-1,bestAlpha=a;
         for(let oy=-1;oy<=1;oy++)for(let ox=-1;ox<=1;ox++){
-          if(!ox&&!oy)continue;const nx=x+ox,ny=y+oy;if(nx<0||nx>=w||ny<0||ny>=h)continue;const ni=(ny*w+nx)*4,na=source[ni+3];if(na>bestAlpha){bestAlpha=na;bestNeighbor=ni}
+          if(!ox&&!oy)continue;const nx=x+ox,ny=sy+oy,globalY=top+y+oy;if(nx<0||nx>=w||globalY<0||globalY>=h||ny<0||ny>=readRows)continue;const ni=(ny*w+nx)*4,na=source[ni+3];if(na>bestAlpha){bestAlpha=na;bestNeighbor=ni}
         }
-        if(bestNeighbor>=0){d[i]=source[bestNeighbor];d[i+1]=source[bestNeighbor+1];d[i+2]=source[bestNeighbor+2]}
-        const choke=Math.min(40,8+Math.round((255-a)*.12));d[i+3]=Math.max(0,a-choke);
+        if(bestNeighbor>=0){output[oi]=source[bestNeighbor];output[oi+1]=source[bestNeighbor+1];output[oi+2]=source[bestNeighbor+2]}
+        const choke=Math.min(40,8+Math.round((255-a)*.12));output[oi+3]=Math.max(0,a-choke);
       }
-      g.putImageData(image,0,0);
+      g.putImageData(outputImage,0,top);if(stripe%4===3)await sleep(0);
     }
-    const blob=await canvasBlob(out,'image/png');out.width=out.height=1;return blob;
+    stripeCanvas.width=stripeCanvas.height=1;const blob=await canvasBlob(out,'image/png');out.width=out.height=1;return blob;
   }
 
   async function request(blob,filename='photo.png',opts={}){

@@ -239,6 +239,22 @@ def front_test(browser, base):
     assert transparent_decontaminate['opaqueWhite'] == [255,255,255,255], transparent_decontaminate
     assert transparent_decontaminate['halo'][3] < 40 and transparent_decontaminate['transparent'][3] == 0, transparent_decontaminate
     print('FRONT_TRANSPARENT_PNG_DECONTAMINATE_OPAQUE_WHITE_OK', transparent_decontaminate)
+    transparent_stripes = page.evaluate("""async () => {
+      const core=window.BenfuwanAiRemoveV2,w=2030,h=4241,source=document.createElement('canvas');source.width=w;source.height=h;
+      const g=source.getContext('2d',{alpha:true,willReadFrequently:true});g.clearRect(0,0,w,h);g.fillStyle='rgba(255,255,255,.25)';g.fillRect(599,999,832,2202);g.fillStyle='#fff';g.fillRect(600,1000,830,2200);
+      const contextPrototype=CanvasRenderingContext2D.prototype,nativeGetImageData=contextPrototype.getImageData,NativeArray=window.Uint8ClampedArray,fullBytes=w*h*4;
+      let maxReadRows=0,fullReads=0,fullCopies=0,blob;
+      contextPrototype.getImageData=function(x,y,width,height){if(this.canvas.width===w&&this.canvas.height===h){maxReadRows=Math.max(maxReadRows,height);if(width*height===w*h)fullReads++}return nativeGetImageData.call(this,x,y,width,height)};
+      window.Uint8ClampedArray=new Proxy(NativeArray,{construct(target,args,newTarget){const value=args[0],length=typeof value==='number'?value:Number(value?.length||0);if(length>=fullBytes)fullCopies++;return Reflect.construct(target,args,newTarget)}});
+      try{blob=await core.decontaminateTransparentElement(source,{stripeRows:384})}finally{contextPrototype.getImageData=nativeGetImageData;window.Uint8ClampedArray=NativeArray}
+      const output=await new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=reject;image.src=URL.createObjectURL(blob)});
+      g.clearRect(0,0,w,h);g.drawImage(output,0,0);const sample=(x,y)=>Array.from(g.getImageData(x,y,1,1).data);
+      return {type:blob.type,width:output.naturalWidth,height:output.naturalHeight,opaqueWhite:sample(700,1500),halo:sample(599,1500),transparent:sample(0,0),maxReadRows,fullReads,fullCopies};
+    }""")
+    assert transparent_stripes['type'] == 'image/png' and (transparent_stripes['width'], transparent_stripes['height']) == (2030,4241), transparent_stripes
+    assert transparent_stripes['opaqueWhite'] == [255,255,255,255] and transparent_stripes['halo'][3] < 40 and transparent_stripes['transparent'][3] == 0, transparent_stripes
+    assert transparent_stripes['maxReadRows'] <= 386 and transparent_stripes['fullReads'] == 0 and transparent_stripes['fullCopies'] == 0, transparent_stripes
+    print('FRONT_HIGH_RES_TRANSPARENT_STRIPE_DECONTAMINATE_OK', transparent_stripes)
     high_res_cache = page.evaluate("""async () => {
       const core=window.BenfuwanAiRemoveV2;
       const make=(w,h)=>{const c=document.createElement('canvas');c.width=w;c.height=h;const g=c.getContext('2d',{alpha:true});g.clearRect(0,0,w,h);g.fillStyle='#fff';g.fillRect(w*.25,h*.25,w*.5,h*.5);return c};
