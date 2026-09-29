@@ -146,6 +146,7 @@ def assert_front_editor_geometry(page, label):
 def front_test(browser, base):
     # Start with a constrained iPhone viewport so initCanvas installs a
     # transform below 1, then exercise the responsive owner's cssOnly fit.
+    browser_engine = os.environ.get('BROWSER_ENGINE', 'webkit').lower()
     page = browser.new_page(viewport={'width': 390, 'height': 600})
     responses = [GOOD, BAD]
     page.route('**/api/ai/remove-background', lambda route: route.fulfill(status=200, body=responses.pop(0) if responses else GOOD, content_type='image/png'))
@@ -607,6 +608,10 @@ def front_test(browser, base):
     }""")
     assert slider_css['opacityHeight'] >= 44 and slider_css['angleHeight'] >= 44, slider_css
     assert slider_css['touchAction'] == 'none', slider_css
+    page.evaluate("""() => {
+      window.__rangeTrusted=[];
+      for(const id of ['opacity-range','angle-range'])for(const type of ['pointerdown','input','change'])document.getElementById(id).addEventListener(type,event=>window.__rangeTrusted.push({id,type,trusted:event.isTrusted}));
+    }""")
     page.wait_for_timeout(250)
     opacity_slider = page.locator('#opacity-range')
     opacity_box = opacity_slider.bounding_box()
@@ -615,13 +620,18 @@ def front_test(browser, base):
     assert float(opacity_slider.input_value()) >= 98, opacity_slider.input_value()
     opacity_history = page.evaluate("() => historyStack.length")
     opacity_y = opacity_box['y'] + opacity_box['height'] / 2
-    opacity_slider.hover(position={'x': opacity_box['width'] - 1, 'y': opacity_box['height'] / 2})
-    page.mouse.down()
-    page.mouse.move(opacity_box['x'] + opacity_box['width'] * .4, opacity_y, steps=12)
-    opacity_live = page.evaluate("() => ({value:+document.getElementById('opacity-range').value,opacity:canvas.getActiveObject().opacity,history:historyStack.length,scroll:document.querySelector('#sheet-adjust .sheet-body').scrollTop})")
+    if browser_engine == 'webkit':
+        opacity_slider.hover(position={'x': opacity_box['width'] - 1, 'y': opacity_box['height'] / 2})
+        page.mouse.down()
+        page.mouse.move(opacity_box['x'] + opacity_box['width'] * .4, opacity_y, steps=12)
+        opacity_live = page.evaluate("() => ({value:+document.getElementById('opacity-range').value,opacity:canvas.getActiveObject().opacity,history:historyStack.length,scroll:document.querySelector('#sheet-adjust .sheet-body').scrollTop})")
+        assert opacity_live['history'] == opacity_history, opacity_live
+        page.mouse.up()
+    else:
+        opacity_slider.click(position={'x': opacity_box['width'] * .4, 'y': opacity_box['height'] / 2})
+        opacity_live = page.evaluate("() => ({value:+document.getElementById('opacity-range').value,opacity:canvas.getActiveObject().opacity,history:historyStack.length,scroll:document.querySelector('#sheet-adjust .sheet-body').scrollTop})")
     assert 34 <= opacity_live['value'] <= 46 and abs(opacity_live['opacity'] - opacity_live['value'] / 100) < .001, opacity_live
-    assert opacity_live['history'] == opacity_history and opacity_live['scroll'] == slider_css['bodyScroll'], opacity_live
-    page.mouse.up()
+    assert opacity_live['scroll'] == slider_css['bodyScroll'], opacity_live
     page.wait_for_timeout(100)
     assert page.evaluate("() => historyStack.length") == opacity_history + 1, 'opacity drag should record exactly one history entry'
 
@@ -632,17 +642,28 @@ def front_test(browser, base):
     assert abs(float(angle_slider.input_value())) <= 2, angle_slider.input_value()
     angle_history = page.evaluate("() => historyStack.length")
     angle_y = angle_box['y'] + angle_box['height'] / 2
-    angle_slider.hover(position={'x': angle_box['width'] / 2, 'y': angle_box['height'] / 2})
-    page.mouse.down()
-    page.mouse.move(angle_box['x'] + angle_box['width'] * .75, angle_y, steps=12)
-    angle_live = page.evaluate("() => ({value:+document.getElementById('angle-range').value,angle:canvas.getActiveObject().angle,history:historyStack.length,scroll:document.querySelector('#sheet-adjust .sheet-body').scrollTop})")
+    if browser_engine == 'webkit':
+        angle_slider.hover(position={'x': angle_box['width'] / 2, 'y': angle_box['height'] / 2})
+        page.mouse.down()
+        page.mouse.move(angle_box['x'] + angle_box['width'] * .75, angle_y, steps=12)
+        angle_live = page.evaluate("() => ({value:+document.getElementById('angle-range').value,angle:canvas.getActiveObject().angle,history:historyStack.length,scroll:document.querySelector('#sheet-adjust .sheet-body').scrollTop})")
+        assert angle_live['history'] == angle_history, angle_live
+        page.mouse.up()
+    else:
+        angle_slider.click(position={'x': angle_box['width'] * .75, 'y': angle_box['height'] / 2})
+        angle_live = page.evaluate("() => ({value:+document.getElementById('angle-range').value,angle:canvas.getActiveObject().angle,history:historyStack.length,scroll:document.querySelector('#sheet-adjust .sheet-body').scrollTop})")
     assert 80 <= angle_live['value'] <= 100 and abs(angle_live['angle'] - angle_live['value']) < .001, angle_live
-    assert angle_live['history'] == angle_history and angle_live['scroll'] == slider_css['bodyScroll'], angle_live
-    page.mouse.up()
+    assert angle_live['scroll'] == slider_css['bodyScroll'], angle_live
     page.wait_for_timeout(100)
     assert page.evaluate("() => historyStack.length") == angle_history + 1, 'angle drag should record exactly one history entry'
+    trusted_events = page.evaluate("() => window.__rangeTrusted")
+    assert trusted_events and all(event['trusted'] for event in trusted_events), trusted_events
+    for slider_id in ('opacity-range', 'angle-range'):
+        assert any(event['id'] == slider_id and event['type'] == 'pointerdown' for event in trusted_events), trusted_events
+        assert any(event['id'] == slider_id and event['type'] == 'input' for event in trusted_events), trusted_events
+        assert any(event['id'] == slider_id and event['type'] == 'change' for event in trusted_events), trusted_events
     page.evaluate("""() => {closeSheets();const o=canvas.getActiveObject();o.set({opacity:1,angle:27});o.setCoords();canvas.requestRenderAll()}""")
-    print('FRONT_RANGE_POINTER_DRAG_OK', opacity_live['value'], angle_live['value'], slider_css)
+    print('FRONT_RANGE_POINTER_INTERACTION_OK', browser_engine, opacity_live['value'], angle_live['value'], slider_css)
 
     font_result = page.evaluate("""async () => {
       document.getElementById('text-input').value='本福丸可愛粉圓';
