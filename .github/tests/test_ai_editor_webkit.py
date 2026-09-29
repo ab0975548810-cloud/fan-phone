@@ -147,7 +147,62 @@ def front_test(browser, base):
     responses = [GOOD, BAD]
     page.route('**/api/ai/remove-background', lambda route: route.fulfill(status=200, body=responses.pop(0) if responses else GOOD, content_type='image/png'))
     page.goto(base + '/', wait_until='domcontentloaded')
-    poll(page, "() => typeof fabric !== 'undefined' && typeof initCanvas === 'function' && !!window.BenfuwanAiRemoveV2 && !!window.removeBackgroundForActive && !!window.BenfuwanEditorAccess && !!window.BenfuwanOrderPayload && !!window.BenfuwanPrintMask && !!window.BenfuwanProductionHQ")
+    poll(page, "() => typeof fabric !== 'undefined' && typeof initCanvas === 'function' && !!window.BenfuwanAiRemoveV2 && !!window.removeBackgroundForActive && !!window.BenfuwanEditorAccess && !!window.BenfuwanOrderPayload && !!window.BenfuwanPrintMask && !!window.BenfuwanProductionHQ && !!window.BenfuwanImageUpload")
+    upload_regression = page.evaluate("""async () => {
+      const api=window.BenfuwanImageUpload;
+      const loadImage=src=>new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=reject;image.src=src});
+      const source=document.createElement('canvas');source.width=2030;source.height=4241;
+      const sourceContext=source.getContext('2d',{alpha:true});sourceContext.clearRect(0,0,source.width,source.height);
+      sourceContext.fillStyle='rgba(255,0,0,.5)';sourceContext.fillRect(1000,2100,20,20);
+      const sourceBlob=await new Promise((resolve,reject)=>source.toBlob(blob=>blob?resolve(blob):reject(new Error('PNG fixture failed')),'image/png'));
+      const tenMiB=10*1024*1024;
+      const padding=new Uint8Array(Math.max(1,tenMiB+1-sourceBlob.size));
+      const largePng=new File([sourceBlob,padding],'transparent-large.png',{type:'image/png'});
+      const pngData=await api.prepareImageDataURL(largePng);
+      const pngImage=await loadImage(pngData);
+      const sample=document.createElement('canvas');sample.width=1;sample.height=1;
+      sample.getContext('2d').drawImage(pngImage,1005,2105,1,1,0,0,1,1);
+      const pngAlpha=sample.getContext('2d').getImageData(0,0,1,1).data[3];
+
+      const UTIF=await api.loadTiffDecoder();
+      const rgba=new Uint8Array([255,0,0,255,0,255,0,128,0,0,255,0,255,255,255,255]);
+      const savedPako=window.pako;let encoded;
+      try{window.pako=null;encoded=UTIF.encodeImage(rgba.buffer,2,2)}finally{window.pako=savedPako}
+      const tifData=await api.prepareImageDataURL(new File([encoded],'alpha.tif',{type:'image/tiff'}));
+      const tiffData=await api.prepareImageDataURL(new File([encoded],'alpha.tiff',{type:''}));
+      const tifImage=await loadImage(tifData),tiffImage=await loadImage(tiffData);
+      const tifCanvas=document.createElement('canvas');tifCanvas.width=2;tifCanvas.height=2;
+      const tifContext=tifCanvas.getContext('2d');tifContext.drawImage(tifImage,0,0);
+      const tifAlpha=Array.from(tifContext.getImageData(0,0,2,2).data).filter((_,index)=>index%4===3);
+
+      const oversizedHeader=new Uint8Array(24);oversizedHeader.set([137,80,78,71,13,10,26,10],0);
+      oversizedHeader.set([73,72,68,82],12);const oversizedView=new DataView(oversizedHeader.buffer);
+      oversizedView.setUint32(16,9000,false);oversizedView.setUint32(20,9000,false);
+      let pixelError='';try{await api.prepareImageDataURL(new File([oversizedHeader],'too-many-pixels.png',{type:'image/png'}))}catch(error){pixelError=error.message}
+      let byteError='';try{await api.prepareImageDataURL({name:'too-large.png',type:'image/png',size:50*1024*1024+1})}catch(error){byteError=error.message}
+      return {
+        acceptPhoto:document.getElementById('photo-input').accept,
+        acceptSlot:document.getElementById('slot-input').accept,
+        pngBytes:largePng.size,pngPrefix:pngData.slice(0,22),pngWidth:pngImage.naturalWidth,pngHeight:pngImage.naturalHeight,pngAlpha,
+        tifPrefix:tifData.slice(0,22),tiffPrefix:tiffData.slice(0,22),tifWidth:tifImage.naturalWidth,tifHeight:tifImage.naturalHeight,
+        tiffWidth:tiffImage.naturalWidth,tiffHeight:tiffImage.naturalHeight,tifAlpha,
+        emptyMimeKind:api.imageKind(new File([encoded],'alpha.tiff',{type:''})),imageTifKind:api.imageKind(new File([encoded],'alpha.bin',{type:'image/tif'})),
+        maxBytes:api.PNG_TIFF_MAX_BYTES,maxPixels:api.MAX_DECODED_PIXELS,maxEdge:api.MAX_IMAGE_EDGE,pixelError,byteError
+      };
+    }""")
+    expected_accept = '.png,.tif,.tiff,image/png,image/tiff,image/jpeg,image/webp'
+    assert upload_regression['acceptPhoto'] == expected_accept and upload_regression['acceptSlot'] == expected_accept, upload_regression
+    assert upload_regression['pngBytes'] > 10 * 1024 * 1024 and upload_regression['pngPrefix'] == 'data:image/png;base64,', upload_regression
+    assert (upload_regression['pngWidth'], upload_regression['pngHeight']) == (2030, 4241), upload_regression
+    assert 100 <= upload_regression['pngAlpha'] <= 155, upload_regression
+    assert upload_regression['tifPrefix'] == 'data:image/png;base64,' and upload_regression['tiffPrefix'] == 'data:image/png;base64,', upload_regression
+    assert (upload_regression['tifWidth'], upload_regression['tifHeight']) == (2, 2), upload_regression
+    assert (upload_regression['tiffWidth'], upload_regression['tiffHeight']) == (2, 2), upload_regression
+    assert upload_regression['tifAlpha'] == [255, 128, 0, 255], upload_regression
+    assert upload_regression['emptyMimeKind'] == 'tiff' and upload_regression['imageTifKind'] == 'tiff', upload_regression
+    assert upload_regression['maxBytes'] == 50 * 1024 * 1024 and upload_regression['maxPixels'] == 32_000_000 and upload_regression['maxEdge'] == 8192, upload_regression
+    assert '像素過大' in upload_regression['pixelError'] and '50MB' in upload_regression['byteError'], upload_regression
+    print('FRONT_HIGH_RES_PNG_TIFF_UPLOAD_OK', upload_regression)
     # Let the app finish its own initial catalog load/navigation before forcing
     # the editor. Otherwise the startup async task can switch pages after the
     # test has entered the editor and produce a false zero-geometry failure.
