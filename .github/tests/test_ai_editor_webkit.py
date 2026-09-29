@@ -275,7 +275,7 @@ def front_test(browser, base):
         const preview=await load(pair.preview),print=await load(pair.print),target=[240,480];
         const mapped=window.BenfuwanPrintMask.mapOverlayToPrintFrame(preview,...target);
         const expected=document.createElement('canvas');expected.width=target[0];expected.height=target[1];
-        const expectedContext=expected.getContext('2d',{willReadFrequently:true});expectedContext.drawImage(preview,0,0,...target);
+        const expectedContext=expected.getContext('2d',{willReadFrequently:true});expectedContext.imageSmoothingEnabled=true;expectedContext.imageSmoothingQuality='high';expectedContext.drawImage(preview,0,0,...target);
         const a=expectedContext.getImageData(0,0,...target).data;
         const b=mapped.canvas.getContext('2d').getImageData(0,0,mapped.canvas.width,mapped.canvas.height).data;
         let changed=0;for(let i=0;i<a.length;i++)if(a[i]!==b[i])changed++;
@@ -424,6 +424,32 @@ def front_test(browser, base):
     page.evaluate("""fixtures => {ctx.modelId='model_apple_14_pro_max';ctx.modelName='iPhone 14 Pro Max';ctx.maskUrl=fixtures.iphone14ProMax.preview;ctx.printLineUrl=fixtures.iphone14ProMax.print;applyCaseBoundaryClip()}""", mask_fixtures)
     poll(page, "() => {const m=document.getElementById('phone-mask');return getComputedStyle(m).display!=='none'&&m.naturalWidth===240&&m.naturalHeight===480}")
     print('FRONT_IPHONE_17_PRO_MIXED_RASTER_FULL_FRAME_OK', mixed_resolution)
+    retina_before = page.evaluate("""() => {
+      const box=el=>{const r=el.getBoundingClientRect();return [Math.round(r.width*1000)/1000,Math.round(r.height*1000)/1000]};
+      return {dpr:window.devicePixelRatio,logical:[canvas.width,canvas.height],shell:box(document.getElementById('canvas-shell')),overlay:box(document.getElementById('phone-mask')),guide:box(document.getElementById('print-area-guide'))};
+    }""")
+    page.evaluate("""() => {
+      window.__bfTestOriginalDpr=window.devicePixelRatio;
+      Object.defineProperty(window,'devicePixelRatio',{configurable:true,value:4});
+      applyCaseBoundaryClip();
+    }""")
+    retina_overlay = poll(page, """() => {
+      const overlay=document.getElementById('phone-mask'),guide=document.getElementById('print-area-guide');
+      if(!overlay?.complete||!guide?.complete||overlay.naturalWidth!==720||overlay.naturalHeight!==1440||guide.naturalWidth!==720||guide.naturalHeight!==1440)return false;
+      const box=el=>{const r=el.getBoundingClientRect();return [Math.round(r.width*1000)/1000,Math.round(r.height*1000)/1000]};
+      return {dpr:BenfuwanPrintMask.previewDpr(),logical:[canvas.width,canvas.height],shell:box(document.getElementById('canvas-shell')),overlayCss:box(overlay),guideCss:box(guide),overlayBacking:[overlay.naturalWidth,overlay.naturalHeight],guideBacking:[guide.naturalWidth,guide.naturalHeight]};
+    }""")
+    assert retina_overlay == {
+        'dpr': 3, 'logical': retina_before['logical'], 'shell': retina_before['shell'],
+        'overlayCss': retina_before['overlay'], 'guideCss': retina_before['guide'],
+        'overlayBacking': [720,1440], 'guideBacking': [720,1440],
+    }, (retina_before, retina_overlay)
+    page.evaluate("""() => {
+      Object.defineProperty(window,'devicePixelRatio',{configurable:true,value:window.__bfTestOriginalDpr});
+      applyCaseBoundaryClip();delete window.__bfTestOriginalDpr;
+    }""")
+    poll(page, "() => {const m=document.getElementById('phone-mask'),g=document.getElementById('print-area-guide');return m?.naturalWidth===240&&m?.naturalHeight===480&&g?.naturalWidth===240&&g?.naturalHeight===480}")
+    print('FRONT_RETINA_OVERLAY_GUIDE_BACKING_ONLY_OK', retina_overlay)
     assert_front_editor_geometry(page, 'iphone-constrained-unselected')
     add_front_photo(page, 0)
     page.evaluate("() => window.BenfuwanEditorAccess.fitCanvas()")
