@@ -7,6 +7,15 @@
   const DRAFT_KEY = 'design-draft-v1';
   const DRAFT_VERSION = 1;
   const DEBOUNCE_MS = 650;
+  const DRAFT_CUSTOM_PROPS = [
+    ...CUSTOM_PROPS,
+    'aiRemovalMode',
+    'aiOutlineSource',
+    'aiOutlineStrength',
+    'aiOutlineStyle',
+    'aiOutlineWidth',
+    'aiOutlineColor',
+  ];
   const GEOMETRY_ERROR = '此手機殼設定已更新，舊設計無法安全恢復，請重新製作。';
   const INVALID_ERROR = '上次的設計草稿已無法安全恢復，請刪除舊草稿並重新開始。';
   const QUOTA_ERROR = '此設計圖片較大，自動儲存空間不足，請不要關閉頁面。';
@@ -71,7 +80,7 @@
   function buildDraft() {
     const c = getCanvas(), state = getContext();
     if (!c || !state || !state.modelId || !state.styleId) return null;
-    const canvasJson = c.toDatalessJSON(CUSTOM_PROPS);
+    const canvasJson = c.toDatalessJSON(DRAFT_CUSTOM_PROPS);
     return {
       version: DRAFT_VERSION,
       updatedAt: new Date().toISOString(),

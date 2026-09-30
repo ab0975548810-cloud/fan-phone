@@ -834,9 +834,10 @@ def design_draft_test(browser, base):
       const imageSource=document.createElement('canvas');imageSource.width=12;imageSource.height=18;
       const imageContext=imageSource.getContext('2d',{alpha:true});imageContext.clearRect(0,0,12,18);imageContext.fillStyle='rgba(255,0,0,.7)';imageContext.fillRect(1,1,10,16);
       const photo=await new Promise((resolve,reject)=>fabric.Image.fromURL(imageSource.toDataURL('image/png'),image=>image?resolve(image):reject(new Error('draft image failed'))));
-      photo.set({left:71,top:93,originX:'center',originY:'center',scaleX:1.4,scaleY:1.2,angle:23,opacity:.62,role:'photo',originalName:'draft-photo.png',clipPath:baseClip});
+      const aiSource=photo.getSrc();
+      photo.set({left:71,top:93,originX:'center',originY:'center',scaleX:1.4,scaleY:1.2,angle:23,opacity:.62,role:'photo',originalName:'draft-photo.png',clipPath:baseClip,aiBackgroundRemoved:true,aiRemovalMode:'universal-v3',aiOutlineSource:aiSource,aiOutlineStrength:'0',aiOutlineStyle:'none',aiOutlineWidth:9,aiOutlineColor:'#ffffff'});
       styleEditableObject(photo);canvas.add(photo);canvas.setActiveObject(photo);recordHistory();
-      return {modelId:ctx.modelId,styleId:ctx.styleId,colorName:ctx.colorName||'',width:canvas.width,height:canvas.height};
+      return {modelId:ctx.modelId,styleId:ctx.styleId,colorName:ctx.colorName||'',width:canvas.width,height:canvas.height,aiSource,aiWidth:photo.width,aiHeight:photo.height};
     }""")
     image_draft = poll(page, "() => idbGet(BenfuwanDesignDraft.key).then(draft => draft?.version === 1 ? draft : false)", timeout=10000)
     assert image_draft and image_draft['version'] == 1
@@ -844,6 +845,8 @@ def design_draft_test(browser, base):
     assert image_draft['colorName'] == initial['colorName']
     assert image_draft['logicalCanvasWidth'] == initial['width'] and image_draft['logicalCanvasHeight'] == initial['height']
     assert [obj.get('role') for obj in image_draft['canvasJson']['objects']] == ['photo']
+    initial_ai = image_draft['canvasJson']['objects'][0]
+    assert initial_ai['aiRemovalMode'] == 'universal-v3' and initial_ai['aiOutlineSource'] == initial['aiSource']
     assert all(key not in image_draft for key in ('printBase64','mockupBase64','productionMeta','orderId'))
 
     changed = page.evaluate("""async () => {
@@ -855,11 +858,29 @@ def design_draft_test(browser, base):
       setCanvasBackground('#ffeeaa');changeBackgroundOpacity(67);recordHistory();
       return {photo:{left:photo.left,top:photo.top,scaleX:photo.scaleX,scaleY:photo.scaleY,angle:photo.angle,opacity:photo.opacity}};
     }""")
+    page.evaluate("""() => {
+      const photo=canvas.getObjects().find(object=>object.role==='photo');canvas.setActiveObject(photo);canvas.requestRenderAll();
+      document.getElementById('bf-os-width').value='9';document.getElementById('bf-os-custom-color').value='#ffffff';
+      document.querySelector('#sheet-outline-v2 [data-style="custom"]').click();
+    }""")
+    outlined = poll(page, """() => {
+      const photo=canvas.getActiveObject();
+      if(!photo||photo.aiOutlineStyle!=='custom'||photo.getSrc()===photo.aiOutlineSource)return false;
+      photo.aiRemovalMode='universal-v3';recordHistory();
+      return {source:photo.aiOutlineSource,current:photo.getSrc(),width:photo.width,height:photo.height,strength:photo.aiOutlineStrength,style:photo.aiOutlineStyle,outlineWidth:photo.aiOutlineWidth,color:photo.aiOutlineColor};
+    }""", timeout=10000)
     page.evaluate("updatedAt => { window.__draftBeforeUpdate = updatedAt; }", image_draft['updatedAt'])
     full_draft = poll(page, "() => idbGet(BenfuwanDesignDraft.key).then(draft => draft?.updatedAt && draft.updatedAt !== window.__draftBeforeUpdate ? draft : false)", timeout=10000)
     assert full_draft['updatedAt'] != image_draft['updatedAt']
     assert full_draft['backgroundColor'] == '#ffeeaa' and abs(full_draft['backgroundOpacity'] - .67) < .001
     assert {obj.get('role') for obj in full_draft['canvasJson']['objects']} == {'photo','sticker','text'}
+    saved_ai = next(obj for obj in full_draft['canvasJson']['objects'] if obj.get('role') == 'photo')
+    assert saved_ai['aiRemovalMode'] == 'universal-v3'
+    assert saved_ai['aiOutlineSource'] == initial['aiSource'] == outlined['source']
+    assert saved_ai['aiOutlineStrength'] == outlined['strength'] == 'custom'
+    assert saved_ai['aiOutlineStyle'] == outlined['style'] == 'custom'
+    assert saved_ai['aiOutlineWidth'] == outlined['outlineWidth'] == 9
+    assert saved_ai['aiOutlineColor'] == outlined['color'] == '#ffffff'
     print('FRONT_DESIGN_DRAFT_AUTOSAVE_ACTIONS_OK', full_draft['updatedAt'])
 
     page.reload(wait_until='domcontentloaded')
@@ -874,6 +895,7 @@ def design_draft_test(browser, base):
         modelId:ctx.modelId,styleId:ctx.styleId,colorName:ctx.colorName||'',width:canvas.width,height:canvas.height,count:canvas.getObjects().length,
         backgroundColor:ctx.backgroundColor,backgroundOpacity:ctx.backgroundOpacity,
         photo:{left:photo.left,top:photo.top,scaleX:photo.scaleX,scaleY:photo.scaleY,angle:photo.angle,opacity:photo.opacity},
+        ai:{removalMode:photo.aiRemovalMode,source:photo.aiOutlineSource,strength:photo.aiOutlineStrength,style:photo.aiOutlineStyle,width:photo.aiOutlineWidth,color:photo.aiOutlineColor,current:photo.getSrc(),imageWidth:photo.width,imageHeight:photo.height},
         font:text.fontFamily,fontLoaded:document.fonts.check('16px "jf-openhuninn"','粉圓恢復'),
         printBase64:ctx.printBase64,mockupBase64:ctx.mockupBase64,productionMeta:ctx.productionMeta,
         historyLength:historyStack.length,historyIndex
@@ -886,9 +908,37 @@ def design_draft_test(browser, base):
     for key, value in changed['photo'].items():
         assert abs(restored['photo'][key] - value) < .001, (key, restored, changed)
     assert restored['font'] == 'jf-openhuninn' and restored['fontLoaded']
+    assert restored['ai']['removalMode'] == 'universal-v3'
+    assert restored['ai']['source'] == initial['aiSource'] and restored['ai']['current'] == outlined['current']
+    assert restored['ai']['strength'] == 'custom' and restored['ai']['style'] == 'custom'
+    assert restored['ai']['width'] == 9 and restored['ai']['color'] == '#ffffff'
     assert restored['printBase64'] is None and restored['mockupBase64'] is None and restored['productionMeta'] is None
     assert restored['historyLength'] == 1 and restored['historyIndex'] == 0
     print('FRONT_DESIGN_DRAFT_RELOAD_RECOVERY_OK', restored)
+
+    page.evaluate("""() => {
+      const photo=canvas.getObjects().find(object=>object.role==='photo');canvas.setActiveObject(photo);canvas.requestRenderAll();
+      window.__draftOutlineBeforeRecolor=photo.getSrc();
+      const color=document.getElementById('bf-os-custom-color');color.value='#00ff00';color.dispatchEvent(new Event('change',{bubbles:true}));
+    }""")
+    recolored = poll(page, """() => {
+      const photo=canvas.getActiveObject();
+      return photo?.aiOutlineColor==='#00ff00'&&photo.getSrc()!==window.__draftOutlineBeforeRecolor
+        ? {source:photo.aiOutlineSource,width:photo.width,height:photo.height,color:photo.aiOutlineColor,style:photo.aiOutlineStyle}
+        : false;
+    }""", timeout=10000)
+    assert recolored == {'source': initial['aiSource'], 'width': outlined['width'], 'height': outlined['height'], 'color': '#00ff00', 'style': 'custom'}, recolored
+    page.evaluate("() => document.querySelector('#sheet-outline-v2 [data-style=\"none\"]').click()")
+    outline_removed = poll(page, """() => {
+      const photo=canvas.getActiveObject();
+      return photo?.aiOutlineStyle==='none'&&photo.getSrc()===photo.aiOutlineSource
+        ? {source:photo.aiOutlineSource,current:photo.getSrc(),width:photo.width,height:photo.height,strength:photo.aiOutlineStrength}
+        : false;
+    }""", timeout=10000)
+    assert outline_removed['source'] == outline_removed['current'] == initial['aiSource']
+    assert outline_removed['width'] == initial['aiWidth'] and outline_removed['height'] == initial['aiHeight']
+    assert outline_removed['strength'] == '0'
+    print('FRONT_DESIGN_DRAFT_AI_OUTLINE_EDITABILITY_OK', {'recolored': recolored, 'removed': outline_removed})
 
     cart_state = page.evaluate("""async () => {
       const tiny=document.createElement('canvas');tiny.width=2;tiny.height=2;
