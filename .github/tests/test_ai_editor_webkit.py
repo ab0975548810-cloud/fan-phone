@@ -838,8 +838,7 @@ def design_draft_test(browser, base):
       styleEditableObject(photo);canvas.add(photo);canvas.setActiveObject(photo);recordHistory();
       return {modelId:ctx.modelId,styleId:ctx.styleId,colorName:ctx.colorName||'',width:canvas.width,height:canvas.height};
     }""")
-    page.wait_for_timeout(900)
-    image_draft = page.evaluate("() => idbGet(BenfuwanDesignDraft.key)")
+    image_draft = poll(page, "() => idbGet(BenfuwanDesignDraft.key).then(draft => draft?.version === 1 ? draft : false)", timeout=10000)
     assert image_draft and image_draft['version'] == 1
     assert image_draft['modelId'] == initial['modelId'] and image_draft['styleId'] == initial['styleId']
     assert image_draft['colorName'] == initial['colorName']
@@ -856,8 +855,8 @@ def design_draft_test(browser, base):
       setCanvasBackground('#ffeeaa');changeBackgroundOpacity(67);recordHistory();
       return {photo:{left:photo.left,top:photo.top,scaleX:photo.scaleX,scaleY:photo.scaleY,angle:photo.angle,opacity:photo.opacity}};
     }""")
-    page.wait_for_timeout(900)
-    full_draft = page.evaluate("() => idbGet(BenfuwanDesignDraft.key)")
+    page.evaluate("updatedAt => { window.__draftBeforeUpdate = updatedAt; }", image_draft['updatedAt'])
+    full_draft = poll(page, "() => idbGet(BenfuwanDesignDraft.key).then(draft => draft?.updatedAt && draft.updatedAt !== window.__draftBeforeUpdate ? draft : false)", timeout=10000)
     assert full_draft['updatedAt'] != image_draft['updatedAt']
     assert full_draft['backgroundColor'] == '#ffeeaa' and abs(full_draft['backgroundOpacity'] - .67) < .001
     assert {obj.get('role') for obj in full_draft['canvasJson']['objects']} == {'photo','sticker','text'}
