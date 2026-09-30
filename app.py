@@ -7,6 +7,12 @@ import uuid
 import hashlib
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from ai_quota import (
+    AiQuotaRejected,
+    AiQuotaUnavailable,
+    PersistentAiQuota,
+    QUOTA_UNAVAILABLE_MESSAGE,
+)
 from commerce_store import CommerceError
 from io import BytesIO
 
@@ -55,6 +61,7 @@ SUPABASE_PUBLIC_BUCKET = os.environ.get('SUPABASE_PUBLIC_BUCKET', 'case-assets')
 SUPABASE_PRIVATE_BUCKET = os.environ.get('SUPABASE_PRIVATE_BUCKET', 'case-private').strip() or 'case-private'
 USE_SUPABASE = bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY and create_client)
 SUPABASE = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) if USE_SUPABASE else None
+AI_QUOTA = PersistentAiQuota(lambda: SUPABASE if USE_SUPABASE else None)
 
 # === Self-hosted AI background removal (Runpod Serverless worker) ===
 RUNPOD_API_KEY = os.environ.get('RUNPOD_API_KEY', '').strip()
@@ -530,7 +537,19 @@ def ai_remove_background():
     if len(raw) > AI_MAX_INPUT_BYTES:
         return no_cache_json({'status':'error','msg':'AI 處理圖片需小於 6MB，請重新選擇圖片'}, 400)
 
+    try:
+        import security_perf as security_module
+        quota_reservation = AI_QUOTA.reserve(security_module._cid(), security_module._ip())
+    except AiQuotaRejected as exc:
+        return no_cache_json({'status':'error','code':exc.code,'msg':str(exc)}, 429)
+    except AiQuotaUnavailable as exc:
+        print('AI quota reserve unavailable:', repr(exc), flush=True)
+        return no_cache_json({
+            'status':'error', 'code':'AI_QUOTA_UNAVAILABLE', 'msg':QUOTA_UNAVAILABLE_MESSAGE,
+        }, 503)
+
     job_id = ''
+    quota_counted = False
     started = time.monotonic()
     try:
         payload = {
@@ -540,29 +559,64 @@ def ai_remove_background():
                 'max_output_edge': 1800,
             }
         }
-        job_id, submit_result = _runpod_submit(payload)
+        try:
+            job_id, _ = _runpod_submit(payload)
+        except Exception:
+            try:
+                AI_QUOTA.release(quota_reservation)
+            except AiQuotaUnavailable as quota_exc:
+                print('AI quota release unavailable:', repr(quota_exc), flush=True)
+                return no_cache_json({
+                    'status':'error', 'code':'AI_QUOTA_UNAVAILABLE', 'msg':QUOTA_UNAVAILABLE_MESSAGE,
+                }, 503)
+            raise
+
+        try:
+            AI_QUOTA.mark_submitted(quota_reservation, job_id)
+            quota_counted = True
+        except AiQuotaUnavailable as exc:
+            print('AI quota submit mark unavailable:', repr(exc), flush=True)
+            _runpod_cancel(job_id)
+            return no_cache_json({
+                'status':'error', 'code':'AI_QUOTA_UNAVAILABLE', 'msg':QUOTA_UNAVAILABLE_MESSAGE,
+            }, 503)
+
         deadline = started + AI_REMOVE_BG_TIMEOUT
         result, retried = _runpod_wait_for_result(job_id, deadline)
 
         output = result.get('output') or {}
         if not isinstance(output, dict):
+            AI_QUOTA.finish(quota_reservation, 'FAILED')
+            quota_counted = False
             return no_cache_json({'status':'error','code':'AI_BAD_OUTPUT','msg':'自架 AI 沒有回傳有效結果'}, 502)
         if output.get('status') == 'error':
             detail = output.get('error') or 'unknown error'
+            AI_QUOTA.finish(quota_reservation, 'FAILED')
+            quota_counted = False
             return no_cache_json({'status':'error','code':'AI_WORKER_ERROR','msg':f'自架 AI 失敗：{detail}'}, 502)
 
         encoded = output.get('image_base64') or ''
         if not encoded:
+            AI_QUOTA.finish(quota_reservation, 'FAILED')
+            quota_counted = False
             return no_cache_json({'status':'error','code':'AI_EMPTY_OUTPUT','msg':'自架 AI 沒有回傳去背圖片'}, 502)
         try:
             png = base64.b64decode(encoded, validate=True)
         except Exception:
+            AI_QUOTA.finish(quota_reservation, 'FAILED')
+            quota_counted = False
             return no_cache_json({'status':'error','code':'AI_BAD_IMAGE_DATA','msg':'自架 AI 圖片資料無法解析'}, 502)
         if not png.startswith(b'\x89PNG\r\n\x1a\n'):
+            AI_QUOTA.finish(quota_reservation, 'FAILED')
+            quota_counted = False
             return no_cache_json({'status':'error','code':'AI_NOT_PNG','msg':'自架 AI 回傳的不是 PNG'}, 502)
         if len(png) > 14 * 1024 * 1024:
+            AI_QUOTA.finish(quota_reservation, 'FAILED')
+            quota_counted = False
             return no_cache_json({'status':'error','code':'AI_OUTPUT_TOO_LARGE','msg':'自架 AI 回傳圖片過大'}, 502)
 
+        AI_QUOTA.finish(quota_reservation, 'COMPLETED')
+        quota_counted = False
         resp = Response(png, mimetype='image/png')
         resp.headers['Cache-Control'] = 'no-store'
         resp.headers['X-AI-Provider'] = 'self-hosted-runpod'
@@ -575,6 +629,12 @@ def ai_remove_background():
             resp.headers['X-AI-Execution-Ms'] = str(result.get('executionTime'))[:30]
         return resp
     except TimeoutError as exc:
+        if quota_counted:
+            try:
+                AI_QUOTA.finish(quota_reservation, 'FAILED')
+            except AiQuotaUnavailable as quota_exc:
+                print('AI quota finish unavailable:', repr(quota_exc), flush=True)
+                return no_cache_json({'status':'error','code':'AI_QUOTA_UNAVAILABLE','msg':QUOTA_UNAVAILABLE_MESSAGE}, 503)
         return no_cache_json({
             'status':'error',
             'code':'AI_TIMEOUT',
@@ -584,14 +644,43 @@ def ai_remove_background():
         }, 504)
     except requests.Timeout:
         _runpod_cancel(job_id)
+        if quota_counted:
+            try:
+                AI_QUOTA.finish(quota_reservation, 'FAILED')
+            except AiQuotaUnavailable as quota_exc:
+                print('AI quota finish unavailable:', repr(quota_exc), flush=True)
+                return no_cache_json({'status':'error','code':'AI_QUOTA_UNAVAILABLE','msg':QUOTA_UNAVAILABLE_MESSAGE}, 503)
         return no_cache_json({'status':'error','code':'AI_NETWORK_TIMEOUT','msg':'AI 連線暫時逾時，請再試一次'}, 504)
     except requests.RequestException as exc:
         _runpod_cancel(job_id)
+        if quota_counted:
+            try:
+                AI_QUOTA.finish(quota_reservation, 'FAILED')
+            except AiQuotaUnavailable as quota_exc:
+                print('AI quota finish unavailable:', repr(quota_exc), flush=True)
+                return no_cache_json({'status':'error','code':'AI_QUOTA_UNAVAILABLE','msg':QUOTA_UNAVAILABLE_MESSAGE}, 503)
         return no_cache_json({'status':'error','code':'AI_NETWORK_ERROR','msg':f'自架 AI 連線失敗：{exc}'}, 502)
+    except AiQuotaUnavailable as exc:
+        print('AI quota lifecycle unavailable:', repr(exc), flush=True)
+        if job_id:
+            _runpod_cancel(job_id)
+        return no_cache_json({'status':'error','code':'AI_QUOTA_UNAVAILABLE','msg':QUOTA_UNAVAILABLE_MESSAGE}, 503)
     except RuntimeError as exc:
+        if quota_counted:
+            try:
+                AI_QUOTA.finish(quota_reservation, 'FAILED')
+            except AiQuotaUnavailable as quota_exc:
+                print('AI quota finish unavailable:', repr(quota_exc), flush=True)
+                return no_cache_json({'status':'error','code':'AI_QUOTA_UNAVAILABLE','msg':QUOTA_UNAVAILABLE_MESSAGE}, 503)
         return no_cache_json({'status':'error','code':'AI_JOB_ERROR','job_id':job_id,'msg':str(exc)}, 502)
     except Exception as exc:
         _runpod_cancel(job_id)
+        if quota_counted:
+            try:
+                AI_QUOTA.finish(quota_reservation, 'FAILED')
+            except AiQuotaUnavailable as quota_exc:
+                print('AI quota finish unavailable:', repr(quota_exc), flush=True)
+                return no_cache_json({'status':'error','code':'AI_QUOTA_UNAVAILABLE','msg':QUOTA_UNAVAILABLE_MESSAGE}, 503)
         print('ai_remove_background unexpected error:', repr(exc))
         return no_cache_json({'status':'error','code':'AI_UNKNOWN_ERROR','msg':'AI 去背發生未預期錯誤，請再試一次'}, 500)
 

@@ -11,12 +11,33 @@ with psycopg.connect(os.environ['TEST_POSTGRES_DSN']) as db:
         db.execute(path.read_text(encoding='utf-8-sig'))
     for role in ('anon', 'authenticated'):
         assert not db.execute("SELECT has_function_privilege(%s, 'public.commerce_commit(bigint,jsonb,jsonb,text)', 'EXECUTE')", (role,)).fetchone()[0]
+        for signature in (
+            'public.reserve_ai_usage(uuid,text,text)',
+            'public.mark_ai_usage_submitted(uuid,text)',
+            'public.release_ai_usage(uuid)',
+            'public.finish_ai_usage(uuid,text)',
+            'public.get_ai_usage_diagnostics()',
+        ):
+            assert not db.execute(
+                'SELECT has_function_privilege(%s, %s, \'EXECUTE\')', (role, signature)
+            ).fetchone()[0]
+    for signature in (
+        'public.reserve_ai_usage(uuid,text,text)',
+        'public.mark_ai_usage_submitted(uuid,text)',
+        'public.release_ai_usage(uuid)',
+        'public.finish_ai_usage(uuid,text)',
+        'public.get_ai_usage_diagnostics()',
+    ):
+        assert db.execute(
+            'SELECT has_function_privilege(\'service_role\', %s, \'EXECUTE\')', (signature,)
+        ).fetchone()[0]
     assert db.execute("""SELECT bool_and(relrowsecurity) FROM pg_class WHERE oid IN (
         'public.orders'::regclass,'public.app_store'::regclass,'public.production_profiles'::regclass,
         'public.print_order_bindings'::regclass,'public.print_jobs'::regclass,'public.print_requests'::regclass,
-        'public.print_events'::regclass,'public.printer_status_events'::regclass
+        'public.print_events'::regclass,'public.printer_status_events'::regclass,
+        'public.ai_usage_events'::regclass
     )""").fetchone()[0]
-    for table in ('production_profiles','print_order_bindings','print_jobs','print_requests','print_events','printer_status_events'):
+    for table in ('production_profiles','print_order_bindings','print_jobs','print_requests','print_events','printer_status_events','ai_usage_events'):
         for role in ('anon','authenticated'):
             assert not db.execute("SELECT has_table_privilege(%s, %s, 'SELECT')", (role, 'public.' + table)).fetchone()[0]
             assert not db.execute("SELECT has_table_privilege(%s, %s, 'INSERT')", (role, 'public.' + table)).fetchone()[0]

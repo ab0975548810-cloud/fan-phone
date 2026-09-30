@@ -149,7 +149,11 @@ def front_test(browser, base):
     browser_engine = os.environ.get('BROWSER_ENGINE', 'webkit').lower()
     page = browser.new_page(viewport={'width': 390, 'height': 600})
     responses = [GOOD, BAD]
-    page.route('**/api/ai/remove-background', lambda route: route.fulfill(status=200, body=responses.pop(0) if responses else GOOD, content_type='image/png'))
+    backend_ai_requests = []
+    def backend_ai_response(route):
+        backend_ai_requests.append(route.request.url)
+        route.fulfill(status=200, body=responses.pop(0) if responses else GOOD, content_type='image/png')
+    page.route('**/api/ai/remove-background', backend_ai_response)
     page.goto(base + '/', wait_until='domcontentloaded')
     poll(page, "() => typeof fabric !== 'undefined' && typeof initCanvas === 'function' && !!window.BenfuwanAiRemoveV2 && !!window.removeBackgroundForActive && !!window.BenfuwanEditorAccess && !!window.BenfuwanOrderPayload && !!window.BenfuwanPrintMask && !!window.BenfuwanProductionHQ && !!window.BenfuwanImageUpload")
     upload_regression = page.evaluate("""async () => {
@@ -240,6 +244,8 @@ def front_test(browser, base):
     assert transparent_decontaminate['opaqueWhite'] == [255,255,255,255], transparent_decontaminate
     assert transparent_decontaminate['halo'][3] < 40 and transparent_decontaminate['transparent'][3] == 0, transparent_decontaminate
     print('FRONT_TRANSPARENT_PNG_DECONTAMINATE_OPAQUE_WHITE_OK', transparent_decontaminate)
+    assert backend_ai_requests == [], backend_ai_requests
+    print('FRONT_LOCAL_BACKGROUND_REMOVAL_DOES_NOT_SPEND_CLOUD_QUOTA_OK')
     transparent_stripes = page.evaluate("""async () => {
       const core=window.BenfuwanAiRemoveV2,w=2030,h=4241,source=document.createElement('canvas');source.width=w;source.height=h;
       const g=source.getContext('2d',{alpha:true,willReadFrequently:true});g.clearRect(0,0,w,h);g.fillStyle='rgba(255,255,255,.25)';g.fillRect(599,999,832,2202);g.fillStyle='#fff';g.fillRect(600,1000,830,2200);

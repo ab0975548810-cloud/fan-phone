@@ -138,6 +138,8 @@ def install(app_module):
     def ai_remove_diagnose():
         if not app_module.session.get('logged_in'):
             return app_module.no_cache_json({'status':'error','msg':'未登入'}, 401)
+        from ai_quota import AiQuotaUnavailable, unavailable_diagnostics
+
         endpoint_id = str(app_module.RUNPOD_ENDPOINT_ID or '').strip()
         configured = bool(app_module.RUNPOD_API_KEY and endpoint_id and app_module.requests)
         result = {
@@ -148,6 +150,11 @@ def install(app_module):
             'timeout_seconds': app_module.AI_REMOVE_BG_TIMEOUT,
             'active_workers_expected': 0,
         }
+        try:
+            result['ai_quota'] = app_module.AI_QUOTA.diagnostics()
+        except AiQuotaUnavailable as exc:
+            print('[AI] quota diagnostics unavailable:', repr(exc), flush=True)
+            result['ai_quota'] = unavailable_diagnostics()
         if not configured:
             return app_module.no_cache_json(result, 503)
         try:

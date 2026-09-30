@@ -203,8 +203,15 @@ def install(app_module):
             if blocked:
                 return _429('此網路的 AI 使用量暫時較高，請稍後再試', retry)
             with _LOCK:
-                if _AI_ACTIVE >= 3:
-                    return _429('AI 目前正在處理其他圖片，請稍後再試', 5)
+                if _AI_ACTIVE >= 2:
+                    busy = jsonify({
+                        'status': 'error',
+                        'code': 'AI_BUSY',
+                        'msg': 'AI 正在處理其他圖片，請稍後再試。',
+                    })
+                    busy.status_code = 429
+                    busy.headers['Retry-After'] = '5'
+                    return busy
                 _AI_ACTIVE += 1
                 g._bf_ai_slot = True
             if not _valid_image(request.files.get('image')):
@@ -288,7 +295,10 @@ def install(app_module):
             try:
                 payload = resp.get_json(silent=True) or {}
                 code = payload.get('code') or 'SERVER_ERROR'
-                msg = 'AI 等候時間較久，請再試一次' if code in ('AI_TIMEOUT', 'AI_NETWORK_TIMEOUT') else '服務暫時忙碌，請稍後再試'
+                if code == 'AI_QUOTA_UNAVAILABLE':
+                    msg = payload.get('msg') or '雲端 AI 配額服務暫時無法使用，請稍後再試。'
+                else:
+                    msg = 'AI 等候時間較久，請再試一次' if code in ('AI_TIMEOUT', 'AI_NETWORK_TIMEOUT') else '服務暫時忙碌，請稍後再試'
                 resp.set_data(json.dumps({'status': 'error', 'code': code, 'msg': msg}, ensure_ascii=False))
                 resp.headers['Content-Type'] = 'application/json; charset=utf-8'
             except Exception:
