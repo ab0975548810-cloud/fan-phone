@@ -790,6 +790,30 @@ def front_test(browser, base):
 
 def design_draft_test(browser, base):
     page = browser.new_page(viewport={'width': 390, 'height': 844})
+    draft_preview = fixture_data_url('iphone13-preview.png')
+    draft_print = fixture_data_url('iphone13-print.png')
+
+    def configure_draft_catalog(route):
+        response = route.fetch()
+        payload = response.json()
+        catalog = payload.get('data', payload)
+        models = [row for row in catalog.get('models', []) if row and row.get('status') is not False]
+        styles = [row for row in catalog.get('styles', []) if row and row.get('status') is not False]
+        assert models and styles, 'draft fixture requires one active model and style'
+        model, style = models[0], styles[0]
+        model.setdefault('case_profiles', {})[style['id']] = {
+            'preview_mask_img': draft_preview,
+            'print_line_img': draft_print,
+            'print_x': 0,
+            'print_y': 0,
+            'print_w': 80,
+            'print_h': 160,
+            'print_angle': 0,
+        }
+        style.setdefault('model_colors', {})[model['id']] = ['透明', '黑']
+        route.fulfill(response=response, body=json.dumps(payload, ensure_ascii=False))
+
+    page.route('**/api/shop_data', configure_draft_catalog)
     page.route('**/api/create_order', lambda route: route.fulfill(
         status=200,
         content_type='application/json',
@@ -801,17 +825,11 @@ def design_draft_test(browser, base):
     initial = page.evaluate("""async () => {
       await BenfuwanDesignDraft.clearDraft();
       const colorList=(model,style)=>{const raw=style.model_colors?.[model.id]||style.colors||[];return (Array.isArray(raw)?raw:String(raw||'').split(/[,，]/)).map(x=>String(x).trim()).filter(Boolean)};
-      let pair=null,fallback=null;
-      for(const model of shopData.models||[]){
-        for(const style of shopData.styles||[]){
-          if(model.status!==false&&style.status!==false&&BenfuwanModelProfile.profileFor(model,style.id).ready){
-            const colors=colorList(model,style);fallback??={model,style,colors};if(colors.length>1){pair={model,style,colors};break}
-          }
-        }
-        if(pair)break;
-      }
-      pair??=fallback;
-      if(!pair)throw new Error('No configured model/style fixture');
+      const model=(shopData.models||[]).find(row=>row?.status!==false);
+      const style=(shopData.styles||[]).find(row=>row?.status!==false);
+      if(!model||!style)throw new Error('Missing deterministic model/style fixture');
+      const pair={model,style,colors:colorList(model,style)};
+      if(!BenfuwanModelProfile.profileFor(model,style.id).ready||pair.colors.length<2)throw new Error('Invalid deterministic model/style fixture');
       selectModel(pair.model);if(selectStyle(pair.style)===false)throw new Error('Configured style rejected');if(pair.colors.length)chooseCaseColor(pair.colors[0]);startEditor(false);
       const imageSource=document.createElement('canvas');imageSource.width=12;imageSource.height=18;
       const imageContext=imageSource.getContext('2d',{alpha:true});imageContext.clearRect(0,0,12,18);imageContext.fillStyle='rgba(255,0,0,.7)';imageContext.fillRect(1,1,10,16);
