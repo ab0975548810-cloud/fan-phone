@@ -32,4 +32,5 @@ jobs:
           TEST_POSTGRES_DSN: postgresql://postgres:test-only@localhost:5432/commerce_test
         run: |
           python .github/tests/setup_commerce_postgres.py
+          python .github/tests/test_ai_quota_postgres.py
           python test_commerce.py
