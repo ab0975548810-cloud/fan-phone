@@ -788,6 +788,149 @@ def front_test(browser, base):
     page.close()
 
 
+def design_draft_test(browser, base):
+    page = browser.new_page(viewport={'width': 390, 'height': 844})
+    page.route('**/api/create_order', lambda route: route.fulfill(
+        status=200,
+        content_type='application/json',
+        body='{"status":"success","order_id":"DRAFT-TEST","total":390}'
+    ))
+    page.goto(base + '/', wait_until='domcontentloaded')
+    poll(page, "() => !!window.BenfuwanDesignDraft && !!window.BenfuwanModelProfile && shopData.models?.length")
+
+    initial = page.evaluate("""async () => {
+      await BenfuwanDesignDraft.clearDraft();
+      const colorList=(model,style)=>{const raw=style.model_colors?.[model.id]||style.colors||[];return (Array.isArray(raw)?raw:String(raw||'').split(/[,，]/)).map(x=>String(x).trim()).filter(Boolean)};
+      let pair=null,fallback=null;
+      for(const model of shopData.models||[]){
+        for(const style of shopData.styles||[]){
+          if(model.status!==false&&style.status!==false&&BenfuwanModelProfile.profileFor(model,style.id).ready){
+            const colors=colorList(model,style);fallback??={model,style,colors};if(colors.length>1){pair={model,style,colors};break}
+          }
+        }
+        if(pair)break;
+      }
+      pair??=fallback;
+      if(!pair)throw new Error('No configured model/style fixture');
+      selectModel(pair.model);if(selectStyle(pair.style)===false)throw new Error('Configured style rejected');if(pair.colors.length)chooseCaseColor(pair.colors[0]);startEditor(false);
+      const imageSource=document.createElement('canvas');imageSource.width=12;imageSource.height=18;
+      const imageContext=imageSource.getContext('2d',{alpha:true});imageContext.clearRect(0,0,12,18);imageContext.fillStyle='rgba(255,0,0,.7)';imageContext.fillRect(1,1,10,16);
+      const photo=await new Promise((resolve,reject)=>fabric.Image.fromURL(imageSource.toDataURL('image/png'),image=>image?resolve(image):reject(new Error('draft image failed'))));
+      photo.set({left:71,top:93,originX:'center',originY:'center',scaleX:1.4,scaleY:1.2,angle:23,opacity:.62,role:'photo',originalName:'draft-photo.png',clipPath:baseClip});
+      styleEditableObject(photo);canvas.add(photo);canvas.setActiveObject(photo);recordHistory();
+      return {modelId:ctx.modelId,styleId:ctx.styleId,colorName:ctx.colorName||'',width:canvas.width,height:canvas.height};
+    }""")
+    page.wait_for_timeout(900)
+    image_draft = page.evaluate("() => idbGet(BenfuwanDesignDraft.key)")
+    assert image_draft and image_draft['version'] == 1
+    assert image_draft['modelId'] == initial['modelId'] and image_draft['styleId'] == initial['styleId']
+    assert image_draft['colorName'] == initial['colorName']
+    assert image_draft['logicalCanvasWidth'] == initial['width'] and image_draft['logicalCanvasHeight'] == initial['height']
+    assert [obj.get('role') for obj in image_draft['canvasJson']['objects']] == ['photo']
+    assert all(key not in image_draft for key in ('printBase64','mockupBase64','productionMeta','orderId'))
+
+    changed = page.evaluate("""async () => {
+      await ensureEditorFont('jf-openhuninn','粉圓恢復');
+      const sticker=new fabric.Text('★',{left:42,top:51,role:'sticker',fontSize:28,fill:'#ff5d91',clipPath:baseClip});
+      const text=new fabric.Textbox('粉圓恢復',{left:88,top:122,width:130,role:'text',fontFamily:'jf-openhuninn',fontSize:30,opacity:.84,clipPath:baseClip});
+      styleEditableObject(sticker);styleEditableObject(text);canvas.add(sticker);canvas.add(text);
+      const photo=canvas.getObjects().find(object=>object.role==='photo');canvas.setActiveObject(photo);nudgeActive(1,-1);
+      setCanvasBackground('#ffeeaa');changeBackgroundOpacity(67);recordHistory();
+      return {photo:{left:photo.left,top:photo.top,scaleX:photo.scaleX,scaleY:photo.scaleY,angle:photo.angle,opacity:photo.opacity}};
+    }""")
+    page.wait_for_timeout(900)
+    full_draft = page.evaluate("() => idbGet(BenfuwanDesignDraft.key)")
+    assert full_draft['updatedAt'] != image_draft['updatedAt']
+    assert full_draft['backgroundColor'] == '#ffeeaa' and abs(full_draft['backgroundOpacity'] - .67) < .001
+    assert {obj.get('role') for obj in full_draft['canvasJson']['objects']} == {'photo','sticker','text'}
+    print('FRONT_DESIGN_DRAFT_AUTOSAVE_ACTIONS_OK', full_draft['updatedAt'])
+
+    page.reload(wait_until='domcontentloaded')
+    poll(page, "() => window.BenfuwanDesignDraft?.state().prompt==='ready' && document.getElementById('design-draft-prompt')?.classList.contains('show')")
+    assert page.locator('#design-draft-title').inner_text() == '發現上次未完成的設計'
+    page.locator('#design-draft-prompt .continue').click()
+    poll(page, "() => document.getElementById('page-editor')?.classList.contains('active') && canvas?.getObjects().length===3 && !BenfuwanDesignDraft.state().suspended")
+    restored = page.evaluate("""() => {
+      const photo=canvas.getObjects().find(object=>object.role==='photo');
+      const text=canvas.getObjects().find(object=>object.role==='text');
+      return {
+        modelId:ctx.modelId,styleId:ctx.styleId,colorName:ctx.colorName||'',width:canvas.width,height:canvas.height,count:canvas.getObjects().length,
+        backgroundColor:ctx.backgroundColor,backgroundOpacity:ctx.backgroundOpacity,
+        photo:{left:photo.left,top:photo.top,scaleX:photo.scaleX,scaleY:photo.scaleY,angle:photo.angle,opacity:photo.opacity},
+        font:text.fontFamily,fontLoaded:document.fonts.check('16px "jf-openhuninn"','粉圓恢復'),
+        printBase64:ctx.printBase64,mockupBase64:ctx.mockupBase64,productionMeta:ctx.productionMeta,
+        historyLength:historyStack.length,historyIndex
+      };
+    }""")
+    assert restored['modelId'] == initial['modelId'] and restored['styleId'] == initial['styleId']
+    assert restored['colorName'] == initial['colorName']
+    assert restored['width'] == initial['width'] and restored['height'] == initial['height'] and restored['count'] == 3
+    assert restored['backgroundColor'] == '#ffeeaa' and abs(restored['backgroundOpacity'] - .67) < .001
+    for key, value in changed['photo'].items():
+        assert abs(restored['photo'][key] - value) < .001, (key, restored, changed)
+    assert restored['font'] == 'jf-openhuninn' and restored['fontLoaded']
+    assert restored['printBase64'] is None and restored['mockupBase64'] is None and restored['productionMeta'] is None
+    assert restored['historyLength'] == 1 and restored['historyIndex'] == 0
+    print('FRONT_DESIGN_DRAFT_RELOAD_RECOVERY_OK', restored)
+
+    cart_state = page.evaluate("""async () => {
+      const tiny=document.createElement('canvas');tiny.width=2;tiny.height=2;
+      ctx.printBase64=tiny.toDataURL('image/png');ctx.mockupBase64=ctx.printBase64;
+      ctx.productionMeta={ppm:BenfuwanProductionHQ.PPM,dpi:720,width:2,height:2};
+      await BenfuwanProductionHQ.begin(ctx,async()=>ctx.productionMeta);
+      await confirmDesignToCart();
+      return {draft:!!(await idbGet(BenfuwanDesignDraft.key)),cart:!!(await idbGet('cart'))};
+    }""")
+    assert cart_state == {'draft':True,'cart':True}, cart_state
+    page.evaluate("""async () => {
+      document.getElementById('form-surname').value='草稿';
+      await submitOrder();
+    }""")
+    poll(page, "() => document.getElementById('page-success')?.classList.contains('active')")
+    completed = page.evaluate("""async () => {
+      await BenfuwanDesignDraft.saveNow();
+      return {draft:await idbGet(BenfuwanDesignDraft.key),autosave:BenfuwanDesignDraft.state().autosaveEnabled};
+    }""")
+    assert completed == {'draft':None,'autosave':False}, completed
+    print('FRONT_DESIGN_DRAFT_CART_KEEP_ORDER_SUCCESS_CLEAR_OK')
+
+    incompatible = page.evaluate("""async draft => {
+      draft.logicalCanvasWidth+=1;await idbSet(BenfuwanDesignDraft.key,draft);return draft;
+    }""", full_draft)
+    page.reload(wait_until='domcontentloaded')
+    poll(page, "() => window.BenfuwanDesignDraft?.state().prompt==='invalid'")
+    assert page.locator('#design-draft-message').inner_text() == '此手機殼設定已更新，舊設計無法安全恢復，請重新製作。'
+    assert not page.locator('#design-draft-prompt .continue').is_visible()
+    page.once('dialog', lambda dialog: dialog.accept())
+    page.locator('#design-draft-prompt .discard').click()
+    poll(page, "() => document.getElementById('page-model')?.classList.contains('active')")
+    assert page.evaluate("() => idbGet(BenfuwanDesignDraft.key)") is None
+    print('FRONT_DESIGN_DRAFT_GEOMETRY_FAIL_CLOSED_OK', incompatible['logicalCanvasWidth'])
+
+    page.evaluate("""async () => {
+      await idbSet(BenfuwanDesignDraft.key,{version:1,updatedAt:new Date().toISOString(),modelId:'broken',styleId:'broken',logicalCanvasWidth:240,logicalCanvasHeight:480,canvasJson:'{broken'});
+    }""")
+    page.reload(wait_until='domcontentloaded')
+    poll(page, "() => window.BenfuwanDesignDraft?.state().prompt==='invalid'")
+    assert page.locator('#design-draft-message').inner_text() == '上次的設計草稿已無法安全恢復，請刪除舊草稿並重新開始。'
+    page.once('dialog', lambda dialog: dialog.accept())
+    page.locator('#design-draft-prompt .discard').click()
+    poll(page, "() => document.getElementById('page-model')?.classList.contains('active')")
+    assert page.evaluate("() => idbGet(BenfuwanDesignDraft.key)") is None
+    print('FRONT_DESIGN_DRAFT_CORRUPTION_RECOVERY_OK')
+
+    guarded = page.evaluate("""async ({modelId,styleId,width,height}) => {
+      const draft={version:1,updatedAt:new Date().toISOString(),modelId,styleId,backgroundColor:'transparent',backgroundOpacity:0,logicalCanvasWidth:width,logicalCanvasHeight:height,canvasJson:{version:'5.3.0',objects:[]}};
+      await idbSet(BenfuwanDesignDraft.key,draft);await BenfuwanDesignDraft.refreshPrompt();showPage('page-home');
+      const realConfirm=window.confirm;window.confirm=()=>false;await startNewDesign();const kept=!!(await idbGet(BenfuwanDesignDraft.key))&&document.getElementById('page-home').classList.contains('active');
+      window.confirm=()=>true;await startNewDesign();const discarded=(await idbGet(BenfuwanDesignDraft.key))===null&&document.getElementById('page-model').classList.contains('active');window.confirm=realConfirm;
+      return {kept,discarded};
+    }""", initial)
+    assert guarded == {'kept':True,'discarded':True}, guarded
+    print('FRONT_DESIGN_DRAFT_NEW_DESIGN_GUARD_OK')
+    page.close()
+
+
 def checkout_test(browser, base):
     page = browser.new_page()
     sent = []
@@ -1685,7 +1828,7 @@ def main():
         with sync_playwright() as p:
             browser = getattr(p, os.environ.get('BROWSER_ENGINE', 'webkit')).launch()
             try:
-                base='http://127.0.0.1:8765';passkey_login_test(browser,base);front_test(browser,base);checkout_test(browser,base);admin_test(browser,base)
+                base='http://127.0.0.1:8765';passkey_login_test(browser,base);front_test(browser,base);design_draft_test(browser,base);checkout_test(browser,base);admin_test(browser,base)
                 import runpy
                 runpy.run_path(str(ROOT / '.github/tests/test_pos_dashboard.py'))['dashboard_test'](browser,base,poll)
             finally: browser.close()
