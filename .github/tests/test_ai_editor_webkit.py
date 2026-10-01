@@ -229,6 +229,8 @@ def front_test(browser, base):
     }""")
     page.unroute('**/broken-template-thumb.png')
     print('FRONT_TEMPLATE_BROKEN_THUMB_USES_CASE_FALLBACK_OK', thumb_fallback)
+    template_src = page.locator('script[src*="front-universal-templates.js"]').get_attribute('src')
+    assert template_src and 'v=20261001fallback1' in template_src, template_src
 
     page.set_viewport_size({'width': 390, 'height': 600})
     upload_regression = page.evaluate("""async () => {
