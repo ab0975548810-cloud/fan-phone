@@ -1499,6 +1499,65 @@ def admin_test(browser, base):
     page.evaluate("() => {showView('models',document.querySelector('.nav button[data-view=\"models\"]'));switchModelAdminTab('brands')}")
     prompt_calls = page.evaluate("""() => {window.__workspacePrompt=window.prompt;window.__workspacePromptCalls=0;window.prompt=()=>{window.__workspacePromptCalls++;return '不應呼叫'};return window.__workspacePromptCalls}""")
     assert prompt_calls == 0
+
+    # A pending brand mutation owns its dialog until the request settles. A
+    # stale response must never close or write errors into a newer editor.
+    page.evaluate("""() => {
+      window.__workspaceRealFetch=window.fetch;
+      window.__workspaceBrandPending=[];
+      window.fetch=(input,options)=>{
+        if(String(input).includes('/api/admin/save_shop_data')){
+          return new Promise(resolve=>window.__workspaceBrandPending.push(resolve));
+        }
+        return window.__workspaceRealFetch(input,options);
+      };
+    }""")
+    page.locator('#brand-admin-view .titlebar .btn').click()
+    page.locator('#bf-brand-name').fill('延遲儲存品牌')
+    page.locator('#bf-brand-save').click()
+    poll(page, "() => window.__workspaceBrandPending.length===1")
+    saving_brand = page.evaluate("""() => ({
+      open:document.getElementById('bf-brand-modal').classList.contains('show'),
+      busy:document.getElementById('bf-brand-modal').getAttribute('aria-busy'),
+      saveDisabled:document.getElementById('bf-brand-save').disabled,
+      closeDisabled:[...document.querySelectorAll('#bf-brand-modal [data-brand-close]')].every(button=>button.disabled),
+      value:document.getElementById('bf-brand-name').value
+    })""")
+    assert saving_brand == {'open':True,'busy':'true','saveDisabled':True,'closeDisabled':True,'value':'延遲儲存品牌'}, saving_brand
+    blocked_close = page.evaluate("""() => {
+      document.querySelector('#bf-brand-modal [data-brand-close]').click();
+      document.getElementById('bf-brand-modal').click();
+      addBrand();
+      editBrand('Apple');
+      return {
+        open:document.getElementById('bf-brand-modal').classList.contains('show'),
+        title:document.getElementById('bf-brand-title').textContent,
+        value:document.getElementById('bf-brand-name').value,
+        pending:window.__workspaceBrandPending.length
+      };
+    }""")
+    assert blocked_close == {'open':True,'title':'新增品牌','value':'延遲儲存品牌','pending':1}, blocked_close
+    page.evaluate("""() => window.__workspaceBrandPending.shift()(new Response(JSON.stringify({status:'success',version:'brand-delayed-success'}),{status:200,headers:{'Content-Type':'application/json'}}))""")
+    poll(page, "() => shopData.brands.includes('延遲儲存品牌') && !document.getElementById('bf-brand-modal').classList.contains('show')")
+
+    page.locator('#brand-admin-view .titlebar .btn').click()
+    page.locator('#bf-brand-name').fill('延遲失敗品牌')
+    page.locator('#bf-brand-save').click()
+    poll(page, "() => window.__workspaceBrandPending.length===1")
+    page.evaluate("""() => window.__workspaceBrandPending.shift()(new Response(JSON.stringify({status:'error',msg:'延遲儲存失敗'}),{status:503,headers:{'Content-Type':'application/json'}}))""")
+    poll(page, "() => document.getElementById('bf-brand-error').textContent.includes('延遲儲存失敗')")
+    failed_brand = page.evaluate("""() => ({
+      open:document.getElementById('bf-brand-modal').classList.contains('show'),
+      value:document.getElementById('bf-brand-name').value,
+      saveDisabled:document.getElementById('bf-brand-save').disabled,
+      closeDisabled:[...document.querySelectorAll('#bf-brand-modal [data-brand-close]')].some(button=>button.disabled),
+      error:document.getElementById('bf-brand-error').textContent
+    })""")
+    assert failed_brand['open'] and failed_brand['value'] == '延遲失敗品牌', failed_brand
+    assert not failed_brand['saveDisabled'] and not failed_brand['closeDisabled'] and '延遲儲存失敗' in failed_brand['error'], failed_brand
+    page.locator('#bf-brand-modal [data-brand-close]').last.click()
+    page.evaluate("""() => {window.fetch=window.__workspaceRealFetch;delete window.__workspaceRealFetch;delete window.__workspaceBrandPending}""")
+
     workspace_writes = []
     def workspace_save(route):
         workspace_writes.append(route.request.post_data_json)
@@ -1586,7 +1645,7 @@ def admin_test(browser, base):
     model_profile_src = page.locator('script[src*="admin-model-profiles.js"]').get_attribute('src')
     assert model_profile_src and 'v=20260929style1' in model_profile_src, model_profile_src
     product_workspace_src = page.locator('script[src*="admin-product-workspace-v1.js"]').get_attribute('src')
-    assert product_workspace_src and 'v=20261001a' in product_workspace_src, product_workspace_src
+    assert product_workspace_src and 'v=20261001b' in product_workspace_src, product_workspace_src
     asset_category_src = page.locator('script[src*="admin-asset-categories.js"]').get_attribute('src')
     assert asset_category_src and 'v=20260926audit1' in asset_category_src, asset_category_src
     template_loader_src = page.locator('script[src*="admin-template-loader.js"]').get_attribute('src')
@@ -1741,6 +1800,16 @@ def admin_test(browser, base):
     })""")
     assert failed == {'count':0,'open':True,'value':'重複送出回歸殼款','disabled':False}, failed
     assert '服務暫時無法使用，請稍後再試' in page.locator('#bf-product-message').inner_text()
+    style_failure_layers = page.evaluate("""() => {
+      const message=document.getElementById('bf-product-message');
+      const modal=document.getElementById('style-modal');
+      return {
+        messageZ:Number.parseInt(getComputedStyle(message).zIndex,10),
+        modalZ:Number.parseInt(getComputedStyle(modal).zIndex,10),
+        visible:message.classList.contains('show') && Number.parseFloat(getComputedStyle(message).opacity)>0
+      };
+    }""")
+    assert style_failure_layers['messageZ'] > style_failure_layers['modalZ'] and style_failure_layers['visible'], style_failure_layers
     page.evaluate("() => Promise.all([saveStyle(),saveStyle()])")
     saved = page.evaluate("""() => ({
       total:shopData.styles.length,
@@ -1855,6 +1924,16 @@ def admin_test(browser, base):
     assert server_partial_version != partial_before['version']
     assert next(row for row in server_partial['models'] if row['id'] == partial_before['model']['id'])['name'] == partial_model_name
     assert '型號資料已儲存，但正式列印參數同步失敗' in page.locator('#bf-product-message').inner_text()
+    model_failure_layers = page.evaluate("""() => {
+      const message=document.getElementById('bf-product-message');
+      const modal=document.getElementById('model-modal');
+      return {
+        messageZ:Number.parseInt(getComputedStyle(message).zIndex,10),
+        modalZ:Number.parseInt(getComputedStyle(modal).zIndex,10),
+        visible:message.classList.contains('show') && Number.parseFloat(getComputedStyle(message).opacity)>0
+      };
+    }""")
+    assert model_failure_layers['messageZ'] > model_failure_layers['modalZ'] and model_failure_layers['visible'], model_failure_layers
     fresh_after_partial = page.request.get(base + '/api/shop_data')
     assert fresh_after_partial.headers.get('x-benfuwan-cache') == 'MISS', fresh_after_partial.headers
     fresh_after_partial_data = fresh_after_partial.json()

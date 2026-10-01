@@ -12,6 +12,8 @@
     styleStatus: 'all',
     brandOriginal: '',
   };
+  let brandSaving = false;
+  let brandDialogOperation = 0;
 
   const clean = value => String(value == null ? '' : value).trim();
   const normal = value => clean(value).toLocaleLowerCase('zh-TW');
@@ -47,7 +49,7 @@
         </form>
       </div>`;
       document.body.appendChild(modal);
-      modal.querySelectorAll('[data-brand-close]').forEach(button => button.addEventListener('click', closeBrandDialog));
+      modal.querySelectorAll('[data-brand-close]').forEach(button => button.addEventListener('click', () => closeBrandDialog()));
       modal.addEventListener('click', event => {
         if (event.target === modal) closeBrandDialog();
       });
@@ -226,6 +228,8 @@
 
   function openBrandDialog(original = '') {
     ensureChrome();
+    if (brandSaving) return false;
+    brandDialogOperation += 1;
     state.brandOriginal = original;
     const modal = document.getElementById('bf-brand-modal');
     document.getElementById('bf-brand-title').textContent = original ? '修改品牌' : '新增品牌';
@@ -234,12 +238,27 @@
     setBrandError('');
     modal.classList.add('show');
     setTimeout(() => document.getElementById('bf-brand-name')?.focus(), 0);
+    return true;
   }
 
-  function closeBrandDialog() {
+  function setBrandSaving(saving, operation = brandDialogOperation) {
+    if (operation !== brandDialogOperation) return;
+    brandSaving = Boolean(saving);
+    const modal = document.getElementById('bf-brand-modal');
+    modal?.setAttribute('aria-busy', brandSaving ? 'true' : 'false');
+    modal?.querySelectorAll('[data-brand-close]').forEach(button => {
+      button.disabled = brandSaving;
+    });
+    const saveButton = document.getElementById('bf-brand-save');
+    if (saveButton) saveButton.disabled = brandSaving;
+  }
+
+  function closeBrandDialog(operation = brandDialogOperation, force = false) {
+    if (operation !== brandDialogOperation || (brandSaving && !force)) return false;
     document.getElementById('bf-brand-modal')?.classList.remove('show');
     state.brandOriginal = '';
     setBrandError('');
+    return true;
   }
 
   async function submitBrand(event) {
@@ -268,21 +287,23 @@
       next.brands.push(name);
     }
 
-    const button = document.getElementById('bf-brand-save');
+    const operation = brandDialogOperation;
     shopMutationBusy = true;
-    if (button) button.disabled = true;
+    setBrandSaving(true, operation);
     try {
       await saveShop(next);
       shopData = next;
-      closeBrandDialog();
       renderBrands();
       renderModels();
+      closeBrandDialog(operation, true);
       notify(original ? '品牌名稱已更新' : '品牌已新增', 'success');
     } catch (error) {
-      setBrandError((original ? '修改' : '新增') + '品牌失敗：' + (error.message || error));
+      if (operation === brandDialogOperation) {
+        setBrandError((original ? '修改' : '新增') + '品牌失敗：' + (error.message || error));
+      }
     } finally {
       shopMutationBusy = false;
-      if (button) button.disabled = false;
+      setBrandSaving(false, operation);
     }
   }
 
