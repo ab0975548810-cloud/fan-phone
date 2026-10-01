@@ -157,6 +157,48 @@ def front_test(browser, base):
     page.route('**/api/ai/remove-background', backend_ai_response)
     page.goto(base + '/', wait_until='domcontentloaded')
     poll(page, "() => typeof fabric !== 'undefined' && typeof initCanvas === 'function' && !!window.BenfuwanAiRemoveV2 && !!window.removeBackgroundForActive && !!window.BenfuwanEditorAccess && !!window.BenfuwanOrderPayload && !!window.BenfuwanPrintMask && !!window.BenfuwanProductionHQ && !!window.BenfuwanImageUpload")
+    page.set_viewport_size({'width': 390, 'height': 844})
+    home = poll(page, """() => {
+      const page=document.getElementById('page-home'),hero=document.querySelector('.bf-home-hero'),art=document.querySelector('.bf-home-hero-art'),cta=document.querySelector('.bf-home-primary');
+      const draftState=document.getElementById('home-design-card')?.dataset.draftState;
+      if(!window.BenfuwanFrontHomeV1||!page?.classList.contains('active')||!art?.complete||!art.naturalWidth||!draftState||draftState==='loading')return false;
+      const heroBox=hero.getBoundingClientRect(),ctaBox=cta.getBoundingClientRect(),app=document.getElementById('app').getBoundingClientRect();
+      const labels=[...document.querySelectorAll('.bf-home-bottom-nav .nav-btn')].map(button=>[...button.childNodes].filter(node=>node.nodeType===Node.TEXT_NODE).map(node=>node.textContent).join('').trim());
+      const textFits=[...document.querySelectorAll('.bf-home-primary-copy,.bf-home-quick>span:nth-child(2),.bf-home-banner-copy')].every(node=>node.scrollWidth<=node.clientWidth+1);
+      return {
+        title:document.getElementById('bf-home-title').textContent.trim(),
+        image:[art.naturalWidth,art.naturalHeight],
+        appWidth:app.width,pageWidth:page.scrollWidth,documentWidth:document.documentElement.scrollWidth,
+        heroBottom:heroBox.bottom,ctaTop:ctaBox.top,textFits,labels,
+        fakeTabs:labels.filter(label=>['模板','我的作品','會員'].includes(label)),
+        draftState
+      };
+    }""")
+    assert home['title'] == '本福丸訂製' and home['image'] == [960, 1026], home
+    assert abs(home['appWidth'] - 390) <= 1 and home['pageWidth'] <= 391 and home['documentWidth'] <= 391, home
+    assert home['heroBottom'] <= home['ctaTop'] + 1 and home['textFits'], home
+    assert home['labels'] == ['首頁','開始製作','購物車'] and home['fakeTabs'] == [], home
+    assert home['draftState'] == 'empty', home
+    page.locator('.bf-home-quick-template').click()
+    poll(page, "() => document.getElementById('page-model')?.classList.contains('active')")
+    assert not page.locator('#page-template').evaluate('(node) => node.classList.contains(\'active\')')
+    page.evaluate("() => showPage('page-home')")
+    page.locator('.bf-home-primary').click()
+    poll(page, "() => document.getElementById('page-model')?.classList.contains('active')")
+    page.evaluate("() => showPage('page-home')")
+    page.locator('.bf-home-bottom-nav .nav-cart-wrap').click()
+    poll(page, "() => document.getElementById('page-cart')?.classList.contains('active')")
+    page.evaluate("() => showPage('page-home')")
+    page.locator('#home-design-card').click()
+    poll(page, "() => document.getElementById('toast')?.textContent.includes('目前沒有未完成設計')")
+    page.set_viewport_size({'width': 1180, 'height': 900})
+    desktop = page.evaluate("""() => {
+      const app=document.getElementById('app').getBoundingClientRect(),page=document.getElementById('page-home'),hero=document.querySelector('.bf-home-hero').getBoundingClientRect(),cta=document.querySelector('.bf-home-primary').getBoundingClientRect();
+      return {appWidth:app.width,pageWidth:page.scrollWidth,heroBeforeCta:hero.bottom<=cta.top+1};
+    }""")
+    assert desktop['appWidth'] <= 521 and desktop['pageWidth'] <= 521 and desktop['heroBeforeCta'], desktop
+    print('FRONT_HOME_V1_RESPONSIVE_REAL_ACTIONS_OK', browser_engine, {'iphone':home,'desktop':desktop})
+    page.set_viewport_size({'width': 390, 'height': 600})
     upload_regression = page.evaluate("""async () => {
       const api=window.BenfuwanImageUpload;
       const loadImage=src=>new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=reject;image.src=src});
@@ -891,9 +933,10 @@ def design_draft_test(browser, base):
     print('FRONT_DESIGN_DRAFT_AUTOSAVE_ACTIONS_OK', full_draft['updatedAt'])
 
     page.reload(wait_until='domcontentloaded')
-    poll(page, "() => window.BenfuwanDesignDraft?.state().prompt==='ready' && document.getElementById('design-draft-prompt')?.classList.contains('show')")
+    poll(page, "() => window.BenfuwanDesignDraft?.state().prompt==='ready' && document.getElementById('design-draft-prompt')?.classList.contains('show') && document.getElementById('home-design-card')?.dataset.draftState==='ready'")
     assert page.locator('#design-draft-title').inner_text() == '發現上次未完成的設計'
-    page.locator('#design-draft-prompt .continue').click()
+    assert page.locator('#home-design-title').inner_text() == '繼續上次設計'
+    page.locator('#home-design-card').click()
     poll(page, "() => document.getElementById('page-editor')?.classList.contains('active') && canvas?.getObjects().length===3 && !BenfuwanDesignDraft.state().suspended")
     restored = page.evaluate("""() => {
       const photo=canvas.getObjects().find(object=>object.role==='photo');
@@ -1002,6 +1045,69 @@ def design_draft_test(browser, base):
     }""", initial)
     assert guarded == {'kept':True,'discarded':True}, guarded
     print('FRONT_DESIGN_DRAFT_NEW_DESIGN_GUARD_OK')
+    page.close()
+
+
+def home_draft_catalog_race_test(browser, base):
+    page = browser.new_page(viewport={'width': 390, 'height': 844})
+    draft_preview = fixture_data_url('iphone13-preview.png')
+    draft_print = fixture_data_url('iphone13-print.png')
+
+    def configure_catalog(route):
+        response = route.fetch()
+        payload = response.json()
+        catalog = payload.get('data', payload)
+        model = next(row for row in catalog.get('models', []) if row and row.get('status') is not False)
+        style = next(row for row in catalog.get('styles', []) if row and row.get('status') is not False)
+        model.setdefault('case_profiles', {})[style['id']] = {
+            'preview_mask_img': draft_preview,
+            'print_line_img': draft_print,
+            'print_x': 0,
+            'print_y': 0,
+            'print_w': 80,
+            'print_h': 160,
+            'print_angle': 0,
+        }
+        route.fulfill(response=response, body=json.dumps(payload, ensure_ascii=False))
+
+    page.route('**/api/shop_data', configure_catalog)
+    page.goto(base + '/', wait_until='domcontentloaded')
+    poll(page, "() => window.BenfuwanFrontHomeV1?.isCatalogReady() && shopData.models?.length && shopData.styles?.length")
+    seeded = page.evaluate("""async () => {
+      const model=shopData.models.find(row=>row?.status!==false),style=shopData.styles.find(row=>row?.status!==false),profile=BenfuwanModelProfile.profileFor(model,style.id);
+      const draft={version:1,updatedAt:new Date().toISOString(),modelId:model.id,styleId:style.id,colorName:'',backgroundColor:'transparent',backgroundOpacity:1,logicalCanvasWidth:Math.max(180,Math.round(profile.printW*3)),logicalCanvasHeight:Math.max(360,Math.round(profile.printH*3)),canvasJson:{version:'5.3.0',objects:[]}};
+      await idbSet(BenfuwanDesignDraft.key,draft);
+      return {modelId:model.id,styleId:style.id,width:draft.logicalCanvasWidth,height:draft.logicalCanvasHeight};
+    }""")
+    page.add_init_script("""(() => {
+      const nativeFetch=window.fetch.bind(window);
+      window.fetch=(input,init)=>{
+        const url=String(typeof input==='string'?input:(input&&input.url)||'');
+        if(!url.includes('/api/shop_data'))return nativeFetch(input,init);
+        window.__catalogFetchPending=true;
+        return new Promise((resolve,reject)=>{
+          window.__releaseShopData=()=>{window.__catalogFetchPending=false;nativeFetch(input,init).then(resolve,reject)};
+        });
+      };
+    })()""")
+    page.reload(wait_until='domcontentloaded')
+    loading = poll(page, """() => {
+      const card=document.getElementById('home-design-card');
+      if(!window.__catalogFetchPending||card?.dataset.draftState!=='loading')return false;
+      return {title:document.getElementById('home-design-title').textContent,subtitle:document.getElementById('home-design-subtitle').textContent,promptInvalid:document.getElementById('design-draft-prompt')?.classList.contains('invalid')||false,promptVisible:document.getElementById('design-draft-prompt')?.classList.contains('show')||false};
+    }""")
+    assert loading == {'title':'我的設計','subtitle':'正在檢查上次設計…','promptInvalid':False,'promptVisible':False}, loading
+    page.locator('#home-design-card').click()
+    page.wait_for_timeout(100)
+    assert not page.locator('#design-draft-prompt.invalid').count()
+    page.evaluate("() => window.__releaseShopData()")
+    poll(page, "() => window.BenfuwanFrontHomeV1?.isCatalogReady() && document.getElementById('home-design-card')?.dataset.draftState==='ready'")
+    assert page.locator('#home-design-title').inner_text() == '繼續上次設計'
+    page.locator('#home-design-card').click()
+    poll(page, "() => document.getElementById('page-editor')?.classList.contains('active') && canvas && !BenfuwanDesignDraft.state().suspended")
+    restored = page.evaluate("() => ({modelId:ctx.modelId,styleId:ctx.styleId,width:canvas.width,height:canvas.height,objects:canvas.getObjects().length})")
+    assert restored == {'modelId':seeded['modelId'],'styleId':seeded['styleId'],'width':seeded['width'],'height':seeded['height'],'objects':0}, restored
+    print('FRONT_HOME_DRAFT_CATALOG_RACE_OK', loading, restored)
     page.close()
 
 
@@ -2129,7 +2235,7 @@ def main():
         with sync_playwright() as p:
             browser = getattr(p, os.environ.get('BROWSER_ENGINE', 'webkit')).launch()
             try:
-                base=f'http://127.0.0.1:{BROWSER_TEST_PORT}';passkey_login_test(browser,base);front_test(browser,base);design_draft_test(browser,base);checkout_test(browser,base);admin_test(browser,base)
+                base=f'http://127.0.0.1:{BROWSER_TEST_PORT}';passkey_login_test(browser,base);front_test(browser,base);home_draft_catalog_race_test(browser,base);design_draft_test(browser,base);checkout_test(browser,base);admin_test(browser,base)
                 import runpy
                 runpy.run_path(str(ROOT / '.github/tests/test_pos_dashboard.py'))['dashboard_test'](browser,base,poll)
             finally: browser.close()

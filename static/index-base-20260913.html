@@ -35,35 +35,59 @@
 .success{flex:1;display:grid;place-content:center;text-align:center;padding:30px}.success-cat{font-size:80px}.success h2{font-size:22px;margin:8px 0}.success p{font-size:12px;color:#8f858a;line-height:1.7}.order-box{background:white;border:1px solid var(--line);border-radius:18px;padding:15px;margin:18px 0;text-align:left}.order-box .row{display:flex;justify-content:space-between;font-size:12px;margin:7px 0}.toast{position:absolute;left:50%;bottom:105px;transform:translate(-50%,20px);opacity:0;pointer-events:none;background:#302a2d;color:#fff;border-radius:999px;padding:10px 16px;font-size:11px;z-index:200;transition:.2s;max-width:88%;text-align:center}.toast.show{opacity:1;transform:translate(-50%,0)}
 @media (min-width:700px){.app{max-width:520px}.tpl-grid{grid-template-columns:repeat(3,1fr)}.tpl-card img{height:220px}}
 </style>
+<link rel="stylesheet" href="/static/front-home-v1.css?v=20261001a">
 </head>
 <body>
 <div class="app" id="app">
   <!-- HOME -->
-  <section class="page active" id="page-home">
-    <div class="home-head">
-      <div class="brand-logo"><span class="cat-logo">🐱</span> 本福丸訂製</div>
-      <button class="icon" style="border:0;background:white" onclick="toast('目前沒有新通知')"><i class="fa-regular fa-bell"></i></button>
+  <section class="page active benfuwan-home-v1" id="page-home">
+    <header class="bf-home-header">
+      <div class="bf-home-brand"><span class="bf-home-brand-paw" aria-hidden="true"><i class="fa-solid fa-paw"></i></span><span>本福丸訂製</span></div>
+      <span class="bf-home-header-heart" aria-hidden="true">♡</span>
+    </header>
+    <div class="scroll bf-home-scroll">
+      <main class="bf-home-content">
+        <section class="bf-home-hero" aria-labelledby="bf-home-title">
+          <span class="bf-doodle bf-doodle-heart-one" aria-hidden="true">♡</span>
+          <span class="bf-doodle bf-doodle-paw" aria-hidden="true"><i class="fa-solid fa-paw"></i></span>
+          <span class="bf-doodle bf-doodle-heart-two" aria-hidden="true">♥</span>
+          <div class="bf-home-hero-copy">
+            <h1 id="bf-home-title">本福丸訂製</h1>
+            <p>把喜歡的照片，變成專屬手機殼 ♡</p>
+          </div>
+          <img class="bf-home-hero-art" src="/static/home-assets/benfuwan-cats-hero.webp?v=20261001a" width="960" height="1026" alt="灰奶油貓與白色黃眼貓展示三款粉色客製手機殼" fetchpriority="high" decoding="async">
+        </section>
+
+        <button class="bf-home-primary" type="button" onclick="startNewDesign()">
+          <span class="bf-home-primary-icon" aria-hidden="true"><i class="fa-solid fa-paw"></i></span>
+          <span class="bf-home-primary-copy"><strong>開始製作</strong><small>選手機型號，設計你的手機殼</small></span>
+          <i class="fa-solid fa-chevron-right bf-home-chevron" aria-hidden="true"></i>
+        </button>
+
+        <section class="bf-home-quick-grid" aria-label="設計捷徑">
+          <button class="bf-home-quick bf-home-quick-template" type="button" onclick="openHomeTemplates()">
+            <span class="bf-home-quick-icon" aria-hidden="true"><i class="fa-regular fa-images"></i></span>
+            <span><strong>熱門模板</strong><small>先選型號，再挑熱門模板</small></span>
+            <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+          </button>
+          <button class="bf-home-quick bf-home-quick-design" id="home-design-card" type="button" onclick="openHomeDesign()">
+            <span class="bf-home-quick-icon" aria-hidden="true"><i class="fa-regular fa-rectangle-list"></i></span>
+            <span><strong id="home-design-title">我的設計</strong><small id="home-design-subtitle">有草稿時可從這裡繼續</small></span>
+            <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+          </button>
+        </section>
+
+        <section class="home-section bf-home-section" aria-label="草稿狀態"></section>
+
+        <button class="bf-home-cat-banner" type="button" onclick="startNewDesign()">
+          <img src="/static/home-assets/benfuwan-cat-banner.webp?v=20261001a" width="720" height="489" loading="lazy" decoding="async" alt="灰奶油圓臉貓探出頭">
+          <span class="bf-home-banner-copy"><strong>可愛貓咪系列</strong><small>讓你的手機殼充滿療癒感 ♡</small></span>
+          <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+          <span class="bf-home-banner-paw" aria-hidden="true"><i class="fa-solid fa-paw"></i></span>
+        </button>
+      </main>
     </div>
-    <div class="scroll">
-      <div class="hero">
-        <h2>把喜歡的照片<br>變成專屬手機殼 ♡</h2>
-        <p>選手機型號、套模板、放照片、加貼紙，<br>幾分鐘完成自己的手機殼。</p>
-        <button class="start" onclick="startNewDesign()">開始製作 <i class="fa-solid fa-chevron-right"></i></button>
-        <div class="hero-cat">🐈</div>
-      </div>
-      <div class="home-info-grid">
-        <div class="home-info"><i class="fa-solid fa-wand-magic-sparkles"></i><b>自由 DIY</b><span>拖曳縮放旋轉</span></div>
-        <div class="home-info"><i class="fa-regular fa-images"></i><b>快速模板</b><span>換照片就完成</span></div>
-        <div class="home-info"><i class="fa-solid fa-mobile-screen"></i><b>手機優先</b><span>iPhone / Android</span></div>
-      </div>
-      <div class="home-section">
-        <h3>第一次也能直接上手</h3>
-        <div class="card feature-card" onclick="startNewDesign()"><div class="feature-icon"><i class="fa-solid fa-mobile-screen-button"></i></div><div class="txt"><b>從手機型號開始</b><small>選對型號與手機殼，再進入 DIY 編輯器</small></div><i class="fa-solid fa-chevron-right" style="color:#bbb"></i></div>
-        <div class="card feature-card" onclick="startNewDesign()"><div class="feature-icon"><i class="fa-regular fa-images"></i></div><div class="txt"><b>套用模板快速設計</b><small>模板內照片、貼紙、文字都能繼續調整</small></div><i class="fa-solid fa-chevron-right" style="color:#bbb"></i></div>
-        <div class="card feature-card" onclick="showPrivacyInfo()"><div class="feature-icon"><i class="fa-solid fa-shield-heart"></i></div><div class="txt"><b>設計不公開</b><small>首頁不展示其他客人的作品；購物車只保存在自己的裝置</small></div><i class="fa-solid fa-circle-info" style="color:#bbb"></i></div>
-      </div>
-    </div>
-    <nav class="bottom-nav"><button class="nav-btn active"><i class="fa-solid fa-house"></i>首頁</button><button class="nav-btn" onclick="startNewDesign()"><i class="fa-solid fa-wand-magic-sparkles"></i>開始製作</button><button class="nav-btn nav-cart-wrap" onclick="openCartFromNav()"><span id="cart-badge" class="cart-badge">1</span><i class="fa-solid fa-cart-shopping"></i>購物車</button></nav>
+    <nav class="bottom-nav bf-home-bottom-nav" aria-label="首頁導覽"><button class="nav-btn active" type="button"><i class="fa-solid fa-house"></i>首頁</button><button class="nav-btn" type="button" onclick="startNewDesign()"><i class="fa-solid fa-wand-magic-sparkles"></i>開始製作</button><button class="nav-btn nav-cart-wrap" type="button" onclick="openCartFromNav()"><span id="cart-badge" class="cart-badge">1</span><i class="fa-solid fa-cart-shopping"></i>購物車</button></nav>
   </section>
 
   <!-- MODEL -->
