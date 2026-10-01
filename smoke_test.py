@@ -50,6 +50,7 @@ for rel in refs:
 
 for admin_js in (
     "admin-orders-v3.js",
+    "admin-steward-v1.js",
     "admin-commerce-v1.js",
     "admin-print-center.js",
     "admin-model-colors.js",
@@ -118,6 +119,13 @@ if not passkey_status.get('configured') or passkey_status.get('has_credentials')
     fail(f'Unexpected initial passkey status: {passkey_status}')
 if client.post('/api/admin/passkey/register/options', json={}).status_code != 401:
     fail('Passkey registration options were available before password login')
+for private_read in (
+    '/api/admin/get_orders',
+    '/api/admin/ai_remove_diagnose',
+    '/api/admin/print/jobs',
+):
+    if client.get(private_read).status_code != 401:
+        fail(f'Admin steward data was public: GET {private_read}')
 
 
 # 5) Log in and initialize private POS inventory before creating the order.
@@ -137,6 +145,8 @@ if b"admin-commerce-v1.js" not in admin_resp.data:
     fail("Authenticated /admin did not inject admin-commerce-v1.js")
 if b"admin-print-center.js" not in admin_resp.data:
     fail("Authenticated /admin did not inject admin-print-center.js")
+if b"admin-steward-v1.js" not in admin_resp.data or b"admin-steward-v1.css" not in admin_resp.data:
+    fail("Authenticated /admin did not inject the read-only Benfuwan steward")
 if b"admin-model-profiles.js" not in admin_resp.data:
     fail("Authenticated /admin did not inject admin-model-profiles.js")
 if '登入安全'.encode() not in admin_resp.data or b'id="passkey-enable"' not in admin_resp.data:
