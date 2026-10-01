@@ -6,6 +6,37 @@
 
   const originalApplyTemplate=window.applyTemplate;
   const maskBoxCache=new Map();
+  const TEMPLATE_THUMB_FALLBACK='/static/front-assets/benfuwan-case-fallback.webp?v=20261001a';
+
+  function styleTemplateFallback(img){
+    if(!img)return;
+    img.classList.add('bf-template-thumb-fallback');
+    img.alt='本福丸客製手機殼示意';
+    img.style.objectFit='contain';
+    img.style.padding='10px';
+    img.style.background='linear-gradient(145deg,#fff8fa,#ffe6ee)';
+  }
+
+  function wireTemplateThumb(img,source){
+    if(!img)return;
+    const original=String(source||'').trim();
+    img.style.visibility='hidden';
+    const show=()=>{img.style.visibility='visible'};
+    const fallback=()=>{
+      if(img.dataset.bfFallback==='1')return;
+      img.dataset.bfFallback='1';
+      img.onerror=null;
+      img.onload=show;
+      styleTemplateFallback(img);
+      img.src=TEMPLATE_THUMB_FALLBACK;
+    };
+    img.onload=show;
+    img.onerror=fallback;
+    if(!original)fallback();
+    else if(img.complete){
+      if(img.naturalWidth>0)show();else fallback();
+    }
+  }
 
   function isUniversal(t){return !!(t&&(t.universal===true||t.model_id==='*'||Number(t.template_version)>=2))}
   function deepClone(v){return JSON.parse(JSON.stringify(v))}
@@ -156,7 +187,9 @@
     if(!list.length){box.innerHTML='<div class="tpl-empty">目前還沒有模板。<br>可以按「跳過」直接自由設計 ♡</div>';return}
     list.forEach(t=>{
       const c=document.createElement('div');c.className='card tpl-card'+(selectedTpl?.id===t.id?' selected':'');
-      c.innerHTML=`<img loading="lazy" decoding="async" src="${attr(t.thumb_url||'')}" alt=""><div class="name">${escapeHtml(t.name||'模板')}</div>${isUniversal(t)?'<div style="font-size:9px;color:#ff6f9a;padding:0 4px 5px;font-weight:800">全型號自動對位</div>':''}`;
+      const thumb=String(t.thumb_url||'').trim();
+      c.innerHTML=`<img loading="lazy" decoding="async" src="${attr(thumb||TEMPLATE_THUMB_FALLBACK)}" alt="${escapeHtml(t.name||'模板')}預覽"><div class="name">${escapeHtml(t.name||'模板')}</div>${isUniversal(t)?'<div style="font-size:9px;color:#ff6f9a;padding:0 4px 5px;font-weight:800">全型號自動對位</div>':''}`;
+      wireTemplateThumb(c.querySelector('img'),thumb);
       c.onclick=()=>{selectedTpl=t;$('tpl-next').disabled=false;renderTemplates(cat)};box.appendChild(c);
     });
   };
@@ -177,5 +210,6 @@
   };
 
   window.benfuwanTemplateProxyUrl=proxyUrl;
+  window.BenfuwanTemplateThumbFallback=Object.freeze({url:TEMPLATE_THUMB_FALLBACK,wire:wireTemplateThumb});
   console.info('[FRONT] universal template v2 safe-area auto-fit enabled');
 })();
