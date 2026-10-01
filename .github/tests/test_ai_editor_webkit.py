@@ -156,7 +156,7 @@ def front_test(browser, base):
         route.fulfill(status=200, body=responses.pop(0) if responses else GOOD, content_type='image/png')
     page.route('**/api/ai/remove-background', backend_ai_response)
     page.goto(base + '/', wait_until='domcontentloaded')
-    poll(page, "() => typeof fabric !== 'undefined' && typeof initCanvas === 'function' && !!window.BenfuwanAiRemoveV2 && !!window.removeBackgroundForActive && !!window.BenfuwanEditorAccess && !!window.BenfuwanOrderPayload && !!window.BenfuwanPrintMask && !!window.BenfuwanProductionHQ && !!window.BenfuwanImageUpload")
+    poll(page, "() => typeof fabric !== 'undefined' && typeof initCanvas === 'function' && !!window.BenfuwanAiRemoveV2 && !!window.removeBackgroundForActive && !!window.BenfuwanEditorAccess && !!window.BenfuwanOrderPayload && !!window.BenfuwanPrintMask && !!window.BenfuwanProductionHQ && !!window.BenfuwanImageUpload && !!window.BenfuwanTemplateThumbFallback")
     page.set_viewport_size({'width': 390, 'height': 844})
     home = poll(page, """() => {
       const page=document.getElementById('page-home'),hero=document.querySelector('.bf-home-hero'),art=document.querySelector('.bf-home-hero-art'),cta=document.querySelector('.bf-home-primary');
@@ -198,6 +198,35 @@ def front_test(browser, base):
     }""")
     assert desktop['appWidth'] <= 521 and desktop['pageWidth'] <= 521 and desktop['heroBeforeCta'], desktop
     print('FRONT_HOME_V1_RESPONSIVE_REAL_ACTIONS_OK', browser_engine, {'iphone':home,'desktop':desktop})
+
+    page.route('**/broken-template-thumb.png', lambda route: route.fulfill(status=404, body='missing'))
+    page.evaluate("""() => {
+      window.__thumbFallbackBackup={templates:structuredClone(templatesData),modelId:ctx.modelId,styleId:ctx.styleId};
+      ctx.modelId='fallback-model';ctx.styleId='';
+      templatesData={categories:['全部'],templates:[
+        {id:'broken-thumb',name:'壞圖模板',model_id:'*',universal:true,thumb_url:'/broken-template-thumb.png'},
+        {id:'empty-thumb',name:'空圖模板',model_id:'*',universal:true,thumb_url:''}
+      ]};
+      renderTemplates();
+    }""")
+    thumb_fallback = poll(page, """() => {
+      const imgs=[...document.querySelectorAll('#tpl-grid .tpl-card img')];
+      if(imgs.length!==2)return false;
+      if(!imgs.every(img=>img.dataset.bfFallback==='1'&&img.complete&&img.naturalWidth>0&&getComputedStyle(img).visibility==='visible'))return false;
+      return imgs.map(img=>({src:img.getAttribute('src'),objectFit:img.style.objectFit,padding:img.style.padding,alt:img.alt,natural:[img.naturalWidth,img.naturalHeight]}));
+    }""")
+    assert all('/static/front-assets/benfuwan-case-fallback.webp' in row['src'] for row in thumb_fallback), thumb_fallback
+    assert all(row['objectFit']=='contain' and row['padding']=='10px' and row['natural'][0]>0 and row['natural'][1]>0 for row in thumb_fallback), thumb_fallback
+    page.evaluate("""() => {
+      templatesData=window.__thumbFallbackBackup.templates;
+      ctx.modelId=window.__thumbFallbackBackup.modelId;
+      ctx.styleId=window.__thumbFallbackBackup.styleId;
+      delete window.__thumbFallbackBackup;
+      renderTemplates();
+    }""")
+    page.unroute('**/broken-template-thumb.png')
+    print('FRONT_TEMPLATE_BROKEN_THUMB_USES_CASE_FALLBACK_OK', thumb_fallback)
+
     page.set_viewport_size({'width': 390, 'height': 600})
     upload_regression = page.evaluate("""async () => {
       const api=window.BenfuwanImageUpload;
