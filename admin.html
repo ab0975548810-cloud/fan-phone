@@ -15,19 +15,39 @@
 </head>
 <body>
 <div class="app">
-  <aside class="side">
-    <div class="brand"><i class="fa-solid fa-wand-magic-sparkles"></i>&nbsp;<span>本福丸訂製</span></div>
-    <div class="nav">
-      <button class="active" data-view="orders"><i class="fa-solid fa-list-check"></i><span>訂單管理</span></button>
-      <button data-view="models"><i class="fa-solid fa-mobile-screen"></i><span>品牌及型號</span></button>
-      <button data-view="styles"><i class="fa-solid fa-layer-group"></i><span>手機殼材質</span></button>
-      <button data-view="assets"><i class="fa-solid fa-face-smile"></i><span>素材庫</span></button>
-      <button data-view="templates"><i class="fa-solid fa-border-all"></i><span>模板庫</span></button>
-      <button data-view="security"><i class="fa-solid fa-shield-halved"></i><span>登入安全</span></button>
-    </div>
+  <aside class="side" id="admin-sidebar" aria-label="後台工作區導覽">
+    <div class="brand"><div><i class="fa-solid fa-wand-magic-sparkles"></i>&nbsp;<span>本福丸訂製</span></div><button class="admin-nav-close" id="admin-nav-close" type="button" aria-label="關閉選單"><i class="fa-solid fa-xmark"></i></button></div>
+    <nav class="nav" aria-label="後台工作區">
+      <section class="admin-nav-group" data-nav-group="operations" aria-labelledby="admin-nav-operations">
+        <div class="admin-nav-label" id="admin-nav-operations">營運</div>
+        <div class="admin-nav-items">
+          <button class="active" data-view="orders"><i class="fa-solid fa-list-check"></i><span>訂單管理</span></button>
+        </div>
+      </section>
+      <section class="admin-nav-group" data-nav-group="catalog" aria-labelledby="admin-nav-catalog">
+        <div class="admin-nav-label" id="admin-nav-catalog">商品設定</div>
+        <div class="admin-nav-items">
+          <button data-view="models"><i class="fa-solid fa-mobile-screen"></i><span>品牌及型號</span></button>
+          <button data-view="styles"><i class="fa-solid fa-layer-group"></i><span>手機殼材質</span></button>
+          <button data-view="assets"><i class="fa-solid fa-face-smile"></i><span>素材庫</span></button>
+          <button data-view="templates"><i class="fa-solid fa-border-all"></i><span>模板庫</span></button>
+        </div>
+      </section>
+      <section class="admin-nav-group" data-nav-group="system" aria-labelledby="admin-nav-system">
+        <div class="admin-nav-label" id="admin-nav-system">系統</div>
+        <div class="admin-nav-items">
+          <button data-view="security"><i class="fa-solid fa-shield-halved"></i><span>登入安全</span></button>
+        </div>
+      </section>
+    </nav>
   </aside>
+  <button class="admin-nav-backdrop" id="admin-nav-backdrop" type="button" aria-label="關閉選單" tabindex="-1"></button>
   <main class="main">
-    <div class="top"><a href="/admin/orders-fast"><i class="fa-solid fa-bolt"></i> 快速訂單</a><a href="/" target="_blank"><i class="fa-solid fa-eye"></i> 前台</a><form method="POST" action="/logout"><button class="btn alt" type="submit"><i class="fa-solid fa-right-from-bracket"></i> 登出</button></form></div>
+    <header class="top">
+      <div class="top-primary"><button class="admin-menu-toggle" id="admin-menu-toggle" type="button" aria-controls="admin-sidebar" aria-expanded="false" aria-label="開啟選單"><i class="fa-solid fa-bars"></i></button><div class="top-workspace"><small>目前工作區</small><strong id="admin-workspace-title">訂單管理</strong></div></div>
+      <button class="admin-actions-toggle" id="admin-actions-toggle" type="button" aria-controls="admin-top-actions" aria-expanded="false"><i class="fa-solid fa-ellipsis"></i><span>操作</span></button>
+      <div class="top-actions" id="admin-top-actions"><a href="/admin/orders-fast"><i class="fa-solid fa-bolt"></i> 快速訂單</a><a href="/" target="_blank"><i class="fa-solid fa-eye"></i> 前台</a><form method="POST" action="/logout"><button class="btn alt" type="submit"><i class="fa-solid fa-right-from-bracket"></i> 登出</button></form></div>
+    </header>
     <div class="content">
       <section class="view active" id="view-orders">
         <div class="titlebar"><h2>訂單管理</h2><button class="btn alt" onclick="refreshOrders(true)"><i class="fa-solid fa-rotate"></i> 重新整理</button></div>

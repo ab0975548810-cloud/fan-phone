@@ -1,0 +1,61 @@
+/* Admin navigation shell only. Business workspaces keep their own styles and behavior. */
+.side{width:240px}
+.brand{height:68px;justify-content:space-between;padding:0 16px;gap:10px}
+.brand>div{min-width:0;white-space:nowrap}
+.nav{padding:10px 9px 18px}
+.admin-nav-group{display:block;margin:0 0 15px}
+.admin-nav-label{padding:0 12px 5px;color:#a4969c;font-size:10px;font-weight:950;letter-spacing:.12em}
+.admin-nav-items{display:grid;gap:2px}
+.nav button{display:flex;align-items:center;gap:7px;margin:0;padding:12px 13px;min-height:44px}
+.nav button i{width:22px;flex:none;text-align:center}
+.nav button span{display:inline;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nav button.active{box-shadow:inset 3px 0 0 var(--pink)}
+.top{height:68px;justify-content:space-between;padding:0 20px}
+.top-primary,.top-actions{display:flex;align-items:center;gap:8px;min-width:0}
+.top-workspace{display:grid;gap:2px;min-width:0}
+.top-workspace small{color:var(--muted);font-size:10px;font-weight:800;letter-spacing:.06em}
+.top-workspace strong{font-size:17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.admin-menu-toggle,.admin-actions-toggle,.admin-nav-close{display:none;border:0;background:#fff;color:#665b60;border-radius:12px;min-width:44px;min-height:44px;cursor:pointer}
+.admin-nav-backdrop{display:none}
+body .modal,body .pc-modal{z-index:220}
+
+@media (min-width:601px) and (max-width:1000px){
+  .side{width:176px}
+  .brand{padding:0 12px;font-size:15px}
+  .nav{padding-inline:7px}
+  .nav button{padding:11px 9px;font-size:12px;gap:4px}
+  .nav button i{width:20px}
+  .admin-nav-label{padding-inline:10px}
+  .top{padding-inline:14px}
+  .top-workspace strong{font-size:15px}
+  .top a,.top .btn{padding:8px 10px;font-size:12px}
+}
+
+@media (max-width:600px){
+  .app{display:block;min-height:100%;height:100dvh}
+  .side{position:fixed;z-index:160;inset:0 auto 0 0;width:min(300px,calc(100vw - 48px));height:100dvh;transform:translateX(-105%);transition:transform .18s ease;box-shadow:14px 0 36px rgba(55,36,44,.18)}
+  body.admin-nav-open .side{transform:translateX(0)}
+  .brand{height:64px;padding:0 12px 0 16px;font-size:17px}
+  .brand span,.nav button span{display:inline}
+  .admin-nav-close{display:inline-grid;place-items:center;flex:none}
+  .nav{padding:10px 9px max(20px,env(safe-area-inset-bottom));overscroll-behavior:contain}
+  .nav button{text-align:left;padding:12px 13px}
+  .nav button i{width:22px;font-size:15px}
+  .admin-nav-backdrop{position:fixed;z-index:159;inset:0;display:block;border:0;background:rgba(35,29,32,.36);opacity:0;pointer-events:none;transition:opacity .18s ease}
+  body.admin-nav-open .admin-nav-backdrop{opacity:1;pointer-events:auto}
+  .main{height:100dvh}
+  .top{position:relative;z-index:130;height:64px;padding:0 10px;gap:8px}
+  .top-primary{flex:1;overflow:hidden}
+  .admin-menu-toggle,.admin-actions-toggle{display:inline-flex;align-items:center;justify-content:center;gap:6px;flex:none;border:1px solid var(--line)}
+  .admin-actions-toggle span{font-size:12px;font-weight:900}
+  .top-workspace small{font-size:9px}
+  .top-workspace strong{font-size:15px}
+  .top-actions{display:none;position:absolute;z-index:1;right:10px;top:calc(100% + 7px);width:min(220px,calc(100vw - 20px));padding:9px;background:#fff;border:1px solid var(--line);border-radius:16px;box-shadow:0 12px 36px rgba(55,36,44,.16)}
+  .top.admin-actions-open .top-actions{display:grid;gap:7px}
+  .top-actions a,.top-actions form,.top-actions button{width:100%}
+  .top-actions a,.top-actions button{text-align:left;display:flex;align-items:center;gap:9px;justify-content:flex-start}
+  .content{padding:12px}
+  .panel{padding:10px}
+}
+
+@media (prefers-reduced-motion:reduce){.side,.admin-nav-backdrop{transition:none}}

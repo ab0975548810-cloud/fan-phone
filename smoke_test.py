@@ -50,6 +50,7 @@ for rel in refs:
 
 for admin_js in (
     "admin-orders-v3.js",
+    "admin-shell-v1.js",
     "admin-steward-v1.js",
     "admin-commerce-v1.js",
     "admin-print-center.js",
@@ -147,6 +148,10 @@ if b"admin-print-center.js" not in admin_resp.data:
     fail("Authenticated /admin did not inject admin-print-center.js")
 if b"admin-steward-v1.js" not in admin_resp.data or b"admin-steward-v1.css" not in admin_resp.data:
     fail("Authenticated /admin did not inject the read-only Benfuwan steward")
+if b"admin-shell-v1.js" not in admin_resp.data or b"admin-shell-v1.css" not in admin_resp.data:
+    fail("Authenticated /admin did not inject the responsive navigation shell")
+if b'data-nav-group="operations"' not in admin_resp.data or b'data-nav-group="catalog"' not in admin_resp.data or b'data-nav-group="system"' not in admin_resp.data:
+    fail("Authenticated /admin did not render the grouped navigation shell")
 if b"admin-model-profiles.js" not in admin_resp.data:
     fail("Authenticated /admin did not inject admin-model-profiles.js")
 if '登入安全'.encode() not in admin_resp.data or b'id="passkey-enable"' not in admin_resp.data:
