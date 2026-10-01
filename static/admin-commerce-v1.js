@@ -50,7 +50,7 @@
   window.addEventListener('focus',()=>{if(el('pos-pending'))pendingUi()});
   function ensureUi(){
     const nav=document.querySelector('.nav'),content=document.querySelector('.content');if(!nav||!content||el('view-commerce'))return;
-    const button=document.createElement('button');button.dataset.view='commerce';button.innerHTML='<i class="fa-solid fa-cash-register"></i><span>商品・營運 POS</span>';button.addEventListener('click',open);
+    const button=document.createElement('button');button.dataset.view='commerce';button.innerHTML='<i class="fa-solid fa-cash-register"></i><span>商品與營運</span>';button.addEventListener('click',open);
     const orderNav=nav.querySelector('[data-view="orders"]');if(orderNav)orderNav.after(button);else nav.prepend(button);
     const section=document.createElement('section');section.id='view-commerce';section.className='view';section.innerHTML=`
       <div class="pos-heading"><div><p class="pos-eyebrow">本福丸 · 店務工作台</p><h2>商品與營運</h2><p>按系列管理商品，讓補貨與對帳更清楚。</p></div><button class="btn alt" id="commerce-reload">重新整理</button></div>

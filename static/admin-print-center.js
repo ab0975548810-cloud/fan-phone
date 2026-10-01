@@ -8,11 +8,11 @@
   const date=v=>{if(!v)return '—';const d=typeof v==='number'?new Date(v*1000):new Date(v);return isNaN(d)?'—':new Intl.DateTimeFormat('zh-TW',{timeZone:'Asia/Taipei',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(d)};
 
   function install(){
-    const nav=document.querySelector('.nav');
+    const nav=document.querySelector('[data-nav-group="operations"] .admin-nav-items')||document.querySelector('.nav');
     if(nav&&!document.querySelector('[data-view="print-center"]')){
       const button=document.createElement('button');button.dataset.view='print-center';button.innerHTML='<i class="fa-solid fa-print"></i><span>列印中心</span>';
       button.addEventListener('click',()=>{document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b===button));document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id==='view-print-center'));load(true)});
-      nav.insertBefore(button,nav.children[1]||null);
+      nav.appendChild(button);
     }
     const content=document.querySelector('.content');
     if(content&&!document.getElementById('view-print-center')){

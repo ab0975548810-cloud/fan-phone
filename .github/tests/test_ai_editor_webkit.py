@@ -20,14 +20,15 @@ from werkzeug.serving import make_server
 
 os.environ.setdefault('ADMIN_PASSWORD', 'fan123')
 os.environ['SESSION_COOKIE_SECURE'] = 'false'
-os.environ['PORT'] = '8765'
+BROWSER_TEST_PORT = int(os.environ.get('BROWSER_TEST_PORT', '8765'))
+os.environ['PORT'] = str(BROWSER_TEST_PORT)
 
 test_dir = ROOT / '__pycache__' / f'webkit-test-{os.getpid()}'
 test_dir.mkdir(parents=True, exist_ok=True)
 os.environ['COMMERCE_DB_PATH'] = str(test_dir / 'commerce.sqlite3')
 os.environ['ADMIN_PASSKEYS_FILE'] = str(test_dir / 'admin_passkeys.json')
 os.environ['WEBAUTHN_RP_ID'] = '127.0.0.1'
-os.environ['WEBAUTHN_ORIGIN'] = 'http://127.0.0.1:8765'
+os.environ['WEBAUTHN_ORIGIN'] = f'http://127.0.0.1:{BROWSER_TEST_PORT}'
 os.environ.pop('SUPABASE_URL', None)
 os.environ.pop('SUPABASE_SERVICE_ROLE_KEY', None)
 import app as app_module
@@ -82,7 +83,7 @@ class ServerThread(threading.Thread):
     daemon = True
     def __init__(self):
         super().__init__()
-        self.server = make_server('127.0.0.1', 8765, app_module.app, threaded=True)
+        self.server = make_server('127.0.0.1', BROWSER_TEST_PORT, app_module.app, threaded=True)
     def run(self): self.server.serve_forever()
     def close(self): self.server.shutdown()
 
@@ -1170,6 +1171,93 @@ def admin_steward_test(page):
     print('ADMIN_BENFUWAN_STEWARD_READ_ONLY_RESPONSIVE_OK')
 
 
+def admin_shell_test(page):
+    poll(page, "() => !!window.BenfuwanAdminShellV1 && !!document.querySelector('.nav button[data-view=\"commerce\"]') && !!document.querySelector('.nav button[data-view=\"print-center\"]')")
+    expected = {
+        'operations': ['orders', 'commerce', 'print-center'],
+        'catalog': ['models', 'styles', 'assets', 'templates'],
+        'system': ['security'],
+    }
+    groups = page.evaluate("""() => Object.fromEntries([...document.querySelectorAll('[data-nav-group]')].map(group=>[
+      group.dataset.navGroup,[...group.querySelectorAll('.admin-nav-items>button[data-view]')].map(button=>button.dataset.view)
+    ]))""")
+    assert groups == expected, groups
+    assert page.locator('[data-nav-group="operations"] .admin-nav-label').inner_text() == '營運'
+    assert page.locator('[data-nav-group="catalog"] .admin-nav-label').inner_text() == '商品設定'
+    assert page.locator('[data-nav-group="system"] .admin-nav-label').inner_text() == '系統'
+
+    writes = []
+    def capture_write(request):
+        if request.method in {'POST', 'PUT', 'PATCH', 'DELETE'}:
+            writes.append({'method': request.method, 'url': request.url})
+    page.on('request', capture_write)
+
+    page.set_viewport_size({'width': 1180, 'height': 900})
+    desktop = page.evaluate("""() => {
+      const side=document.getElementById('admin-sidebar'),menu=document.getElementById('admin-menu-toggle');
+      return {width:side.getBoundingClientRect().width,menu:getComputedStyle(menu).display,labels:[...document.querySelectorAll('.nav button span')].every(node=>getComputedStyle(node).display!=='none')};
+    }""")
+    assert desktop['width'] >= 230 and desktop['menu'] == 'none' and desktop['labels'], desktop
+
+    for view, label in (
+        ('orders', '訂單管理'), ('commerce', '商品與營運'), ('print-center', '列印中心'),
+        ('models', '品牌及型號'), ('styles', '手機殼材質'), ('assets', '素材庫'),
+        ('templates', '模板庫'), ('security', '登入安全'),
+    ):
+        page.locator(f'.nav button[data-view="{view}"]').click()
+        poll(page, f"() => document.getElementById('view-{view}')?.classList.contains('active') && document.getElementById('admin-workspace-title')?.textContent==={json.dumps(label, ensure_ascii=False)}")
+        assert page.locator(f'.nav button[data-view="{view}"]').get_attribute('aria-current') == 'page'
+
+    page.evaluate("() => openModal('model-modal')")
+    layers = page.evaluate("""() => ({
+      modal:+getComputedStyle(document.getElementById('model-modal')).zIndex,
+      sidebar:+getComputedStyle(document.getElementById('admin-sidebar')).zIndex||0
+    })""")
+    assert layers['modal'] > layers['sidebar'], layers
+    page.evaluate("() => closeModal('model-modal')")
+
+    page.set_viewport_size({'width': 390, 'height': 844})
+    poll(page, "() => document.getElementById('admin-sidebar').getAttribute('aria-hidden')==='true'")
+    poll(page, "() => document.getElementById('admin-sidebar').getBoundingClientRect().x < -1")
+    mobile = page.evaluate("""() => ({
+      viewport:document.documentElement.clientWidth,
+      main:document.querySelector('.main').getBoundingClientRect().width,
+      menu:getComputedStyle(document.getElementById('admin-menu-toggle')).display,
+      sideX:document.getElementById('admin-sidebar').getBoundingClientRect().x
+    })""")
+    assert mobile['main'] == mobile['viewport'] == 390 and mobile['menu'] != 'none' and mobile['sideX'] < -1, mobile
+    page.locator('#admin-menu-toggle').click()
+    poll(page, "() => document.body.classList.contains('admin-nav-open') && document.getElementById('admin-sidebar').getBoundingClientRect().x>=-1")
+    page.locator('.nav button[data-view="models"]').click()
+    poll(page, "() => !document.body.classList.contains('admin-nav-open') && document.getElementById('admin-workspace-title').textContent==='品牌及型號'")
+    page.locator('#admin-menu-toggle').click()
+    poll(page, "() => document.body.classList.contains('admin-nav-open')")
+    page.keyboard.press('Escape')
+    poll(page, "() => !document.body.classList.contains('admin-nav-open')")
+
+    page.locator('#admin-actions-toggle').click()
+    poll(page, "() => document.querySelector('.top').classList.contains('admin-actions-open')")
+    actions = page.evaluate("""() => [...document.querySelectorAll('#admin-top-actions>a,#admin-top-actions>form')].map(node=>{
+      const box=node.getBoundingClientRect();return {visible:box.width>0&&box.height>0,top:box.top,bottom:box.bottom};
+    })""")
+    assert len(actions) == 3 and all(row['visible'] for row in actions), actions
+    assert actions[0]['bottom'] <= actions[1]['top'] + 1 and actions[1]['bottom'] <= actions[2]['top'] + 1, actions
+    page.keyboard.press('Escape')
+    assert not page.evaluate("() => document.querySelector('.top').classList.contains('admin-actions-open')")
+
+    page.set_viewport_size({'width': 768, 'height': 1024})
+    ipad = page.evaluate("""() => ({
+      width:document.getElementById('admin-sidebar').getBoundingClientRect().width,
+      menu:getComputedStyle(document.getElementById('admin-menu-toggle')).display,
+      labels:[...document.querySelectorAll('.nav button span')].every(node=>getComputedStyle(node).display!=='none'&&node.getBoundingClientRect().width>0)
+    })""")
+    assert 160 <= ipad['width'] <= 190 and ipad['menu'] == 'none' and ipad['labels'], ipad
+    assert writes == [], writes
+    page.remove_listener('request', capture_write)
+    page.set_viewport_size({'width': 1180, 'height': 900})
+    print('ADMIN_NAVIGATION_SHELL_RESPONSIVE_READ_ONLY_OK', {'desktop':desktop,'mobile':mobile,'ipad':ipad,'groups':groups})
+
+
 def admin_test(browser, base):
     page = browser.new_page(viewport={'width': 1180, 'height': 900})
     page.add_init_script("""(() => {
@@ -1191,6 +1279,7 @@ def admin_test(browser, base):
     page.wait_for_url('**/admin')
 
     admin_steward_test(page)
+    admin_shell_test(page)
 
     # The first setup path is password login, then explicit enablement in the
     # dedicated login-security view. WebAuthn is mocked only at the browser edge;
@@ -2030,7 +2119,7 @@ def main():
         with sync_playwright() as p:
             browser = getattr(p, os.environ.get('BROWSER_ENGINE', 'webkit')).launch()
             try:
-                base='http://127.0.0.1:8765';passkey_login_test(browser,base);front_test(browser,base);design_draft_test(browser,base);checkout_test(browser,base);admin_test(browser,base)
+                base=f'http://127.0.0.1:{BROWSER_TEST_PORT}';passkey_login_test(browser,base);front_test(browser,base);design_draft_test(browser,base);checkout_test(browser,base);admin_test(browser,base)
                 import runpy
                 runpy.run_path(str(ROOT / '.github/tests/test_pos_dashboard.py'))['dashboard_test'](browser,base,poll)
             finally: browser.close()
