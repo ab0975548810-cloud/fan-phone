@@ -159,24 +159,24 @@ def front_test(browser, base):
     poll(page, "() => typeof fabric !== 'undefined' && typeof initCanvas === 'function' && !!window.BenfuwanAiRemoveV2 && !!window.removeBackgroundForActive && !!window.BenfuwanEditorAccess && !!window.BenfuwanOrderPayload && !!window.BenfuwanPrintMask && !!window.BenfuwanProductionHQ && !!window.BenfuwanImageUpload")
     page.set_viewport_size({'width': 390, 'height': 844})
     home = poll(page, """() => {
-      const page=document.getElementById('page-home'),hero=document.querySelector('.bf-home-hero'),art=document.querySelector('.bf-home-hero-art'),cta=document.querySelector('.bf-home-primary');
+      const page=document.getElementById('page-home'),hero=document.querySelector('.bf-home-hero'),copy=document.querySelector('.bf-home-hero-copy'),art=document.querySelector('.bf-home-hero-art'),cta=document.querySelector('.bf-home-primary');
       const draftState=document.getElementById('home-design-card')?.dataset.draftState;
       if(!window.BenfuwanFrontHomeV1||!page?.classList.contains('active')||!art?.complete||!art.naturalWidth||!draftState||draftState==='loading')return false;
-      const heroBox=hero.getBoundingClientRect(),ctaBox=cta.getBoundingClientRect(),app=document.getElementById('app').getBoundingClientRect();
+      const heroBox=hero.getBoundingClientRect(),copyBox=copy.getBoundingClientRect(),artBox=art.getBoundingClientRect(),ctaBox=cta.getBoundingClientRect(),app=document.getElementById('app').getBoundingClientRect();
       const labels=[...document.querySelectorAll('.bf-home-bottom-nav .nav-btn')].map(button=>[...button.childNodes].filter(node=>node.nodeType===Node.TEXT_NODE).map(node=>node.textContent).join('').trim());
       const textFits=[...document.querySelectorAll('.bf-home-primary-copy,.bf-home-quick>span:nth-child(2),.bf-home-banner-copy')].every(node=>node.scrollWidth<=node.clientWidth+1);
       return {
         title:document.getElementById('bf-home-title').textContent.trim(),
         image:[art.naturalWidth,art.naturalHeight],
         appWidth:app.width,pageWidth:page.scrollWidth,documentWidth:document.documentElement.scrollWidth,
-        heroBottom:heroBox.bottom,ctaTop:ctaBox.top,textFits,labels,
+        heroBottom:heroBox.bottom,ctaTop:ctaBox.top,copyBottom:copyBox.bottom,artTop:artBox.top,textFits,labels,
         fakeTabs:labels.filter(label=>['模板','我的作品','會員'].includes(label)),
         draftState
       };
     }""")
     assert home['title'] == '本福丸訂製' and home['image'] == [960, 1026], home
     assert abs(home['appWidth'] - 390) <= 1 and home['pageWidth'] <= 391 and home['documentWidth'] <= 391, home
-    assert home['heroBottom'] <= home['ctaTop'] + 1 and home['textFits'], home
+    assert home['heroBottom'] <= home['ctaTop'] + 1 and home['copyBottom'] <= home['artTop'] + 1 and home['textFits'], home
     assert home['labels'] == ['首頁','開始製作','購物車'] and home['fakeTabs'] == [], home
     assert home['draftState'] == 'empty', home
     page.locator('.bf-home-quick-template').click()
