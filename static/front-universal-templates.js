@@ -22,20 +22,20 @@
     const original=String(source||'').trim();
     img.style.visibility='hidden';
     const show=()=>{img.style.visibility='visible'};
-    const fallback=()=>{
-      if(img.dataset.bfFallback==='1')return;
+    const loadFallback=()=>{
+      if(img.dataset.bfFallback==='1'&&img.complete&&img.naturalWidth>0){show();return}
       img.dataset.bfFallback='1';
-      img.onerror=null;
-      img.onload=show;
       styleTemplateFallback(img);
+      img.onerror=()=>{img.style.visibility='visible'};
+      img.onload=show;
+      img.removeAttribute('src');
       img.src=TEMPLATE_THUMB_FALLBACK;
+      if(img.complete&&img.naturalWidth>0)show();
     };
     img.onload=show;
-    img.onerror=fallback;
-    if(!original)fallback();
-    else if(img.complete){
-      if(img.naturalWidth>0)show();else fallback();
-    }
+    img.onerror=loadFallback;
+    if(original)img.src=original;
+    else loadFallback();
   }
 
   function isUniversal(t){return !!(t&&(t.universal===true||t.model_id==='*'||Number(t.template_version)>=2))}
@@ -188,7 +188,7 @@
     list.forEach(t=>{
       const c=document.createElement('div');c.className='card tpl-card'+(selectedTpl?.id===t.id?' selected':'');
       const thumb=String(t.thumb_url||'').trim();
-      c.innerHTML=`<img loading="lazy" decoding="async" src="${attr(thumb||TEMPLATE_THUMB_FALLBACK)}" alt="${escapeHtml(t.name||'模板')}預覽"><div class="name">${escapeHtml(t.name||'模板')}</div>${isUniversal(t)?'<div style="font-size:9px;color:#ff6f9a;padding:0 4px 5px;font-weight:800">全型號自動對位</div>':''}`;
+      c.innerHTML=`<img loading="lazy" decoding="async" alt="${escapeHtml(t.name||'模板')}預覽"><div class="name">${escapeHtml(t.name||'模板')}</div>${isUniversal(t)?'<div style="font-size:9px;color:#ff6f9a;padding:0 4px 5px;font-weight:800">全型號自動對位</div>':''}`;
       wireTemplateThumb(c.querySelector('img'),thumb);
       c.onclick=()=>{selectedTpl=t;$('tpl-next').disabled=false;renderTemplates(cat)};box.appendChild(c);
     });
