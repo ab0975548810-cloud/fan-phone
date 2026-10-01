@@ -1477,10 +1477,116 @@ def admin_test(browser, base):
     page.evaluate("snapshot => {shopData=structuredClone(snapshot.data);shopVersion=snapshot.version;renderBrands();renderModels();renderStyles()}", listing_original)
     print('ADMIN_MODEL_STYLE_LISTING_CONTROL_OK')
 
+    # Product settings workspace keeps the existing catalog contracts while
+    # replacing prompts/wide mobile tables with explicit, filterable controls.
+    workspace_original = page.evaluate("() => ({data:structuredClone(shopData),version:shopVersion})")
+    workspace_fixture = {
+        'brands':['Apple','Samsung'],
+        'styles':[
+            {'id':'style_1789287807818','name':'晶彩','price':490,'colors':['白色','黑色'],'model_colors':{'model-a':['透明']},'mask_img':'fixture://crystal-mask','status':True},
+            {'id':'style-mirror','name':'鏡面','price':590,'colors':['黑色'],'model_colors':{},'mask_img':'fixture://mirror-mask','status':True},
+            {'id':'style-off','name':'停售殼款','price':390,'colors':['白色'],'model_colors':{},'mask_img':'','status':False},
+        ],
+        'models':[
+            {'id':'model-a','brand':'Apple','name':'iPhone 17 Pro','status':True,'case_profiles':{
+                'style_1789287807818':{'preview_mask_img':'fixture://a-preview','print_line_img':'fixture://a-print','print_x':11,'print_y':12,'print_w':71,'print_h':150,'print_angle':90},
+                'style-mirror':{'preview_mask_img':'fixture://b-preview','print_line_img':'fixture://b-print','print_x':21,'print_y':22,'print_w':72,'print_h':151,'print_angle':0},
+            }},
+            {'id':'model-b','brand':'Samsung','name':'Galaxy S25','status':False,'case_profiles':{}},
+        ],
+    }
+    page.evaluate("fixture => {shopData=structuredClone(fixture);renderBrands();renderModels();renderStyles()}", workspace_fixture)
+    page.evaluate("() => {showView('models',document.querySelector('.nav button[data-view=\"models\"]'));switchModelAdminTab('brands')}")
+    prompt_calls = page.evaluate("""() => {window.__workspacePrompt=window.prompt;window.__workspacePromptCalls=0;window.prompt=()=>{window.__workspacePromptCalls++;return '不應呼叫'};return window.__workspacePromptCalls}""")
+    assert prompt_calls == 0
+    workspace_writes = []
+    def workspace_save(route):
+        workspace_writes.append(route.request.post_data_json)
+        route.fulfill(status=200, content_type='application/json', body='{"status":"success","version":"workspace-version"}')
+    page.route('**/api/admin/save_shop_data', workspace_save)
+    page.locator('#brand-admin-view .titlebar .btn').click()
+    assert page.locator('#bf-brand-modal.show').count() == 1
+    page.locator('#bf-brand-name').fill('Apple')
+    page.locator('#bf-brand-save').click()
+    poll(page, "() => document.getElementById('bf-brand-error').textContent.includes('品牌已存在')")
+    assert workspace_writes == [] and page.evaluate("() => window.__workspacePromptCalls") == 0
+    page.locator('#bf-brand-name').fill('Google')
+    page.locator('#bf-brand-save').click()
+    poll(page, "() => shopData.brands.includes('Google') && !document.getElementById('bf-brand-modal').classList.contains('show')")
+    page.locator('#brands-body [data-edit-brand="Apple"]').click()
+    page.locator('#bf-brand-name').fill('Apple Inc.')
+    page.locator('#bf-brand-save').click()
+    poll(page, "() => shopData.brands.includes('Apple Inc.') && shopData.models.find(x=>x.id==='model-a').brand==='Apple Inc.'")
+    assert len(workspace_writes) == 2 and page.evaluate("() => window.__workspacePromptCalls") == 0
+    assert page.locator('#brands-body tr[data-brand="Apple Inc."] .bf-count-chip').inner_text() == '1 個型號'
+    page.unroute('**/api/admin/save_shop_data')
+
+    page.locator('#model-tab-btn').click()
+    page.locator('#bf-model-search').fill('17 Pro')
+    assert page.locator('#models-body tr[data-model-id]').count() == 1
+    page.locator('#bf-model-search').fill('')
+    page.locator('#bf-model-brand-filter').select_option('Samsung')
+    assert page.locator('#models-body tr[data-model-id="model-b"]').count() == 1
+    page.locator('#bf-model-brand-filter').select_option('')
+    page.locator('#bf-model-status-filter').select_option('active')
+    assert page.locator('#models-body tr[data-model-id]').count() == 1
+    page.locator('#bf-model-status-filter').select_option('all')
+
+    page.locator('#models-body [data-model-id="model-a"][data-model-style="style-mirror"]').click()
+    assert page.evaluate("() => BenfuwanModelProfilesAdmin.getActiveStyleId()") == 'style-mirror'
+    assert page.locator('#model-profile-x').input_value() == '21'
+    page.locator('#model-profile-x').fill('99')
+    dirty_guard = page.evaluate("""() => {window.__workspaceConfirm=window.confirm;window.__workspaceConfirmCalls=0;window.confirm=()=>{window.__workspaceConfirmCalls++;return false};document.querySelector('[data-profile-style="style_1789287807818"]').click();return {calls:window.__workspaceConfirmCalls,style:BenfuwanModelProfilesAdmin.getActiveStyleId(),dirty:BenfuwanModelProfilesAdmin.isDirty()}}""")
+    assert dirty_guard == {'calls':1,'style':'style-mirror','dirty':True}, dirty_guard
+    page.evaluate("() => {window.confirm=()=>true;document.querySelector('[data-profile-style=\"style_1789287807818\"]').click()}")
+    assert page.evaluate("() => BenfuwanModelProfilesAdmin.getActiveStyleId()") == 'style_1789287807818'
+    assert page.locator('#model-profile-x').input_value() == '11'
+    page.evaluate("() => {window.confirm=window.__workspaceConfirm;delete window.__workspaceConfirm;delete window.__workspaceConfirmCalls}")
+
+    profile_writes = []
+    def workspace_profile_save(route):
+        profile_writes.append(route.request.post_data_json)
+        route.fulfill(status=200, content_type='application/json', body='{"status":"success","version":"workspace-profile-version"}')
+    page.route('**/api/admin/print/model-profiles', workspace_profile_save)
+    page.locator('#model-profile-x').fill('13.5')
+    page.locator('#model-save').click()
+    poll(page, "() => !document.getElementById('model-modal').classList.contains('show')")
+    assert len(profile_writes) == 1
+    saved_model = next(row for row in profile_writes[0]['shop_data']['models'] if row['id'] == 'model-a')
+    assert profile_writes[0]['style_id'] == 'style_1789287807818'
+    assert saved_model['case_profiles']['style_1789287807818']['print_x'] == 13.5
+    assert saved_model['case_profiles']['style-mirror'] == workspace_fixture['models'][0]['case_profiles']['style-mirror']
+    page.unroute('**/api/admin/print/model-profiles')
+
+    page.locator('.nav button[data-view="styles"]').click()
+    page.locator('#bf-style-search').fill('鏡面')
+    assert page.locator('#styles-body tr[data-style-id="style-mirror"]').count() == 1
+    page.locator('#bf-style-search').fill('')
+    page.locator('#bf-style-status-filter').select_option('inactive')
+    assert page.locator('#styles-body tr[data-style-id="style-off"]').count() == 1
+    page.locator('#bf-style-status-filter').select_option('all')
+    page.locator('#styles-body [data-edit-style="style_1789287807818"]').click()
+    assert page.locator('#style-colors').input_value() == '白色, 黑色'
+    assert page.locator('#bf-model-color-list [data-model-id="model-a"]').input_value() == '透明'
+    page.locator('#style-modal .mh button').click()
+
+    for width, height in ((390,844),(768,1024),(1180,900)):
+        page.set_viewport_size({'width':width,'height':height})
+        page.locator('.nav button[data-view="models"]').click() if width >= 600 else page.evaluate("() => showView('models',document.querySelector('.nav button[data-view=\"models\"]'))")
+        page.locator('#model-tab-btn').click()
+        layout = page.evaluate("""() => ({scroll:document.documentElement.scrollWidth,viewport:document.documentElement.clientWidth,row:getComputedStyle(document.querySelector('#models-body tr[data-model-id]')).display})""")
+        assert layout['scroll'] <= layout['viewport'] + 2, (width, layout)
+        assert (layout['row'] == 'grid') == (width < 600), (width, layout)
+    page.set_viewport_size({'width':1180,'height':900})
+    page.evaluate("snapshot => {shopData=structuredClone(snapshot.data);shopVersion=snapshot.version;window.prompt=window.__workspacePrompt;delete window.__workspacePrompt;delete window.__workspacePromptCalls;renderBrands();renderModels();renderStyles()}", workspace_original)
+    print('ADMIN_PRODUCT_SETTINGS_WORKSPACE_V1_OK')
+
     model_color_src = page.locator('script[src*="admin-model-colors.js"]').get_attribute('src')
     assert model_color_src and 'v=20260926audit1' in model_color_src, model_color_src
     model_profile_src = page.locator('script[src*="admin-model-profiles.js"]').get_attribute('src')
     assert model_profile_src and 'v=20260929style1' in model_profile_src, model_profile_src
+    product_workspace_src = page.locator('script[src*="admin-product-workspace-v1.js"]').get_attribute('src')
+    assert product_workspace_src and 'v=20261001a' in product_workspace_src, product_workspace_src
     asset_category_src = page.locator('script[src*="admin-asset-categories.js"]').get_attribute('src')
     assert asset_category_src and 'v=20260926audit1' in asset_category_src, asset_category_src
     template_loader_src = page.locator('script[src*="admin-template-loader.js"]').get_attribute('src')
@@ -1634,7 +1740,7 @@ def admin_test(browser, base):
       disabled:document.getElementById('style-save').disabled
     })""")
     assert failed == {'count':0,'open':True,'value':'重複送出回歸殼款','disabled':False}, failed
-    assert any('服務暫時無法使用，請稍後再試' in msg for msg in dialogs), dialogs
+    assert '服務暫時無法使用，請稍後再試' in page.locator('#bf-product-message').inner_text()
     page.evaluate("() => Promise.all([saveStyle(),saveStyle()])")
     saved = page.evaluate("""() => ({
       total:shopData.styles.length,
@@ -1654,9 +1760,9 @@ def admin_test(browser, base):
         'models':[{'id':'issue29-model','brand':'Issue29品牌','name':'Issue29型號','status':True}],
         'styles':[{'id':'issue29-style','name':'Issue29系列','price':390,'colors':['透明'],'status':True}],
     }
-    page.evaluate("() => {window.__issue29Prompt=window.prompt;window.__issue29Confirm=window.confirm}")
+    page.evaluate("() => {window.__issue29Confirm=window.confirm}")
 
-    def catalog_case(label, action, failure_check, success_check):
+    def catalog_case(label, action, failure_check, success_check, feedback_check):
         page.evaluate("data => {shopData=structuredClone(data);renderBrands();renderModels();renderStyles()}", catalog_fixture)
         requests = []
         def respond(route):
@@ -1667,11 +1773,10 @@ def admin_test(browser, base):
                 time.sleep(.15)
                 route.fulfill(status=200, content_type='application/json', body='{"status":"success","version":"mock-catalog-version"}')
         page.route('**/api/admin/save_shop_data', respond)
-        dialog_start = len(dialogs)
         page.evaluate(action)
         failed = page.evaluate(failure_check)
         assert len(requests) == 1 and failed, (label, requests, failed)
-        assert any('服務暫時無法使用，請稍後再試' in msg for msg in dialogs[dialog_start:]), (label, dialogs[dialog_start:])
+        assert page.evaluate(feedback_check), label
         page.evaluate(action)
         saved = page.evaluate(success_check)
         assert len(requests) == 2 and saved, (label, requests, saved)
@@ -1679,35 +1784,40 @@ def admin_test(browser, base):
 
     catalog_case(
         'addBrand',
-        """() => {window.prompt=()=> 'Issue29新增品牌';return Promise.all([addBrand(),addBrand()])}""",
+        """() => {addBrand();document.getElementById('bf-brand-name').value='Issue29新增品牌';return Promise.all([BenfuwanAdminProductWorkspace.submitBrand(),BenfuwanAdminProductWorkspace.submitBrand()])}""",
         """() => JSON.stringify(shopData)===JSON.stringify({brands:['Issue29品牌','Issue29空品牌'],models:[{id:'issue29-model',brand:'Issue29品牌',name:'Issue29型號',status:true}],styles:[{id:'issue29-style',name:'Issue29系列',price:390,colors:['透明'],status:true}]}) && !shopMutationBusy""",
         """() => shopData.brands.filter(x=>x==='Issue29新增品牌').length===1 && !shopMutationBusy""",
+        """() => document.getElementById('bf-brand-error').textContent.includes('服務暫時無法使用')""",
     )
     catalog_case(
         'editBrand',
-        """() => {window.prompt=()=> 'Issue29品牌改名';return Promise.all([editBrand('Issue29品牌'),editBrand('Issue29品牌')])}""",
+        """() => {editBrand('Issue29品牌');document.getElementById('bf-brand-name').value='Issue29品牌改名';return Promise.all([BenfuwanAdminProductWorkspace.submitBrand(),BenfuwanAdminProductWorkspace.submitBrand()])}""",
         """() => shopData.brands.includes('Issue29品牌') && !shopData.brands.includes('Issue29品牌改名') && shopData.models[0].brand==='Issue29品牌' && !shopMutationBusy""",
         """() => !shopData.brands.includes('Issue29品牌') && shopData.brands.filter(x=>x==='Issue29品牌改名').length===1 && shopData.models[0].brand==='Issue29品牌改名' && !shopMutationBusy""",
+        """() => document.getElementById('bf-brand-error').textContent.includes('服務暫時無法使用')""",
     )
     catalog_case(
         'deleteBrand',
         """() => {window.confirm=()=>true;return Promise.all([deleteBrand('Issue29品牌'),deleteBrand('Issue29品牌')])}""",
         """() => shopData.brands.includes('Issue29品牌') && !shopData.brands.includes('未分類') && shopData.models[0].brand==='Issue29品牌' && !shopMutationBusy""",
         """() => !shopData.brands.includes('Issue29品牌') && shopData.brands.filter(x=>x==='未分類').length===1 && shopData.models[0].brand==='未分類' && !shopMutationBusy""",
+        """() => document.getElementById('bf-product-message').textContent.includes('服務暫時無法使用')""",
     )
     catalog_case(
         'deleteModel',
         """() => {window.confirm=()=>true;return Promise.all([deleteModel('issue29-model'),deleteModel('issue29-model')])}""",
         """() => shopData.models.some(x=>x.id==='issue29-model') && document.getElementById('models-body').textContent.includes('Issue29型號') && !shopMutationBusy""",
         """() => !shopData.models.some(x=>x.id==='issue29-model') && !shopMutationBusy""",
+        """() => document.getElementById('bf-product-message').textContent.includes('服務暫時無法使用')""",
     )
     catalog_case(
         'deleteStyle',
         """() => {window.confirm=()=>true;return Promise.all([deleteStyle('issue29-style'),deleteStyle('issue29-style')])}""",
         """() => shopData.styles.some(x=>x.id==='issue29-style') && document.getElementById('styles-body').textContent.includes('Issue29系列') && !shopMutationBusy""",
         """() => !shopData.styles.some(x=>x.id==='issue29-style') && !shopMutationBusy""",
+        """() => document.getElementById('bf-product-message').textContent.includes('服務暫時無法使用')""",
     )
-    page.evaluate("async () => {await loadShop(true);window.prompt=window.__issue29Prompt;window.confirm=window.__issue29Confirm;delete window.__issue29Prompt;delete window.__issue29Confirm}")
+    page.evaluate("async () => {await loadShop(true);window.confirm=window.__issue29Confirm;delete window.__issue29Confirm}")
     print('ADMIN_CATALOG_CRUD_STATE_RETRY_DOUBLE_SUBMIT_OK')
 
     # Catalog commit can succeed before production-profile sync fails. The
@@ -1721,7 +1831,6 @@ def admin_test(browser, base):
     partial_brand = f'部分成功後品牌 {time.time_ns()}'
     page.evaluate("id => openModelEditor(id)", partial_before['model']['id'])
     page.locator('#model-name').fill(partial_model_name)
-    partial_dialog_start = len(dialogs)
     original_save_profiles = app_module.print_center.store.save_profiles
     def fail_profile_sync(_profiles):
         raise RuntimeError('browser fixture')
@@ -1745,7 +1854,7 @@ def admin_test(browser, base):
     }, partial_state
     assert server_partial_version != partial_before['version']
     assert next(row for row in server_partial['models'] if row['id'] == partial_before['model']['id'])['name'] == partial_model_name
-    assert any('型號資料已儲存，但正式列印參數同步失敗' in msg for msg in dialogs[partial_dialog_start:])
+    assert '型號資料已儲存，但正式列印參數同步失敗' in page.locator('#bf-product-message').inner_text()
     fresh_after_partial = page.request.get(base + '/api/shop_data')
     assert fresh_after_partial.headers.get('x-benfuwan-cache') == 'MISS', fresh_after_partial.headers
     fresh_after_partial_data = fresh_after_partial.json()
@@ -1753,7 +1862,7 @@ def admin_test(browser, base):
     assert next(row for row in fresh_after_partial_data['data']['models'] if row['id'] == partial_before['model']['id'])['name'] == partial_model_name
     print('ADMIN_MODEL_PROFILE_PARTIAL_SUCCESS_CACHE_INVALIDATION_OK')
 
-    page.evaluate("""async brand => {const old=window.prompt;window.prompt=()=>brand;try{await addBrand()}finally{window.prompt=old}}""", partial_brand)
+    page.evaluate("""async brand => {addBrand();document.getElementById('bf-brand-name').value=brand;await BenfuwanAdminProductWorkspace.submitBrand()}""", partial_brand)
     server_after_mutation = page.request.get(base + '/api/shop_data').json()
     assert partial_brand in server_after_mutation['data']['brands']
     assert next(row for row in server_after_mutation['data']['models'] if row['id'] == partial_before['model']['id'])['name'] == partial_model_name
@@ -1780,7 +1889,6 @@ def admin_test(browser, base):
     winner_cached = page.request.get(base + '/api/shop_data')
     assert winner_cached.headers.get('x-benfuwan-cache') == 'MISS', winner_cached.headers
     assert winner_cached.json()['version'] == winner_version
-    stale_dialog_start = len(dialogs)
 
     page.evaluate("""() => {openStyleEditor();document.getElementById('style-name').value='CAS 分頁 B 系列';document.getElementById('style-price').value='555'}""")
     page.evaluate("() => saveStyle()")
@@ -1824,7 +1932,7 @@ def admin_test(browser, base):
     assert server_after_stale['version'] == winner_version
     assert 'CAS 分頁 A' in server_after_stale['data']['brands']
     assert not any(x.get('name') == 'CAS 分頁 B 系列' for x in server_after_stale['data']['styles'])
-    assert any('資料已被其他分頁或裝置更新，請重新載入後再修改。' in msg for msg in dialogs[stale_dialog_start:]), dialogs[stale_dialog_start:]
+    assert '資料已被其他分頁或裝置更新，請重新載入後再修改。' in page.locator('#bf-product-message').inner_text()
     page.evaluate("() => loadShop(true)")
     assert page.evaluate("version => shopVersion===version && shopData.brands.includes('CAS 分頁 A')", winner_version)
     restored = page.request.post(base + '/api/admin/save_shop_data', data={

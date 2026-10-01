@@ -7,6 +7,13 @@
   const LEGACY_CRYSTAL_STYLE_ID = 'style_1789287807818';
   let editingModel = null;
   let activeStyleId = '';
+  let profileSnapshot = '';
+
+  const notify = (message, type = 'error') => {
+    const workspace = window.BenfuwanAdminProductWorkspace;
+    if (workspace && typeof workspace.notify === 'function') workspace.notify(message, type);
+    else alert(message);
+  };
 
   const activeStyles = () => (shopData.styles || []).filter(row => row && row.status !== false && row.id);
   const complete = profile => Boolean(
@@ -54,6 +61,22 @@
     return element ? element.value : fallback;
   }
 
+  function currentProfileSnapshot() {
+    return JSON.stringify({
+      preview_mask_img: value('model-profile-mask-url').trim(),
+      print_line_img: value('model-profile-line-url').trim(),
+      print_x: value('model-profile-x', '0'),
+      print_y: value('model-profile-y', '0'),
+      print_w: value('model-profile-w'),
+      print_h: value('model-profile-h'),
+      print_angle: value('model-profile-angle', '0'),
+    });
+  }
+
+  function profileIsDirty() {
+    return Boolean(profileSnapshot && currentProfileSnapshot() !== profileSnapshot);
+  }
+
   function renderProfilePanel() {
     const host = document.getElementById('model-profile-admin');
     if (!host) return;
@@ -81,7 +104,10 @@
       <div class="field"><label>角度（預設 0°）</label><input id="model-profile-angle" type="number" step="0.1" value="${esc(profile.print_angle ?? 0)}"></div>
     </div>`;
     host.querySelectorAll('[data-profile-style]').forEach(button => button.onclick = () => {
-      activeStyleId = button.dataset.profileStyle;
+      const nextStyleId = button.dataset.profileStyle;
+      if (String(nextStyleId) === String(activeStyleId)) return;
+      if (profileIsDirty() && !confirm('目前殼款有尚未儲存的修改，確定要切換殼款並放棄修改嗎？')) return;
+      activeStyleId = nextStyleId;
       renderProfilePanel();
     });
     host.querySelectorAll('[data-upload-profile]').forEach(button => button.onclick = () => {
@@ -90,6 +116,7 @@
     ['mask', 'line'].forEach(kind => {
       document.getElementById(`model-profile-${kind}-file`)?.addEventListener('change', event => uploadProfileImage(event, kind));
     });
+    profileSnapshot = currentProfileSnapshot();
   }
 
   async function uploadProfileImage(event, kind) {
@@ -103,14 +130,14 @@
       image.src = url;
       image.style.display = 'block';
     } catch (error) {
-      alert(error.message || error);
+      notify(error.message || error);
     } finally {
       event.target.value = '';
     }
   }
 
   window.renderModels = renderModelList;
-  window.openModelEditor = function (id = '') {
+  window.openModelEditor = function (id = '', requestedStyleId = '') {
     ensureStyles();
     editingModel = id ? (shopData.models || []).find(row => String(row.id) === String(id)) || null : null;
     document.getElementById('model-id').value = id;
@@ -119,7 +146,9 @@
     document.getElementById('model-name').value = editingModel?.name || '';
     document.getElementById('model-active').checked = editingModel?.status !== false;
     const styles = activeStyles();
-    activeStyleId = styles.some(row => row.id === LEGACY_CRYSTAL_STYLE_ID) ? LEGACY_CRYSTAL_STYLE_ID : (styles[0]?.id || '');
+    activeStyleId = styles.some(row => String(row.id) === String(requestedStyleId))
+      ? requestedStyleId
+      : (styles.some(row => row.id === LEGACY_CRYSTAL_STYLE_ID) ? LEGACY_CRYSTAL_STYLE_ID : (styles[0]?.id || ''));
     renderProfilePanel();
     openModal('model-modal');
   };
@@ -137,8 +166,8 @@
       print_h: Number(value('model-profile-h')),
       print_angle: Number(value('model-profile-angle', 0)) || 0,
     };
-    if (!name) return alert('請填型號名稱');
-    if (!complete(profile)) return alert('請上傳此殼款的預覽遮罩、打印線圖，並確認列印 W / H 大於 0');
+    if (!name) return notify('請填型號名稱');
+    if (!complete(profile)) return notify('請上傳此殼款的預覽遮罩、打印線圖，並確認列印 W / H 大於 0');
     const previous = editingModel || {};
     const patch = {
       ...previous, id, brand: document.getElementById('model-brand').value, name,
@@ -159,6 +188,7 @@
       shopData = next;
       renderModels();
       closeModal('model-modal');
+      notify('型號與目前殼款設定已儲存', 'success');
     } catch (error) {
       if (error.code === 'PROFILE_SYNC_FAILED' && error.version) {
         shopVersion = String(error.version);
@@ -168,12 +198,17 @@
         renderModels();
         renderProfilePanel();
       }
-      alert('儲存失敗：' + (error.message || error));
+      notify('儲存失敗：' + (error.message || error));
     } finally {
       modelSaveBusy = false;
       if (button) button.disabled = false;
     }
   };
+
+  window.BenfuwanModelProfilesAdmin = Object.freeze({
+    getActiveStyleId: () => activeStyleId,
+    isDirty: profileIsDirty,
+  });
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { ensureStyles(); renderModels(); }, {once: true});
   else { ensureStyles(); renderModels(); }

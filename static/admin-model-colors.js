@@ -12,6 +12,11 @@
   };
   const getStyle=id=>id?(shopData.styles||[]).find(x=>String(x.id)===String(id)):null;
   let savingStyle=false;
+  const notify=(message,type='error')=>{
+    const workspace=window.BenfuwanAdminProductWorkspace;
+    if(workspace&&typeof workspace.notify==='function')workspace.notify(message,type);
+    else alert(message);
+  };
 
   function ensureStyles(){
     if(document.getElementById('bf-model-color-style'))return;
@@ -133,7 +138,7 @@
       mask_img:document.getElementById('style-mask-url').value||'',
       status:document.getElementById('style-active')?.checked!==false
     };
-    if(!data.name)return alert('請填材質名稱');
+    if(!data.name)return notify('請填材質名稱');
     const next=structuredClone(shopData),idx=id?next.styles.findIndex(x=>x.id===id):-1;
     if(idx>=0)next.styles[idx]=data;else next.styles.push(data);
     const button=document.getElementById('style-save');
@@ -143,7 +148,8 @@
       shopData=next;
       renderStyles();
       closeModal('style-modal');
-    }catch(e){alert('儲存失敗：'+(e.message||e))}
+      notify('手機殼材質已儲存','success');
+    }catch(e){notify('儲存失敗：'+(e.message||e))}
     finally{savingStyle=false;if(button)button.disabled=false}
   };
 
