@@ -169,14 +169,14 @@ def front_test(browser, base):
         title:document.getElementById('bf-home-title').textContent.trim(),
         image:[art.naturalWidth,art.naturalHeight],
         appWidth:app.width,pageWidth:page.scrollWidth,documentWidth:document.documentElement.scrollWidth,
-        heroBottom:heroBox.bottom,ctaTop:ctaBox.top,copyBottom:copyBox.bottom,artTop:artBox.top,textFits,labels,
+        heroBottom:heroBox.bottom,ctaTop:ctaBox.top,copyBottom:copyBox.bottom,artTop:artBox.top,artBottom:artBox.bottom,textFits,labels,
         fakeTabs:labels.filter(label=>['模板','我的作品','會員'].includes(label)),
         draftState
       };
     }""")
     assert home['title'] == '本福丸訂製' and home['image'] == [960, 1026], home
     assert abs(home['appWidth'] - 390) <= 1 and home['pageWidth'] <= 391 and home['documentWidth'] <= 391, home
-    assert home['heroBottom'] <= home['ctaTop'] + 1 and home['copyBottom'] <= home['artTop'] + 1 and home['textFits'], home
+    assert home['heroBottom'] <= home['ctaTop'] + 1 and home['copyBottom'] <= home['artTop'] + 1 and home['artBottom'] <= home['heroBottom'] + 1 and home['textFits'], home
     assert home['labels'] == ['首頁','開始製作','購物車'] and home['fakeTabs'] == [], home
     assert home['draftState'] == 'empty', home
     page.locator('.bf-home-quick-template').click()
@@ -194,9 +194,9 @@ def front_test(browser, base):
     page.set_viewport_size({'width': 1180, 'height': 900})
     desktop = page.evaluate("""() => {
       const app=document.getElementById('app').getBoundingClientRect(),page=document.getElementById('page-home'),hero=document.querySelector('.bf-home-hero').getBoundingClientRect(),cta=document.querySelector('.bf-home-primary').getBoundingClientRect();
-      return {appWidth:app.width,pageWidth:page.scrollWidth,heroBeforeCta:hero.bottom<=cta.top+1};
+      const art=document.querySelector('.bf-home-hero-art').getBoundingClientRect();return {appWidth:app.width,pageWidth:page.scrollWidth,heroBeforeCta:hero.bottom<=cta.top+1,artInsideHero:art.bottom<=hero.bottom+1};
     }""")
-    assert desktop['appWidth'] <= 521 and desktop['pageWidth'] <= 521 and desktop['heroBeforeCta'], desktop
+    assert desktop['appWidth'] <= 521 and desktop['pageWidth'] <= 521 and desktop['heroBeforeCta'] and desktop['artInsideHero'], desktop
     print('FRONT_HOME_V1_RESPONSIVE_REAL_ACTIONS_OK', browser_engine, {'iphone':home,'desktop':desktop})
     page.set_viewport_size({'width': 390, 'height': 600})
     upload_regression = page.evaluate("""async () => {
