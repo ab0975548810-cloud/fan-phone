@@ -1043,6 +1043,133 @@ def checkout_test(browser, base):
     page.close()
 
 
+def admin_steward_test(page):
+    requests_seen = []
+    mode = {
+        'quota_used': 10,
+        'active': 0,
+        'quota_unavailable': False,
+        'ai_failure': False,
+        'print_failure': False,
+        'print_states': ['PREPARED', 'COMPLETED'],
+    }
+    now = int(time.time())
+    orders = [
+        {'order_id': 'TODAY-PENDING', 'status': '待處理', 'time': now},
+        {'order_id': 'TODAY-DONE', 'status': '已完成', 'time': now},
+        {'order_id': 'TODAY-MAKING', 'status': '製作中', 'time': now},
+        {'order_id': 'YESTERDAY', 'status': '待處理', 'time': now - 86400},
+    ]
+
+    def reply(route, payload, status=200):
+        requests_seen.append({'method': route.request.method, 'url': route.request.url})
+        route.fulfill(status=status, content_type='application/json', body=json.dumps(payload, ensure_ascii=False))
+
+    def health(route):
+        reply(route, {'status': 'success', 'persistence': 'supabase'})
+
+    def ai(route):
+        if mode['ai_failure']:
+            reply(route, {'status': 'error', 'code': 'AI_DIAG_UNAVAILABLE'}, 500)
+            return
+        quota = {
+            'client_limit_24h': 5, 'ip_limit_24h': 15, 'global_limit_24h': 60,
+            'active_limit': 2,
+            'global_used_24h': None if mode['quota_unavailable'] else mode['quota_used'],
+            'active_now': None if mode['quota_unavailable'] else mode['active'],
+        }
+        reply(route, {'status': 'transport_ok', 'ai_quota': quota})
+
+    def order_list(route):
+        reply(route, {'status': 'success', 'data': orders})
+
+    def print_jobs(route):
+        if mode['print_failure']:
+            reply(route, {'status': 'error', 'code': 'PRINT_UNAVAILABLE'}, 500)
+            return
+        rows = [{'order_id': f'PRINT-{index}', 'job': {'state': state}} for index, state in enumerate(mode['print_states'])]
+        reply(route, {'status': 'success', 'rows': rows, 'vendor_ready': True, 'vendor_connected': True})
+
+    page.route('**/api/health*', health)
+    page.route('**/api/admin/ai_remove_diagnose*', ai)
+    page.route('**/api/admin/get_orders*', order_list)
+    page.route('**/api/admin/print/jobs*', print_jobs)
+    poll(page, "() => !!window.BenfuwanStewardV1 && !!document.getElementById('bf-steward-launch')")
+    assert requests_seen == [], requests_seen
+    assert page.locator('#bf-steward-launch').inner_text() == '🐱 本福丸'
+
+    page.set_viewport_size({'width': 390, 'height': 844})
+    page.locator('#bf-steward-launch').click()
+    poll(page, "() => window.BenfuwanStewardV1.lastOverall==='normal'")
+    assert page.locator('#bf-steward-panel').get_attribute('aria-hidden') == 'false'
+    assert page.locator('#bf-steward-overall-text').inner_text() == '系統目前正常 ฅ^•ﻌ•^ฅ'
+    assert page.locator('#bf-steward-ai-usage').inner_text() == '10 / 60'
+    assert page.locator('#bf-steward-ai-active').inner_text() == '0 / 2'
+    assert page.locator('#bf-steward-order-total').inner_text() == '3'
+    assert page.locator('#bf-steward-order-pending').inner_text() == '1'
+    assert page.locator('#bf-steward-order-completed').inner_text() == '1'
+    assert page.locator('#bf-steward-print-pending').inner_text() == '1'
+    assert page.locator('#bf-steward-print-failed').inner_text() == '0'
+    assert page.locator('#bf-steward-print-unknown').inner_text() == '0'
+    assert len(requests_seen) == 4 and {row['method'] for row in requests_seen} == {'GET'}, requests_seen
+    mobile_box = page.locator('#bf-steward-panel').bounding_box()
+    assert mobile_box and mobile_box['width'] <= 390 and mobile_box['height'] <= 844 * .83, mobile_box
+    assert page.locator('.bf-steward-backdrop').count() == 0
+    page.locator('#bf-steward-close').click()
+    assert page.locator('#bf-steward-panel').get_attribute('aria-hidden') == 'true'
+
+    page.set_viewport_size({'width': 768, 'height': 1024})
+    page.locator('#bf-steward-launch').click()
+    poll(page, "() => document.getElementById('bf-steward-panel').classList.contains('open')")
+    poll(page, "() => !document.getElementById('bf-steward-refresh').disabled")
+    ipad_box = page.locator('#bf-steward-panel').bounding_box()
+    assert ipad_box and ipad_box['width'] <= 402 and ipad_box['x'] >= 350, ipad_box
+
+    mode['quota_used'] = 45
+    page.evaluate("() => window.BenfuwanStewardV1.refresh()")
+    assert page.evaluate("() => window.BenfuwanStewardV1.lastOverall") == 'attention'
+    assert page.locator('#bf-steward-overall-text').inner_text() == '有幾個項目需要注意，我已經幫你標出來。'
+
+    mode.update(quota_used=10, print_states=['FAILED', 'UNKNOWN', 'COMPLETED'])
+    page.evaluate("() => window.BenfuwanStewardV1.refresh()")
+    assert page.evaluate("() => window.BenfuwanStewardV1.lastOverall") == 'attention'
+    assert page.locator('#bf-steward-print-failed').inner_text() == '1'
+    assert page.locator('#bf-steward-print-unknown').inner_text() == '1'
+
+    mode.update(quota_unavailable=True, print_states=['COMPLETED'])
+    page.evaluate("() => window.BenfuwanStewardV1.refresh()")
+    assert page.evaluate("() => window.BenfuwanStewardV1.lastOverall") == 'error'
+    assert page.locator('#bf-steward-quota').get_attribute('data-level') == 'error'
+
+    mode.update(quota_unavailable=False, ai_failure=True, quota_used=10)
+    page.evaluate("() => window.BenfuwanStewardV1.refresh()")
+    assert page.evaluate("() => window.BenfuwanStewardV1.lastOverall") == 'error'
+    assert page.locator('#bf-steward-runpod').get_attribute('data-level') == 'error'
+    assert page.locator('#bf-steward-order-total').inner_text() == '3'
+    assert page.locator('#bf-steward-print-failed').inner_text() == '0'
+
+    mode['ai_failure'] = False
+    before_refresh = len(requests_seen)
+    page.locator('#bf-steward-refresh').click()
+    poll(page, "() => !document.getElementById('bf-steward-refresh').disabled")
+    assert len(requests_seen) >= before_refresh + 4, requests_seen[before_refresh:]
+    assert {row['method'] for row in requests_seen[before_refresh:]} == {'GET'}, requests_seen[before_refresh:]
+
+    page.locator('#bf-steward-orders-link').click()
+    poll(page, "() => document.getElementById('view-orders').classList.contains('active') && document.getElementById('bf-steward-panel').getAttribute('aria-hidden')==='true'")
+    page.locator('#bf-steward-launch').click()
+    poll(page, "() => document.getElementById('bf-steward-panel').classList.contains('open')")
+    page.locator('#bf-steward-print-link').click()
+    poll(page, "() => document.getElementById('view-print-center').classList.contains('active') && document.getElementById('bf-steward-panel').getAttribute('aria-hidden')==='true'")
+
+    page.unroute('**/api/health*')
+    page.unroute('**/api/admin/ai_remove_diagnose*')
+    page.unroute('**/api/admin/get_orders*')
+    page.unroute('**/api/admin/print/jobs*')
+    page.set_viewport_size({'width': 1180, 'height': 900})
+    print('ADMIN_BENFUWAN_STEWARD_READ_ONLY_RESPONSIVE_OK')
+
+
 def admin_test(browser, base):
     page = browser.new_page(viewport={'width': 1180, 'height': 900})
     page.add_init_script("""(() => {
@@ -1062,6 +1189,8 @@ def admin_test(browser, base):
     if submit.count(): submit.click()
     else: page.locator('form').evaluate('(f)=>f.submit()')
     page.wait_for_url('**/admin')
+
+    admin_steward_test(page)
 
     # The first setup path is password login, then explicit enablement in the
     # dedicated login-security view. WebAuthn is mocked only at the browser edge;
