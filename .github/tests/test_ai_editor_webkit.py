@@ -1195,9 +1195,9 @@ def admin_shell_test(page):
     page.set_viewport_size({'width': 1180, 'height': 900})
     desktop = page.evaluate("""() => {
       const side=document.getElementById('admin-sidebar'),menu=document.getElementById('admin-menu-toggle');
-      return {width:side.getBoundingClientRect().width,menu:getComputedStyle(menu).display,labels:[...document.querySelectorAll('.nav button span')].every(node=>getComputedStyle(node).display!=='none')};
+      return {width:side.getBoundingClientRect().width,menu:getComputedStyle(menu).display,labels:[...document.querySelectorAll('.nav button span')].every(node=>getComputedStyle(node).display!=='none'),inert:side.inert};
     }""")
-    assert desktop['width'] >= 230 and desktop['menu'] == 'none' and desktop['labels'], desktop
+    assert desktop['width'] >= 230 and desktop['menu'] == 'none' and desktop['labels'] and not desktop['inert'], desktop
 
     for view, label in (
         ('orders', '訂單管理'), ('commerce', '商品與營運'), ('print-center', '列印中心'),
@@ -1217,7 +1217,7 @@ def admin_shell_test(page):
     page.evaluate("() => closeModal('model-modal')")
 
     page.set_viewport_size({'width': 390, 'height': 844})
-    poll(page, "() => document.getElementById('admin-sidebar').getAttribute('aria-hidden')==='true'")
+    poll(page, "() => document.getElementById('admin-sidebar').getAttribute('aria-hidden')==='true' && document.getElementById('admin-sidebar').inert===true")
     poll(page, "() => document.getElementById('admin-sidebar').getBoundingClientRect().x < -1")
     mobile = page.evaluate("""() => ({
       viewport:document.documentElement.clientWidth,
@@ -1226,14 +1226,22 @@ def admin_shell_test(page):
       sideX:document.getElementById('admin-sidebar').getBoundingClientRect().x
     })""")
     assert mobile['main'] == mobile['viewport'] == 390 and mobile['menu'] != 'none' and mobile['sideX'] < -1, mobile
+    page.evaluate("() => document.activeElement?.blur()")
+    page.keyboard.press('Tab')
+    assert not page.evaluate("() => document.getElementById('admin-sidebar').contains(document.activeElement)")
     page.locator('#admin-menu-toggle').click()
-    poll(page, "() => document.body.classList.contains('admin-nav-open') && document.getElementById('admin-sidebar').getBoundingClientRect().x>=-1")
+    poll(page, "() => document.body.classList.contains('admin-nav-open') && document.getElementById('admin-sidebar').getBoundingClientRect().x>=-1 && document.getElementById('admin-sidebar').inert===false")
+    assert page.evaluate("() => document.getElementById('admin-sidebar').contains(document.activeElement) && document.activeElement.matches('.nav button.active')")
     page.locator('.nav button[data-view="models"]').click()
-    poll(page, "() => !document.body.classList.contains('admin-nav-open') && document.getElementById('admin-workspace-title').textContent==='品牌及型號'")
+    poll(page, "() => !document.body.classList.contains('admin-nav-open') && document.getElementById('admin-sidebar').inert===true && document.getElementById('admin-workspace-title').textContent==='品牌及型號'")
     page.locator('#admin-menu-toggle').click()
     poll(page, "() => document.body.classList.contains('admin-nav-open')")
     page.keyboard.press('Escape')
-    poll(page, "() => !document.body.classList.contains('admin-nav-open')")
+    poll(page, "() => !document.body.classList.contains('admin-nav-open') && document.getElementById('admin-sidebar').inert===true")
+    page.locator('#admin-menu-toggle').click()
+    poll(page, "() => document.body.classList.contains('admin-nav-open') && document.getElementById('admin-sidebar').inert===false")
+    page.locator('#admin-nav-backdrop').click(position={'x': 380, 'y': 20})
+    poll(page, "() => !document.body.classList.contains('admin-nav-open') && document.getElementById('admin-sidebar').inert===true")
 
     page.locator('#admin-actions-toggle').click()
     poll(page, "() => document.querySelector('.top').classList.contains('admin-actions-open')")
@@ -1246,12 +1254,14 @@ def admin_shell_test(page):
     assert not page.evaluate("() => document.querySelector('.top').classList.contains('admin-actions-open')")
 
     page.set_viewport_size({'width': 768, 'height': 1024})
+    poll(page, "() => document.getElementById('admin-sidebar').inert===false")
     ipad = page.evaluate("""() => ({
       width:document.getElementById('admin-sidebar').getBoundingClientRect().width,
       menu:getComputedStyle(document.getElementById('admin-menu-toggle')).display,
-      labels:[...document.querySelectorAll('.nav button span')].every(node=>getComputedStyle(node).display!=='none'&&node.getBoundingClientRect().width>0)
+      labels:[...document.querySelectorAll('.nav button span')].every(node=>getComputedStyle(node).display!=='none'&&node.getBoundingClientRect().width>0),
+      inert:document.getElementById('admin-sidebar').inert
     })""")
-    assert 160 <= ipad['width'] <= 190 and ipad['menu'] == 'none' and ipad['labels'], ipad
+    assert 160 <= ipad['width'] <= 190 and ipad['menu'] == 'none' and ipad['labels'] and not ipad['inert'], ipad
     assert writes == [], writes
     page.remove_listener('request', capture_write)
     page.set_viewport_size({'width': 1180, 'height': 900})

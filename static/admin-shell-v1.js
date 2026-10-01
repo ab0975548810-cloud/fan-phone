@@ -30,7 +30,13 @@
   function closeMenu(restore=false){
     body.classList.remove('admin-nav-open');
     menuToggle.setAttribute('aria-expanded','false');
-    if(mobile.matches)sidebar.setAttribute('aria-hidden','true');else sidebar.removeAttribute('aria-hidden');
+    if(mobile.matches){
+      sidebar.setAttribute('aria-hidden','true');
+      sidebar.inert=true;
+    }else{
+      sidebar.removeAttribute('aria-hidden');
+      sidebar.inert=false;
+    }
     if(restore&&returnFocus?.isConnected)returnFocus.focus();
     returnFocus=null;
   }
@@ -41,6 +47,7 @@
     returnFocus=document.activeElement;
     body.classList.add('admin-nav-open');
     menuToggle.setAttribute('aria-expanded','true');
+    sidebar.inert=false;
     sidebar.removeAttribute('aria-hidden');
     (nav.querySelector('button.active')||nav.querySelector('button'))?.focus();
   }
