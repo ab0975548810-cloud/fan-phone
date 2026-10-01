@@ -201,12 +201,13 @@ def front_test(browser, base):
 
     page.route('**/broken-template-thumb.png', lambda route: route.fulfill(status=404, body='missing'))
     page.evaluate("""() => {
-      window.__thumbFallbackBackup={templates:structuredClone(templatesData),modelId:ctx.modelId,styleId:ctx.styleId};
+      window.__thumbFallbackBackup={templates:structuredClone(templatesData),modelId:ctx.modelId,styleId:ctx.styleId,page:document.querySelector('.page.active')?.id||'page-home'};
       ctx.modelId='fallback-model';ctx.styleId='';
       templatesData={categories:['全部'],templates:[
         {id:'broken-thumb',name:'壞圖模板',model_id:'*',universal:true,thumb_url:'/broken-template-thumb.png'},
         {id:'empty-thumb',name:'空圖模板',model_id:'*',universal:true,thumb_url:''}
       ]};
+      showPage('page-template');
       renderTemplates();
     }""")
     thumb_fallback = poll(page, """() => {
@@ -218,11 +219,13 @@ def front_test(browser, base):
     assert all('/static/front-assets/benfuwan-case-fallback.webp' in row['src'] for row in thumb_fallback), thumb_fallback
     assert all(row['objectFit']=='contain' and row['padding']=='10px' and row['natural'][0]>0 and row['natural'][1]>0 for row in thumb_fallback), thumb_fallback
     page.evaluate("""() => {
+      const previous=window.__thumbFallbackBackup.page||'page-home';
       templatesData=window.__thumbFallbackBackup.templates;
       ctx.modelId=window.__thumbFallbackBackup.modelId;
       ctx.styleId=window.__thumbFallbackBackup.styleId;
       delete window.__thumbFallbackBackup;
       renderTemplates();
+      showPage(previous);
     }""")
     page.unroute('**/broken-template-thumb.png')
     print('FRONT_TEMPLATE_BROKEN_THUMB_USES_CASE_FALLBACK_OK', thumb_fallback)
