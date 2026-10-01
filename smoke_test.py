@@ -61,6 +61,7 @@ for marker in (
 for asset in (
     "home-assets/benfuwan-cats-hero.webp",
     "home-assets/benfuwan-cat-banner.webp",
+    "front-assets/benfuwan-case-fallback.webp",
     "front-home-v1.css",
     "front-home-v1.js",
 ):
