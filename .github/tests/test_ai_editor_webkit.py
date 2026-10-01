@@ -157,6 +157,48 @@ def front_test(browser, base):
     page.route('**/api/ai/remove-background', backend_ai_response)
     page.goto(base + '/', wait_until='domcontentloaded')
     poll(page, "() => typeof fabric !== 'undefined' && typeof initCanvas === 'function' && !!window.BenfuwanAiRemoveV2 && !!window.removeBackgroundForActive && !!window.BenfuwanEditorAccess && !!window.BenfuwanOrderPayload && !!window.BenfuwanPrintMask && !!window.BenfuwanProductionHQ && !!window.BenfuwanImageUpload")
+    page.set_viewport_size({'width': 390, 'height': 844})
+    home = poll(page, """() => {
+      const page=document.getElementById('page-home'),hero=document.querySelector('.bf-home-hero'),art=document.querySelector('.bf-home-hero-art'),cta=document.querySelector('.bf-home-primary');
+      const draftState=document.getElementById('home-design-card')?.dataset.draftState;
+      if(!window.BenfuwanFrontHomeV1||!page?.classList.contains('active')||!art?.complete||!art.naturalWidth||!draftState)return false;
+      const heroBox=hero.getBoundingClientRect(),ctaBox=cta.getBoundingClientRect(),app=document.getElementById('app').getBoundingClientRect();
+      const labels=[...document.querySelectorAll('.bf-home-bottom-nav .nav-btn')].map(button=>[...button.childNodes].filter(node=>node.nodeType===Node.TEXT_NODE).map(node=>node.textContent).join('').trim());
+      const textFits=[...document.querySelectorAll('.bf-home-primary-copy,.bf-home-quick>span:nth-child(2),.bf-home-banner-copy')].every(node=>node.scrollWidth<=node.clientWidth+1);
+      return {
+        title:document.getElementById('bf-home-title').textContent.trim(),
+        image:[art.naturalWidth,art.naturalHeight],
+        appWidth:app.width,pageWidth:page.scrollWidth,documentWidth:document.documentElement.scrollWidth,
+        heroBottom:heroBox.bottom,ctaTop:ctaBox.top,textFits,labels,
+        fakeTabs:labels.filter(label=>['模板','我的作品','會員'].includes(label)),
+        draftState
+      };
+    }""")
+    assert home['title'] == '本福丸訂製' and home['image'] == [960, 1026], home
+    assert abs(home['appWidth'] - 390) <= 1 and home['pageWidth'] <= 391 and home['documentWidth'] <= 391, home
+    assert home['heroBottom'] <= home['ctaTop'] + 1 and home['textFits'], home
+    assert home['labels'] == ['首頁','開始製作','購物車'] and home['fakeTabs'] == [], home
+    assert home['draftState'] == 'empty', home
+    page.locator('.bf-home-quick-template').click()
+    poll(page, "() => document.getElementById('page-model')?.classList.contains('active')")
+    assert not page.locator('#page-template').evaluate('(node) => node.classList.contains(\'active\')')
+    page.evaluate("() => showPage('page-home')")
+    page.locator('.bf-home-primary').click()
+    poll(page, "() => document.getElementById('page-model')?.classList.contains('active')")
+    page.evaluate("() => showPage('page-home')")
+    page.locator('.bf-home-bottom-nav .nav-cart-wrap').click()
+    poll(page, "() => document.getElementById('page-cart')?.classList.contains('active')")
+    page.evaluate("() => showPage('page-home')")
+    page.locator('#home-design-card').click()
+    poll(page, "() => document.getElementById('toast')?.textContent.includes('目前沒有未完成設計')")
+    page.set_viewport_size({'width': 1180, 'height': 900})
+    desktop = page.evaluate("""() => {
+      const app=document.getElementById('app').getBoundingClientRect(),page=document.getElementById('page-home'),hero=document.querySelector('.bf-home-hero').getBoundingClientRect(),cta=document.querySelector('.bf-home-primary').getBoundingClientRect();
+      return {appWidth:app.width,pageWidth:page.scrollWidth,heroBeforeCta:hero.bottom<=cta.top+1};
+    }""")
+    assert desktop['appWidth'] <= 521 and desktop['pageWidth'] <= 521 and desktop['heroBeforeCta'], desktop
+    print('FRONT_HOME_V1_RESPONSIVE_REAL_ACTIONS_OK', browser_engine, {'iphone':home,'desktop':desktop})
+    page.set_viewport_size({'width': 390, 'height': 600})
     upload_regression = page.evaluate("""async () => {
       const api=window.BenfuwanImageUpload;
       const loadImage=src=>new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=reject;image.src=src});
@@ -891,9 +933,10 @@ def design_draft_test(browser, base):
     print('FRONT_DESIGN_DRAFT_AUTOSAVE_ACTIONS_OK', full_draft['updatedAt'])
 
     page.reload(wait_until='domcontentloaded')
-    poll(page, "() => window.BenfuwanDesignDraft?.state().prompt==='ready' && document.getElementById('design-draft-prompt')?.classList.contains('show')")
+    poll(page, "() => window.BenfuwanDesignDraft?.state().prompt==='ready' && document.getElementById('design-draft-prompt')?.classList.contains('show') && document.getElementById('home-design-card')?.dataset.draftState==='ready'")
     assert page.locator('#design-draft-title').inner_text() == '發現上次未完成的設計'
-    page.locator('#design-draft-prompt .continue').click()
+    assert page.locator('#home-design-title').inner_text() == '繼續上次設計'
+    page.locator('#home-design-card').click()
     poll(page, "() => document.getElementById('page-editor')?.classList.contains('active') && canvas?.getObjects().length===3 && !BenfuwanDesignDraft.state().suspended")
     restored = page.evaluate("""() => {
       const photo=canvas.getObjects().find(object=>object.role==='photo');

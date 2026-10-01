@@ -48,6 +48,26 @@ for rel in refs:
     if proc.returncode:
         fail(f"JavaScript syntax: static/{rel}\n{proc.stderr}")
 
+front_base = (ROOT / "static" / "index-base-20260913.html").read_text(encoding="utf-8")
+for marker in (
+    'id="bf-home-title">本福丸訂製',
+    'onclick="startNewDesign()"',
+    'onclick="openHomeTemplates()"',
+    'onclick="openHomeDesign()"',
+    'onclick="openCartFromNav()"',
+):
+    if marker not in front_base:
+        fail(f"Missing interactive homepage contract: {marker}")
+for asset in (
+    "home-assets/benfuwan-cats-hero.webp",
+    "home-assets/benfuwan-cat-banner.webp",
+    "front-home-v1.css",
+    "front-home-v1.js",
+):
+    path = ROOT / "static" / asset
+    if not path.exists() or path.stat().st_size == 0:
+        fail(f"Missing homepage asset: static/{asset}")
+
 for admin_js in (
     "admin-orders-v3.js",
     "admin-shell-v1.js",
