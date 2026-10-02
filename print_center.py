@@ -122,7 +122,7 @@ def triage_bucket(row):
     state = (row.get("job") or {}).get("state") or ""
     if state in {"UNKNOWN", "FAILED", "SENDING", "CANCELING", "STARTING"}:
         return "exception"
-    if row.get("order_status") != "作廢" and (
+    if row.get("order_status") not in {"已完成", "作廢"} and (
         row.get("binding_required") or not row.get("has_print") or
         not row.get("profile_available") or not state
     ):
@@ -756,40 +756,28 @@ class PrintService:
                 raise PrintError("INVALID_REPLAY", "printer callback 驗證資料已被重用", 403)
         return inserted
 
-    def dashboard(self, order_id=None, all_orders=False):
+    def dashboard(self, order_id=None):
         if order_id:
             order = self.app.commerce.store.order(order_id)
             orders = [order] if order else []
         elif self.app.USE_SUPABASE:
             fields = "id,customer_name,model_id,model_name,style_id,style_name,status,print_path,mockup_path,created_at_unix"
-            if all_orders:
-                orders, offset = [], 0
-                while True:
-                    batch = (self.app.SUPABASE.table("orders").select(fields)
-                             .order("created_at_unix", desc=True).order("id", desc=True)
-                             .range(offset, offset + 499).execute().data or [])
-                    orders.extend(batch)
-                    if len(batch) < 500:
-                        break
-                    offset += 500
-            else:
-                orders = self.app.SUPABASE.table("orders").select(fields).order("created_at_unix", desc=True).limit(200).execute().data or []
+            orders = self.app.SUPABASE.table("orders").select(fields).order("created_at_unix", desc=True).limit(200).execute().data or []
         else:
             orders = self.app.commerce.store.local_orders()
             orders.sort(key=lambda row: int(row.get("created_at_unix") or 0), reverse=True)
-            if not all_orders:
-                orders = orders[:200]
+            orders = orders[:200]
         commerce = self.app.commerce.read()
         finance = commerce.get("order_finance") or {}
         shop = self.app.cloud_get_json("shop_data", self.app.DATA_FILE, self.app.DEFAULT_SHOP_DATA)
         bindings = ({order_id: self.store.binding(order_id)} if order_id else
-                    {row["order_id"]: row for row in self.store.bindings(all_rows=all_orders)})
+                    {row["order_id"]: row for row in self.store.bindings()})
         latest = ({order_id: self.store.latest_job(order_id)} if order_id else {})
         if not order_id:
-            for job in self.store.list_jobs(limit=None if all_orders else 300):
-                if job["order_id"] not in latest or int(job.get("attempt_no") or 0) > int(latest[job["order_id"]].get("attempt_no") or 0):
+            for job in self.store.list_jobs():
+                if job["order_id"] not in latest:
                     latest[job["order_id"]] = job
-        profiles = {row["sku_id"]: row for row in self.store.profiles(all_rows=all_orders)}
+        profiles = {row["sku_id"]: row for row in self.store.profiles()}
         result = []
         for order in orders:
             order_id = order["id"]
@@ -828,6 +816,53 @@ class PrintService:
             "device_id": self.client.device_id if self.vendor_ready else "",
             "platform": A5_DESKTOP_METADATA,
         }
+
+    def operational_summary_rows(self):
+        """Small read-only projection of unfinished orders and nonterminal/failed jobs.
+
+        Completed history, terminal jobs, and global bindings/profiles are never
+        hydrated for the steward's periodic refresh.
+        """
+        orders = {row['id']: row for row in self.app.commerce.store.operational_orders()}
+        candidate_ids = {row['order_id'] for row in self.store.operational_jobs()}
+        for order_id in candidate_ids - orders.keys():
+            order = self.app.commerce.store.order(order_id)
+            if order:
+                orders[order_id] = order
+        commerce = self.app.commerce.read()
+        finance = commerce.get('order_finance') or {}
+        shop = self.app.cloud_get_json('shop_data', self.app.DATA_FILE, self.app.DEFAULT_SHOP_DATA)
+        rows = []
+        for order_id, order in orders.items():
+            job = self.store.latest_job(order_id)
+            status = order.get('status') or '待處理'
+            state = (job or {}).get('state') or ''
+            # A previous failed attempt must not revive an already resolved order.
+            if status in ('已完成', '作廢') and state in ('', 'COMPLETED', 'CANCELED'):
+                continue
+            if state in ('UNKNOWN', 'FAILED', 'SENDING', 'CANCELING', 'STARTING'):
+                row = {'order_id': order_id, 'order_status': status,
+                       'time': order.get('created_at_unix') or 0, 'job': {'state': state}}
+                row['triage'] = triage_bucket(row)
+                rows.append(row)
+                continue
+            finance_sku_id = str((finance.get(order_id) or {}).get('sku_id') or '')
+            binding = self.store.binding(order_id) if not finance_sku_id else None
+            candidates = self._sku_candidates(order, commerce, shop) if not finance_sku_id else []
+            binding_sku_id = str((binding or {}).get('sku_id') or '')
+            binding_valid = bool(binding_sku_id and binding_sku_id in {item['id'] for item in candidates})
+            sku_id = finance_sku_id or (binding_sku_id if binding_valid else '')
+            row = {
+                'order_id': order_id, 'order_status': status,
+                'time': order.get('created_at_unix') or 0,
+                'has_print': bool(order.get('print_path')),
+                'binding_required': not finance_sku_id and not binding_valid,
+                'profile_available': bool(sku_id and self.store.profile(sku_id)),
+                'job': {'state': state} if state else None,
+            }
+            row['triage'] = triage_bucket(row)
+            rows.append(row)
+        return rows
 
 
 def install(app_module):

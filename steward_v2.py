@@ -29,10 +29,8 @@ def print_projection(rows):
         elif bucket == 'attention':
             if row.get('binding_required'):
                 issue = (3, '舊訂單需要補綁 SKU')
-                kind = 'order'
             elif not row.get('profile_available'):
                 issue = (3, '缺 production profile')
-                kind = 'order'
             elif not row.get('has_print'):
                 issue = (5, '缺高清生產圖')
                 kind = 'order'
@@ -78,7 +76,7 @@ def install(app_module):
         except Exception:
             app.logger.exception('Steward order summary unavailable')
         try:
-            counts, issues = print_projection(app_module.print_center.dashboard(all_orders=True)['rows'])
+            counts, issues = print_projection(app_module.print_center.operational_summary_rows())
             result['print'] = {'available': True, **counts}
             result['issues'] = issues
         except Exception:

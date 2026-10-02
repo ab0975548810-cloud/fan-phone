@@ -1227,7 +1227,7 @@ def admin_steward_test(page):
         issues=[dict(priority=1,kind='print',order_id='PRINT-UNKNOWN',text='列印結果不明・訂單 PRINT-UNKNOWN') for _ in range(unknown)]
         issues += [dict(priority=2,kind='print',order_id='PRINT-FAILED',text='銳印回報失敗・訂單 PRINT-FAILED') for _ in range(failed)]
         if mode['order_issue']:
-            issues.append(dict(priority=3,kind='order',order_id='ORDER-OLD',text='缺 production profile・訂單 ORDER-OLD'))
+            issues.append(dict(priority=3,kind='print',order_id='ORDER-OLD',text='舊訂單需要補綁 SKU・訂單 ORDER-OLD'))
         reply(route, {'status':'success','timezone':'Asia/Taipei',
             'orders':dict(available=True,total=3,revenue=560,pending=1,making=1,print_flow=0,completed=1),
             'print':dict(available=not mode['print_failure'],manual=failed+unknown,attention=0,
@@ -1337,16 +1337,17 @@ def admin_steward_test(page):
     page.route('**/api/admin/get_orders?*',lambda route:route.fulfill(status=200,content_type='application/json',body=json.dumps(dict(status='success',data=[],has_more=False,next_offset=0,before=int(time.time())))))
     page.evaluate("() => window.BenfuwanStewardV1.refresh()")
     poll(page,"() => document.querySelectorAll('#bf-steward-issues .bf-steward-issue').length===2")
-    page.locator('[data-steward-kind="print"]').click()
+    page.locator('[data-order-id="PRINT-UNKNOWN"]').click()
     poll(page,"() => document.getElementById('view-print-center').classList.contains('active')")
     poll(page,"() => !!document.getElementById('pc-exact') && document.getElementById('pc-exact').textContent.includes('PRINT-UNKNOWN')")
     assert any('order_id=PRINT-UNKNOWN' in url for url in exact_requests),exact_requests
     assert mutations==[],mutations
     page.locator('#bf-steward-launch').click()
-    poll(page,"() => document.querySelector('[data-steward-kind=order]')")
-    page.locator('[data-steward-kind="order"]').click()
-    poll(page,"() => document.getElementById('view-orders').classList.contains('active')")
+    poll(page,"() => document.querySelector('[data-order-id=ORDER-OLD]')")
+    page.locator('[data-order-id="ORDER-OLD"]').click()
+    poll(page,"() => document.getElementById('view-print-center').classList.contains('active')")
     assert any('order_id=ORDER-OLD' in url for url in exact_requests),exact_requests
+    assert mutations==[],mutations
     page.unroute('**/api/admin/print/jobs?*');page.unroute('**/api/admin/get_orders?*')
 
     page.unroute('**/api/health*')

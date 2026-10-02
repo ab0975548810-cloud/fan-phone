@@ -118,17 +118,8 @@ class PrintStore:
         with self.connection() as db:
             return self._decode(db.execute("SELECT * FROM production_profiles WHERE sku_id=? AND active=1", (sku_id,)).fetchone())
 
-    def profiles(self, all_rows=False):
+    def profiles(self):
         if self.app.USE_SUPABASE:
-            if all_rows:
-                rows, offset = [], 0
-                while True:
-                    batch = (self.app.SUPABASE.table("production_profiles").select("*").eq("active", True)
-                             .order("sku_id").range(offset, offset + 499).execute().data or [])
-                    rows.extend(batch)
-                    if len(batch) < 500:
-                        return rows
-                    offset += 500
             return self.app.SUPABASE.table("production_profiles").select("*").eq("active", True).execute().data or []
         with self.connection() as db:
             return [self._decode(row) for row in db.execute("SELECT * FROM production_profiles WHERE active=1")]
@@ -145,17 +136,8 @@ class PrintStore:
                 "SELECT * FROM print_order_bindings WHERE order_id=?", (order_id,)
             ).fetchone())
 
-    def bindings(self, all_rows=False):
+    def bindings(self):
         if self.app.USE_SUPABASE:
-            if all_rows:
-                rows, offset = [], 0
-                while True:
-                    batch = (self.app.SUPABASE.table("print_order_bindings").select("*")
-                             .order("order_id").range(offset, offset + 499).execute().data or [])
-                    rows.extend(batch)
-                    if len(batch) < 500:
-                        return rows
-                    offset += 500
             return self.app.SUPABASE.table("print_order_bindings").select("*").execute().data or []
         with self.connection() as db:
             return [self._decode(row) for row in db.execute("SELECT * FROM print_order_bindings")]
@@ -284,20 +266,28 @@ class PrintStore:
 
     def list_jobs(self, limit=300):
         if self.app.USE_SUPABASE:
-            if limit is not None:
-                return self.app.SUPABASE.table("print_jobs").select("*").order("updated_at", desc=True).limit(limit).execute().data or []
+            return self.app.SUPABASE.table("print_jobs").select("*").order("updated_at", desc=True).limit(limit).execute().data or []
+        with self.connection() as db:
+            return [self._decode(row) for row in db.execute("SELECT * FROM print_jobs ORDER BY updated_at DESC LIMIT ?", (limit,))]
+
+    def operational_jobs(self):
+        """Only jobs whose current state can require monitoring or intervention."""
+        states = (*ACTIVE_STATES, 'FAILED')
+        if self.app.USE_SUPABASE:
             rows, offset = [], 0
             while True:
-                batch = (self.app.SUPABASE.table("print_jobs").select("*").order("updated_at", desc=True)
-                         .range(offset, offset + 499).execute().data or [])
+                batch = (self.app.SUPABASE.table('print_jobs')
+                         .select('id,order_id,attempt_no,state,updated_at')
+                         .in_('state', list(states)).order('updated_at', desc=True)
+                         .order('id', desc=True).range(offset, offset + 499).execute().data or [])
                 rows.extend(batch)
                 if len(batch) < 500:
                     return rows
                 offset += 500
         with self.connection() as db:
-            if limit is None:
-                return [self._decode(row) for row in db.execute("SELECT * FROM print_jobs ORDER BY updated_at DESC")]
-            return [self._decode(row) for row in db.execute("SELECT * FROM print_jobs ORDER BY updated_at DESC LIMIT ?", (limit,))]
+            marks = ','.join('?' for _ in states)
+            return [self._decode(row) for row in db.execute(
+                f'SELECT id,order_id,attempt_no,state,updated_at FROM print_jobs WHERE state IN ({marks})', states)]
 
     def auto_prepared_jobs(self, limit=50):
         """Return only jobs carrying the durable Phase 3.3 auto marker."""

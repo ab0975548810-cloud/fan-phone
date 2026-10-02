@@ -71,6 +71,24 @@ class Store:
         with self.connection() as db:
             return [json.loads(row[0]) for row in db.execute('SELECT value FROM orders')]
 
+    def operational_orders(self):
+        """Read unfinished orders without transferring completed history to the app."""
+        fields = 'id,model_id,model_name,style_id,style_name,status,print_path,created_at_unix'
+        if self.app.USE_SUPABASE:
+            rows, offset = [], 0
+            while True:
+                batch = (self.app.SUPABASE.table('orders').select(fields)
+                         .or_('status.is.null,status.not.in.(已完成,作廢)')
+                         .order('created_at_unix', desc=True).order('id', desc=True)
+                         .range(offset, offset + 499).execute().data or [])
+                rows.extend(batch)
+                if len(batch) < 500:
+                    return rows
+                offset += 500
+        with self.connection() as db:
+            return [json.loads(row[0]) for row in db.execute("""SELECT value FROM orders
+                WHERE COALESCE(json_extract(value, '$.status'), '') NOT IN ('已完成', '作廢')""")]
+
     def orders_between(self, start, end):
         if not self.app.USE_SUPABASE:
             return [r for r in self.local_orders() if start <= int(r.get('created_at_unix') or 0) < end]
