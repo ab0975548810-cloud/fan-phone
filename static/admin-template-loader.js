@@ -28,7 +28,17 @@
   async function ensure(){
     if(loaded)return;
     if(loading)return loading;
-    loading=(async()=>{for(const src of STACK)await loadOne(src);loaded=true;window.__benfuwanTemplateStackReady=true;console.info('[ADMIN] template editor stack lazy-loaded')})().finally(()=>{loading=null});
+    loading=(async()=>{
+      for(const src of STACK)await loadOne(src);
+      loaded=true;
+      window.__benfuwanTemplateStackReady=true;
+      // The heavy editor contains an older list renderer. Restore the light
+      // management workspace after the editor modules finish installing.
+      window.BenfuwanAdminLibraryWorkspace?.installTemplateRender?.();
+      window.renderTemplateTabs?.();
+      window.renderTemplates?.();
+      console.info('[ADMIN] template editor stack lazy-loaded');
+    })().finally(()=>{loading=null});
     return loading;
   }
   window.benfuwanEnsureTemplateEditor=ensure;
@@ -42,9 +52,4 @@
     };
     window.openTemplateEditor=lazyOpen;
   }
-
-  document.addEventListener('click',ev=>{
-    const nav=ev.target.closest('[data-view="templates"]');
-    if(nav)ensure().catch(console.error);
-  },{passive:true});
 })();
