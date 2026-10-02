@@ -54,6 +54,7 @@
       <div class="pc-actions">${actions}<button data-pc="order" data-order="${esc(row.order_id)}">查看訂單</button></div></div></article>`;
   }
   function bucket(row){
+    if(row.triage)return row.triage;
     const state=row.job?.state||'';
     if(['UNKNOWN','FAILED','SENDING','CANCELING','STARTING'].includes(state))return 'exception';
     if(row.order_status!=='作廢'&&(row.binding_required||!row.has_print||!row.profile_available||!state))return 'attention';

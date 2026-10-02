@@ -270,6 +270,25 @@ class PrintStore:
         with self.connection() as db:
             return [self._decode(row) for row in db.execute("SELECT * FROM print_jobs ORDER BY updated_at DESC LIMIT ?", (limit,))]
 
+    def operational_jobs(self):
+        """Only jobs whose current state can require monitoring or intervention."""
+        states = (*ACTIVE_STATES, 'FAILED')
+        if self.app.USE_SUPABASE:
+            rows, offset = [], 0
+            while True:
+                batch = (self.app.SUPABASE.table('print_jobs')
+                         .select('id,order_id,attempt_no,state,updated_at')
+                         .in_('state', list(states)).order('updated_at', desc=True)
+                         .order('id', desc=True).range(offset, offset + 499).execute().data or [])
+                rows.extend(batch)
+                if len(batch) < 500:
+                    return rows
+                offset += 500
+        with self.connection() as db:
+            marks = ','.join('?' for _ in states)
+            return [self._decode(row) for row in db.execute(
+                f'SELECT id,order_id,attempt_no,state,updated_at FROM print_jobs WHERE state IN ({marks})', states)]
+
     def auto_prepared_jobs(self, limit=50):
         """Return only jobs carrying the durable Phase 3.3 auto marker."""
         if self.app.USE_SUPABASE:

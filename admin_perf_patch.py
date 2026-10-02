@@ -28,7 +28,7 @@ def install(app_module):
                     '/static/admin-asset-categories.js?v=20261002a',
                     '/static/admin-template-loader.js?v=20261002a',
                     '/static/admin-orders-v3.js?v=20261002operations1',
-                    '/static/admin-steward-v1.js?v=20261001a',
+                    '/static/admin-steward-v1.js?v=20261002v2',
                     '/static/admin-shell-v1.js?v=20261001a',
                     '/static/admin-product-workspace-v1.js?v=20261001b',
                     '/static/admin-library-workspace-v1.js?v=20261002a',
@@ -36,7 +36,7 @@ def install(app_module):
                 for src in scripts:
                     if src not in html and '</body>' in html:
                         html = html.replace('</body>', f'<script src="{src}"></script></body>')
-                steward_css = '/static/admin-steward-v1.css?v=20261001a'
+                steward_css = '/static/admin-steward-v1.css?v=20261002v2'
                 if steward_css not in html and '</head>' in html:
                     html = html.replace('</head>', f'<link rel="stylesheet" href="{steward_css}"></head>')
                 shell_css = '/static/admin-shell-v1.css?v=20261001a'

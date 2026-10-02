@@ -43,6 +43,7 @@ def post_worker_init(worker):
         from ai_runtime_patch import install as install_ai_runtime
         from commerce_patch import install as install_commerce
         from print_center import install as install_print_center, start_auto_dispatcher
+        from steward_v2 import install as install_steward_v2
         install_passkey_auth(app_module)
         install_security(app_module)
         install_supabase_resilience(app_module)
@@ -58,6 +59,7 @@ def post_worker_init(worker):
         install_commerce(app_module)
         # Print Center depends on the final commerce order/finance transaction layer.
         install_print_center(app_module)
+        install_steward_v2(app_module)
         # This recovers only durable Phase 3.3 markers and calls receiveTask;
         # startPrint/pushPrint remain outside the website workflow.
         start_auto_dispatcher(app_module)

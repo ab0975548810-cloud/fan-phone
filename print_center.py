@@ -117,6 +117,25 @@ def _public_job(job):
     return row
 
 
+def triage_bucket(row):
+    """Single operational classification shared by Print Center and steward."""
+    state = (row.get("job") or {}).get("state") or ""
+    if state in {"UNKNOWN", "FAILED", "SENDING", "CANCELING", "STARTING"}:
+        return "exception"
+    if row.get("order_status") not in {"已完成", "作廢"} and (
+        row.get("binding_required") or not row.get("has_print") or
+        not row.get("profile_available") or not state
+    ):
+        return "attention"
+    if state == "PREPARED":
+        return "prepared"
+    if state == "QUEUED":
+        return "queued"
+    if state == "PRINTING":
+        return "printing"
+    return "completed"
+
+
 class PrintService:
     def __init__(self, app_module, *, store=None, client=None):
         self.app = app_module
@@ -770,7 +789,7 @@ class PrintService:
             binding_sku_id = str(binding.get("sku_id") or "")
             binding_valid = bool(binding_sku_id and binding_sku_id in candidate_ids)
             sku_id = finance_sku_id or (binding_sku_id if binding_valid else "")
-            result.append({
+            row = {
                 "order_id": order_id, "customer_name": order.get("customer_name") or "",
                 "model": order.get("model_name") or "", "style": order.get("style_name") or "",
                 "order_status": order.get("status") or "待處理", "time": order.get("created_at_unix"),
@@ -786,7 +805,9 @@ class PrintService:
                     if sku_id in profiles else None),
                 "preview_url": url_for("admin_order_file", order_id=order_id, kind="preview") if order.get("mockup_path") else "",
                 "job": _public_job(latest.get(order_id)),
-            })
+            }
+            row["triage"] = triage_bucket(row)
+            result.append(row)
         return {
             "rows": result,
             "vendor_ready": self.vendor_ready,
@@ -795,6 +816,53 @@ class PrintService:
             "device_id": self.client.device_id if self.vendor_ready else "",
             "platform": A5_DESKTOP_METADATA,
         }
+
+    def operational_summary_rows(self):
+        """Small read-only projection of unfinished orders and nonterminal/failed jobs.
+
+        Completed history, terminal jobs, and global bindings/profiles are never
+        hydrated for the steward's periodic refresh.
+        """
+        orders = {row['id']: row for row in self.app.commerce.store.operational_orders()}
+        candidate_ids = {row['order_id'] for row in self.store.operational_jobs()}
+        for order_id in candidate_ids - orders.keys():
+            order = self.app.commerce.store.order(order_id)
+            if order:
+                orders[order_id] = order
+        commerce = self.app.commerce.read()
+        finance = commerce.get('order_finance') or {}
+        shop = self.app.cloud_get_json('shop_data', self.app.DATA_FILE, self.app.DEFAULT_SHOP_DATA)
+        rows = []
+        for order_id, order in orders.items():
+            job = self.store.latest_job(order_id)
+            status = order.get('status') or '待處理'
+            state = (job or {}).get('state') or ''
+            # A previous failed attempt must not revive an already resolved order.
+            if status in ('已完成', '作廢') and state in ('', 'COMPLETED', 'CANCELED'):
+                continue
+            if state in ('UNKNOWN', 'FAILED', 'SENDING', 'CANCELING', 'STARTING'):
+                row = {'order_id': order_id, 'order_status': status,
+                       'time': order.get('created_at_unix') or 0, 'job': {'state': state}}
+                row['triage'] = triage_bucket(row)
+                rows.append(row)
+                continue
+            finance_sku_id = str((finance.get(order_id) or {}).get('sku_id') or '')
+            binding = self.store.binding(order_id) if not finance_sku_id else None
+            candidates = self._sku_candidates(order, commerce, shop) if not finance_sku_id else []
+            binding_sku_id = str((binding or {}).get('sku_id') or '')
+            binding_valid = bool(binding_sku_id and binding_sku_id in {item['id'] for item in candidates})
+            sku_id = finance_sku_id or (binding_sku_id if binding_valid else '')
+            row = {
+                'order_id': order_id, 'order_status': status,
+                'time': order.get('created_at_unix') or 0,
+                'has_print': bool(order.get('print_path')),
+                'binding_required': not finance_sku_id and not binding_valid,
+                'profile_available': bool(sku_id and self.store.profile(sku_id)),
+                'job': {'state': state} if state else None,
+            }
+            row['triage'] = triage_bucket(row)
+            rows.append(row)
+        return rows
 
 
 def install(app_module):
@@ -958,7 +1026,7 @@ def install(app_module):
         if request.path == "/admin" and response.status_code == 200 and response.mimetype == "text/html":
             response.direct_passthrough = False
             html = response.get_data(as_text=True)
-            src = "/static/admin-print-center.js?v=20261002operations1"
+            src = "/static/admin-print-center.js?v=20261002steward2"
             if src not in html:
                 response.set_data(html.replace("</body>", f'<link rel="stylesheet" href="/static/admin-print-center.css?v=20261002operations1"><script src="{src}"></script></body>'))
             response.headers["Cache-Control"] = "no-store"

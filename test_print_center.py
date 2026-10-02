@@ -15,6 +15,7 @@ os.environ["SESSION_COOKIE_SECURE"] = "false"
 import app
 import commerce_patch
 import print_center
+import steward_v2
 from commerce_store import Store
 from order_color_patch import install as install_colors
 from order_management_patch import install as install_actions
@@ -25,6 +26,7 @@ install_colors(app)
 install_actions(app)
 commerce_patch.install(app)
 print_center.install(app)
+steward_v2.install(app)
 app.app.config.update(TESTING=True, SESSION_COOKIE_SECURE=False)
 
 PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z7VQAAAAASUVORK5CYII="
@@ -137,6 +139,74 @@ class PrintCenterTests(unittest.TestCase):
         exact = self.client.get('/api/admin/print/jobs?order_id=HIST-000').get_json()
         self.assertEqual([row['order_id'] for row in exact['rows']], ['HIST-000'])
         self.assertIsNone(exact['rows'][0]['job'])
+        self.assertEqual(self.client.get('/api/admin/steward/summary').get_json()['print']['manual'], 2)
+
+    def test_steward_summary_is_admin_only_and_uses_finance_report(self):
+        anonymous = app.app.test_client()
+        self.assertEqual(anonymous.get('/api/admin/steward/summary').status_code, 401)
+        summary = self.client.get('/api/admin/steward/summary').get_json()
+        today = self.client.get('/api/admin/commerce_report?period=today').get_json()['data']['summary']
+        self.assertEqual(summary['orders']['revenue'], today['revenue'])
+        self.assertEqual(summary['orders']['total'], today['orders'])
+        self.assertTrue(summary['print']['available'])
+        self.assertEqual(summary['timezone'], 'Asia/Taipei')
+        self.assertNotIn('artwork_token_nonce', json.dumps(summary))
+
+    def test_steward_ignores_completed_history_but_reports_old_abnormal_jobs(self):
+        baseline = self.client.get('/api/admin/steward/summary').get_json()['print']['manual']
+        model = app.DEFAULT_SHOP_DATA['models'][0]
+        style = app.DEFAULT_SHOP_DATA['styles'][0]
+        with app.commerce.store.connection() as db:
+            for index in range(1000):
+                order = dict(id=f'OLD-DONE-{index:04d}', model_id=model['id'], style_id=style['id'],
+                             status='已完成', print_path='fixture.png', created_at_unix=1700000000 + index)
+                db.execute('INSERT INTO orders (id,value) VALUES (?,?)', (order['id'], json.dumps(order)))
+            db.commit()
+        for index, state in ((1, 'UNKNOWN'), (2, 'FAILED'), (3, 'FAILED')):
+            order = app.commerce.store.order(f'OLD-DONE-{index:04d}')
+            job = app.print_center.store.create_job(order, '', None, '0' * 64, f'old-token-{index}')
+            app.print_center.store.patch_job(job['id'], {'state': state})
+        # An earlier FAILED attempt is not an issue once its latest attempt completed.
+        resolved = app.commerce.store.order('OLD-DONE-0003')
+        later = app.print_center.store.create_job(resolved, '', None, '0' * 64, 'resolved-token')
+        app.print_center.store.patch_job(later['id'], {'state': 'COMPLETED'})
+        with mock.patch.object(app.print_center, 'dashboard', side_effect=AssertionError('full dashboard used')), \
+             mock.patch.object(app.print_center.store, 'list_jobs', side_effect=AssertionError('all jobs read')), \
+             mock.patch.object(app.print_center.store, 'bindings', side_effect=AssertionError('all bindings read')), \
+             mock.patch.object(app.print_center.store, 'profiles', side_effect=AssertionError('all profiles read')):
+            summary = self.client.get('/api/admin/steward/summary').get_json()
+        self.assertEqual(summary['print']['manual'], baseline + 2)
+        self.assertEqual(summary['print']['unknown'], 1)
+        self.assertEqual(summary['print']['failed'], 1)
+        self.assertEqual({item['order_id'] for item in summary['issues'] if item['priority'] < 3},
+                         {'OLD-DONE-0001', 'OLD-DONE-0002'})
+
+    def test_steward_summary_isolates_print_read_failure(self):
+        with mock.patch.object(app.print_center, 'operational_summary_rows', side_effect=RuntimeError('fixture read failure')):
+            summary = self.client.get('/api/admin/steward/summary').get_json()
+        self.assertEqual(summary['status'], 'success')
+        self.assertTrue(summary['orders']['available'])
+        self.assertFalse(summary['print']['available'])
+        self.assertEqual(summary['issues'], [])
+
+    def test_steward_print_projection_uses_print_center_triage(self):
+        rows = []
+        for index, state in enumerate(('UNKNOWN', 'FAILED', 'PREPARED', 'QUEUED', 'PRINTING')):
+            row = dict(order_id=f'STEWARD-{index}', order_status='待處理', time=1700000000+index,
+                       binding_required=False, has_print=True, profile_available=True,
+                       job=dict(state=state))
+            row['triage'] = print_center.triage_bucket(row)
+            rows.append(row)
+        for index, field in enumerate(('binding_required', 'profile_available')):
+            row = dict(order_id=f'NEEDS-{index}', order_status='待處理', time=1700000100+index,
+                       binding_required=False, has_print=True, profile_available=True, job=None)
+            row[field] = True if field == 'binding_required' else False
+            row['triage'] = print_center.triage_bucket(row)
+            rows.append(row)
+        counts, issues = steward_v2.print_projection(rows)
+        self.assertEqual([counts[x] for x in ('unknown', 'failed', 'attention', 'prepared', 'queued', 'printing')], [1, 1, 2, 1, 1, 1])
+        self.assertEqual([issue['order_id'] for issue in issues[:2]], ['STEWARD-0', 'STEWARD-1'])
+        self.assertEqual({issue['kind'] for issue in issues[2:4]}, {'print'})
 
     def post(self, action, payload, key=None):
         idem = key or ("print-" + uuid.uuid4().hex)
