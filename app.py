@@ -841,7 +841,7 @@ def admin_get_orders():
             if order_id_filter and str(row.get('id') or row.get('order_id') or '') != order_id_filter:
                 return False
             if q and q.casefold() not in ' '.join(str(row.get(k) or '') for k in
-                    ('id', 'order_id', 'customer_name', 'model_name', 'model', 'style_name', 'style', 'payment_method')).casefold():
+                    ('id', 'order_id', 'customer_name', 'model_name', 'model', 'style_name', 'style', 'payment_method', 'status')).casefold():
                 return False
             return True
 
@@ -864,7 +864,7 @@ def admin_get_orders():
                 needle = q.replace('\\', '\\\\').replace('_', '\\_')
                 query_builder = query_builder.or_(','.join(
                     f'{field}.ilike.%{needle}%' for field in
-                    ('id', 'customer_name', 'model_name', 'style_name', 'payment_method')))
+                    ('id', 'customer_name', 'model_name', 'style_name', 'payment_method', 'status')))
             rows = (query_builder.order('created_at_unix', desc=True).order('id', desc=True)
                     .range(offset, offset + limit).execute().data or [])
             has_more = len(rows) > limit

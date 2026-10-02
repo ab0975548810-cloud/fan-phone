@@ -69,7 +69,7 @@
     document.getElementById('bf-order-date').onchange=ev=>{exactDate=ev.target.value||'';exactOrderId='';if(exactDate){dateMode='exact';document.querySelectorAll('[data-range]').forEach(x=>x.classList.remove('active'));}refreshOrders(true)};
     document.getElementById('bf-order-status-filter').onchange=ev=>{statusFilter=ev.target.value||'全部';exactOrderId='';refreshOrders(true)};
     document.getElementById('bf-order-reload').onclick=()=>refreshOrders(true);
-    document.getElementById('bf-order-page').onclick=ev=>{if(ev.target.closest('[data-order-more]'))refreshOrders(false)};
+    document.getElementById('bf-order-page').onclick=ev=>{if(ev.target.closest('[data-order-more]'))loadMoreOrders()};
     document.getElementById('bf-order-manager').addEventListener('change',ev=>{
       const sel=ev.target.closest('[data-order-status]');if(!sel)return;
       const orderId=sel.dataset.orderStatus,newStatus=sel.value,oldStatus=sel.dataset.currentStatus||'待處理';
@@ -175,15 +175,20 @@
     try{await requestAction(orderId,action);await refreshOrders(true)}catch(err){alert(err.message||'訂單操作失敗')}
   };
 
-  window.refreshOrders=async function(force=false){
-    if(loading&&!force)return;const version=++requestVersion;loading=true;ensureUi();const list=document.getElementById('bf-order-list');if(force){rows=[];nextOffset=0;before=Math.floor(Date.now()/1000);hasMore=false;if(list)list.innerHTML='<div class="bf-order-empty">重新整理中…</div>'}
+  async function fetchOrdersPage(append=false){
+    if(loading&&append)return;
+    const version=++requestVersion;loading=true;ensureUi();const list=document.getElementById('bf-order-list');
+    if(!append){rows=[];nextOffset=0;before=Math.floor(Date.now()/1000);hasMore=false;if(list)list.innerHTML='<div class="bf-order-empty">重新整理中…</div>'}
     try{
       const r=await fetch('/api/admin/get_orders?'+filters(),{cache:'no-store'});let j={};try{j=await r.json()}catch(e){}
       if(!r.ok||j.status!=='success')throw new Error(j.msg||('HTTP '+r.status));if(version!==requestVersion)return;
-      rows=rows.concat(Array.isArray(j.data)?j.data:[]);before=Number(j.before)||before;nextOffset=Number(j.next_offset)||rows.length;hasMore=!!j.has_more;render();
+      const incoming=Array.isArray(j.data)?j.data:[];
+      rows=append?rows.concat(incoming):incoming;before=Number(j.before)||before;nextOffset=Number(j.next_offset)||rows.length;hasMore=!!j.has_more;render();
     }catch(err){if(version===requestVersion&&list)list.innerHTML=`<div class="bf-order-empty" style="color:#d94d61">${e(err.message||'讀取失敗')}</div>`}
     finally{if(version===requestVersion)loading=false}
-  };
+  }
+  function loadMoreOrders(){if(!hasMore)return Promise.resolve();return fetchOrdersPage(true)}
+  window.refreshOrders=function(){return fetchOrdersPage(false)};
   window.BenfuwanOrdersV3={openOrder(orderId){
     exactOrderId=String(orderId||'');dateMode='all';query='';statusFilter='全部';exactDate='';
     const search=document.getElementById('bf-order-search');if(search)search.value='';

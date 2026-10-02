@@ -2715,11 +2715,12 @@ def order_print_workspace_test(browser, base, poll):
                    model='iPhone 13', style='晶彩', payment_method='現金', status='待處理',
                    time=stamp-i, has_print=True, has_mockup=False, quantity=1, total=100)
               for i in range(205)]
+    orders[203]['status'] = '已完成'
     def order_route(route):
         p = parse_qs(urlsplit(route.request.url).query)
         found = orders
         if 'order_id' in p: found = [o for o in found if o['order_id'] == p['order_id'][0]]
-        if 'q' in p: found = [o for o in found if p['q'][0].lower() in ' '.join(str(o[k]) for k in ('order_id','customer_name','model','style','payment_method')).lower()]
+        if 'q' in p: found = [o for o in found if p['q'][0].lower() in ' '.join(str(o[k]) for k in ('order_id','customer_name','model','style','payment_method','status')).lower()]
         if 'status' in p: found = [o for o in found if o['status'] == p['status'][0]]
         offset = int(p.get('offset', ['0'])[0]);limit = int(p.get('limit', ['200'])[0])
         route.fulfill(status=200, content_type='application/json', body=json.dumps(dict(status='success',data=found[offset:offset+limit],has_more=len(found)>offset+limit,next_offset=min(len(found),offset+limit),before=stamp+10)))
@@ -2740,8 +2741,15 @@ def order_print_workspace_test(browser, base, poll):
     page.locator('.nav button[data-view="orders"]').click()
     page.locator('[data-range="all"]').click()
     poll(page,"() => document.querySelectorAll('.bf-order-card').length===200 && !!document.querySelector('[data-order-more]')")
+    # Normal/periodic refresh must reset page 1, never append page 2.
+    page.evaluate("() => window.refreshOrders()")
+    poll(page,"() => document.querySelectorAll('.bf-order-card').length===200 && !!document.querySelector('[data-order-more]')")
+    page.evaluate("() => window.refreshOrders()")
+    poll(page,"() => document.querySelectorAll('.bf-order-card').length===200 && !!document.querySelector('[data-order-more]')")
     page.locator('[data-order-more]').click()
     poll(page,"() => document.querySelectorAll('.bf-order-card').length===205")
+    page.locator('#bf-order-search').fill('已完成')
+    poll(page,"() => document.querySelectorAll('.bf-order-card').length===1 && document.querySelector('.bf-order-id').textContent.includes('ORDER-203')")
     page.locator('#bf-order-search').fill('老客人')
     poll(page,"() => document.querySelectorAll('.bf-order-card').length===1 && document.querySelector('.bf-order-id').textContent.includes('ORDER-204')")
     page.locator('[data-order-action="print"]').click()
