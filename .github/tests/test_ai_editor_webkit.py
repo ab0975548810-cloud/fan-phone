@@ -197,6 +197,8 @@ def front_test(browser, base):
       const art=document.querySelector('.bf-home-hero-art').getBoundingClientRect();return {appWidth:app.width,pageWidth:page.scrollWidth,heroBeforeCta:hero.bottom<=cta.top+1,artInsideHero:art.bottom<=hero.bottom+1};
     }""")
     assert desktop['appWidth'] <= 521 and desktop['pageWidth'] <= 521 and desktop['heroBeforeCta'] and desktop['artInsideHero'], desktop
+    home_css = page.locator('link[href*="front-home-v1.css"]').get_attribute('href')
+    assert home_css and 'v=20261002hero1' in home_css, home_css
     print('FRONT_HOME_V1_RESPONSIVE_REAL_ACTIONS_OK', browser_engine, {'iphone':home,'desktop':desktop})
     page.set_viewport_size({'width': 390, 'height': 600})
     upload_regression = page.evaluate("""async () => {
