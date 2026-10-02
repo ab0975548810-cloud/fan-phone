@@ -78,6 +78,7 @@ for admin_js in (
     "admin-model-colors.js",
     "admin-model-profiles.js",
     "admin-product-workspace-v1.js",
+    "admin-library-workspace-v1.js",
     "admin-asset-categories.js",
     "admin-template-loader.js",
     "admin-universal-templates.js",
@@ -178,6 +179,8 @@ if b"admin-model-profiles.js" not in admin_resp.data:
     fail("Authenticated /admin did not inject admin-model-profiles.js")
 if b"admin-product-workspace-v1.js" not in admin_resp.data or b"admin-product-workspace-v1.css" not in admin_resp.data:
     fail("Authenticated /admin did not inject the product settings workspace")
+if b"admin-library-workspace-v1.js" not in admin_resp.data or b"admin-library-workspace-v1.css" not in admin_resp.data:
+    fail("Authenticated /admin did not inject the asset/template management workspace")
 if '登入安全'.encode() not in admin_resp.data or b'id="passkey-enable"' not in admin_resp.data:
     fail('Authenticated /admin did not expose the login security panel')
 passkey_admin = client.get('/api/admin/passkeys').get_json() or {}

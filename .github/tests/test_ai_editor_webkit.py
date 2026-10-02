@@ -1683,9 +1683,11 @@ def admin_test(browser, base):
     product_workspace_src = page.locator('script[src*="admin-product-workspace-v1.js"]').get_attribute('src')
     assert product_workspace_src and 'v=20261001b' in product_workspace_src, product_workspace_src
     asset_category_src = page.locator('script[src*="admin-asset-categories.js"]').get_attribute('src')
-    assert asset_category_src and 'v=20260926audit1' in asset_category_src, asset_category_src
+    assert asset_category_src and 'v=20261002a' in asset_category_src, asset_category_src
     template_loader_src = page.locator('script[src*="admin-template-loader.js"]').get_attribute('src')
-    assert template_loader_src and 'v=20260929universal1' in template_loader_src, template_loader_src
+    assert template_loader_src and 'v=20261002a' in template_loader_src, template_loader_src
+    library_workspace_src = page.locator('script[src*="admin-library-workspace-v1.js"]').get_attribute('src')
+    assert library_workspace_src and 'v=20261002a' in library_workspace_src, library_workspace_src
     commerce_src = page.locator('script[src*="admin-commerce-v1.js"]').get_attribute('src')
     assert commerce_src and 'v=20260923cas1' in commerce_src, commerce_src
     def ux_error(route):
@@ -2072,8 +2074,10 @@ def admin_test(browser, base):
     fresh_assets = page.request.get(base + '/api/assets')
     assert fresh_assets.headers.get('x-benfuwan-cache') == 'MISS', fresh_assets.headers
     assert fresh_assets.json()['version'] == asset_winner_version
-    asset_dialog_start = len(dialogs)
-    page.evaluate("name => {window.__issue37Prompt=window.prompt;window.prompt=()=>name;document.querySelector('#bf-asset-cat-actions button').click()}", asset_b)
+    prompt_count = page.evaluate("() => {window.__issue59Prompt=window.prompt;window.__issue59PromptCount=0;window.prompt=()=>{window.__issue59PromptCount++;return 'unexpected'};document.querySelector('[data-asset-create]').click();return window.__issue59PromptCount}")
+    assert prompt_count == 0
+    page.locator('#bf-asset-category-name').fill(asset_b)
+    page.locator('#bf-asset-category-save').click()
     poll(page, f"() => assetsVersion==={json.dumps(asset_winner_version)}")
     asset_stale_state = page.evaluate("""names => ({
       version:assetsVersion,
@@ -2081,13 +2085,130 @@ def admin_test(browser, base):
       hasB:assetsData.categories.includes(names.b)
     })""", {'a': asset_a, 'b': asset_b})
     assert asset_stale_state == {'version': asset_winner_version, 'hasA': True, 'hasB': False}, asset_stale_state
-    assert any('資料已被其他分頁或裝置更新' in msg for msg in dialogs[asset_dialog_start:]), dialogs[asset_dialog_start:]
+    assert '資料已被其他分頁或裝置更新' in page.locator('#bf-asset-category-error').inner_text()
+    assert page.locator('#bf-asset-category-modal').get_attribute('class').find('show') >= 0
+    assert page.evaluate("() => window.__issue59PromptCount") == 0
+    page.locator('#bf-asset-category-modal [data-category-close]').first.click()
     asset_restore = page.request.post(base + '/api/admin/sticker_category', data={
         'action': 'delete', 'name': asset_a, 'expected_version': asset_winner_version,
     })
     assert asset_restore.status == 200, asset_restore.text()
-    page.evaluate("async () => {await loadAssets(true);window.prompt=window.__issue37Prompt;delete window.__issue37Prompt}")
+    page.evaluate("async () => {await loadAssets(true)}")
     print('ADMIN_ASSET_STALE_CAS_CACHE_INVALIDATION_OK')
+
+    asset_workspace = page.evaluate("""() => {
+      window.__issue59Assets=structuredClone(assetsData);
+      assetsData={categories:['全部','貓咪','花朵'],stickers:[
+        {id:'asset-cat-a',name:'睡覺貓咪',category:'貓咪',url:'/static/missing-issue59-asset.png'},
+        {id:'asset-cat-b',name:'橘色小花',category:'花朵',url:'/static/image.png'},
+        {id:'asset-cat-c',name:'站立貓咪',category:'貓咪',url:'/static/image.png'}
+      ]};
+      currentAsset='全部';renderAssetTabs();renderAssets();
+      document.querySelector('[data-asset-create]').click();
+      document.getElementById('bf-asset-category-name').value='貓咪';
+      document.getElementById('bf-asset-category-form').requestSubmit();
+      return {
+        promptCalls:window.__issue59PromptCount||0,
+        duplicate:document.getElementById('bf-asset-category-error').textContent,
+        count:document.getElementById('bf-asset-result-count').textContent,
+        cards:document.querySelectorAll('#asset-grid .bf-asset-card').length,
+        explicitDelete:document.querySelectorAll('#asset-grid [data-delete-sticker]').length
+      };
+    }""")
+    assert asset_workspace == {
+        'promptCalls': 0, 'duplicate': '分類名稱已存在',
+        'count': '目前分類 3 張', 'cards': 3, 'explicitDelete': 3,
+    }, asset_workspace
+    page.locator('#bf-asset-category-modal [data-category-close]').first.click()
+    page.evaluate("() => {currentAsset='貓咪';renderAssetTabs();renderAssets();document.querySelector('[data-asset-rename]').click()}")
+    assert page.locator('#bf-asset-category-name').input_value() == '貓咪'
+    assert page.evaluate("() => window.__issue59PromptCount") == 0
+    page.locator('#bf-asset-category-modal [data-category-close]').first.click()
+    page.evaluate("() => {currentAsset='全部';renderAssetTabs();renderAssets()}")
+    page.locator('#bf-asset-search').fill('貓咪')
+    assert page.locator('#asset-grid .bf-asset-card').count() == 2
+    assert '搜尋到 2 張' in page.locator('#bf-asset-result-count').inner_text()
+    poll(page, "() => document.querySelector('[data-id=\"asset-cat-a\"] .bf-card-media')?.classList.contains('is-broken')")
+    assert '圖片無法顯示' in page.locator('[data-id="asset-cat-a"] .bf-image-placeholder').inner_text()
+
+    page.locator('#bf-asset-search').fill('')
+    page.locator('#bf-batch-cat-btn').click()
+    page.locator('[data-id="asset-cat-a"]').click()
+    move_requests = []
+    def move_asset_response(route):
+        move_requests.append(route.request.post_data_json)
+        route.fulfill(status=200, content_type='application/json', body='{"status":"success","moved":1,"version":"issue59-move"}')
+    page.route('**/api/admin/sticker_category', move_asset_response)
+    page.locator('#bf-target-category').fill('精選')
+    page.locator('#bf-move-assets').click()
+    poll(page, "() => assetsData.stickers.find(x=>x.id==='asset-cat-a')?.category==='精選'")
+    assert len(move_requests) == 1 and move_requests[0]['action'] == 'move' and move_requests[0]['ids'] == ['asset-cat-a'], move_requests
+    page.unroute('**/api/admin/sticker_category')
+
+    page.locator('#bf-batch-cat-btn').click()
+    page.locator('[data-id="asset-cat-a"]').click()
+    delete_assets = []
+    def delete_assets_response(route):
+        delete_assets.append(route.request.post_data_json)
+        route.fulfill(status=200, content_type='application/json', body='{"status":"success","deleted":1,"version":"issue59-delete"}')
+    page.route('**/api/admin/sticker_category', delete_assets_response)
+    page.evaluate("() => {window.__issue59Confirm=window.confirm;window.confirm=()=>true}")
+    page.locator('#bf-delete-assets').click()
+    poll(page, "() => !assetsData.stickers.some(x=>x.id==='asset-cat-a')")
+    assert len(delete_assets) == 1 and delete_assets[0]['action'] == 'delete_stickers', delete_assets
+    page.unroute('**/api/admin/sticker_category')
+
+    upload_attempts = []
+    def upload_asset_failure(route):
+        upload_attempts.append(route.request.post_data)
+        route.fulfill(status=503, content_type='application/json', body='{"status":"error","msg":"上傳暫時失敗"}')
+    page.route('**/api/admin/batch_upload_stickers', upload_asset_failure)
+    page.locator('#sticker-files').set_input_files(files=[{
+        'name': 'issue59.png', 'mimeType': 'image/png',
+        'buffer': b'issue59-upload-fixture',
+    }])
+    assert page.locator('#bf-asset-upload-modal').get_attribute('class').find('show') >= 0
+    assert '已選擇 1 張圖片' in page.locator('#bf-asset-upload-summary').inner_text()
+    page.locator('#bf-asset-new-category-toggle').click()
+    page.locator('#bf-asset-upload-new-category').fill('批次新分類')
+    page.locator('#bf-asset-upload-confirm').click()
+    poll(page, "() => document.getElementById('bf-asset-upload-error').textContent.includes('上傳暫時失敗')")
+    assert len(upload_attempts) == 1
+    assert page.locator('#bf-asset-upload-modal').get_attribute('class').find('show') >= 0
+    assert '已選擇 1 張圖片' in page.locator('#bf-asset-upload-summary').inner_text()
+    assert page.locator('#bf-asset-upload-new-category').input_value() == '批次新分類'
+    page.unroute('**/api/admin/batch_upload_stickers')
+    upload_success = []
+    def upload_asset_success(route):
+        upload_success.append(route.request.post_data)
+        route.fulfill(status=200, content_type='application/json', body='{"status":"success","version":"issue59-upload","data":[{"id":"issue59-uploaded","category":"批次新分類","url":"/static/missing-issue59-upload.png"}]}')
+    page.route('**/api/admin/batch_upload_stickers', upload_asset_success)
+    page.evaluate("() => {const form=document.getElementById('bf-asset-upload-form');form.requestSubmit();form.requestSubmit()}")
+    poll(page, "() => !document.getElementById('bf-asset-upload-modal').classList.contains('show')")
+    assert len(upload_success) == 1
+    assert '已上傳 1 張到「批次新分類」' in page.locator('#bf-product-message').inner_text()
+    page.unroute('**/api/admin/batch_upload_stickers')
+
+    page.set_viewport_size({'width':390,'height':844})
+    page.evaluate("() => {currentAsset='全部';renderAssetTabs();renderAssets();document.getElementById('bf-batch-cat-btn').click()}")
+    asset_mobile = page.evaluate("""() => ({
+      scroll:document.documentElement.scrollWidth,
+      columns:getComputedStyle(document.getElementById('asset-grid')).gridTemplateColumns.split(' ').length,
+      deleteHeight:document.querySelector('#asset-grid [data-delete-sticker]')?.getBoundingClientRect().height||0,
+      batchOverflow:getComputedStyle(document.getElementById('asset-batchbar')).overflowX
+    })""")
+    assert asset_mobile['scroll'] <= 392 and asset_mobile['columns'] == 2 and asset_mobile['deleteHeight'] >= 43, asset_mobile
+    assert asset_mobile['batchOverflow'] == 'auto', asset_mobile
+    page.set_viewport_size({'width':1180,'height':900})
+
+    page.evaluate("""() => {
+      if(document.getElementById('asset-batchbar').classList.contains('show'))document.getElementById('bf-batch-cat-btn').click();
+      assetsData=window.__issue59Assets;delete window.__issue59Assets;
+      window.confirm=window.__issue59Confirm;delete window.__issue59Confirm;
+      window.prompt=window.__issue59Prompt;delete window.__issue59Prompt;delete window.__issue59PromptCount;
+      currentAsset='全部';renderAssetTabs();renderAssets();
+    }""")
+    print('ADMIN_ASSET_LIBRARY_WORKSPACE_OK')
 
     print_nav = page.locator('.nav button[data-view="print-center"]')
     print_nav.click()
@@ -2122,6 +2243,68 @@ def admin_test(browser, base):
     template_nav = page.locator('.nav button[data-view="templates"]')
     template_nav.click()
     poll(page, "() => typeof window.benfuwanEnsureTemplateEditor === 'function' && typeof shopLoaded !== 'undefined' && shopLoaded && typeof templatesLoaded !== 'undefined' && templatesLoaded")
+    lazy_before = page.evaluate("""() => ({
+      ready:!!window.__benfuwanTemplateStackReady,
+      universalScripts:document.querySelectorAll('script[src*="admin-universal-templates.js"]').length,
+      editorScripts:document.querySelectorAll('script[src*="admin-template-editor-v2.js"]').length,
+      filters:!!document.getElementById('bf-template-filters')
+    })""")
+    assert lazy_before == {'ready': False, 'universalScripts': 0, 'editorScripts': 0, 'filters': True}, lazy_before
+
+    template_library = page.evaluate("""() => {
+      window.__issue59Templates=structuredClone(templatesData);
+      window.__issue59Shop=structuredClone(shopData);
+      const model=(shopData.models||[])[0]||{id:'issue59-model',name:'測試型號',status:true};
+      if(!(shopData.models||[]).length)shopData.models=[model];
+      const first=(shopData.styles||[])[0]||{id:'issue59-crystal',name:'晶彩',status:true};
+      if(!(shopData.styles||[]).length)shopData.styles=[first];
+      const second=(shopData.styles||[])[1]||{id:'issue59-mirror',name:'鏡面',status:true};
+      if(!(shopData.styles||[]).some(x=>x.id===second.id))shopData.styles.push(second);
+      templatesData={categories:['全部','精選','季節'],templates:[
+        {id:'issue59-universal',name:'晶彩貓咪模板',category:'精選',model_id:'*',universal:true,reference_model_id:model.id,reference_style_id:first.id,thumb_url:'/static/missing-issue59-template.png'},
+        {id:'issue59-specific',name:'鏡面花朵模板',category:'精選',model_id:model.id,case_style_id:second.id,thumb_url:'/static/image.png'}
+      ]};
+      currentTpl='全部';
+      Object.assign(BenfuwanAdminLibraryWorkspace.state,{query:'',category:'全部',model:'',style:'',type:'all'});
+      renderTemplateTabs();renderTemplates();
+      const base={cards:document.querySelectorAll('#template-grid .bf-template-card').length,text:document.getElementById('template-grid').textContent};
+      BenfuwanAdminLibraryWorkspace.state.query='晶彩';renderTemplates();const search=document.querySelectorAll('#template-grid .bf-template-card').length;
+      Object.assign(BenfuwanAdminLibraryWorkspace.state,{query:'',category:'精選',model:'',style:first.id,type:'all'});renderTemplates();const style=document.querySelectorAll('#template-grid .bf-template-card').length;
+      Object.assign(BenfuwanAdminLibraryWorkspace.state,{query:'',category:'精選',model:model.id,style:'',type:'specific'});renderTemplates();const specific=document.querySelectorAll('#template-grid .bf-template-card').length;
+      Object.assign(BenfuwanAdminLibraryWorkspace.state,{query:'',category:'精選',model:model.id,style:'',type:'universal'});renderTemplates();const universal=document.querySelectorAll('#template-grid .bf-template-card').length;
+      Object.assign(BenfuwanAdminLibraryWorkspace.state,{query:'',category:'全部',model:'',style:'',type:'all'});currentTpl='全部';renderTemplateTabs();renderTemplates();
+      return {base,search,style,specific,universal,model:model.name,first:first.name,second:second.name};
+    }""")
+    assert template_library['base']['cards'] == 2, template_library
+    assert all(label in template_library['base']['text'] for label in (
+        '晶彩貓咪模板', '鏡面花朵模板', '精選', template_library['model'],
+        template_library['first'], template_library['second'], '全型號通用', '指定型號',
+    )), template_library
+    assert {key: template_library[key] for key in ('search','style','specific','universal')} == {
+        'search': 1, 'style': 1, 'specific': 1, 'universal': 1,
+    }, template_library
+    poll(page, "() => document.querySelector('[data-template-id=\"issue59-universal\"] .bf-card-media')?.classList.contains('is-broken')")
+    assert '尚無模板縮圖' in page.locator('[data-template-id="issue59-universal"] .bf-image-placeholder').inner_text()
+    for width, height in ((390,844),(768,1024),(1180,900)):
+        page.set_viewport_size(dict(width=width,height=height))
+        library_layout = page.evaluate("""() => ({
+          scroll:document.documentElement.scrollWidth,
+          assetColumns:getComputedStyle(document.getElementById('asset-grid')).gridTemplateColumns.split(' ').length,
+          templateColumns:getComputedStyle(document.getElementById('template-grid')).gridTemplateColumns.split(' ').length,
+          deleteHeight:document.querySelector('#template-grid [data-delete-template]')?.getBoundingClientRect().height||0
+        })""")
+        assert library_layout['scroll'] <= width + 2, (width, library_layout)
+        if width == 390:
+            assert library_layout['templateColumns'] == 2 and library_layout['deleteHeight'] >= 43, library_layout
+    page.set_viewport_size({'width': 1440, 'height': 900})
+    page.evaluate("""() => {
+      templatesData=window.__issue59Templates;shopData=window.__issue59Shop;
+      delete window.__issue59Templates;delete window.__issue59Shop;
+      Object.assign(BenfuwanAdminLibraryWorkspace.state,{query:'',category:'全部',model:'',style:'',type:'all'});
+      currentTpl='全部';renderTemplateTabs();renderTemplates();
+    }""")
+    print('ADMIN_TEMPLATE_LIBRARY_FILTERS_PLACEHOLDER_RESPONSIVE_OK')
+
     page.evaluate("() => window.benfuwanEnsureTemplateEditor()")
     diag = page.evaluate("""() => ({core:!!window.BenfuwanAiRemoveV2,admin:typeof window.bfAdminRemoveBackground,stackReady:!!window.__benfuwanTemplateStackReady,adminFlag:!!window.__bfAdminAiRemoveOnlyV2,models:(shopData?.models||[]).length})""")
     print('ADMIN_STACK_DIAG', diag)
@@ -2297,11 +2480,10 @@ def admin_test(browser, base):
             time.sleep(.15)
             route.fulfill(status=200, content_type='application/json', body='{"status":"success","version":"mock-template-delete-version"}')
     page.route('**/api/admin/save_templates', delete_template_response)
-    delete_dialog_start = len(dialogs)
     page.evaluate("() => Promise.all([deleteTemplate('issue29-delete-template'),deleteTemplate('issue29-delete-template')])")
     delete_failed = page.evaluate("() => templatesData.templates.filter(x=>x.id==='issue29-delete-template').length===1 && document.getElementById('template-grid').textContent.includes('Issue29刪除模板') && !templateDeleteBusy")
     assert len(delete_requests) == 1 and delete_failed, (delete_requests, delete_failed)
-    assert any('服務暫時無法使用，請稍後再試' in msg for msg in dialogs[delete_dialog_start:]), dialogs[delete_dialog_start:]
+    assert '服務暫時無法使用，請稍後再試' in page.locator('#bf-product-message').inner_text()
     page.evaluate("() => Promise.all([deleteTemplate('issue29-delete-template'),deleteTemplate('issue29-delete-template')])")
     delete_saved = page.evaluate("() => !templatesData.templates.some(x=>x.id==='issue29-delete-template') && !templateDeleteBusy")
     assert len(delete_requests) == 2 and delete_saved, (delete_requests, delete_saved)
