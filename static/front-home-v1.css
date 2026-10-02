@@ -25,10 +25,10 @@
 .bf-home-content{width:100%;padding:10px 14px calc(104px + env(safe-area-inset-bottom));overflow:hidden}
 .bf-home-hero{position:relative;min-height:408px;overflow:hidden;border:1px solid rgba(255,255,255,.86);border-radius:28px;background:radial-gradient(circle at 50% 15%,#fff 0 10%,transparent 40%),linear-gradient(145deg,#fff7f9 0%,#ffe5ed 55%,#ffdce8 100%);box-shadow:0 18px 42px rgba(153,77,100,.12);isolation:isolate}
 .bf-home-hero::before{content:"";position:absolute;left:-12%;right:-12%;top:112px;height:180px;background:repeating-linear-gradient(165deg,rgba(255,255,255,.38) 0 23px,rgba(248,159,186,.08) 24px 48px);transform:rotate(-4deg);z-index:-1}
-.bf-home-hero-copy{position:relative;z-index:2;padding:24px 16px 0;text-align:center}
+.bf-home-hero-copy{position:relative;z-index:3;min-height:104px;padding:18px 16px 12px;text-align:center;background:linear-gradient(180deg,rgba(255,250,252,.98) 0%,rgba(255,250,252,.92) 72%,rgba(255,250,252,0) 100%)}
 .bf-home-hero h1{margin:0;font-family:"jf-openhuninn","PingFang TC",sans-serif;font-size:34px;line-height:1.18;letter-spacing:.07em;color:#704149;text-shadow:0 2px 0 #fff,2px 0 0 #fff,-2px 0 0 #fff}
 .bf-home-hero p{margin:8px 0 0;font-size:14px;font-weight:800;letter-spacing:.06em;color:#6d4850}
-.bf-home-hero-art{position:absolute;left:50%;bottom:-43px;width:min(100%,430px);height:auto;max-width:none;transform:translateX(-50%);filter:drop-shadow(0 13px 16px rgba(89,47,60,.13));z-index:1}
+.bf-home-hero-art{position:relative;left:auto;top:auto;bottom:auto;display:block;width:min(100%,430px);height:auto;max-width:none;margin:0 auto;transform:none;filter:drop-shadow(0 13px 16px rgba(89,47,60,.13));z-index:1}
 .bf-doodle{position:absolute;z-index:2;color:#ee779a;pointer-events:none}
 .bf-doodle-heart-one{left:20px;top:88px;font-size:31px;transform:rotate(-13deg)}
 .bf-doodle-heart-two{right:25px;top:105px;font-size:22px;opacity:.72;transform:rotate(13deg)}
@@ -52,6 +52,6 @@
 .bf-home-bottom-nav{left:12px;right:12px;bottom:calc(9px + env(safe-area-inset-bottom));height:72px;padding:0;border:1px solid rgba(120,85,95,.08);border-radius:25px;background:rgba(255,255,255,.95);box-shadow:0 14px 35px rgba(99,61,72,.17);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);overflow:visible}
 .bf-home-bottom-nav .nav-btn{min-width:0;border-radius:21px;font-size:10px;color:#8d858a}.bf-home-bottom-nav .nav-btn i{font-size:19px}.bf-home-bottom-nav .nav-btn.active{color:var(--home-pink-dark)}
 .bf-home-bottom-nav .cart-badge{top:5px;margin-left:8px}
-@media (max-width:360px){.bf-home-content{padding-left:10px;padding-right:10px}.bf-home-hero{min-height:378px}.bf-home-hero h1{font-size:30px}.bf-home-hero-art{width:105%;bottom:-37px}.bf-home-primary{grid-template-columns:50px minmax(0,1fr) 16px;padding:14px}.bf-home-primary-icon{width:49px;height:57px}.bf-home-primary strong{font-size:23px}.bf-home-quick{grid-template-columns:40px minmax(0,1fr);gap:8px;padding:11px}.bf-home-quick>i{display:none}.bf-home-quick-icon{width:40px}.bf-home-cat-banner{padding-left:44%}}
-@media (max-height:700px){.bf-home-hero{min-height:350px}.bf-home-hero-art{width:88%;bottom:-42px}.bf-home-hero-copy{padding-top:18px}.bf-home-hero h1{font-size:29px}.bf-home-primary{min-height:91px}.bf-home-quick{min-height:112px}}
+@media (max-width:360px){.bf-home-content{padding-left:10px;padding-right:10px}.bf-home-hero{min-height:0}.bf-home-hero h1{font-size:30px}.bf-home-hero-copy{min-height:100px;padding-top:16px}.bf-home-hero-art{width:100%;margin-top:0;margin-bottom:0}.bf-home-primary{grid-template-columns:50px minmax(0,1fr) 16px;padding:14px}.bf-home-primary-icon{width:49px;height:57px}.bf-home-primary strong{font-size:23px}.bf-home-quick{grid-template-columns:40px minmax(0,1fr);gap:8px;padding:11px}.bf-home-quick>i{display:none}.bf-home-quick-icon{width:40px}.bf-home-cat-banner{padding-left:44%}}
+@media (max-height:700px){.bf-home-hero{min-height:0}.bf-home-hero-art{width:88%;margin-top:0;margin-bottom:0}.bf-home-hero-copy{min-height:96px;padding-top:14px}.bf-home-hero h1{font-size:29px}.bf-home-primary{min-height:91px}.bf-home-quick{min-height:112px}}
 @media (prefers-reduced-motion:reduce){.bf-home-scroll{scroll-behavior:auto}}
