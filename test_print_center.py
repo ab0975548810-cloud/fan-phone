@@ -1,5 +1,6 @@
 """Print Center safety tests. No test in this file can reach the vendor network."""
 import os
+import json
 import copy
 import tempfile
 import unittest
@@ -112,6 +113,30 @@ class PrintCenterTests(unittest.TestCase):
         if state != "PREPARED":
             job = app.print_center.store.patch_job(job["id"], {"state": state})
         return order_id, finance["sku_id"], job
+
+    def test_order_history_filters_pagination_and_exact_print_lookup(self):
+        # Rows beyond the recent 200 must remain reachable without changing commerce state.
+        with app.commerce.store.connection() as db:
+            for index in range(205):
+                row = dict(id=f'HIST-{index:03d}', customer_name='老客人' if index == 0 else '客人',
+                           model_id=app.DEFAULT_SHOP_DATA['models'][0]['id'],
+                           style_id=app.DEFAULT_SHOP_DATA['styles'][0]['id'],
+                           model_name='iPhone 13', style_name='晶彩', payment_method='現金',
+                           status='待處理' if index == 0 else '已完成',
+                           created_at_unix=1700000000 + index, print_path='fixture.png')
+                db.execute('INSERT INTO orders (id,value) VALUES (?,?)', (row['id'], json.dumps(row)))
+            db.commit()
+        page1 = self.client.get('/api/admin/get_orders?limit=200&date_from=2023-11-14&date_to=2023-11-15').get_json()
+        self.assertEqual(len(page1['data']), 200)
+        self.assertTrue(page1['has_more'])
+        page2 = self.client.get('/api/admin/get_orders?limit=200&offset=200&before=' + str(page1['before'])).get_json()
+        self.assertIn('HIST-000', [row['order_id'] for row in page2['data']])
+        search = self.client.get('/api/admin/get_orders?q=%E8%80%81%E5%AE%A2%E4%BA%BA').get_json()
+        self.assertEqual([row['order_id'] for row in search['data']], ['HIST-000'])
+        self.assertEqual(self.client.get('/api/admin/get_orders?status=作廢').get_json()['data'], [])
+        exact = self.client.get('/api/admin/print/jobs?order_id=HIST-000').get_json()
+        self.assertEqual([row['order_id'] for row in exact['rows']], ['HIST-000'])
+        self.assertIsNone(exact['rows'][0]['job'])
 
     def post(self, action, payload, key=None):
         idem = key or ("print-" + uuid.uuid4().hex)

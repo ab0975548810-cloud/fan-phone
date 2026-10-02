@@ -2700,13 +2700,83 @@ def passkey_login_test(browser, base):
     print('PASSKEY_LOGIN_WEBKIT_OK')
 
 
+def order_print_workspace_test(browser, base, poll):
+    """PR #60: paged orders, exact cross-navigation, triage and safe actions."""
+    from urllib.parse import parse_qs, urlsplit
+    page = browser.new_page(viewport={'width': 1180, 'height': 900})
+    page.goto(base + '/login', wait_until='domcontentloaded')
+    if not page.locator('#password-form').is_visible():
+        page.locator('#password-toggle').click()
+    page.locator('input[name="password"]').fill('fan123')
+    page.locator('button[type="submit"]').first.click()
+    page.wait_for_url('**/admin')
+    stamp = int(time.time())
+    orders = [dict(order_id=f'ORDER-{i:03d}', customer_name='老客人' if i == 204 else '客人',
+                   model='iPhone 13', style='晶彩', payment_method='現金', status='待處理',
+                   time=stamp-i, has_print=True, has_mockup=False, quantity=1, total=100)
+              for i in range(205)]
+    def order_route(route):
+        p = parse_qs(urlsplit(route.request.url).query)
+        found = orders
+        if 'order_id' in p: found = [o for o in found if o['order_id'] == p['order_id'][0]]
+        if 'q' in p: found = [o for o in found if p['q'][0].lower() in ' '.join(str(o[k]) for k in ('order_id','customer_name','model','style','payment_method')).lower()]
+        if 'status' in p: found = [o for o in found if o['status'] == p['status'][0]]
+        offset = int(p.get('offset', ['0'])[0]);limit = int(p.get('limit', ['200'])[0])
+        route.fulfill(status=200, content_type='application/json', body=json.dumps(dict(status='success',data=found[offset:offset+limit],has_more=len(found)>offset+limit,next_offset=min(len(found),offset+limit),before=stamp+10)))
+    print_rows=[]
+    for state in ('UNKNOWN','FAILED','SENDING','CANCELING','STARTING','PREPARED','QUEUED','PRINTING','COMPLETED'):
+        print_rows.append(dict(order_id='PRINT-'+state,customer_name='客人',model='iPhone 13',style='晶彩',order_status='待處理',time=stamp,
+                               has_print=True,profile_available=True,binding_required=False,sku_id='SKU',job=dict(id='JOB-'+state,state=state,state_label=state,profile_complete=True,last_error='銳印回報失敗' if state=='FAILED' else '')))
+    print_rows.append(dict(order_id='PRINT-BIND',customer_name='客人',model='iPhone 13',style='晶彩',order_status='待處理',time=stamp,
+                           has_print=True,profile_available=False,binding_required=True,sku_id='',legacy_order=True,sku_candidates=[],job=None))
+    def print_route(route):
+        p = parse_qs(urlsplit(route.request.url).query)
+        data = [dict(order_id='ORDER-204',customer_name='老客人',model='iPhone 13',style='晶彩',order_status='待處理',time=stamp-204,has_print=True,profile_available=True,binding_required=False,sku_id='SKU',job=None)] if p.get('order_id') == ['ORDER-204'] else print_rows
+        route.fulfill(status=200,content_type='application/json',body=json.dumps(dict(status='success',rows=data,vendor_ready=True,vendor_connected=True,device_id='fixture')))
+    mutations=[]
+    page.on('request',lambda request: mutations.append(request.url) if request.method != 'GET' and '/api/admin/print/' in request.url else None)
+    page.route('**/api/admin/get_orders?*',order_route)
+    page.route('**/api/admin/print/jobs?*',print_route)
+    page.locator('.nav button[data-view="orders"]').click()
+    page.locator('[data-range="all"]').click()
+    poll(page,"() => document.querySelectorAll('.bf-order-card').length===200 && !!document.querySelector('[data-order-more]')")
+    page.locator('[data-order-more]').click()
+    poll(page,"() => document.querySelectorAll('.bf-order-card').length===205")
+    page.locator('#bf-order-search').fill('老客人')
+    poll(page,"() => document.querySelectorAll('.bf-order-card').length===1 && document.querySelector('.bf-order-id').textContent.includes('ORDER-204')")
+    page.locator('[data-order-action="print"]').click()
+    poll(page,"() => document.querySelector('#view-print-center.active .pc-card')?.textContent.includes('ORDER-204')")
+    assert 'order_id=ORDER-204' in page.locator('#pc-exact').inner_text() or 'ORDER-204' in page.locator('#pc-exact').inner_text()
+    page.locator('[data-pc="order"]').click()
+    poll(page,"() => document.querySelector('#view-orders.active .bf-order-card')?.textContent.includes('ORDER-204')")
+    page.locator('.nav button[data-view="print-center"]').click()
+    page.locator('[data-pc="clear-exact"]').click()
+    poll(page,"() => document.querySelectorAll('#pc-grid .pc-card').length===10")
+    for key,count in [('exception',5),('attention',1),('prepared',1),('queued',1),('printing',1),('completed',1)]:
+        page.locator(f'[data-triage="{key}"]').click()
+        assert page.locator('#pc-grid .pc-card').count()==count,(key,page.locator('#pc-grid .pc-card').count())
+    page.locator('[data-triage="all"]').click()
+    for state in ('UNKNOWN','SENDING','CANCELING'):
+        card=page.locator('.pc-card').filter(has=page.locator('.pc-id',has_text='PRINT-'+state))
+        assert card.locator('[data-pc="send"]').count()==0
+        assert card.locator('[data-pc="reconcile"]').count()==1
+    assert page.locator('.pc-card').filter(has=page.locator('.pc-id',has_text='PRINT-PRINTING')).locator('[data-pc="cancel"]').count()==0
+    assert page.locator('.pc-card').filter(has=page.locator('.pc-id',has_text='PRINT-FAILED')).locator('[data-pc="send"]').count()==0
+    assert mutations==[],mutations
+    for width,height in ((390,844),(768,1024),(1180,900)):
+        page.set_viewport_size(dict(width=width,height=height))
+        assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+2'),width
+        assert page.locator('#pc-triage').evaluate('(e)=>e.scrollWidth>=e.clientWidth')
+    page.close()
+
+
 def main():
     server = ServerThread();server.start();time.sleep(.8)
     try:
         with sync_playwright() as p:
             browser = getattr(p, os.environ.get('BROWSER_ENGINE', 'webkit')).launch()
             try:
-                base=f'http://127.0.0.1:{BROWSER_TEST_PORT}';passkey_login_test(browser,base);front_test(browser,base);home_draft_catalog_race_test(browser,base);design_draft_test(browser,base);checkout_test(browser,base);admin_test(browser,base)
+                base=f'http://127.0.0.1:{BROWSER_TEST_PORT}';passkey_login_test(browser,base);front_test(browser,base);home_draft_catalog_race_test(browser,base);design_draft_test(browser,base);checkout_test(browser,base);admin_test(browser,base);order_print_workspace_test(browser,base,poll)
                 import runpy
                 runpy.run_path(str(ROOT / '.github/tests/test_pos_dashboard.py'))['dashboard_test'](browser,base,poll)
             finally: browser.close()
