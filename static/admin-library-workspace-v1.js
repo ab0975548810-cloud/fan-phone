@@ -119,7 +119,7 @@
     card.dataset.templateId = clean(template.id);
 
     const media = document.createElement('div');
-    media.className = 'bf-card-media bf-template-media';
+    media.className = 'bf-card-media bf-template-media is-broken';
     const image = document.createElement('img');
     image.loading = 'lazy';
     image.decoding = 'async';
@@ -127,9 +127,16 @@
     const placeholder = document.createElement('div');
     placeholder.className = 'bf-image-placeholder';
     placeholder.innerHTML = '<i class="fa-regular fa-image"></i><span>尚無模板縮圖</span>';
-    image.addEventListener('load', () => media.classList.remove('is-broken'));
-    image.addEventListener('error', () => media.classList.add('is-broken'));
-    if (template.thumb_url) image.src = template.thumb_url; else media.classList.add('is-broken');
+    image.style.visibility = 'hidden';
+    image.addEventListener('load', () => {
+      media.classList.remove('is-broken');
+      image.style.visibility = 'visible';
+    });
+    image.addEventListener('error', () => {
+      image.style.visibility = 'hidden';
+      media.classList.add('is-broken');
+    });
+    if (template.thumb_url) image.src = template.thumb_url;
     media.append(image, placeholder);
 
     const body = document.createElement('div');

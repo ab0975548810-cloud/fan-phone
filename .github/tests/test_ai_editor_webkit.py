@@ -2119,6 +2119,41 @@ def admin_test(browser, base):
         'promptCalls': 0, 'duplicate': '分類名稱已存在',
         'count': '目前分類 3 張', 'cards': 3, 'explicitDelete': 3,
     }, asset_workspace
+    pending_asset_image = []
+    page.route('**/issue59-delayed-asset.png', lambda route: pending_asset_image.append(route))
+    with page.expect_request('**/issue59-delayed-asset.png'):
+        page.evaluate("() => {assetsData.stickers.find(x=>x.id==='asset-cat-a').url='/issue59-delayed-asset.png';renderAssets();document.querySelector('[data-id=\"asset-cat-a\"] img').loading='eager'}")
+    asset_pending = page.evaluate("""() => {
+      const media=document.querySelector('[data-id="asset-cat-a"] .bf-card-media');
+      return {image:getComputedStyle(media.querySelector('img')).visibility,placeholder:getComputedStyle(media.querySelector('.bf-image-placeholder')).display};
+    }""")
+    assert asset_pending == {'image': 'hidden', 'placeholder': 'grid'}, asset_pending
+    assert len(pending_asset_image) == 1
+    page.locator('[data-id="asset-cat-a"] .bf-card-media img').evaluate("img => img.addEventListener('error', () => img.dataset.testError = '1')")
+    pending_asset_image.pop().fulfill(status=404, body='missing')
+    poll(page, "() => document.querySelector('[data-id=\"asset-cat-a\"] .bf-card-media img')?.dataset.testError==='1'")
+    asset_failed = page.evaluate("""() => {
+      const media=document.querySelector('[data-id="asset-cat-a"] .bf-card-media');
+      return {image:getComputedStyle(media.querySelector('img')).visibility,placeholder:getComputedStyle(media.querySelector('.bf-image-placeholder')).display};
+    }""")
+    assert asset_failed == {'image': 'hidden', 'placeholder': 'grid'}, asset_failed
+    page.unroute('**/issue59-delayed-asset.png')
+    pending_asset_success = []
+    page.route('**/issue59-ok-asset.png', lambda route: pending_asset_success.append(route))
+    with page.expect_request('**/issue59-ok-asset.png'):
+        page.evaluate("() => {assetsData.stickers.find(x=>x.id==='asset-cat-a').url='/issue59-ok-asset.png';renderAssets();document.querySelector('[data-id=\"asset-cat-a\"] img').loading='eager'}")
+    assert page.locator('[data-id="asset-cat-a"] .bf-card-media img').evaluate("img => getComputedStyle(img).visibility") == 'hidden'
+    assert len(pending_asset_success) == 1
+    pending_asset_success.pop().fulfill(status=200, body=GOOD, content_type='image/png')
+    poll(page, "() => getComputedStyle(document.querySelector('[data-id=\"asset-cat-a\"] .bf-card-media img')).visibility==='visible'")
+    asset_loaded = page.evaluate("""() => {
+      const media=document.querySelector('[data-id="asset-cat-a"] .bf-card-media');
+      return {image:getComputedStyle(media.querySelector('img')).visibility,placeholder:getComputedStyle(media.querySelector('.bf-image-placeholder')).display};
+    }""")
+    assert asset_loaded == {'image': 'visible', 'placeholder': 'none'}, asset_loaded
+    page.unroute('**/issue59-ok-asset.png')
+    page.evaluate("() => {assetsData.stickers.find(x=>x.id==='asset-cat-a').url='/static/missing-issue59-asset.png';renderAssets()}")
+    print('ADMIN_ASSET_THUMB_NO_FLASH_OK')
     page.locator('#bf-asset-category-modal [data-category-close]').first.click()
     page.evaluate("() => {currentAsset='貓咪';renderAssetTabs();renderAssets();document.querySelector('[data-asset-rename]').click()}")
     assert page.locator('#bf-asset-category-name').input_value() == '貓咪'
@@ -2128,8 +2163,6 @@ def admin_test(browser, base):
     page.locator('#bf-asset-search').fill('貓咪')
     assert page.locator('#asset-grid .bf-asset-card').count() == 2
     assert '搜尋到 2 張' in page.locator('#bf-asset-result-count').inner_text()
-    poll(page, "() => document.querySelector('[data-id=\"asset-cat-a\"] .bf-card-media')?.classList.contains('is-broken')")
-    assert '圖片無法顯示' in page.locator('[data-id="asset-cat-a"] .bf-image-placeholder').inner_text()
 
     page.locator('#bf-asset-search').fill('')
     page.locator('#bf-batch-cat-btn').click()
@@ -2283,8 +2316,41 @@ def admin_test(browser, base):
     assert {key: template_library[key] for key in ('search','style','specific','universal')} == {
         'search': 1, 'style': 1, 'specific': 1, 'universal': 1,
     }, template_library
-    poll(page, "() => document.querySelector('[data-template-id=\"issue59-universal\"] .bf-card-media')?.classList.contains('is-broken')")
-    assert '尚無模板縮圖' in page.locator('[data-template-id="issue59-universal"] .bf-image-placeholder').inner_text()
+    pending_template_image = []
+    page.route('**/issue59-delayed-template.png', lambda route: pending_template_image.append(route))
+    with page.expect_request('**/issue59-delayed-template.png'):
+        page.evaluate("() => {templatesData.templates.find(x=>x.id==='issue59-universal').thumb_url='/issue59-delayed-template.png';renderTemplates();document.querySelector('[data-template-id=\"issue59-universal\"] img').loading='eager'}")
+    template_pending = page.evaluate("""() => {
+      const media=document.querySelector('[data-template-id="issue59-universal"] .bf-card-media');
+      return {image:getComputedStyle(media.querySelector('img')).visibility,placeholder:getComputedStyle(media.querySelector('.bf-image-placeholder')).display};
+    }""")
+    assert template_pending == {'image': 'hidden', 'placeholder': 'grid'}, template_pending
+    assert len(pending_template_image) == 1
+    page.locator('[data-template-id="issue59-universal"] .bf-card-media img').evaluate("img => img.addEventListener('error', () => img.dataset.testError = '1')")
+    pending_template_image.pop().fulfill(status=404, body='missing')
+    poll(page, "() => document.querySelector('[data-template-id=\"issue59-universal\"] .bf-card-media img')?.dataset.testError==='1'")
+    template_failed = page.evaluate("""() => {
+      const media=document.querySelector('[data-template-id="issue59-universal"] .bf-card-media');
+      return {image:getComputedStyle(media.querySelector('img')).visibility,placeholder:getComputedStyle(media.querySelector('.bf-image-placeholder')).display};
+    }""")
+    assert template_failed == {'image': 'hidden', 'placeholder': 'grid'}, template_failed
+    page.unroute('**/issue59-delayed-template.png')
+    pending_template_success = []
+    page.route('**/issue59-ok-template.png', lambda route: pending_template_success.append(route))
+    with page.expect_request('**/issue59-ok-template.png'):
+        page.evaluate("() => {templatesData.templates.find(x=>x.id==='issue59-universal').thumb_url='/issue59-ok-template.png';renderTemplates();document.querySelector('[data-template-id=\"issue59-universal\"] img').loading='eager'}")
+    assert page.locator('[data-template-id="issue59-universal"] .bf-card-media img').evaluate("img => getComputedStyle(img).visibility") == 'hidden'
+    assert len(pending_template_success) == 1
+    pending_template_success.pop().fulfill(status=200, body=GOOD, content_type='image/png')
+    poll(page, "() => getComputedStyle(document.querySelector('[data-template-id=\"issue59-universal\"] .bf-card-media img')).visibility==='visible'")
+    template_loaded = page.evaluate("""() => {
+      const media=document.querySelector('[data-template-id="issue59-universal"] .bf-card-media');
+      return {image:getComputedStyle(media.querySelector('img')).visibility,placeholder:getComputedStyle(media.querySelector('.bf-image-placeholder')).display};
+    }""")
+    assert template_loaded == {'image': 'visible', 'placeholder': 'none'}, template_loaded
+    page.unroute('**/issue59-ok-template.png')
+    page.evaluate("() => {templatesData.templates.find(x=>x.id==='issue59-universal').thumb_url='/static/missing-issue59-template.png';renderTemplates()}")
+    print('ADMIN_TEMPLATE_THUMB_NO_FLASH_OK')
     for width, height in ((390,844),(768,1024),(1180,900)):
         page.set_viewport_size(dict(width=width,height=height))
         library_layout = page.evaluate("""() => ({

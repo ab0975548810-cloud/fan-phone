@@ -538,7 +538,7 @@
           });
         }
         const media = document.createElement('div');
-        media.className = 'bf-card-media';
+        media.className = 'bf-card-media is-broken';
         const placeholder = document.createElement('div');
         placeholder.className = 'bf-image-placeholder';
         placeholder.innerHTML = '<i class="fa-regular fa-image"></i><span>圖片無法顯示</span>';
@@ -547,9 +547,16 @@
         image.decoding = 'async';
         image.fetchPriority = 'low';
         image.alt = clean(sticker.name) || '素材預覽';
-        image.addEventListener('load', () => media.classList.remove('is-broken'));
-        image.addEventListener('error', () => media.classList.add('is-broken'));
-        if (sticker.url) image.src = sticker.url; else media.classList.add('is-broken');
+        image.style.visibility = 'hidden';
+        image.addEventListener('load', () => {
+          media.classList.remove('is-broken');
+          image.style.visibility = 'visible';
+        });
+        image.addEventListener('error', () => {
+          image.style.visibility = 'hidden';
+          media.classList.add('is-broken');
+        });
+        if (sticker.url) image.src = sticker.url;
         media.append(image, placeholder);
         const meta = document.createElement('div');
         meta.className = 'bf-card-meta';
