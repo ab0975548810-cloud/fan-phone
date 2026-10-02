@@ -30,6 +30,7 @@ def install(app_module):
                     '/static/admin-orders-v3.js?v=20260917a',
                     '/static/admin-steward-v1.js?v=20261001a',
                     '/static/admin-shell-v1.js?v=20261001a',
+                    '/static/admin-product-workspace-v1.js?v=20261001b',
                 ]
                 for src in scripts:
                     if src not in html and '</body>' in html:
@@ -40,6 +41,9 @@ def install(app_module):
                 shell_css = '/static/admin-shell-v1.css?v=20261001a'
                 if shell_css not in html and '</head>' in html:
                     html = html.replace('</head>', f'<link rel="stylesheet" href="{shell_css}"></head>')
+                product_css = '/static/admin-product-workspace-v1.css?v=20261001b'
+                if product_css not in html and '</head>' in html:
+                    html = html.replace('</head>', f'<link rel="stylesheet" href="{product_css}"></head>')
                 resp.set_data(html)
                 resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
                 resp.headers.pop('Content-Length', None)
