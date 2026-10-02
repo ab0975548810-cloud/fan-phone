@@ -116,6 +116,7 @@ installers = [
     ("order_management_patch", "install"),
     ("commerce_patch", "install"),
     ("print_center", "install"),
+    ("steward_v2", "install"),
 ]
 for module_name, fn_name in installers:
     module = importlib.import_module(module_name)

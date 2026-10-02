@@ -44,6 +44,7 @@ from template_editor_patch import install as install_template_editor
 from order_management_patch import install as install_order_management
 from commerce_patch import install as install_commerce
 from print_center import install as install_print_center
+from steward_v2 import install as install_steward_v2
 
 install_passkey_auth(app_module)
 install_security(app_module)
@@ -57,6 +58,7 @@ install_template_editor(app_module)
 install_order_management(app_module)
 install_commerce(app_module)
 install_print_center(app_module)
+install_steward_v2(app_module)
 app_module.app.config['SESSION_COOKIE_SECURE'] = False
 
 
@@ -1195,20 +1197,17 @@ def admin_steward_test(page):
         'ai_failure': False,
         'print_failure': False,
         'print_states': ['PREPARED', 'COMPLETED'],
+        'order_issue': False,
+        'health_error': False,
     }
-    now = int(time.time())
-    orders = [
-        {'order_id': 'TODAY-PENDING', 'status': '待處理', 'time': now},
-        {'order_id': 'TODAY-DONE', 'status': '已完成', 'time': now},
-        {'order_id': 'TODAY-MAKING', 'status': '製作中', 'time': now},
-        {'order_id': 'YESTERDAY', 'status': '待處理', 'time': now - 86400},
-    ]
 
     def reply(route, payload, status=200):
         requests_seen.append({'method': route.request.method, 'url': route.request.url})
         route.fulfill(status=status, content_type='application/json', body=json.dumps(payload, ensure_ascii=False))
 
     def health(route):
+        if mode['health_error']:
+            reply(route, {'status':'error'}, 503);return
         reply(route, {'status': 'success', 'persistence': 'supabase'})
 
     def ai(route):
@@ -1223,20 +1222,21 @@ def admin_steward_test(page):
         }
         reply(route, {'status': 'transport_ok', 'ai_quota': quota})
 
-    def order_list(route):
-        reply(route, {'status': 'success', 'data': orders})
-
-    def print_jobs(route):
-        if mode['print_failure']:
-            reply(route, {'status': 'error', 'code': 'PRINT_UNAVAILABLE'}, 500)
-            return
-        rows = [{'order_id': f'PRINT-{index}', 'job': {'state': state}} for index, state in enumerate(mode['print_states'])]
-        reply(route, {'status': 'success', 'rows': rows, 'vendor_ready': True, 'vendor_connected': True})
+    def summary(route):
+        states=mode['print_states'];failed=states.count('FAILED');unknown=states.count('UNKNOWN')
+        issues=[dict(priority=1,kind='print',order_id='PRINT-UNKNOWN',text='列印結果不明・訂單 PRINT-UNKNOWN') for _ in range(unknown)]
+        issues += [dict(priority=2,kind='print',order_id='PRINT-FAILED',text='銳印回報失敗・訂單 PRINT-FAILED') for _ in range(failed)]
+        if mode['order_issue']:
+            issues.append(dict(priority=3,kind='order',order_id='ORDER-OLD',text='缺 production profile・訂單 ORDER-OLD'))
+        reply(route, {'status':'success','timezone':'Asia/Taipei',
+            'orders':dict(available=True,total=3,revenue=560,pending=1,making=1,print_flow=0,completed=1),
+            'print':dict(available=not mode['print_failure'],manual=failed+unknown,attention=0,
+                         prepared=states.count('PREPARED'),queued=states.count('QUEUED'),printing=states.count('PRINTING'),
+                         unknown=unknown,failed=failed,completed=states.count('COMPLETED')),'issues':issues})
 
     page.route('**/api/health*', health)
     page.route('**/api/admin/ai_remove_diagnose*', ai)
-    page.route('**/api/admin/get_orders*', order_list)
-    page.route('**/api/admin/print/jobs*', print_jobs)
+    page.route('**/api/admin/steward/summary*', summary)
     poll(page, "() => !!window.BenfuwanStewardV1 && !!document.getElementById('bf-steward-launch')")
     assert requests_seen == [], requests_seen
     assert page.locator('#bf-steward-launch').inner_text() == '🐱 本福丸'
@@ -1245,18 +1245,21 @@ def admin_steward_test(page):
     page.locator('#bf-steward-launch').click()
     poll(page, "() => window.BenfuwanStewardV1.lastOverall==='normal'")
     assert page.locator('#bf-steward-panel').get_attribute('aria-hidden') == 'false'
-    assert page.locator('#bf-steward-overall-text').inner_text() == '系統目前正常 ฅ^•ﻌ•^ฅ'
+    assert page.locator('#bf-steward-overall-text').inner_text() == '目前沒有需要立即處理的項目。'
     assert page.locator('#bf-steward-ai-usage').inner_text() == '10 / 60'
     assert page.locator('#bf-steward-ai-active').inner_text() == '0 / 2'
     assert page.locator('#bf-steward-order-total').inner_text() == '3'
+    assert page.locator('#bf-steward-order-revenue').inner_text() == 'NT$ 560'
     assert page.locator('#bf-steward-order-pending').inner_text() == '1'
     assert page.locator('#bf-steward-order-completed').inner_text() == '1'
-    assert page.locator('#bf-steward-print-pending').inner_text() == '1'
+    assert page.locator('#bf-steward-print-prepared').inner_text() == '1'
     assert page.locator('#bf-steward-print-failed').inner_text() == '0'
     assert page.locator('#bf-steward-print-unknown').inner_text() == '0'
-    assert len(requests_seen) == 4 and {row['method'] for row in requests_seen} == {'GET'}, requests_seen
+    assert len(requests_seen) == 3 and {row['method'] for row in requests_seen} == {'GET'}, requests_seen
+    assert not any('/api/admin/get_orders' in row['url'] or '/api/admin/print/jobs' in row['url'] for row in requests_seen)
     mobile_box = page.locator('#bf-steward-panel').bounding_box()
     assert mobile_box and mobile_box['width'] <= 390 and mobile_box['height'] <= 844 * .83, mobile_box
+    assert page.locator('#bf-steward-panel').evaluate('(e)=>e.scrollWidth<=e.clientWidth+2')
     assert page.locator('.bf-steward-backdrop').count() == 0
     page.locator('#bf-steward-close').click()
     assert page.locator('#bf-steward-panel').get_attribute('aria-hidden') == 'true'
@@ -1267,17 +1270,19 @@ def admin_steward_test(page):
     poll(page, "() => !document.getElementById('bf-steward-refresh').disabled")
     ipad_box = page.locator('#bf-steward-panel').bounding_box()
     assert ipad_box and ipad_box['width'] <= 402 and ipad_box['x'] >= 350, ipad_box
+    assert page.locator('#bf-steward-panel').evaluate('(e)=>e.scrollWidth<=e.clientWidth+2')
 
-    mode['quota_used'] = 45
+    mode['quota_used'] = 52
     page.evaluate("() => window.BenfuwanStewardV1.refresh()")
     assert page.evaluate("() => window.BenfuwanStewardV1.lastOverall") == 'attention'
-    assert page.locator('#bf-steward-overall-text').inner_text() == '有幾個項目需要注意，我已經幫你標出來。'
+    assert '52 / 60' in page.locator('#bf-steward-issues').inner_text()
 
     mode.update(quota_used=10, print_states=['FAILED', 'UNKNOWN', 'COMPLETED'])
     page.evaluate("() => window.BenfuwanStewardV1.refresh()")
     assert page.evaluate("() => window.BenfuwanStewardV1.lastOverall") == 'attention'
     assert page.locator('#bf-steward-print-failed').inner_text() == '1'
     assert page.locator('#bf-steward-print-unknown').inner_text() == '1'
+    assert page.locator('#bf-steward-issues .bf-steward-issue').count() == 2
 
     mode.update(quota_unavailable=True, print_states=['COMPLETED'])
     page.evaluate("() => window.BenfuwanStewardV1.refresh()")
@@ -1295,7 +1300,7 @@ def admin_steward_test(page):
     before_refresh = len(requests_seen)
     page.locator('#bf-steward-refresh').click()
     poll(page, "() => !document.getElementById('bf-steward-refresh').disabled")
-    assert len(requests_seen) >= before_refresh + 4, requests_seen[before_refresh:]
+    assert len(requests_seen) >= before_refresh + 3, requests_seen[before_refresh:]
     assert {row['method'] for row in requests_seen[before_refresh:]} == {'GET'}, requests_seen[before_refresh:]
 
     page.locator('#bf-steward-orders-link').click()
@@ -1305,11 +1310,50 @@ def admin_steward_test(page):
     page.locator('#bf-steward-print-link').click()
     poll(page, "() => document.getElementById('view-print-center').classList.contains('active') && document.getElementById('bf-steward-panel').getAttribute('aria-hidden')==='true'")
 
+    # Closed/hidden panels never poll, even if refresh is called directly.
+    before_idle=len(requests_seen)
+    page.evaluate("() => window.BenfuwanStewardV1.refresh()")
+    assert len(requests_seen)==before_idle
+    page.locator('#bf-steward-launch').click()
+    poll(page,"() => !document.getElementById('bf-steward-refresh').disabled")
+    page.evaluate("() => Object.defineProperty(document,'hidden',{configurable:true,value:true})")
+    before_hidden=len(requests_seen)
+    page.evaluate("() => window.BenfuwanStewardV1.refresh()")
+    assert len(requests_seen)==before_hidden
+    page.evaluate("() => {delete document.hidden;document.dispatchEvent(new Event('visibilitychange'))}")
+    poll(page,"() => !document.getElementById('bf-steward-refresh').disabled")
+    mode.update(quota_used=60,active=2)
+    page.evaluate("() => window.BenfuwanStewardV1.refresh()")
+    assert page.locator('#bf-steward-quota').get_attribute('data-level')=='error'
+    assert '目前需等待' in page.locator('#bf-steward-issues').inner_text()
+    mode.update(quota_used=10,active=0,health_error=True)
+    page.evaluate("() => window.BenfuwanStewardV1.refresh()")
+    assert page.locator('#bf-steward-website').get_attribute('data-level')=='error'
+    mode.update(health_error=False,print_states=['UNKNOWN'],order_issue=True)
+    exact_requests=[];mutations=[]
+    page.on('request',lambda request: (exact_requests.append(request.url) if ('/api/admin/get_orders?' in request.url or '/api/admin/print/jobs?' in request.url) else None,
+                                    mutations.append(request.url) if request.method!='GET' and '/api/admin/print/' in request.url else None))
+    page.route('**/api/admin/print/jobs?*',lambda route:route.fulfill(status=200,content_type='application/json',body=json.dumps(dict(status='success',rows=[],vendor_ready=False,vendor_connected=False))))
+    page.route('**/api/admin/get_orders?*',lambda route:route.fulfill(status=200,content_type='application/json',body=json.dumps(dict(status='success',data=[],has_more=False,next_offset=0,before=int(time.time())))))
+    page.evaluate("() => window.BenfuwanStewardV1.refresh()")
+    poll(page,"() => document.querySelectorAll('#bf-steward-issues .bf-steward-issue').length===2")
+    page.locator('[data-steward-kind="print"]').click()
+    poll(page,"() => document.getElementById('view-print-center').classList.contains('active')")
+    poll(page,"() => !!document.getElementById('pc-exact') && document.getElementById('pc-exact').textContent.includes('PRINT-UNKNOWN')")
+    assert any('order_id=PRINT-UNKNOWN' in url for url in exact_requests),exact_requests
+    assert mutations==[],mutations
+    page.locator('#bf-steward-launch').click()
+    poll(page,"() => document.querySelector('[data-steward-kind=order]')")
+    page.locator('[data-steward-kind="order"]').click()
+    poll(page,"() => document.getElementById('view-orders').classList.contains('active')")
+    assert any('order_id=ORDER-OLD' in url for url in exact_requests),exact_requests
+    page.unroute('**/api/admin/print/jobs?*');page.unroute('**/api/admin/get_orders?*')
+
     page.unroute('**/api/health*')
     page.unroute('**/api/admin/ai_remove_diagnose*')
-    page.unroute('**/api/admin/get_orders*')
-    page.unroute('**/api/admin/print/jobs*')
+    page.unroute('**/api/admin/steward/summary*')
     page.set_viewport_size({'width': 1180, 'height': 900})
+    assert page.locator('#bf-steward-panel').evaluate('(e)=>e.scrollWidth<=e.clientWidth+2')
     print('ADMIN_BENFUWAN_STEWARD_READ_ONLY_RESPONSIVE_OK')
 
 
