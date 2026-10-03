@@ -7,7 +7,7 @@
   const STATUSES=['待處理','製作中','待列印','列印中','已完成','作廢'];
   const PRINT_REQUIRED=new Set(['待列印','列印中','已完成']);
   let rows=[];
-  let loading=false,hasMore=false,nextOffset=0,before=0,requestVersion=0,exactOrderId='',activeRequest=null,resetGeneration=0;
+  let loading=false,hasMore=false,nextOffset=0,before=0,requestVersion=0,exactOrderId='',activeRequest=null;
   let dateMode='today';
   let exactDate='';
   let query='';
@@ -195,18 +195,22 @@
     activeRequest=promise;
     return promise.finally(()=>{if(version===requestVersion&&activeRequest===promise)activeRequest=null});
   }
+  function filterIntentKey(){
+    return JSON.stringify([query,statusFilter,dateMode,exactDate,exactOrderId]);
+  }
   function loadMoreOrders(){
-    const generation=resetGeneration;
-    // The button is rendered only when the last completed response reported
-    // has_more. During a reset refresh hasMore is temporarily false while the
-    // old pager is still visible, so do not drop a real user click on that
-    // transient flag. Queue the append behind the active refresh instead.
-    const append=()=>generation===resetGeneration?fetchOrdersPage(true,false):Promise.resolve();
+    const intent=filterIntentKey();
+    // A refresh with the same filters must not eat a real user click. Wait for
+    // the active refresh, then append the current next page. Only discard the
+    // click when the actual search/filter/exact-order intent changed.
+    const append=()=>{
+      if(intent!==filterIntentKey()||!hasMore)return Promise.resolve();
+      return fetchOrdersPage(true,false);
+    };
     if(loading)return (activeRequest||Promise.resolve()).then(append);
     return append();
   }
   window.refreshOrders=function(force=false){
-    if(force)resetGeneration++;
     return fetchOrdersPage(false,!!force);
   };
   window.BenfuwanOrdersV3={openOrder(orderId){
