@@ -1689,7 +1689,7 @@ def admin_test(browser, base):
     library_workspace_src = page.locator('script[src*="admin-library-workspace-v1.js"]').get_attribute('src')
     assert library_workspace_src and 'v=20261002a' in library_workspace_src, library_workspace_src
     commerce_src = page.locator('script[src*="admin-commerce-v1.js"]').get_attribute('src')
-    assert commerce_src and 'v=20260923cas1' in commerce_src, commerce_src
+    assert commerce_src and 'v=20261003launch1' in commerce_src, commerce_src
     def ux_error(route):
         status = int(route.request.url.rsplit('-', 1)[-1])
         route.fulfill(status=status, content_type='application/json', body='{"status":"error"}')
