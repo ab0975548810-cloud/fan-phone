@@ -2716,10 +2716,8 @@ def order_print_workspace_test(browser, base, poll):
                    time=stamp-i, has_print=True, has_mockup=False, quantity=1, total=100)
               for i in range(205)]
     orders[203]['status'] = '已完成'
-    order_requests = []
     def order_route(route):
         p = parse_qs(urlsplit(route.request.url).query)
-        order_requests.append({k: list(v) for k, v in p.items()})
         found = orders
         if 'order_id' in p: found = [o for o in found if o['order_id'] == p['order_id'][0]]
         if 'q' in p: found = [o for o in found if p['q'][0].lower() in ' '.join(str(o[k]) for k in ('order_id','customer_name','model','style','payment_method','status')).lower()]
@@ -2748,10 +2746,7 @@ def order_print_workspace_test(browser, base, poll):
     poll(page,"() => document.querySelectorAll('.bf-order-card').length===200 && !!document.querySelector('[data-order-more]')")
     page.evaluate("() => window.refreshOrders()")
     poll(page,"() => document.querySelectorAll('.bf-order-card').length===200 && !!document.querySelector('[data-order-more]')")
-    order_requests.clear()
     page.locator('[data-order-more]').click()
-    page.wait_for_timeout(750)
-    print('ORDER_PAGINATION_DIAG', order_requests, 'count=', page.locator('.bf-order-card').count(), 'pager=', page.locator('#bf-order-page').inner_text())
     poll(page,"() => document.querySelectorAll('.bf-order-card').length===205")
     page.locator('#bf-order-search').fill('已完成')
     poll(page,"() => document.querySelectorAll('.bf-order-card').length===1 && document.querySelector('.bf-order-id').textContent.includes('ORDER-203')")
