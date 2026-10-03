@@ -195,7 +195,11 @@
   }
   function loadMoreOrders(){
     const generation=resetGeneration;
-    const append=()=>generation===resetGeneration&&hasMore?fetchOrdersPage(true,false):Promise.resolve();
+    // The button is rendered only when the last completed response reported
+    // has_more. During a reset refresh hasMore is temporarily false while the
+    // old pager is still visible, so do not drop a real user click on that
+    // transient flag. Queue the append behind the active refresh instead.
+    const append=()=>generation===resetGeneration?fetchOrdersPage(true,false):Promise.resolve();
     if(loading)return (activeRequest||Promise.resolve()).then(append);
     return append();
   }
