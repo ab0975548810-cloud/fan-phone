@@ -9,6 +9,7 @@ def model_cat_icon_test(browser, base, poll):
         page.goto(base+'/', wait_until='domcontentloaded')
         poll(page, "() => window.BenfuwanFrontHomeV1?.isCatalogReady() && document.querySelectorAll('.model-item').length>0")
         page.locator('.bf-home-primary').click()
+        poll(page, "() => document.querySelector('#page-model.active')")
         poll(page, """() => [...document.querySelectorAll('.model-cat-icon img')].every(img=>img.complete&&img.naturalWidth>0&&getComputedStyle(img).visibility==='visible')""")
         layout = page.locator('.model-item').first.evaluate("""row=>{
           const img=row.querySelector('.model-cat-icon img'),icon=img.parentElement,name=icon.nextElementSibling,arrow=row.lastElementChild;
@@ -39,6 +40,7 @@ def model_cat_icon_test(browser, base, poll):
         page.goto(base+'/', wait_until='domcontentloaded')
         poll(page, "() => window.BenfuwanFrontHomeV1?.isCatalogReady() && document.querySelectorAll('.model-item').length>0")
         page.locator('.bf-home-primary').click()
+        poll(page, "() => document.querySelector('#page-model.active')")
         assert pending
         def presentation():
             return page.locator('.model-cat-icon').evaluate_all("""icons=>icons.map(icon=>({image:getComputedStyle(icon.querySelector('img')).visibility,fallback:getComputedStyle(icon.querySelector('svg')).visibility,loaded:icon.querySelector('img').naturalWidth>0}))""")
@@ -53,3 +55,4 @@ def model_cat_icon_test(browser, base, poll):
         assert all(x==expected for x in presentation()), (response_status,presentation())
         page.close()
     print('MODEL_CAT_ICON_RESPONSIVE_NO_FLASH_FALLBACK_OK')
+
