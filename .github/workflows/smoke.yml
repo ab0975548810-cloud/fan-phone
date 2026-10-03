@@ -36,3 +36,4 @@ jobs:
         run: |
           python test_backend_v1.py
           python test_ai_quota.py
+          python test_supabase_resilience.py
