@@ -33,8 +33,9 @@ def launch_acceptance_test(browser, base, poll):
     page.evaluate("() => window.__releaseCatalog()")
     poll(page, "() => document.querySelector('#page-model.active') && document.querySelectorAll('.model-item').length>0")
     assert page.locator('#brand-row').inner_text()
-    # The model list needs no thumbnails or external icon font.
-    assert page.locator('.model-item img').count() == 0
+    # A local decorative cat image with a safe native SVG fallback.
+    assert page.locator('.model-item img').count() == page.locator('.model-item').count()
+    assert all(src == '/static/images/benfuwan-cat-peek.png' for src in page.locator('.model-item img').evaluate_all("(imgs)=>imgs.map(img=>img.getAttribute('src'))"))
     assert page.locator('.model-item svg').count() == page.locator('.model-item').count()
     assert page.locator('.model-item .fa-mobile-screen-button').count() == 0
     page.locator('#model-search').fill('not-a-real-phone-zz')
