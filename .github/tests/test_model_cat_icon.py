@@ -6,11 +6,14 @@ from pathlib import Path
 def model_cat_icon_test(browser, base, poll):
     for width, height in ((390, 844), (768, 1024), (1180, 900)):
         page = browser.new_page(viewport=dict(width=width, height=height), device_scale_factor=3, has_touch=True)
+        icon_requests=[]
+        page.on('request',lambda request:icon_requests.append(request.url) if '/static/images/benfuwan-cat-peek.png' in request.url else None)
         page.goto(base+'/', wait_until='domcontentloaded')
         poll(page, "() => window.BenfuwanFrontHomeV1?.isCatalogReady() && document.querySelectorAll('.model-item').length>0")
+        assert icon_requests==[], 'Hidden model picker must not download the icon on homepage startup'
         page.locator('.bf-home-primary').click()
         poll(page, "() => document.querySelector('#page-model.active')")
-        poll(page, """() => [...document.querySelectorAll('.model-cat-icon img')].every(img=>img.complete&&img.naturalWidth>0&&getComputedStyle(img).visibility==='visible')""")
+        poll(page, """() => {const img=document.querySelector('.model-cat-icon img');return img.complete&&img.naturalWidth>0&&getComputedStyle(img).visibility==='visible'}""")
         layout = page.locator('.model-item').first.evaluate("""row=>{
           const img=row.querySelector('.model-cat-icon img'),icon=img.parentElement,name=icon.nextElementSibling,arrow=row.lastElementChild;
           const box=el=>{const r=el.getBoundingClientRect();return {x:r.x,right:r.right,width:r.width,height:r.height}};
@@ -54,12 +57,12 @@ def model_cat_icon_test(browser, base, poll):
         poll(page, "() => document.querySelector('#page-model.active')")
         assert pending
         def presentation():
-            return page.locator('.model-cat-icon').evaluate_all("""icons=>icons.map(icon=>({image:getComputedStyle(icon.querySelector('img')).visibility,fallback:getComputedStyle(icon.querySelector('svg')).visibility,loaded:icon.querySelector('img').naturalWidth>0}))""")
+            return page.locator('.model-cat-icon').first.evaluate("""icon=>[{image:getComputedStyle(icon.querySelector('img')).visibility,fallback:getComputedStyle(icon.querySelector('svg')).visibility,loaded:icon.querySelector('img').naturalWidth>0}]""")
         assert all(x==dict(image='hidden',fallback='visible',loaded=False) for x in presentation())
         released=True
         for route in pending:
             fulfill_icon(route)
-        poll(page, "() => [...document.querySelectorAll('.model-cat-icon img')].every(img=>img.complete)")
+        poll(page, "() => document.querySelector('.model-cat-icon img').complete")
         expected=dict(image='visible',fallback='hidden',loaded=True) if response_status==200 else dict(image='hidden',fallback='visible',loaded=False)
         assert all(x==expected for x in presentation()), (response_status,presentation())
         page.close()

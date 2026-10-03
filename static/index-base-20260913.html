@@ -321,7 +321,7 @@ function renderModels(){
       const row=document.createElement('div');row.className='model-item'+(ctx.modelId===m.id?' selected':'');
       row.innerHTML=`<span class="model-cat-icon" aria-hidden="true"><svg width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="#aaa" stroke-width="1.5"><rect x="6" y="2" width="12" height="20" rx="3"/><path d="M10 5h4M11 19h2"/></svg></span><span>${escapeHtml(m.name)}</span><i class="fa-solid fa-chevron-right" style="font-size:10px;color:#bbb"></i>`;
       const icon=row.querySelector('.model-cat-icon'),fallback=icon.querySelector('svg'),img=document.createElement('img');
-      img.alt='';img.width=36;img.height=32;
+      img.alt='';img.width=36;img.height=32;img.loading='lazy';
       // Hide the image before assigning src, including cached/error responses.
       img.onload=()=>{if(img.naturalWidth>0){img.style.visibility='visible';fallback.style.visibility='hidden'}};
       img.onerror=()=>{img.style.visibility='hidden';fallback.style.visibility='visible'};
@@ -457,3 +457,4 @@ function num(v,fallback){const n=parseFloat(v);return Number.isFinite(n)?n:fallb
 </script>
 </body>
 </html>
+
