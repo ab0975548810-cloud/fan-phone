@@ -26,7 +26,10 @@
   // 圖片仍然 lazy-load，卡片也使用 content-visibility，避免一次解碼所有預覽圖。
 
   const style=document.createElement('style');
-  style.textContent='.bf-order-day,.bf-order-card,.card{content-visibility:auto;contain-intrinsic-size:auto 260px}.bf-order-thumb{background:#f8f6f7}#bf-order-list{contain:layout style paint}';
+  // WebKit can leave a stale hit-test region after a very tall paint-contained
+  // list is materialized. Keep per-card lazy rendering, but do not contain the
+  // whole list because the pager immediately following it must remain clickable.
+  style.textContent='.bf-order-day,.bf-order-card,.card{content-visibility:auto;contain-intrinsic-size:auto 260px}.bf-order-thumb{background:#f8f6f7}';
   document.head.appendChild(style);
 
   let raf=0;
