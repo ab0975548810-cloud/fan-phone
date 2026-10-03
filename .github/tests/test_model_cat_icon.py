@@ -1,5 +1,6 @@
 """Real picker clicks and local PNG success/pending/error presentation."""
 import os
+import time
 from pathlib import Path
 
 
@@ -55,6 +56,9 @@ def model_cat_icon_test(browser, base, poll):
         poll(page, "() => window.BenfuwanFrontHomeV1?.isCatalogReady() && document.querySelectorAll('.model-item').length>0")
         page.locator('.bf-home-primary').click()
         poll(page, "() => document.querySelector('#page-model.active')")
+        deadline=time.monotonic()+10
+        while not pending and time.monotonic()<deadline:
+            page.wait_for_timeout(50)
         assert pending
         def presentation():
             return page.locator('.model-cat-icon').first.evaluate("""icon=>[{image:getComputedStyle(icon.querySelector('img')).visibility,fallback:getComputedStyle(icon.querySelector('svg')).visibility,loaded:icon.querySelector('img').naturalWidth>0}]""")
