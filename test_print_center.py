@@ -1,5 +1,6 @@
 """Print Center safety tests. No test in this file can reach the vendor network."""
 import os
+import json
 import copy
 import tempfile
 import unittest
@@ -14,6 +15,7 @@ os.environ["SESSION_COOKIE_SECURE"] = "false"
 import app
 import commerce_patch
 import print_center
+import supabase_resilience
 from commerce_store import Store
 from order_color_patch import install as install_colors
 from order_management_patch import install as install_actions
@@ -112,6 +114,55 @@ class PrintCenterTests(unittest.TestCase):
         if state != "PREPARED":
             job = app.print_center.store.patch_job(job["id"], {"state": state})
         return order_id, finance["sku_id"], job
+
+    def test_order_history_filters_pagination_and_exact_print_lookup(self):
+        # Rows beyond the recent 200 must remain reachable without changing commerce state.
+        with app.commerce.store.connection() as db:
+            for index in range(205):
+                row = dict(id=f'HIST-{index:03d}', customer_name='老客人' if index == 0 else '客人',
+                           model_id=app.DEFAULT_SHOP_DATA['models'][0]['id'],
+                           style_id=app.DEFAULT_SHOP_DATA['styles'][0]['id'],
+                           model_name='iPhone 13', style_name='晶彩', payment_method='現金',
+                           status='待處理' if index == 0 else '已完成',
+                           created_at_unix=1700000000 + index, print_path='fixture.png')
+                db.execute('INSERT INTO orders (id,value) VALUES (?,?)', (row['id'], json.dumps(row)))
+            db.commit()
+        page1 = self.client.get('/api/admin/get_orders?limit=200&date_from=2023-11-14&date_to=2023-11-15').get_json()
+        self.assertEqual(len(page1['data']), 200)
+        self.assertTrue(page1['has_more'])
+        page2 = self.client.get('/api/admin/get_orders?limit=200&offset=200&before=' + str(page1['before'])).get_json()
+        self.assertIn('HIST-000', [row['order_id'] for row in page2['data']])
+        search = self.client.get('/api/admin/get_orders?q=%E8%80%81%E5%AE%A2%E4%BA%BA').get_json()
+        self.assertEqual([row['order_id'] for row in search['data']], ['HIST-000'])
+        self.assertEqual(self.client.get('/api/admin/get_orders?status=作廢').get_json()['data'], [])
+        exact = self.client.get('/api/admin/print/jobs?order_id=HIST-000').get_json()
+        self.assertEqual([row['order_id'] for row in exact['rows']], ['HIST-000'])
+        self.assertIsNone(exact['rows'][0]['job'])
+        pending_search = self.client.get('/api/admin/get_orders?q=%E5%BE%85%E8%99%95%E7%90%86').get_json()
+        self.assertIn('HIST-000', [row['order_id'] for row in pending_search['data']])
+        completed_search = self.client.get('/api/admin/get_orders?q=%E5%B7%B2%E5%AE%8C%E6%88%90').get_json()
+        self.assertTrue(any(row['order_id'].startswith('HIST-') for row in completed_search['data']))
+
+    def test_order_last_good_cache_is_isolated_by_full_query(self):
+        with supabase_resilience._LOCK:
+            supabase_resilience._LAST_RESPONSE.clear()
+        def cache_key(query):
+            with app.app.test_request_context('/api/admin/get_orders?' + query):
+                return supabase_resilience._response_cache_key('admin_get_orders')
+        key_a = cache_key('q=A&limit=200&offset=0&before=123')
+        key_b = cache_key('q=B&limit=200&offset=0&before=123')
+        key_page2 = cache_key('q=A&limit=200&offset=200&before=123')
+        key_exact_a = cache_key('order_id=ORDER-A&limit=200&offset=0&before=123')
+        key_exact_b = cache_key('order_id=ORDER-B&limit=200&offset=0&before=123')
+        response = app.app.response_class('{"status":"success","data":["A"]}', status=200, mimetype='application/json')
+        supabase_resilience._remember_response(key_a, response)
+        self.assertIsNotNone(supabase_resilience._stale_response(key_a))
+        self.assertIsNone(supabase_resilience._stale_response(key_b))
+        self.assertIsNone(supabase_resilience._stale_response(key_page2))
+        supabase_resilience._remember_response(key_exact_a, response)
+        self.assertIsNone(supabase_resilience._stale_response(key_exact_b))
+        with supabase_resilience._LOCK:
+            supabase_resilience._LAST_RESPONSE.clear()
 
     def post(self, action, payload, key=None):
         idem = key or ("print-" + uuid.uuid4().hex)

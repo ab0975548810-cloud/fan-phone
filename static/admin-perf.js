@@ -26,7 +26,11 @@
   // 圖片仍然 lazy-load，卡片也使用 content-visibility，避免一次解碼所有預覽圖。
 
   const style=document.createElement('style');
-  style.textContent='.bf-order-day,.bf-order-card,.card{content-visibility:auto;contain-intrinsic-size:auto 260px}.bf-order-thumb{background:#f8f6f7}#bf-order-list{contain:layout style paint}';
+  // Do not apply content-visibility to an entire order day. A day can contain
+  // hundreds of cards, so WebKit initially gives it the 260px intrinsic height
+  // and moves the pager while the section materializes during a real click.
+  // Lazy-render individual cards instead; the pager then keeps a stable hit box.
+  style.textContent='.bf-order-card,.card{content-visibility:auto;contain-intrinsic-size:auto 260px}.bf-order-thumb{background:#f8f6f7}';
   document.head.appendChild(style);
 
   let raf=0;

@@ -12,12 +12,13 @@ import functools
 import threading
 import time
 
-from flask import Response
+from flask import Response, request
 
 _INSTALLED = False
 _LOCK = threading.RLock()
 _LAST_JSON = {}          # key -> (monotonic_ts, python_value)
-_LAST_RESPONSE = {}      # endpoint -> (monotonic_ts, status, headers, body)
+_LAST_RESPONSE = {}      # cache_key -> (monotonic_ts, status, headers, body)
+_MAX_RESPONSE_CACHE = 256
 _RETRY_DELAYS = (0.8, 1.6)
 _STALE_SECONDS = 15 * 60
 
@@ -50,6 +51,37 @@ def _stale_json(key):
         return value
 
 
+def _response_cache_key(endpoint):
+    """Keep last-good admin order responses isolated by the full query."""
+    if endpoint != 'admin_get_orders':
+        return endpoint
+    try:
+        # Sort keys for a canonical identity.  Keep every request parameter
+        # except a pure cache-buster so future filters cannot accidentally
+        # reuse unrelated order data.
+        query = tuple(sorted(
+            (str(key), tuple(str(value) for value in values))
+            for key, values in request.args.lists()
+            if str(key) != 'ts'
+        ))
+    except RuntimeError:
+        query = ()
+    return endpoint, query
+
+
+def _cleanup_responses(now):
+    """Caller holds _LOCK: discard expired entries and oldest excess entries."""
+    expired = [key for key, item in _LAST_RESPONSE.items()
+               if now - item[0] > _STALE_SECONDS]
+    for key in expired:
+        del _LAST_RESPONSE[key]
+    excess = len(_LAST_RESPONSE) - _MAX_RESPONSE_CACHE
+    if excess > 0:
+        oldest = sorted(_LAST_RESPONSE, key=lambda key: _LAST_RESPONSE[key][0])
+        for key in oldest[:excess]:
+            del _LAST_RESPONSE[key]
+
+
 def _remember_response(endpoint, resp):
     if not isinstance(resp, Response) or not (200 <= resp.status_code < 300):
         return
@@ -57,19 +89,20 @@ def _remember_response(endpoint, resp):
         headers = [(k, v) for k, v in resp.headers.items() if k.lower() not in ('content-length', 'set-cookie')]
         body = resp.get_data()
         with _LOCK:
-            _LAST_RESPONSE[endpoint] = (time.monotonic(), resp.status_code, headers, body)
+            now = time.monotonic()
+            _LAST_RESPONSE[endpoint] = (now, resp.status_code, headers, body)
+            _cleanup_responses(now)
     except Exception:
         pass
 
 
 def _stale_response(endpoint):
     with _LOCK:
+        _cleanup_responses(time.monotonic())
         item = _LAST_RESPONSE.get(endpoint)
     if not item:
         return None
     ts, status, headers, body = item
-    if time.monotonic() - ts > _STALE_SECONDS:
-        return None
     resp = Response(body, status=status)
     for k, v in headers:
         resp.headers[k] = v
@@ -208,10 +241,11 @@ def install(app_module):
         def make_wrapper(fn, ep):
             @functools.wraps(fn)
             def wrapped(*args, **kwargs):
+                cache_key = _response_cache_key(ep)
                 resp = fn(*args, **kwargs)
                 if not _response_has_future_jwt(resp):
                     if ep == 'admin_get_orders':
-                        _remember_response(ep, resp)
+                        _remember_response(cache_key, resp)
                     return resp
 
                 for delay in _RETRY_DELAYS:
@@ -220,11 +254,11 @@ def install(app_module):
                     resp = fn(*args, **kwargs)
                     if not _response_has_future_jwt(resp):
                         if ep == 'admin_get_orders':
-                            _remember_response(ep, resp)
+                            _remember_response(cache_key, resp)
                         return resp
 
                 if ep == 'admin_get_orders':
-                    stale = _stale_response(ep)
+                    stale = _stale_response(cache_key)
                     if stale is not None:
                         print('[SUPABASE] order list using last-good response during PGRST303', flush=True)
                         return stale

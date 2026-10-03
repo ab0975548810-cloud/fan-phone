@@ -6,7 +6,9 @@ import base64
 import uuid
 import hashlib
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
+import re
 from ai_quota import (
     AiQuotaRejected,
     AiQuotaUnavailable,
@@ -794,21 +796,79 @@ def admin_get_orders():
     if not session.get('logged_in'):
         return no_cache_json({'status':'error','msg':'未登入'}, 401)
     try:
-        if USE_SUPABASE:
+        def number(name, default, low, high):
             try:
-                limit = int(request.args.get('limit', '50') or 50)
-            except Exception:
-                limit = 50
-            limit = max(10, min(200, limit))
+                value = int(request.args.get(name, default))
+            except (TypeError, ValueError):
+                value = default
+            return max(low, min(high, value))
+
+        limit = number('limit', 50, 1, 200)
+        offset = number('offset', 0, 0, 10000000)
+        # A fixed upper bound keeps new orders from shifting an open page.
+        before = number('before', int(time.time()), 0, 9999999999)
+        q = str(request.args.get('q') or '').strip()[:100]
+        status = str(request.args.get('status') or '').strip()
+        order_id_filter = str(request.args.get('order_id') or '').strip()
+        if status and status not in ('待處理', '製作中', '待列印', '列印中', '已完成', '作廢'):
+            return no_cache_json({'status':'error','msg':'訂單狀態無效'}, 400)
+        if order_id_filter and not re.fullmatch(r'[A-Za-z0-9-]{1,100}', order_id_filter):
+            return no_cache_json({'status':'error','msg':'訂單編號格式錯誤'}, 400)
+        def day_start(name):
+            value = request.args.get(name) or ''
+            if not value:
+                return None
+            try:
+                day = datetime.strptime(value, '%Y-%m-%d').date()
+                return int(datetime(day.year, day.month, day.day, tzinfo=ZoneInfo('Asia/Taipei')).timestamp())
+            except ValueError:
+                raise ValueError('日期格式須為 YYYY-MM-DD')
+        start = day_start('date_from')
+        end_day = request.args.get('date_to') or ''
+        end = day_start('date_to')
+        if end is not None:
+            end_date = datetime.strptime(end_day, '%Y-%m-%d').date() + timedelta(days=1)
+            end = int(datetime(end_date.year, end_date.month, end_date.day, tzinfo=ZoneInfo('Asia/Taipei')).timestamp())
+        if start is not None and end is not None and start >= end:
+            return no_cache_json({'status':'error','msg':'日期範圍無效'}, 400)
+
+        def matches(row):
+            stamp = int(row.get('created_at_unix') or row.get('time') or 0)
+            if stamp > before or (start is not None and stamp < start) or (end is not None and stamp >= end):
+                return False
+            if status and (row.get('status') or '待處理') != status:
+                return False
+            if order_id_filter and str(row.get('id') or row.get('order_id') or '') != order_id_filter:
+                return False
+            if q and q.casefold() not in ' '.join(str(row.get(k) or '') for k in
+                    ('id', 'order_id', 'customer_name', 'model_name', 'model', 'style_name', 'style', 'payment_method', 'status')).casefold():
+                return False
+            return True
+
+        if USE_SUPABASE:
             fields = 'id,customer_name,payment_method,model_name,style_name,unit_price,quantity,total,status,print_path,mockup_path,created_at_unix'
-            rows = (
-                SUPABASE.table('orders')
-                .select(fields)
-                .order('created_at_unix', desc=True)
-                .limit(limit)
-                .execute()
-                .data or []
-            )
+            query_builder = SUPABASE.table('orders').select(fields).lte('created_at_unix', before)
+            if start is not None:
+                query_builder = query_builder.gte('created_at_unix', start)
+            if end is not None:
+                query_builder = query_builder.lt('created_at_unix', end)
+            if status:
+                query_builder = query_builder.eq('status', status)
+            if order_id_filter:
+                query_builder = query_builder.eq('id', order_id_filter)
+            if q:
+                # PostgREST OR syntax is not a parameterized text expression.
+                # Reject structural metacharacters instead of interpolating them.
+                if re.search(r'[,().%*]', q):
+                    return no_cache_json({'status':'error','msg':'搜尋文字含不支援的符號'}, 400)
+                needle = q.replace('\\', '\\\\').replace('_', '\\_')
+                query_builder = query_builder.or_(','.join(
+                    f'{field}.ilike.%{needle}%' for field in
+                    ('id', 'customer_name', 'model_name', 'style_name', 'payment_method', 'status')))
+            rows = (query_builder.order('created_at_unix', desc=True).order('id', desc=True)
+                    .range(offset, offset + limit).execute().data or [])
+            has_more = len(rows) > limit
+            rows = rows[:limit]
             orders = []
             for row in rows:
                 order_id = str(row.get('id') or '')
@@ -830,12 +890,16 @@ def admin_get_orders():
                     'print_url': url_for('admin_order_file', order_id=order_id, kind='print') if print_path else '',
                     'mockup_url': url_for('admin_order_file', order_id=order_id, kind='preview') if mockup_path else '',
                 })
-            return no_cache_json({'status':'success','data':orders,'limit':limit})
+            return no_cache_json({'status':'success','data':orders,'limit':limit,'offset':offset,
+                                  'before':before,'has_more':has_more,'next_offset':offset+len(orders)})
 
         if 'commerce' in globals():
-            rows = commerce.store.local_orders()
+            rows = [row for row in commerce.store.local_orders() if matches(row)]
+            rows.sort(key=lambda row: (int(row.get('created_at_unix') or 0), str(row.get('id') or '')), reverse=True)
+            page = rows[offset:offset+limit+1]
+            has_more = len(page) > limit
             orders = []
-            for row in rows:
+            for row in page[:limit]:
                 orders.append(dict(order_id=row['id'], customer_name=row.get('customer_name'),
                     model=row.get('model_name'), style=row.get('style_name'), price=row.get('unit_price'),
                     quantity=row.get('quantity'), total=row.get('total'), payment_method=row.get('payment_method'),
@@ -843,8 +907,8 @@ def admin_get_orders():
                     has_print=bool(row.get('print_path')), has_mockup=bool(row.get('mockup_path')),
                     print_url='/orders/' + row['print_path'] if row.get('print_path') else '',
                     mockup_url='/orders/' + row['mockup_path'] if row.get('mockup_path') else ''))
-            orders.sort(key=lambda row: row.get('time') or 0, reverse=True)
-            return no_cache_json(dict(status='success', data=orders[:200]))
+            return no_cache_json(dict(status='success', data=orders, limit=limit, offset=offset,
+                                      before=before, has_more=has_more, next_offset=offset+len(orders)))
 
         orders = []
         for filename in os.listdir(SAVE_DIR):
@@ -852,11 +916,16 @@ def admin_get_orders():
                 try:
                     info = local_load_json(os.path.join(SAVE_DIR, filename), {})
                     info.pop('design_json', None)
-                    orders.append(info)
+                    if matches(info):
+                        orders.append(info)
                 except Exception as exc:
                     print('order read warning:', filename, exc)
         orders.sort(key=lambda x: x.get('time', 0), reverse=True)
-        return no_cache_json({'status':'success','data':orders[:50]})
+        page = orders[offset:offset+limit+1]
+        return no_cache_json({'status':'success','data':page[:limit], 'limit':limit, 'offset':offset,
+                              'before':before, 'has_more':len(page)>limit, 'next_offset':offset+min(len(page),limit)})
+    except ValueError as exc:
+        return no_cache_json({'status':'error','msg':str(exc)}, 400)
     except Exception as exc:
         return no_cache_json({'status':'error','msg':str(exc)}, 500)
 

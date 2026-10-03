@@ -737,8 +737,11 @@ class PrintService:
                 raise PrintError("INVALID_REPLAY", "printer callback 驗證資料已被重用", 403)
         return inserted
 
-    def dashboard(self):
-        if self.app.USE_SUPABASE:
+    def dashboard(self, order_id=None):
+        if order_id:
+            order = self.app.commerce.store.order(order_id)
+            orders = [order] if order else []
+        elif self.app.USE_SUPABASE:
             fields = "id,customer_name,model_id,model_name,style_id,style_name,status,print_path,mockup_path,created_at_unix"
             orders = self.app.SUPABASE.table("orders").select(fields).order("created_at_unix", desc=True).limit(200).execute().data or []
         else:
@@ -748,11 +751,13 @@ class PrintService:
         commerce = self.app.commerce.read()
         finance = commerce.get("order_finance") or {}
         shop = self.app.cloud_get_json("shop_data", self.app.DATA_FILE, self.app.DEFAULT_SHOP_DATA)
-        bindings = {row["order_id"]: row for row in self.store.bindings()}
-        latest = {}
-        for job in self.store.list_jobs():
-            if job["order_id"] not in latest:
-                latest[job["order_id"]] = job
+        bindings = ({order_id: self.store.binding(order_id)} if order_id else
+                    {row["order_id"]: row for row in self.store.bindings()})
+        latest = ({order_id: self.store.latest_job(order_id)} if order_id else {})
+        if not order_id:
+            for job in self.store.list_jobs():
+                if job["order_id"] not in latest:
+                    latest[job["order_id"]] = job
         profiles = {row["sku_id"]: row for row in self.store.profiles()}
         result = []
         for order in orders:
@@ -864,7 +869,10 @@ def install(app_module):
     @app.route("/api/admin/print/jobs")
     @guarded
     def print_jobs():
-        return app_module.no_cache_json({"status": "success", **service.dashboard()})
+        order_id = str(request.args.get('order_id') or '').strip()
+        if order_id and not re.fullmatch(r'[A-Za-z0-9-]{1,100}', order_id):
+            raise PrintError('BAD_REQUEST', '訂單編號格式錯誤', 400)
+        return app_module.no_cache_json({"status": "success", **service.dashboard(order_id or None)})
 
     @app.route("/api/admin/print/model-profiles", methods=["POST"])
     @guarded
@@ -950,9 +958,9 @@ def install(app_module):
         if request.path == "/admin" and response.status_code == 200 and response.mimetype == "text/html":
             response.direct_passthrough = False
             html = response.get_data(as_text=True)
-            src = "/static/admin-print-center.js?v=20260921b"
+            src = "/static/admin-print-center.js?v=20261002operations1"
             if src not in html:
-                response.set_data(html.replace("</body>", f'<link rel="stylesheet" href="/static/admin-print-center.css?v=20260921b"><script src="{src}"></script></body>'))
+                response.set_data(html.replace("</body>", f'<link rel="stylesheet" href="/static/admin-print-center.css?v=20261002operations1"><script src="{src}"></script></body>'))
             response.headers["Cache-Control"] = "no-store"
         return response
 
