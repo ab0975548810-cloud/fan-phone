@@ -5,7 +5,7 @@ import re
 import time
 from flask import request
 from commerce_store import CommerceError
-from commerce_reporting import EXPENSE_CATEGORIES, date_range, iso_date, positive_money, replenishment, report
+from commerce_reporting import EXPENSE_CATEGORIES, date_range, iso_date, positive_money, replenishment, report, operational_range
 
 
 def install(app_module, guarded):
@@ -75,9 +75,11 @@ def install(app_module, guarded):
         interval = date_range(request.args.get('period', 'today'), request.args.get('start'), request.args.get('end'))
         for _ in range(4):
             data = commerce.read()
-            orders = commerce.store.orders_between(interval['start_unix'], interval['end_unix'])
+            include_test = request.args.get('include_test') == '1'
+            effective = operational_range(data, interval, include_test)
+            orders = commerce.store.orders_between(effective['start_unix'], effective['end_unix']) if effective['start_unix'] < effective['end_unix'] else []
             if commerce.read()['revision'] == data['revision']:
-                return reply(dict(status='success', data=report(data, orders, interval)))
+                return reply(dict(status='success', data=report(data, orders, interval, include_test)))
         raise CommerceError('REPORT_BUSY', '資料正在更新，請重新載入報表')
 
     @app.get('/api/admin/expenses')

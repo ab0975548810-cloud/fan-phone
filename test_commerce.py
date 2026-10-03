@@ -408,6 +408,117 @@ class CommerceTests(unittest.TestCase):
         with patch('commerce_patch.time.time', return_value=midnight+1):
             self.assertEqual(commerce_patch._finance_summary(data)['today_revenue'], 20)
 
+    def test_style_cost_inheritance_override_and_immutable_snapshots(self):
+        data = self.data()
+        sid = data['skus'][0]['style_id']
+        # Legacy numeric costs survive reads/restarts as explicit overrides.
+        self.assertEqual(data['skus'][0]['cost_price'], 100)
+        data['style_defaults'][sid] = dict(cost_price=70)
+        data['skus'][0]['cost_price'] = None
+        self.assertEqual(self.save(data).status_code, 200)
+        inherited = self.create('inherit-cost-000001').get_json()['order_id']
+        snapshot = copy.deepcopy(app.commerce.read()['order_finance'][inherited])
+        self.assertEqual(snapshot['unit_cost'], 70)
+        self.assertEqual(snapshot['gross_profit'], snapshot['revenue'] - 70)
+        data = self.data()
+        # Every unoverridden model/color of this style resolves the same cost.
+        for sku in data['skus']:
+            if sku['style_id'] == sid and sku['cost_price'] is None:
+                self.assertEqual(commerce_patch.effective_cost(data, sku), 70)
+        data['skus'][0]['cost_price'] = 90
+        data['style_defaults'][sid]['cost_price'] = 80
+        self.assertEqual(self.save(data).status_code, 200)
+        override = self.create('override-cost-00001').get_json()['order_id']
+        self.assertEqual(app.commerce.read()['order_finance'][override]['unit_cost'], 90)
+        data = self.data()
+        data['skus'][0]['cost_price'] = 0
+        self.assertEqual(self.save(data).status_code, 200)
+        free = self.create('zero-cost-00000001').get_json()['order_id']
+        self.assertEqual(app.commerce.read()['order_finance'][free]['unit_cost'], 0)
+        self.assertEqual(app.commerce.read()['order_finance'][inherited], snapshot)
+        app.commerce.store = PgStore(app) if os.environ.get('TEST_POSTGRES_DSN') else Store(app)
+        app.commerce.store.path = str(Path(self.tmp.name) / 'commerce.sqlite3')
+        self.assertEqual(self.data()['style_defaults'][sid]['cost_price'], 80)
+
+    def test_new_skus_inherit_default_without_copying_cost(self):
+        data = self.data()
+        model = app.DEFAULT_SHOP_DATA['models'][0]
+        style = app.DEFAULT_SHOP_DATA['styles'][0]
+        data['skus'] = []
+        data['style_defaults'][style['id']] = dict(cost_price=55)
+        commerce_patch._sync_skus(app, data)
+        matching = [s for s in data['skus'] if s['model_id'] == model['id'] and s['style_id'] == style['id']]
+        self.assertTrue(matching)
+        self.assertTrue(all(s['cost_price'] is None for s in matching))
+        self.assertTrue(all(commerce_patch.effective_cost(data, s) == 55 for s in matching))
+        data['style_defaults'][style['id']]['cost_price'] = 66
+        self.assertTrue(all(commerce_patch.effective_cost(data, s) == 66 for s in matching))
+
+    def test_report_start_date_filters_kpi_preserves_orders_ledgers_and_expenses(self):
+        from commerce_reporting import date_range, report, operational_range
+        zone = ZoneInfo('Asia/Taipei')
+        before = int(datetime(2026, 10, 9, 23, 59, 59, tzinfo=zone).timestamp())
+        boundary = int(datetime(2026, 10, 10, tzinfo=zone).timestamp())
+        with patch('time.time', return_value=before):
+            old = self.create('old-test-order-0001').get_json()['order_id']
+        with patch('time.time', return_value=boundary):
+            live = self.create('new-live-order-0001').get_json()['order_id']
+        for day, amount in [('2026-10-09', 30), ('2026-10-10', 20)]:
+            self.assertEqual(self.client.post('/api/admin/expense', json=dict(idempotency_key=uuid.uuid4().hex,
+                date=day, category='其他', amount=amount)).status_code, 200)
+        original = app.commerce.read()
+        original_orders = app.commerce.store.local_orders()
+        body = dict(revision=original['revision'], skus=[], report_start_date='2026-10-10')
+        self.assertEqual(self.save(body).status_code, 200)
+        self.assertEqual(self.save(body).status_code, 409)  # Existing CAS is preserved.
+        saved = app.commerce.read()
+        for field in ('order_finance', 'inventory_ledger', 'expenses', 'expense_ledger', 'style_defaults', 'skus'):
+            self.assertEqual(saved[field], original[field], field)
+        self.assertEqual(app.commerce.store.local_orders(), original_orders)
+        query = '/api/admin/commerce_report?period=custom&start=2026-10-01&end=2026-10-31'
+        result = self.client.get(query).get_json()['data']
+        finance = saved['order_finance'][live]
+        self.assertEqual(result['summary']['orders'], 1)
+        self.assertEqual(result['summary']['revenue'], finance['revenue'])
+        self.assertEqual(result['summary']['product_cost'], finance['cost_total'])
+        self.assertEqual(result['summary']['gross_profit'], finance['gross_profit'])
+        self.assertEqual(result['summary']['expenses'], 20)
+        all_data = self.client.get(query+'&include_test=1').get_json()['data']
+        self.assertEqual(all_data['summary']['orders'], 2)
+        self.assertEqual(all_data['summary']['expenses'], 50)
+        self.assertTrue(all_data['range']['includes_test_data'])
+        for period in ('today', 'week', 'month', 'year', 'custom'):
+            interval = date_range(period, '2026-10-01', '2026-10-31',
+                                  now=datetime(2026, 10, 10, 12, tzinfo=zone))
+            self.assertGreaterEqual(operational_range(saved, interval)['start_unix'], boundary)
+            projected = report(saved, original_orders, interval)
+            self.assertEqual(projected['summary']['orders'], 1, period)
+        empty = self.client.get('/api/admin/commerce_report?period=custom&start=2026-10-01&end=2026-10-09').get_json()['data']
+        self.assertEqual(empty['summary']['revenue'], 0)
+        self.assertEqual(empty['summary']['expenses'], 0)
+        self.assertIn(old, app.commerce.read()['order_finance'])
+        self.assertEqual(app.commerce.store.order(old)['id'], old)
+        self.assertEqual(commerce_patch._finance_summary(saved)['revenue'], finance['revenue'])
+        # Old clients omitting the setting must not clear the boundary.
+        without_setting = self.data()
+        without_setting.pop('report_start_date')
+        self.assertEqual(self.save(without_setting).status_code, 200)
+        self.assertEqual(self.data()['report_start_date'], '2026-10-10')
+
+    def test_cost_and_report_settings_validate_and_remain_private(self):
+        data = self.data()
+        sid = data['skus'][0]['style_id']
+        for value in (-1, 'NaN', 1.234, True):
+            invalid = copy.deepcopy(data)
+            invalid['style_defaults'][sid] = dict(cost_price=value)
+            self.assertEqual(self.save(invalid).status_code, 400)
+        for value in ('2026-02-30', '2026/10/10', 123):
+            self.assertEqual(self.save(dict(revision=data['revision'], skus=[], report_start_date=value)).status_code, 400)
+        public = app.app.test_client()
+        self.assertEqual(public.get('/api/admin/commerce_report?include_test=1').status_code, 401)
+        for field in ('style_defaults', 'report_start_date'):
+            self.assertNotIn(field, public.get('/api/shop_data').get_data(as_text=True))
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

@@ -105,6 +105,28 @@ def _normalize_default(raw):
     }
 
 
+def effective_cost(data, sku):
+    """A saved SKU cost is an explicit override, including zero.
+
+    Keep legacy numeric costs intact. Null means live inheritance; do not copy
+    a default into new SKUs or recalculate already committed finance snapshots.
+    """
+    override = sku.get('cost_price')
+    return override if override is not None else (data.get('style_defaults') or {}).get(sku['style_id'], {}).get('cost_price')
+
+
+def _validate_cost(value):
+    if value is None:
+        return
+    from decimal import Decimal, InvalidOperation
+    try:
+        cost = Decimal(str(value))
+        if not cost.is_finite() or cost < 0 or cost > 10_000_000 or cost != cost.quantize(Decimal('.01')):
+            raise ValueError()
+    except (ValueError, InvalidOperation):
+        raise CommerceError('BAD_COST', '成本須為非負金額，最多兩位小數', 400)
+
+
 def _normalize_store(raw):
     raw = raw if isinstance(raw, dict) else {}
     defaults = {}
@@ -133,6 +155,7 @@ def _normalize_store(raw):
         'requests': raw.get('requests', {}),
         'actions': raw.get('actions', {}),
         'style_defaults': defaults,
+        'report_start_date': raw.get('report_start_date') or None,
         'skus': skus,
         'order_finance': finance,
     }
@@ -171,7 +194,7 @@ def _sync_skus(app_module, data):
                     'model_id': model_id,
                     'style_id': style_id,
                     'color': color,
-                    'cost_price': default.get('cost_price'),
+                    'cost_price': None,
                     'stock_qty': 0,
                     'target_stock': None,
                     'low_stock_threshold': default.get('low_stock_threshold', 2),
@@ -185,6 +208,7 @@ def _sync_skus(app_module, data):
 
 
 def _finance_summary(data):
+    from commerce_reporting import operational_range
     revenue = 0.0
     known_cost = 0.0
     known_profit = 0.0
@@ -196,8 +220,11 @@ def _finance_summary(data):
     midnight = datetime.fromtimestamp(time.time(), ZoneInfo('Asia/Taipei')).replace(hour=0, minute=0, second=0, microsecond=0)
     today_start = midnight.timestamp()
     tomorrow = (midnight + timedelta(days=1)).timestamp()
+    start = operational_range(data, dict(start='1970-01-01', start_unix=0))['start_unix']
     for row in (data.get('order_finance') or {}).values():
         if not isinstance(row, dict) or row.get('status') == '作廢':
+            continue
+        if int(row.get('created_at_unix') or 0) < start:
             continue
         active_orders += 1
         rev = float(row.get('revenue') or 0)
@@ -275,7 +302,7 @@ class Commerce:
             if not sku or not sku['active']:
                 raise CommerceError('SKU_UNAVAILABLE', '此規格尚未啟用，請洽店員')
             qty, total = order['quantity'], order['total']
-            cost = sku['cost_price']
+            cost = effective_cost(data, sku)
             finance = dict(order_id=order['id'], sku_id=sku['id'], model_id=order['model_id'],
                 style_id=order['style_id'], series_id=order['style_id'],
                 series_name=str(next((s.get('name') for s in getattr(g, 'commerce_shop', {}).get('styles', []) if str(s['id']) == order['style_id']), order['style_id'])),
@@ -382,7 +409,7 @@ def install(app_module):
     @guarded
     def admin_commerce_data():
         data = commerce.read()
-        return reply(dict(status='success', data={k: data[k] for k in ('version', 'revision', 'skus', 'style_defaults')},
+        return reply(dict(status='success', data={k: data[k] for k in ('version', 'revision', 'skus', 'style_defaults', 'report_start_date')},
                           summary=_finance_summary(data)))
 
     @app.route('/api/admin/inventory_ledger')
@@ -407,6 +434,16 @@ def install(app_module):
             raise CommerceError('BAD_DATA', 'SKU 資料格式錯誤', 400)
         if not isinstance(payload.get('style_defaults', {}), dict):
             raise CommerceError('BAD_DATA', '材質預設資料格式錯誤', 400)
+        for value in payload.get('style_defaults', {}).values():
+            if not isinstance(value, dict):
+                raise CommerceError('BAD_DATA', '材質預設資料格式錯誤', 400)
+            _validate_cost(value.get('cost_price'))
+        if 'report_start_date' in payload:
+            from commerce_reporting import iso_date
+            start = payload['report_start_date']
+            if start is not None:
+                if iso_date(start).year >= 9999:
+                    raise CommerceError('BAD_DATE', '起算日超出支援範圍', 400)
         def update(data):
             if payload.get('revision') != data['revision']:
                 raise CommerceError('STALE_INVENTORY', '庫存或設定已更新，請重新整理後再修改；本次未儲存')
@@ -421,15 +458,7 @@ def install(app_module):
                         continue
                     if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 10_000_000:
                         raise CommerceError('BAD_QUANTITY', '庫存設定須為零至一千萬的整數', 400)
-                value = raw.get('cost_price')
-                if value is not None:
-                    from decimal import Decimal, InvalidOperation
-                    try:
-                        cost = Decimal(str(value))
-                        if not cost.is_finite() or cost < 0 or cost > 10_000_000 or cost != cost.quantize(Decimal('.01')):
-                            raise ValueError()
-                    except (ValueError, InvalidOperation):
-                        raise CommerceError('BAD_COST', '成本須為非負金額，最多兩位小數', 400)
+                _validate_cost(raw.get('cost_price'))
                 sku = _normalize_sku(raw)
                 if not sku or sku['id'] not in existing or sku['id'] in seen:
                     raise CommerceError('BAD_SKU', 'SKU 不存在或重複，請先同步商品', 400)
@@ -439,7 +468,10 @@ def install(app_module):
                 if delta:
                     _ledger(data, old, delta, 'MANUAL_ADJUST', f"admin:{data['revision']}:{sku['id']}")
                 old.update(sku)
-            data['style_defaults'] = _normalize_store({'style_defaults': payload.get('style_defaults', {})})['style_defaults']
+            if 'style_defaults' in payload:
+                data['style_defaults'] = _normalize_store({'style_defaults': payload['style_defaults']})['style_defaults']
+            if 'report_start_date' in payload:
+                data['report_start_date'] = payload['report_start_date']
             return dict(status='success', msg='成本與庫存已儲存'), None, ''
         return reply(commerce.mutate(update))
 
@@ -506,8 +538,8 @@ def install(app_module):
         if request.path == '/admin' and resp.status_code == 200 and resp.mimetype == 'text/html':
             resp.direct_passthrough = False
             html = resp.get_data(as_text=True)
-            src = '/static/admin-commerce-v1.js?v=20260923cas1'
+            src = '/static/admin-commerce-v1.js?v=20261003launch1'
             if src not in html:
-                resp.set_data(html.replace('</body>', f'<link rel="stylesheet" href="/static/admin-commerce.css?v=20260918d"><script src="{src}"></script></body>'))
+                resp.set_data(html.replace('</body>', f'<link rel="stylesheet" href="/static/admin-commerce.css?v=20261003launch1"><script src="{src}"></script></body>'))
             resp.headers['Cache-Control'] = 'no-store'
         return resp

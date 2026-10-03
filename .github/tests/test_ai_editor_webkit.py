@@ -1689,7 +1689,7 @@ def admin_test(browser, base):
     library_workspace_src = page.locator('script[src*="admin-library-workspace-v1.js"]').get_attribute('src')
     assert library_workspace_src and 'v=20261002a' in library_workspace_src, library_workspace_src
     commerce_src = page.locator('script[src*="admin-commerce-v1.js"]').get_attribute('src')
-    assert commerce_src and 'v=20260923cas1' in commerce_src, commerce_src
+    assert commerce_src and 'v=20261003launch1' in commerce_src, commerce_src
     def ux_error(route):
         status = int(route.request.url.rsplit('-', 1)[-1])
         route.fulfill(status=status, content_type='application/json', body='{"status":"error"}')
@@ -2789,6 +2789,7 @@ def main():
                 base=f'http://127.0.0.1:{BROWSER_TEST_PORT}';passkey_login_test(browser,base);front_test(browser,base);home_draft_catalog_race_test(browser,base);design_draft_test(browser,base);checkout_test(browser,base);admin_test(browser,base);order_print_workspace_test(browser,base,poll)
                 import runpy
                 runpy.run_path(str(ROOT / '.github/tests/test_pos_dashboard.py'))['dashboard_test'](browser,base,poll)
+                runpy.run_path(str(ROOT / '.github/tests/test_launch_acceptance.py'))['launch_acceptance_test'](browser,base,poll)
             finally: browser.close()
             durable_receipt_test(p, base)
         print('AI_EDITOR_WEBKIT_OK')
