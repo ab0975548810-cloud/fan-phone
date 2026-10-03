@@ -62,13 +62,14 @@
         <button class="btn alt mini" id="bf-order-reload"><i class="fa-solid fa-rotate"></i> 重新整理</button>
       </div>
       <div class="bf-order-summary" id="bf-order-summary"></div>
-      <div id="bf-order-list"><div class="bf-order-empty">讀取訂單中…</div></div><div id="bf-order-page" class="bf-order-page"></div>
+      <div id="bf-order-list"><div class="bf-order-empty">讀取訂單中…</div></div><div id="bf-order-page" class="bf-order-page" aria-live="polite"><span data-order-page-label></span><button type="button" data-order-more hidden>顯示更多</button></div>
     </div>`;
     let searchTimer;document.getElementById('bf-order-search').addEventListener('input',ev=>{query=ev.target.value.trim();exactOrderId='';clearTimeout(searchTimer);searchTimer=setTimeout(()=>refreshOrders(true),300)});
     document.querySelectorAll('[data-range]').forEach(b=>b.onclick=()=>{dateMode=b.dataset.range;exactDate='';exactOrderId='';document.getElementById('bf-order-date').value='';document.querySelectorAll('[data-range]').forEach(x=>x.classList.toggle('active',x===b));refreshOrders(true)});
     document.getElementById('bf-order-date').onchange=ev=>{exactDate=ev.target.value||'';exactOrderId='';if(exactDate){dateMode='exact';document.querySelectorAll('[data-range]').forEach(x=>x.classList.remove('active'));}refreshOrders(true)};
     document.getElementById('bf-order-status-filter').onchange=ev=>{statusFilter=ev.target.value||'全部';exactOrderId='';refreshOrders(true)};
     document.getElementById('bf-order-reload').onclick=()=>refreshOrders(true);
+    document.querySelector('[data-order-more]').addEventListener('click',loadMoreOrders);
     document.getElementById('bf-order-manager').addEventListener('change',ev=>{
       const sel=ev.target.closest('[data-order-status]');if(!sel)return;
       const orderId=sel.dataset.orderStatus,newStatus=sel.value,oldStatus=sel.dataset.currentStatus||'待處理';
@@ -111,8 +112,9 @@
     ensureUi();const list=document.getElementById('bf-order-list');if(!list)return;
     const data=rows;renderSummary(data);
     const pager=document.getElementById('bf-order-page');if(pager){
-      pager.innerHTML=`目前顯示 ${data.length} 筆${hasMore?'・還有更多 <button type="button" data-order-more>顯示更多</button>':''}`;
-      const more=pager.querySelector('[data-order-more]');if(more)more.onclick=()=>loadMoreOrders();
+      const label=pager.querySelector('[data-order-page-label]'),more=pager.querySelector('[data-order-more]');
+      if(label)label.textContent=`目前顯示 ${data.length} 筆${hasMore?'・還有更多':''}`;
+      if(more)more.hidden=!hasMore;
     }
     if(!data.length){list.innerHTML='<div class="bf-order-empty">這個條件目前沒有訂單</div>';return}
     const days=new Map();data.forEach(r=>{const f=fmtParts(r.time);if(!days.has(f.key))days.set(f.key,{label:f.label,rows:[]});days.get(f.key).rows.push({...r,_fmt:f})});

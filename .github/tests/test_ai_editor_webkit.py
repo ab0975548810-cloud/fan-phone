@@ -2741,11 +2741,13 @@ def order_print_workspace_test(browser, base, poll):
     page.locator('.nav button[data-view="orders"]').click()
     page.locator('[data-range="all"]').click()
     poll(page,"() => document.querySelectorAll('.bf-order-card').length===200 && !!document.querySelector('[data-order-more]')")
+    page.evaluate("() => window.__bfPagerButton = document.querySelector('[data-order-more]')")
     # Normal/periodic refresh must reset page 1, never append page 2.
     page.evaluate("() => window.refreshOrders()")
     poll(page,"() => document.querySelectorAll('.bf-order-card').length===200 && !!document.querySelector('[data-order-more]')")
     page.evaluate("() => window.refreshOrders()")
     poll(page,"() => document.querySelectorAll('.bf-order-card').length===200 && !!document.querySelector('[data-order-more]')")
+    assert page.evaluate("() => window.__bfPagerButton === document.querySelector('[data-order-more]')")
     page.locator('[data-order-more]').click()
     poll(page,"() => document.querySelectorAll('.bf-order-card').length===205")
     page.locator('#bf-order-search').fill('已完成')
