@@ -36,7 +36,18 @@ def model_cat_icon_test(browser, base, poll):
     for response_status in (200, 404):
         page=browser.new_page(viewport=dict(width=390,height=844))
         pending=[]
-        page.route('**/static/images/benfuwan-cat-peek.png', lambda route:pending.append(route))
+        released=False
+        def fulfill_icon(route):
+            if response_status==200:
+                route.fulfill(status=200,content_type='image/png',path=str(Path(__file__).resolve().parents[2]/'static/images/benfuwan-cat-peek.png'))
+            else:
+                route.fulfill(status=404,content_type='text/plain',body='not found')
+        def icon_route(route):
+            if released:
+                fulfill_icon(route)
+            else:
+                pending.append(route)
+        page.route('**/static/images/benfuwan-cat-peek.png', icon_route)
         page.goto(base+'/', wait_until='domcontentloaded')
         poll(page, "() => window.BenfuwanFrontHomeV1?.isCatalogReady() && document.querySelectorAll('.model-item').length>0")
         page.locator('.bf-home-primary').click()
@@ -45,11 +56,9 @@ def model_cat_icon_test(browser, base, poll):
         def presentation():
             return page.locator('.model-cat-icon').evaluate_all("""icons=>icons.map(icon=>({image:getComputedStyle(icon.querySelector('img')).visibility,fallback:getComputedStyle(icon.querySelector('svg')).visibility,loaded:icon.querySelector('img').naturalWidth>0}))""")
         assert all(x==dict(image='hidden',fallback='visible',loaded=False) for x in presentation())
+        released=True
         for route in pending:
-            if response_status==200:
-                route.fulfill(status=200,content_type='image/png',path=str(Path(__file__).resolve().parents[2]/'static/images/benfuwan-cat-peek.png'))
-            else:
-                route.fulfill(status=404,content_type='text/plain',body='not found')
+            fulfill_icon(route)
         poll(page, "() => [...document.querySelectorAll('.model-cat-icon img')].every(img=>img.complete)")
         expected=dict(image='visible',fallback='hidden',loaded=True) if response_status==200 else dict(image='hidden',fallback='visible',loaded=False)
         assert all(x==expected for x in presentation()), (response_status,presentation())
