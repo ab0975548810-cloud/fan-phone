@@ -33,8 +33,9 @@ def launch_acceptance_test(browser, base, poll):
     page.evaluate("() => window.__releaseCatalog()")
     poll(page, "() => document.querySelector('#page-model.active') && document.querySelectorAll('.model-item').length>0")
     assert page.locator('#brand-row').inner_text()
-    # The model list needs no thumbnails or external icon font.
-    assert page.locator('.model-item img').count() == 0
+    # A local decorative cat image with a safe native SVG fallback.
+    assert page.locator('.model-item img').count() == page.locator('.model-item').count()
+    assert all(src == '/static/images/benfuwan-cat-peek.png' for src in page.locator('.model-item img').evaluate_all("(imgs)=>imgs.map(img=>img.getAttribute('src'))"))
     assert page.locator('.model-item svg').count() == page.locator('.model-item').count()
     assert page.locator('.model-item .fa-mobile-screen-button').count() == 0
     page.locator('#model-search').fill('not-a-real-phone-zz')
@@ -54,6 +55,9 @@ def launch_acceptance_test(browser, base, poll):
     failed.goto(base+'/', wait_until='domcontentloaded')
     poll(failed, "() => document.querySelector('#model-list')?.dataset.catalogState==='error' && !!window.BenfuwanFrontHomeV1")
     failed.locator('.bf-home-primary').click()
+    # startNewDesign is async; opening the picker may retry the failed catalog.
+    # Keep 503 routing until that retry finishes before testing the retry button.
+    poll(failed, "() => document.querySelector('#page-model.active') && document.querySelector('#model-list')?.dataset.catalogState==='error'")
     assert '載入失敗' in failed.locator('#model-list').inner_text()
     assert '找不到符合' not in failed.locator('#model-list').inner_text()
     failed.unroute('**/api/shop_data')
@@ -110,3 +114,4 @@ def launch_acceptance_test(browser, base, poll):
     poll(admin, "() => BenfuwanCommerce.state.report_start_date===null")
     admin.close()
     print('LAUNCH_ACCEPTANCE_CATALOG_COST_REPORT_OK')
+
