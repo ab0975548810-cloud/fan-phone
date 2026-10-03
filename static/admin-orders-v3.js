@@ -7,7 +7,7 @@
   const STATUSES=['待處理','製作中','待列印','列印中','已完成','作廢'];
   const PRINT_REQUIRED=new Set(['待列印','列印中','已完成']);
   let rows=[];
-  let loading=false,hasMore=false,nextOffset=0,before=0,requestVersion=0,exactOrderId='';
+  let loading=false,hasMore=false,nextOffset=0,before=0,requestVersion=0,exactOrderId='',activeRequest=null,resetGeneration=0;
   let dateMode='today';
   let exactDate='';
   let query='';
@@ -175,9 +175,8 @@
     try{await requestAction(orderId,action);await refreshOrders(true)}catch(err){alert(err.message||'訂單操作失敗')}
   };
 
-  async function fetchOrdersPage(append=false){
-    if(loading&&append)return;
-    const version=++requestVersion;loading=true;ensureUi();const list=document.getElementById('bf-order-list');
+  async function runOrdersFetch(append,version){
+    loading=true;ensureUi();const list=document.getElementById('bf-order-list');
     if(!append){rows=[];nextOffset=0;before=Math.floor(Date.now()/1000);hasMore=false;if(list)list.innerHTML='<div class="bf-order-empty">重新整理中…</div>'}
     try{
       const r=await fetch('/api/admin/get_orders?'+filters(),{cache:'no-store'});let j={};try{j=await r.json()}catch(e){}
@@ -187,8 +186,23 @@
     }catch(err){if(version===requestVersion&&list)list.innerHTML=`<div class="bf-order-empty" style="color:#d94d61">${e(err.message||'讀取失敗')}</div>`}
     finally{if(version===requestVersion)loading=false}
   }
-  function loadMoreOrders(){if(!hasMore)return Promise.resolve();return fetchOrdersPage(true)}
-  window.refreshOrders=function(){return fetchOrdersPage(false)};
+  function fetchOrdersPage(append=false,force=false){
+    if(loading&&!force)return activeRequest||Promise.resolve();
+    const version=++requestVersion;
+    const promise=runOrdersFetch(append,version);
+    activeRequest=promise;
+    return promise.finally(()=>{if(version===requestVersion&&activeRequest===promise)activeRequest=null});
+  }
+  function loadMoreOrders(){
+    const generation=resetGeneration;
+    const append=()=>generation===resetGeneration&&hasMore?fetchOrdersPage(true,false):Promise.resolve();
+    if(loading)return (activeRequest||Promise.resolve()).then(append);
+    return append();
+  }
+  window.refreshOrders=function(force=false){
+    if(force)resetGeneration++;
+    return fetchOrdersPage(false,!!force);
+  };
   window.BenfuwanOrdersV3={openOrder(orderId){
     exactOrderId=String(orderId||'');dateMode='all';query='';statusFilter='全部';exactDate='';
     const search=document.getElementById('bf-order-search');if(search)search.value='';
