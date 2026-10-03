@@ -27,7 +27,7 @@ def install(app_module):
                     '/static/admin-model-profiles.js?v=20260929style1',
                     '/static/admin-asset-categories.js?v=20261002a',
                     '/static/admin-template-loader.js?v=20261002a',
-                    '/static/admin-orders-v3.js?v=20261002operations1',
+                    '/static/admin-orders-v3.js?v=20261003operations2',
                     '/static/admin-steward-v1.js?v=20261001a',
                     '/static/admin-shell-v1.js?v=20261001a',
                     '/static/admin-product-workspace-v1.js?v=20261001b',
