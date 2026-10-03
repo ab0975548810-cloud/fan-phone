@@ -99,9 +99,23 @@ def replenishment(data, shop):
                 missing_targets=sum(r['target_stock'] is None for g in ordered for r in g['items']))
 
 
-def report(data, orders, interval):
+def operational_range(data, interval, include_test=False):
+    """Clamp financial projections only; no order/ledger mutation."""
+    result = dict(interval)
+    start = data.get('report_start_date')
+    result.update(report_start_date=start, includes_test_data=bool(include_test))
+    if start and not include_test:
+        day = iso_date(start)
+        boundary = int(datetime.combine(day, day_time.min, TAIPEI).timestamp())
+        if boundary > result['start_unix']:
+            result.update(start=day.isoformat(), start_unix=boundary)
+    return result
+
+
+def report(data, orders, interval, include_test=False):
     # Finance contains immutable amounts plus current lifecycle status. Legacy
     # orders absent from finance use their own recorded total, never today's SKU.
+    interval = operational_range(data, interval, include_test)
     finances = data['order_finance']
     rows = {oid: dict(row) for oid, row in finances.items()}
     for order in orders:

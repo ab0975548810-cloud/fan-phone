@@ -238,22 +238,39 @@ const materialItems=[
 ];
 const backgroundColors=['transparent','#ffffff','#fff7f1','#fff0f5','#ffdce8','#ffc7d9','#ffb4ca','#f6d7ff','#e7ddff','#dce9ff','#cfe9f6','#d9f2e1','#e7f4c9','#fff0b8','#ffe08a','#ffc878','#f8b7a6','#f29b9b','#e95c76','#ff7b5e','#f2a21b','#e8cf2c','#8bcf8a','#75bde0','#8b7ce8','#bb67d8','#d85aa7','#9c6a52','#777777','#222222'];
 
-window.addEventListener('load',async()=>{
+let catalogState='loading', catalogRequest=null, frontInitialized=false;
+async function initializeFront(){
+  if(frontInitialized)return;frontInitialized=true;
   history.replaceState({page:'page-home'},'',location.pathname+'#home');
-  const [_,savedCart]=await Promise.all([loadAll(),idbGet('cart')]);
-  cartItem=savedCart||null;updateCartBadge();
+  const results=await Promise.allSettled([loadAll(),idbGet('cart')]);
+  if(results[0].status==='rejected')console.warn('catalog',results[0].reason);
+  cartItem=results[1].status==='fulfilled'?results[1].value||null:null;updateCartBadge();
   checkBackendStatus();
-  showPage('page-home');
-});
+}
+// Start after the injected profile/draft scripts are installed, without waiting
+// for window.load (external images/fonts can delay it on a cold Safari visit).
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initializeFront,{once:true});
+else setTimeout(initializeFront,0);
+window.addEventListener('pageshow',()=>{if(!frontInitialized)initializeFront();else if(catalogState==='error')loadAll().catch(e=>console.warn('catalog',e));else renderModels()});
 window.addEventListener('popstate',e=>showPage(e.state?.page||HASH_PAGE[(location.hash||'#home').slice(1)]||'page-home'));
 
 async function loadAll(){
+  if(catalogRequest)return catalogRequest;
+  catalogState='loading';renderModels();
   const endpoints=[['/api/shop_data','shop'],['/api/assets','assets'],['/api/templates','templates']];
-  const results=await Promise.allSettled(endpoints.map(([url])=>fetch(url,{cache:'no-store'}).then(r=>r.json())));
-  if(results[0].status==='fulfilled')shopData=results[0].value.data||results[0].value||shopData;
+  catalogRequest=(async()=>{
+  const results=await Promise.allSettled(endpoints.map(([url],index)=>fetch(url,{cache:'no-store'}).then(async r=>{
+    if(!r.ok)throw Error('HTTP '+r.status);const j=await r.json();
+    if(index===0){const data=j.data||j;if(!Array.isArray(data.models)||!Array.isArray(data.styles)||!Array.isArray(data.brands))throw Error('Invalid catalog');
+      shopData=data;catalogState='ready';if(!(data.brands||[]).includes(activeBrand))activeBrand=data.brands[0]||null;
+      renderBrands();renderModels();renderStyles();}
+    return j;
+  })));
   if(results[1].status==='fulfilled')assetsData=results[1].value.data||results[1].value||assetsData;
   if(results[2].status==='fulfilled')templatesData=results[2].value.data||results[2].value||templatesData;
-  activeBrand=(shopData.brands||[])[0]||null;renderBrands();renderModels();renderStyles();
+  if(results[0].status==='rejected'){catalogState='error';renderModels();throw results[0].reason;}
+  })();
+  try{return await catalogRequest}finally{catalogRequest=null}
 }
 
 async function checkBackendStatus(){
@@ -284,7 +301,29 @@ async function openCartFromNav(){if(!cartItem)cartItem=await idbGet('cart');rend
 
 function renderBrands(){const box=$('brand-row');if(!box)return;box.innerHTML='';const brands=shopData.brands||[];if(!activeBrand)activeBrand=brands[0];brands.forEach(b=>{const btn=document.createElement('button');btn.className='pill'+(b===activeBrand?' active':'');btn.textContent=b;btn.onclick=()=>{activeBrand=b;renderBrands();renderModels()};box.appendChild(btn)})}
 function seriesName(name){const m=(name||'').match(/iPhone\s+(\d+)/i);return m?`iPhone ${m[1]} 系列`:'其他型號'}
-function renderModels(){const box=$('model-list');if(!box)return;const q=($('model-search')?.value||'').trim().toLowerCase();const list=(shopData.models||[]).filter(m=>m.status!==false&&(!activeBrand||m.brand===activeBrand)&&(!q||(m.name||'').toLowerCase().includes(q)));const groups={};list.forEach(m=>(groups[seriesName(m.name)]??=[]).push(m));box.innerHTML='';Object.entries(groups).forEach(([g,arr])=>{const wrap=document.createElement('div');wrap.className='model-group';wrap.innerHTML=`<div class="model-group-title">${escapeHtml(g)}</div>`;arr.forEach(m=>{const row=document.createElement('div');row.className='model-item'+(ctx.modelId===m.id?' selected':'');row.innerHTML=`<i class="fa-regular fa-mobile-screen-button" style="width:25px;color:#aaa"></i><span>${escapeHtml(m.name)}</span><i class="fa-solid fa-chevron-right" style="font-size:10px;color:#bbb"></i>`;row.onclick=()=>selectModel(m);wrap.appendChild(row)});box.appendChild(wrap)});if(!list.length)box.innerHTML='<div style="padding:50px;text-align:center;color:#aaa">找不到符合的型號</div>'}
+function renderModels(){
+  const box=$('model-list');if(!box)return;
+  box.dataset.catalogState=catalogState;box.setAttribute('aria-busy',String(catalogState==='loading'));
+  if(catalogState!=='ready'){
+    box.innerHTML='<div role="status" style="padding:50px;text-align:center;color:#888">'+(catalogState==='loading'?'正在載入手機型號…':'手機型號載入失敗，請重試。')+'</div>';
+    if(catalogState==='error'){const retry=document.createElement('button');retry.className='pill';retry.textContent='重新載入型號';retry.onclick=()=>loadAll().catch(e=>console.warn('catalog',e));box.firstChild.appendChild(retry)}
+    return;
+  }
+  const q=($('model-search')?.value||'').trim().toLowerCase();
+  const list=(shopData.models||[]).filter(m=>m.status!==false&&(!activeBrand||m.brand===activeBrand)&&(!q||(m.name||'').toLowerCase().includes(q)));
+  const groups={};list.forEach(m=>(groups[seriesName(m.name)]??=[]).push(m));box.innerHTML='';
+  Object.entries(groups).forEach(([g,arr])=>{
+    const wrap=document.createElement('div');wrap.className='model-group';wrap.innerHTML=`<div class="model-group-title">${escapeHtml(g)}</div>`;
+    arr.forEach(m=>{
+      const row=document.createElement('div');row.className='model-item'+(ctx.modelId===m.id?' selected':'');
+      // The list has no product thumbnail. A native SVG avoids both failed
+      // image URLs and the unavailable Font Awesome regular phone glyph.
+      row.innerHTML=`<svg aria-hidden="true" width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="#aaa" stroke-width="1.5"><rect x="6" y="2" width="12" height="20" rx="3"/><path d="M10 5h4M11 19h2"/></svg><span>${escapeHtml(m.name)}</span><i class="fa-solid fa-chevron-right" style="font-size:10px;color:#bbb"></i>`;
+      row.onclick=()=>selectModel(m);wrap.appendChild(row);
+    });box.appendChild(wrap);
+  });
+  if(!list.length)box.innerHTML='<div role="status" style="padding:50px;text-align:center;color:#aaa">找不到符合的型號</div>';
+}
 function selectModel(m){ctx.modelId=m.id;ctx.modelName=m.name;ctx.styleId=null;ctx.styleName=null;ctx.maskUrl=m.preview_mask_img||m.mask_img||'';ctx.printLineUrl=m.print_line_img||m.line_img||'';ctx.printX=num(m.print_x,0);ctx.printY=num(m.print_y,0);ctx.printW=num(m.print_w,80);ctx.printH=num(m.print_h,160);ctx.mockupBase64=null;ctx.printBase64=null;editorHasSession=false;$('chosen-model').textContent=m.name;$('model-next').disabled=false;renderModels();renderStyles()}
 function renderStyles(){const box=$('style-grid');if(!box)return;box.innerHTML='';(shopData.styles||[]).filter(s=>s.status!==false).forEach(s=>{const card=document.createElement('div');card.className='card style-card'+(ctx.styleId===s.id?' selected':'');let visual=s.mask_img?`<img src="${attr(s.mask_img)}" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><div class="style-placeholder" style="display:none"><i class="fa-regular fa-mobile-screen"></i></div>`:`<div class="style-placeholder"><i class="fa-regular fa-mobile-screen"></i></div>`;card.innerHTML=`<div class="preview">${visual}</div><div class="style-name">${escapeHtml(s.name)}</div><div class="price">NT$ ${parseInt(s.price)||390}</div>${ctx.styleId===s.id?'<div class="selected-badge"><i class="fa-solid fa-check"></i></div>':''}`;card.onclick=()=>selectStyle(s);box.appendChild(card)})}
 function selectStyle(s){ctx.styleId=s.id;ctx.styleName=s.name;ctx.price=parseInt(s.price)||390;const m=(shopData.models||[]).find(x=>x.id===ctx.modelId)||{};ctx.maskUrl=m.preview_mask_img||m.mask_img||s.mask_img||'';ctx.printLineUrl=m.print_line_img||m.line_img||s.line_img||'';ctx.printX=num(m.print_x??s.print_x,0);ctx.printY=num(m.print_y??s.print_y,0);ctx.printW=num(m.print_w??s.print_w,80);ctx.printH=num(m.print_h??s.print_h,160);ctx.mockupBase64=null;ctx.printBase64=null;editorHasSession=false;$('style-next').disabled=false;renderStyles()}
