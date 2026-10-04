@@ -37,6 +37,8 @@
 .model-item .model-cat-icon{flex:0 0 36px;width:36px;height:32px;display:grid;place-items:center}
 .model-cat-icon>img{width:36px;height:32px;object-fit:contain;flex-shrink:0;visibility:hidden;grid-area:1/1}
 .model-cat-icon>svg{grid-area:1/1}
+.model-cat-icon[data-image-state="ready"]>img{visibility:visible}
+.model-cat-icon[data-image-state="ready"]>svg{visibility:hidden}
 </style>
 <link rel="stylesheet" href="/static/front-home-v1.css?v=20261002hero1">
 </head>
@@ -304,6 +306,13 @@ async function openCartFromNav(){if(!cartItem)cartItem=await idbGet('cart');rend
 
 function renderBrands(){const box=$('brand-row');if(!box)return;box.innerHTML='';const brands=shopData.brands||[];if(!activeBrand)activeBrand=brands[0];brands.forEach(b=>{const btn=document.createElement('button');btn.className='pill'+(b===activeBrand?' active':'');btn.textContent=b;btn.onclick=()=>{activeBrand=b;renderBrands();renderModels()};box.appendChild(btn)})}
 function seriesName(name){const m=(name||'').match(/iPhone\s+(\d+)/i);return m?`iPhone ${m[1]} 系列`:'其他型號'}
+let modelCatIconState='loading';
+function setModelCatIconState(state){
+  // A failed asset stays fail-closed for this page, including late load events.
+  if(modelCatIconState==='error')return;
+  modelCatIconState=state;
+  document.querySelectorAll('.model-cat-icon').forEach(icon=>{icon.dataset.imageState=state});
+}
 function renderModels(){
   const box=$('model-list');if(!box)return;
   box.dataset.catalogState=catalogState;box.setAttribute('aria-busy',String(catalogState==='loading'));
@@ -320,13 +329,14 @@ function renderModels(){
     arr.forEach(m=>{
       const row=document.createElement('div');row.className='model-item'+(ctx.modelId===m.id?' selected':'');
       row.innerHTML=`<span class="model-cat-icon" aria-hidden="true"><svg width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="#aaa" stroke-width="1.5"><rect x="6" y="2" width="12" height="20" rx="3"/><path d="M10 5h4M11 19h2"/></svg></span><span>${escapeHtml(m.name)}</span><i class="fa-solid fa-chevron-right" style="font-size:10px;color:#bbb"></i>`;
-      const icon=row.querySelector('.model-cat-icon'),fallback=icon.querySelector('svg'),img=document.createElement('img');
+      const icon=row.querySelector('.model-cat-icon'),img=document.createElement('img');
       img.alt='';img.width=36;img.height=32;img.loading='lazy';
-      // Hide the image before assigning src, including cached/error responses.
-      img.onload=()=>{if(img.naturalWidth>0){img.style.visibility='visible';fallback.style.visibility='hidden'}};
-      img.onerror=()=>{img.style.visibility='hidden';fallback.style.visibility='visible'};
+      // Reuse successful loading across selection/search/brand rerenders.
+      icon.dataset.imageState=modelCatIconState;
+      img.onload=()=>{if(img.naturalWidth>0){setModelCatIconState('ready');icon.dataset.imageState=modelCatIconState}};
+      img.onerror=()=>{setModelCatIconState('error');icon.dataset.imageState=modelCatIconState};
       icon.appendChild(img);
-      img.src='/static/images/benfuwan-cat-peek.png';
+      if(modelCatIconState!=='error')img.src='/static/images/benfuwan-cat-peek.png';
       row.onclick=()=>selectModel(m);wrap.appendChild(row);
     });box.appendChild(wrap);
   });
@@ -457,4 +467,3 @@ function num(v,fallback){const n=parseFloat(v);return Number.isFinite(n)?n:fallb
 </script>
 </body>
 </html>
-

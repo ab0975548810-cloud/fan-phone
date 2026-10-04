@@ -25,6 +25,29 @@ def model_cat_icon_test(browser, base, poll):
         assert layout['fit']=='contain' and layout['shrink']=='0', layout
         assert layout['name']['width']>100 and layout['icon']['right']<=layout['name']['x'] and layout['name']['right']<=layout['arrow']['x'], layout
         assert layout['fallback']=='hidden', layout
+        # Observe the synchronous render result, before new image load callbacks.
+        # An eventual-only poll would miss the SVG flash on cached image reloads.
+        page.evaluate("""() => {
+          window.__catRenderChecks=[];
+          const render=window.renderModels;
+          window.renderModels=function(...args){
+            const result=render.apply(this,args);
+            window.__catRenderChecks.push([...document.querySelectorAll('.model-cat-icon')].map(icon=>({
+              image:getComputedStyle(icon.querySelector('img')).visibility,
+              fallback:getComputedStyle(icon.querySelector('svg')).visibility
+            })));
+            return result;
+          };
+        }""")
+        page.locator('.model-item').nth(1).click()
+        assert page.locator('.model-item.selected').count()==1
+        page.locator('#model-search').fill('iPhone 1')
+        page.locator('#model-search').fill('')
+        page.locator('#brand-row button').nth(1).click()
+        page.locator('#brand-row button').first.click()
+        page.evaluate('renderModels()')
+        checks=page.evaluate('window.__catRenderChecks')
+        assert len(checks)>=6 and all(item==dict(image='visible',fallback='hidden') for render in checks for item in render), checks
         assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+2'), width
         if os.environ.get('CAT_ICON_SCREENSHOT_DIR'):
             folder=Path(os.environ['CAT_ICON_SCREENSHOT_DIR']);folder.mkdir(parents=True,exist_ok=True)
@@ -69,6 +92,10 @@ def model_cat_icon_test(browser, base, poll):
         poll(page, "() => document.querySelector('.model-cat-icon img').complete")
         expected=dict(image='visible',fallback='hidden',loaded=True) if response_status==200 else dict(image='hidden',fallback='visible',loaded=False)
         assert all(x==expected for x in presentation()), (response_status,presentation())
+        if response_status==404:
+            page.evaluate('renderModels()')
+            assert all(x==expected for x in presentation())
+            # Failed icons remain hidden, and rerender does not retry the asset.
+            assert page.locator('.model-cat-icon img').evaluate_all("imgs=>imgs.every(img=>!img.getAttribute('src'))")
         page.close()
-    print('MODEL_CAT_ICON_RESPONSIVE_NO_FLASH_FALLBACK_OK')
-
+    print('MODEL_CAT_ICON_RESPONSIVE_NO_FLASH_FALLBACK_RERENDER_OK')
