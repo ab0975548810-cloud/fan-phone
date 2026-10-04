@@ -132,7 +132,13 @@
 
   async function request(blob,filename='photo.png',opts={}){
     if(!(blob instanceof Blob)||!blob.size)throw new Error('沒有可送給 AI 的圖片');const timeoutMs=Math.max(30000,Number(opts.timeoutMs||195000)),controller=typeof AbortController!=='undefined'?new AbortController():null,timer=controller?setTimeout(()=>controller.abort(),timeoutMs):null;
-    try{const fd=new FormData();fd.append('image',blob,filename||'photo.png');const r=await fetch('/api/ai/remove-background',{method:'POST',body:fd,cache:'no-store',signal:controller?.signal});if(!r.ok){let msg='AI 摳圖失敗';try{const j=await r.clone().json();msg=j?.msg||j?.error||msg}catch(e){try{const t=(await r.text()).trim();if(t)msg=t.slice(0,180)}catch(_) {}}throw new Error(msg+'（HTTP '+r.status+'）')}const out=await r.blob();if(!out.size)throw new Error('AI 沒有回傳圖片');return out}catch(e){if(e?.name==='AbortError')throw new Error('AI 處理逾時，原圖已保留，請再試一次');throw e}finally{if(timer)clearTimeout(timer)}
+    try{const fd=new FormData();fd.append('image',blob,filename||'photo.png');fd.append('mode',opts.mode||'general');const r=await fetch('/api/ai/remove-background',{method:'POST',body:fd,cache:'no-store',signal:controller?.signal});if(!r.ok){let msg='AI 摳圖失敗';try{const j=await r.clone().json();msg=j?.msg||j?.error||msg}catch(e){try{const t=(await r.text()).trim();if(t)msg=t.slice(0,180)}catch(_) {}}throw new Error(msg+'（HTTP '+r.status+'）')}const out=await r.blob();if(!out.size)throw new Error('AI 沒有回傳圖片');return out}catch(e){if(e?.name==='AbortError')throw new Error('AI 處理逾時，原圖已保留，請再試一次');throw e}finally{if(timer)clearTimeout(timer)}
+  }
+
+  async function cloudRemoveFromElement(el,opts={}){
+    const input=await sourceBlobFromElement(el,{maxEdge:opts.aiMaxEdge||4096,maxBytes:opts.maxBytes||5.5*1024*1024,maxPixels:opts.maxPixels});
+    const mask=await request(input,opts.filename||'photo.png',{timeoutMs:opts.timeoutMs,mode:opts.mode||'stamp'});await validate(mask);
+    const blob=await compositeWithMask(el,mask,opts);await validate(blob);return {blob,mode:'stamp-mask'};
   }
 
   async function universalRemoveFromElement(el,opts={}){
@@ -142,7 +148,7 @@
     }
     if(local?.mask&&local.confidence>=Number(opts.localConfidence||.58)){const blob=await compositeWithMask(el,local.mask,{...opts,backgroundColor:local.background});local.mask.width=local.mask.height=1;await validate(blob);return {blob,mode:'edge-connected',analysis:local}}
     if(opts.localOnly)throw new Error('圖片背景較複雜，需要 AI 協助去背');
-    const input=await sourceBlobFromElement(el,{maxEdge:opts.aiMaxEdge||4096,maxBytes:opts.maxBytes||5.5*1024*1024,maxPixels:opts.maxPixels}),ai=await request(input,opts.filename||'photo.png',{timeoutMs:opts.timeoutMs});await validate(ai);
+    const input=await sourceBlobFromElement(el,{maxEdge:opts.aiMaxEdge||4096,maxBytes:opts.maxBytes||5.5*1024*1024,maxPixels:opts.maxPixels}),ai=await request(input,opts.filename||'photo.png',{timeoutMs:opts.timeoutMs,mode:opts.mode||'general'});await validate(ai);
     const blob=await compositeWithMask(el,ai,opts);await validate(blob);return {blob,mode:'ai-mask',input,analysis:local};
   }
 
@@ -155,6 +161,6 @@
   }
   async function validateWithRetry(blob){try{return await validate(blob)}catch(e){if(!/讀取|格式/.test(String(e?.message||'')))throw e;await sleep(40);return validate(blob)}}
 
-  window.BenfuwanAiRemoveV2={sourceBlobFromElement,request,validate:validateWithRetry,blobToDataURL,fingerprint,cacheIdentityFromElement,elementSize,connectedBackgroundMask,compositeWithMask,decontaminateTransparentElement,universalRemoveFromElement,version:'4.0-transparent-decontaminate'};
+  window.BenfuwanAiRemoveV2={sourceBlobFromElement,request,validate:validateWithRetry,blobToDataURL,fingerprint,cacheIdentityFromElement,elementSize,connectedBackgroundMask,compositeWithMask,decontaminateTransparentElement,universalRemoveFromElement,cloudRemoveFromElement,version:'4.0-transparent-decontaminate'};
   console.info('[AI REMOVE] universal high-resolution client v4 ready');
 })();

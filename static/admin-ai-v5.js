@@ -46,21 +46,28 @@ async function replace(old,blob,publicUrl){
   return neo;
 }
 
-async function runRemove(){
+async function runRemove(aiMode='general'){
   if(busy)return;const old=active();if(!isImage(old)){alert('請先選取一張圖片');return}
-  if(old.aiBackgroundRemoved){alert('這張圖片已經完成通用去背');return}
+  if(aiMode==='general'&&old.aiBackgroundRemoved){alert('這張圖片已經完成通用去背');return}
   const core=window.BenfuwanAiRemoveV2;if(!core){alert('通用去背核心尚未載入，請重新整理後再試');return}
   busy=true;status('正在準備高解析圖片…');
   try{
     const source=await sourceElement(old);status('正在保留全部圖案並移除外圍背景…');
-    const result=await core.universalRemoveFromElement(source,{filename:(old.originalName||'template').replace(/\.[^.]+$/,'')+'.png',timeoutMs:195000}),out=result.blob;
+    const opts={filename:(old.originalName||'template').replace(/\.[^.]+$/,'')+'.png',timeoutMs:195000};
+    const result=aiMode==='interactive'?{blob:await window.BenfuwanAiTools.interactive(source),mode:'interactive-mask'}:await (aiMode==='stamp'?core.cloudRemoveFromElement:core.universalRemoveFromElement)(source,opts),out=result.blob;
+    if(!out){status('已取消摳圖');return}
     status(result.mode==='ai-mask'?'AI 已回傳，正在驗證高解析透明背景…':'外圍背景已辨識，正在驗證高解析透明背景…');await core.validate(out);
-    status('通用去背完成，正在儲存結果…');const publicUrl=await uploadResult(out);
-    await replace(old,out,publicUrl);status(publicUrl?'通用去背完成 ✓':'通用去背完成 ✓（本次雲端備份未完成，儲存模板前請確認圖片仍正常）');
-  }catch(e){console.error('[ADMIN UNIVERSAL REMOVE V3]',e);status('通用去背失敗，原圖已保留');alert(e?.message||'通用去背失敗')}
+    status('AI 摳圖完成，正在儲存結果…');const publicUrl=await uploadResult(out);
+    await replace(old,out,publicUrl);status(publicUrl?'AI 摳圖完成 ✓':'AI 摳圖完成 ✓（本次雲端備份未完成，儲存模板前請確認圖片仍正常）');
+  }catch(e){console.error('[ADMIN UNIVERSAL REMOVE V3]',e);status('AI 摳圖失敗，原圖已保留');alert(e?.message||'通用去背失敗')}
   finally{busy=false}
 }
 window.bfAdminRemoveBackground=runRemove;
+async function openTools(){
+  if(busy)return;if(!isImage(active())){status('請先選取一張圖片');return}
+  const mode=await window.BenfuwanAiTools.chooseMode();if(mode)await runRemove(mode);
+}
+window.bfAdminAiTools=openTools;
 
 function removeExpandUi(){
   by('bf-admin-ai-v5-panel')?.remove();by('bf-tpl-ai-v5-panel')?.remove();
@@ -68,15 +75,15 @@ function removeExpandUi(){
   document.querySelectorAll('#bf-tpl-objectbar .bf-expand-btn,[data-expand]').forEach(b=>b.style.display='none');
 }
 function bind(){
-  removeExpandUi();const bar=by('bf-tpl-objectbar');if(bar){bar.querySelectorAll('.bf-ai-btn').forEach(ai=>{ai.textContent='通用去背';ai.title='保留全部圖案，只移除外圍背景'})}
-  const top=by('bf-tpl-ai-v4');if(top){top.innerHTML='<span class="ico"><i class="fa-solid fa-wand-magic-sparkles"></i></span>通用去背';top.title='保留全部圖案，只移除外圍背景'}
-  const panel=document.querySelector('#bf-tpl-ai-panel-v4 [data-remove]');if(panel)panel.textContent='通用去背';
+  removeExpandUi();const bar=by('bf-tpl-objectbar');if(bar){bar.querySelectorAll('.bf-ai-btn').forEach(ai=>{ai.textContent='AI 摳圖工具';ai.title='保留全部圖案，只移除外圍背景'})}
+  const top=by('bf-tpl-ai-v4');if(top){top.innerHTML='<span class="ico"><i class="fa-solid fa-wand-magic-sparkles"></i></span>AI 摳圖工具';top.title='保留全部圖案，只移除外圍背景'}
+  const panel=document.querySelector('#bf-tpl-ai-panel-v4 [data-remove]');if(panel)panel.textContent='AI 摳圖工具';
 }
 
 // 舊版 v4 曾綁定匿名 capture listener；從 document capture 最前面攔截所有 AI 摳圖入口，確保只跑新版一次。
 document.addEventListener('click',ev=>{
   const target=ev.target?.closest?.('#bf-tpl-ai-v4,#bf-tpl-objectbar .bf-ai-btn,#bf-tpl-ai-panel-v4 [data-remove]');
-  if(!target)return;ev.preventDefault();ev.stopPropagation();ev.stopImmediatePropagation();runRemove();
+  if(!target)return;ev.preventDefault();ev.stopPropagation();ev.stopImmediatePropagation();openTools();
 },true);
 
 function boot(){bind();let n=0;const t=setInterval(()=>{bind();if(++n>120)clearInterval(t)},500);console.info('[ADMIN] universal high-resolution background removal v3 enabled')}
