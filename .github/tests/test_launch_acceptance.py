@@ -87,8 +87,14 @@ def launch_acceptance_test(browser, base, poll):
     card = admin.locator('.pos-sku').first
     card.locator('[data-field="cost_price"]').fill('88')
     assert 'SKU 覆寫' in card.locator('[data-effective-cost]').inner_text()
-    admin.locator('#commerce-save').click()
-    poll(admin, "() => document.getElementById('pos-message').textContent==='商品設定已儲存' && BenfuwanCommerce.state.skus.some(s=>s.cost_price===88)")
+    previous_revision = admin.evaluate('BenfuwanCommerce.state.revision')
+    with admin.expect_response('**/api/admin/save_commerce_data') as saved:
+        admin.locator('#commerce-save').click()
+    assert saved.value.status == 200
+    # The previous save already left this same success text, and editing a SKU
+    # mutates local state immediately. Wait for the new server snapshot too;
+    # otherwise its pending reload can reset the date input in the next step.
+    poll(admin, f"() => BenfuwanCommerce.state.revision!=={json.dumps(previous_revision)} && document.getElementById('pos-message').textContent==='商品設定已儲存' && BenfuwanCommerce.state.skus.some(s=>s.cost_price===88)")
     assert admin.locator('.pos-sku').first.locator('[data-field="cost_price"]').input_value() == '88'
     admin.locator('[data-tab="reports"]').click()
     tomorrow = (datetime.now(ZoneInfo('Asia/Taipei')).date()+timedelta(days=1)).isoformat()
@@ -114,4 +120,3 @@ def launch_acceptance_test(browser, base, poll):
     poll(admin, "() => BenfuwanCommerce.state.report_start_date===null")
     admin.close()
     print('LAUNCH_ACCEPTANCE_CATALOG_COST_REPORT_OK')
-

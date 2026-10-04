@@ -324,7 +324,7 @@ def install(app_module):
         resp.headers['Referrer-Policy'] = 'same-origin'
         resp.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=(), payment=(), publickey-credentials-get=(self), publickey-credentials-create=(self)'
         resp.headers['Content-Security-Policy'] = (
-            "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "
+            "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com; "
             "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data: blob: https:; "
             "font-src 'self' data: https://cdnjs.cloudflare.com; connect-src 'self'; object-src 'none'; "
             "base-uri 'self'; frame-ancestors 'none'; form-action 'self'"

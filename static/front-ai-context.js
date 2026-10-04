@@ -24,15 +24,15 @@
       b.innerHTML='<i class="fa-solid fa-border-style"></i>描邊';
       b.onclick=()=>window.openAiOutlineSheet?.();
     }else{
-      b.title='通用去背';
-      b.innerHTML='<i class="fa-solid fa-wand-magic-sparkles"></i>通用去背';
+      b.title='AI 摳圖工具';
+      b.innerHTML='<i class="fa-solid fa-wand-magic-sparkles"></i>AI 摳圖';
       b.onclick=async()=>{
         if(typeof window.removeBackgroundForActive!=='function'){
           if(typeof toast==='function')toast('通用去背功能尚未載入');
           return;
         }
         try{
-          await window.removeBackgroundForActive();
+          await (window.openAiRemoveTools||window.removeBackgroundForActive)();
         }finally{
           setTimeout(refreshAiContextButton,80);
         }
