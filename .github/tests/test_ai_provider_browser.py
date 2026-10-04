@@ -12,7 +12,11 @@ from PIL import Image, ImageDraw
 SDK = """
 export class FilesetResolver { static async forVisionTasks(url){window.__mpWasm=url;return {}} }
 export class InteractiveSegmenter {
-  static async createFromOptions(v,opts){window.__mpOptions=opts;return new InteractiveSegmenter()}
+  static async createFromOptions(v,opts){
+    (window.__mpAttempts ||= []).push(opts);
+    if(window.__mpInitFailure==='both' || (window.__mpInitFailure==='cpu' && opts.baseOptions.delegate==='CPU'))throw new Error('fixture initialization failed');
+    window.__mpOptions=opts;return new InteractiveSegmenter();
+  }
   setImage(image){this.image=image}
   segment(strokes){
     window.__mpStrokes=strokes;
@@ -35,7 +39,56 @@ def image_url(width=2400, height=1800):
     return 'data:image/png;base64,'+base64.b64encode(buf.getvalue()).decode()
 
 
+def delegate_fallback_test(browser,base,poll):
+    for failure,expected_delegates in ((None,['CPU']),('cpu',['CPU',None]),('both',['CPU',None])):
+        page=browser.new_page()
+        page.route('**/vendor/mediapipe/vision_bundle.mjs*',lambda r:r.fulfill(status=200,body=SDK,content_type='text/javascript'))
+        page.goto(base+'/')
+        poll(page,'() => !!window.BenfuwanAiTools && !!window.BenfuwanAiRemoveV2')
+        result=page.evaluate("""async(failure)=>{
+          window.__mpInitFailure=failure;
+          const image=document.createElement('canvas');image.width=200;image.height=150;
+          image.getContext('2d').fillRect(0,0,200,150);
+          try{
+            const blob=await BenfuwanAiTools.segment(image,[{mode:'positive',points:[{x:.5,y:.5}]}]);
+            return {ok:blob.type==='image/png',attempts:window.__mpAttempts};
+          }catch(error){return {ok:false,error:error.message,attempts:window.__mpAttempts};}
+        }""",failure)
+        attempts=result['attempts']
+        assert [a['baseOptions'].get('delegate') for a in attempts]==expected_delegates,result
+        assert all(a['baseOptions']['modelAssetPath']=='/vendor/mediapipe/interactive_segmentation.task' for a in attempts),result
+        if len(attempts)==2:assert 'delegate' not in attempts[1]['baseOptions'],result
+        assert result['ok']==(failure!='both'),result
+        if failure=='both':assert result['error']=='fixture initialization failed',result
+        page.close()
+    print('MEDIAPIPE_CPU_SUCCESS_DEFAULT_DELEGATE_FALLBACK_DOUBLE_FAILURE_OK')
+
+
+def real_mediapipe_test(browser,base,poll):
+    # No SDK/model/WASM stubs: exercise the production same-origin loader.
+    page=browser.new_page()
+    page.set_default_timeout(180000)
+    page.goto(base+'/')
+    poll(page,'() => !!window.BenfuwanAiTools && !!document.querySelector(".bf-home-hero-art")?.naturalWidth')
+    result=page.evaluate("""async()=>{
+      const image=document.querySelector('.bf-home-hero-art');await image.decode();
+      const blob=await BenfuwanAiTools.segment(image,[
+        {mode:'positive',points:[{x:.5,y:.4}]},
+        {mode:'negative',points:[{x:.03,y:.03}]}
+      ]);
+      const stats=await BenfuwanAiRemoveV2.validate(blob);
+      return {type:blob.type,bytes:blob.size,width:stats.width,height:stats.height,
+        originalWidth:image.naturalWidth,originalHeight:image.naturalHeight,alpha:stats.transparentRatio};
+    }""")
+    assert result['type']=='image/png' and result['bytes']>0,result
+    assert result['width']==result['originalWidth'] and result['height']==result['originalHeight'],result
+    assert 0<result['alpha']<1,result
+    page.close()
+    print('REAL_MEDIAPIPE_SAME_ORIGIN_INITIALIZATION_SEGMENTATION_OK',result)
+
+
 def ai_provider_browser_test(browser,base,poll):
+    delegate_fallback_test(browser,base,poll)
     page=browser.new_page(viewport={'width':390,'height':844},has_touch=True)
     page.on('dialog',lambda dialog:dialog.accept())
     requests=[]
@@ -125,3 +178,4 @@ def ai_provider_browser_test(browser,base,poll):
         page.locator('.bf-ai-tool-dialog [data-close]').click()
     page.close()
     print('AI_PROVIDER_THREE_MODES_REAL_TOUCH_FULL_RES_FABRIC_PRESERVATION_OK')
+    real_mediapipe_test(browser,base,poll)

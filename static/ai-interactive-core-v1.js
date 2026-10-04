@@ -10,7 +10,13 @@
       const mod=imported.InteractiveSegmenter?imported:imported.default;
       if(!mod?.InteractiveSegmenter||!mod?.FilesetResolver)throw new Error('點選摳圖核心尚未準備好');
       const vision=await mod.FilesetResolver.forVisionTasks('/vendor/mediapipe/wasm');
-      const segmenter=await mod.InteractiveSegmenter.createFromOptions(vision,{baseOptions:{modelAssetPath:'/vendor/mediapipe/interactive_segmentation.task',delegate:'CPU'}});
+      const modelAssetPath='/vendor/mediapipe/interactive_segmentation.task';
+      let segmenter;
+      try{
+        segmenter=await mod.InteractiveSegmenter.createFromOptions(vision,{baseOptions:{modelAssetPath,delegate:'CPU'}});
+      }catch(_){
+        segmenter=await mod.InteractiveSegmenter.createFromOptions(vision,{baseOptions:{modelAssetPath}});
+      }
       return {segmenter,BrushMode:mod.BrushMode||{POSITIVE:1,NEGATIVE:2}};
     })().catch(e=>{toolPromise=null;throw e});
     return toolPromise;

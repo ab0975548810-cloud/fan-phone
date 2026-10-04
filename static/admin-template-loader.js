@@ -18,7 +18,7 @@
     '/static/admin-upload-optimizer.js?v=20260914h',
     '/static/admin-template-normalized-v5.js?v=20260914j',
     '/static/ai-remove-client-v2.js?v=20261004providers1',
-    '/static/ai-interactive-core-v1.js?v=20261004providers1',
+    '/static/ai-interactive-core-v1.js?v=20261004providers2',
     '/static/admin-ai-v5.js?v=20261004providers1',
     '/static/admin-template-history-v1.js?v=20260915b',
     '/static/admin-template-upload-fix-v1.js?v=20260916a'
