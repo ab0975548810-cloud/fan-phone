@@ -2791,6 +2791,7 @@ def main():
                 runpy.run_path(str(ROOT / '.github/tests/test_pos_dashboard.py'))['dashboard_test'](browser,base,poll)
                 runpy.run_path(str(ROOT / '.github/tests/test_launch_acceptance.py'))['launch_acceptance_test'](browser,base,poll)
                 runpy.run_path(str(ROOT / '.github/tests/test_model_cat_icon.py'))['model_cat_icon_test'](browser,base,poll)
+                runpy.run_path(str(ROOT / '.github/tests/test_ai_provider_browser.py'))['ai_provider_browser_test'](browser,base,poll)
             finally: browser.close()
             durable_receipt_test(p, base)
         print('AI_EDITOR_WEBKIT_OK')

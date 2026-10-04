@@ -76,6 +76,8 @@ AI_HTTP_TIMEOUT = max(5, min(30, int(os.environ.get('AI_HTTP_TIMEOUT', '15') or 
 AI_RETRY_FAILED_JOB = os.environ.get('AI_RETRY_FAILED_JOB', 'true').lower() in ('1', 'true', 'yes')
 AI_MAX_INPUT_BYTES = 6 * 1024 * 1024
 AI_ENABLED = bool(RUNPOD_API_KEY and RUNPOD_ENDPOINT_ID and requests)
+KOUKOUTU_API_KEY = os.environ.get('KOUKOUTU_API_KEY', '').strip()
+AI_REMOVE_PROVIDER = os.environ.get('AI_REMOVE_PROVIDER', 'runpod').strip().lower()
 
 DEFAULT_SHOP_DATA = {
     'brands': ['Apple', 'Samsung', 'Google', 'OPPO'],
@@ -487,14 +489,16 @@ def home():
 
 @app.route('/api/health')
 def api_health():
+    ai_ready = bool((AI_REMOVE_PROVIDER in ('runpod', 'auto') and AI_ENABLED) or
+                    (AI_REMOVE_PROVIDER in ('koukoutu', 'auto') and KOUKOUTU_API_KEY and requests))
     return no_cache_json({
         'status': 'success',
         'persistence': 'supabase' if USE_SUPABASE else 'local',
-        'ai_background_removal': AI_ENABLED,
-        'ai_provider': 'self-hosted-runpod' if AI_ENABLED else 'not-configured',
-        'ai_model': AI_MODEL_NAME if AI_ENABLED else '',
-        'ai_queue_mode': 'async-poll' if AI_ENABLED else '',
-        'ai_timeout_seconds': AI_REMOVE_BG_TIMEOUT if AI_ENABLED else 0,
+        'ai_background_removal': ai_ready,
+        'ai_provider': ('self-hosted-runpod' if AI_REMOVE_PROVIDER == 'runpod' else AI_REMOVE_PROVIDER) if ai_ready else 'not-configured',
+        'ai_model': (AI_MODEL_NAME if AI_REMOVE_PROVIDER == 'runpod' else 'background-removal') if ai_ready else '',
+        'ai_queue_mode': 'async-poll' if ai_ready else '',
+        'ai_timeout_seconds': AI_REMOVE_BG_TIMEOUT if ai_ready else 0,
     })
 
 
@@ -518,7 +522,13 @@ def get_templates():
 
 @app.route('/api/ai/remove-background', methods=['POST'])
 def ai_remove_background():
-    if not AI_ENABLED:
+    mode = request.form.get('mode', 'general')
+    if mode not in ('general', 'stamp'):
+        return no_cache_json({'status':'error','code':'AI_INVALID_MODE','msg':'不支援的 AI 摳圖模式'}, 400)
+    if AI_REMOVE_PROVIDER not in ('runpod', 'koukoutu', 'auto'):
+        return no_cache_json({'status':'error','code':'AI_NOT_CONFIGURED','msg':'AI provider 設定無效'}, 503)
+    if not ((AI_REMOVE_PROVIDER in ('runpod', 'auto') and AI_ENABLED) or
+            (AI_REMOVE_PROVIDER in ('koukoutu', 'auto') and KOUKOUTU_API_KEY and requests)):
         return no_cache_json({
             'status':'error',
             'code':'AI_NOT_CONFIGURED',
@@ -538,6 +548,14 @@ def ai_remove_background():
         return no_cache_json({'status':'error','msg':'圖片內容是空的'}, 400)
     if len(raw) > AI_MAX_INPUT_BYTES:
         return no_cache_json({'status':'error','msg':'AI 處理圖片需小於 6MB，請重新選擇圖片'}, 400)
+
+    if AI_REMOVE_PROVIDER != 'runpod':
+        import sys
+        from ai_remove_provider import handle
+        return handle(sys.modules[__name__], raw, mime, mode)
+    if mode == 'stamp':
+        return no_cache_json({'status':'error','code':'AI_MODE_NOT_AVAILABLE',
+                              'msg':'印花摳圖尚未啟用，請先使用自動去背或點選摳圖'}, 503)
 
     try:
         import security_perf as security_module
