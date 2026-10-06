@@ -5,6 +5,7 @@
   const say=m=>typeof toast==='function'&&toast(m);
   const get=()=>typeof canvas!=='undefined'?canvas:null;
   const has=c=>c?.getObjects().some(core.isMember);
+  function restoreViewport(){const app=document.querySelector('.app');if(app){app.scrollTop=0;app.scrollLeft=0;}requestAnimationFrame(()=>window.BenfuwanEditorAccess?.fitCanvas?.());}
   const history=window.recordHistory;
   window.recordHistory=function(){const c=get();if(has(c))core.syncAll(c);return history.apply(this,arguments);};
   const init=window.initCanvas;
@@ -35,7 +36,7 @@
     const list=assetsData.editable_stickers||[];
     if(!list.length){box.textContent='目前沒有文字貼紙，請店員先建立對話框';return;}
     for(const asset of list){const b=document.createElement('button');b.className='editable-sticker-choice';const img=document.createElement('img');img.alt='';img.src=asset.imageSrc;img.onerror=()=>img.hidden=true;const name=document.createElement('span');name.textContent=asset.name;b.append(img,name);
-      b.onclick=async()=>{b.blur();b.disabled=true;try{await core.add(get(),asset);recordHistory();renderLayerList();closeSheets();}catch(e){say(e.message);}finally{b.disabled=false;}};box.append(b);}
+      b.onclick=async()=>{b.blur();b.disabled=true;try{await core.add(get(),asset);recordHistory();renderLayerList();closeSheets();restoreViewport();}catch(e){say(e.message);}finally{b.disabled=false;}};box.append(b);}
   }
   let selected=null;
   const dock=document.createElement('div');dock.id='editable-text-tools';dock.hidden=true;dock.className='editable-text-dock';
@@ -46,6 +47,7 @@
   window.bfEditableSelection=(c,o)=>{
     if(c!==get()||!core.isMember(o)){dock.hidden=true;return;}selected=o;const {text}=core.pair(c,o);if(!text)return;
     dock.hidden=false;const form=dock.querySelector('form');
+    restoreViewport();
     for(const name of ['text','fontFamily','fontSize','fill','stroke','strokeWidth','textAlign','charSpacing','lineHeight'])form.elements[name].value=name==='fontSize'?(text.requestedFontSize||text.fontSize):(text[name]??(name==='stroke'?'#ffffff':''));
     form.elements.fontWeight.checked=String(text.fontWeight)==='700';form.elements.fontStyle.checked=text.fontStyle==='italic';
   };
