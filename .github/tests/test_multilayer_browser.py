@@ -48,6 +48,10 @@ def multilayer_browser_test(browser,base,poll):
             admin.locator('#view-templates .titlebar button').filter(has_text='建立模板').click()
             poll(admin,"() => !!window.visualCanvas && !!document.getElementById('multilayer-enable')")
             assert admin.locator('#multilayer-enable').is_checked()
+            admin.locator('#bf-tpl-bg-btn-v3').click();admin.locator('#bf-tpl-bg-transparent-v3').click()
+            assert admin.evaluate("visualCanvas.getObjects().find(o=>o.isTplBg).fill")=='transparent'
+            admin.locator('#bf-tpl-bg-white-v3').click();admin.locator('#bf-tpl-bg-close-v3').click()
+            assert admin.evaluate("visualCanvas.getObjects().find(o=>o.isTplBg).fill")=='#ffffff'
             admin.locator('#tpl-name').fill('Multi-layer 30')
             files=[{'name':f'layer-{i}.png','mimeType':'image/png','buffer':png('#f47ea8' if i%2 else '#9ac8e5')} for i in range(14)]
             admin.locator('#multilayer-files').set_input_files(files)
@@ -223,7 +227,7 @@ def single_touch_drag_test(page,browser):
         cdp.send('Input.dispatchTouchEvent',{'type':'touchEnd','touchPoints':[]});cdp.detach()
     else:
         page.evaluate("""p=>{const el=canvas.upperCanvasEl;
-          function emit(type,dx,dy){const touch=new Touch({identifier:1,target:el,clientX:p.x+dx,clientY:p.y+dy,pageX:p.x+dx+scrollX,pageY:p.y+dy+scrollY});const touches=type==='touchend'?[]:[touch];el.dispatchEvent(new TouchEvent(type,{touches,targetTouches:touches,changedTouches:[touch],bubbles:true,cancelable:true}));}
+          function emit(type,dx,dy){const touch={identifier:1,target:el,clientX:p.x+dx,clientY:p.y+dy,pageX:p.x+dx+scrollX,pageY:p.y+dy+scrollY};const touches=type==='touchend'?[]:[touch],event=new Event(type,{bubbles:true,cancelable:true});Object.defineProperties(event,{touches:{value:touches},targetTouches:{value:touches},changedTouches:{value:[touch]}});el.dispatchEvent(event);}
           emit('touchstart',0,0);for(let i=1;i<=5;i++)emit('touchmove',i*3,i*2);emit('touchend',15,10);
         }""",point)
     assert abs(page.evaluate('canvas.getActiveObject().left')-point['left'])>3
@@ -240,9 +244,10 @@ def gesture_test(page,browser):
         cdp.send('Input.dispatchTouchEvent',{'type':'touchEnd','touchPoints':[]});cdp.detach()
     else:
         # WebKit Playwright has no CDP multi-touch transport. Dispatch native DOM
-        # TouchEvents through the public canvas input handler, never set transforms.
+        # DOM touch-shaped input through the public canvas handler. Linux WebKit
+        # disallows Touch constructors; no test directly changes transforms.
         page.evaluate("""()=>{const el=canvas.upperCanvasEl,r=el.getBoundingClientRect(),x=r.x+r.width*.3,y=r.y+r.height*.3;
-          function emit(type,d,dy){const points=d?[new Touch({identifier:1,target:el,clientX:x-d,clientY:y-dy,pageX:x-d+scrollX,pageY:y-dy+scrollY}),new Touch({identifier:2,target:el,clientX:x+d,clientY:y+dy,pageX:x+d+scrollX,pageY:y+dy+scrollY})]:[];el.dispatchEvent(new TouchEvent(type,{touches:points,targetTouches:points,changedTouches:points,bubbles:true,cancelable:true}));}
+          function emit(type,d,dy){const points=d?[{identifier:1,target:el,clientX:x-d,clientY:y-dy,pageX:x-d+scrollX,pageY:y-dy+scrollY},{identifier:2,target:el,clientX:x+d,clientY:y+dy,pageX:x+d+scrollX,pageY:y+dy+scrollY}]:[],event=new Event(type,{bubbles:true,cancelable:true});Object.defineProperties(event,{touches:{value:points},targetTouches:{value:points},changedTouches:{value:points}});el.dispatchEvent(event);}
           emit('touchstart',15,0);emit('touchmove',24,12);emit('touchend',0,0);
         }""")
     after=page.evaluate('({scale:canvas.getActiveObject().scaleX,angle:canvas.getActiveObject().angle})')

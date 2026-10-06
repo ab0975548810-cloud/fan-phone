@@ -3,9 +3,10 @@
   let mode=false,saving=false,hooked=new WeakSet(),observed=null;
   const by=id=>document.getElementById(id),canvas=()=>window.visualCanvas;
   const notify=(m,error=false)=>{if(window.BenfuwanAdminProductWorkspace?.notify)window.BenfuwanAdminProductWorkspace.notify(m,error?'error':'success');else console.info(m);};
-  function background(c){if(!c||c.getObjects().some(o=>o.isTplBg))return;
+  function background(c){if(!c||c.getObjects().some(o=>o.isTplBg&&o.type==='rect'))return;
     const bg=new fabric.Rect({width:c.width,height:c.height,left:0,top:0,strokeWidth:0,fill:typeof c.backgroundColor==='string'&&c.backgroundColor!=='transparent'?c.backgroundColor:'#fff',isTplBg:true,role:'template-bg',layerName:'背景'});multi.decorate(bg,c);c.insertAt(bg,0,false);c.backgroundColor='transparent';multi.permissions(c,bg,true);c.requestRenderAll();
   }
+  function syncBackground(c){if(!mode||!c.backgroundColor||c.backgroundColor==='transparent')return;const fill=c.backgroundColor;background(c);c.getObjects().find(o=>o.isTplBg&&o.type==='rect').set('fill',fill);c.backgroundColor='transparent';}
   function controls(){const editor=by('template-modal')?.querySelector('.editor');if(!editor||by('multilayer-admin-tools'))return;
     const bar=document.createElement('div');bar.id='multilayer-admin-tools';bar.className='multi-admin-tools';bar.innerHTML='<label><input type="checkbox" id="multilayer-enable"> 多圖層可編輯模板</label><button type="button" class="btn alt" id="multilayer-upload">加入 PNG 圖層</button><input id="multilayer-files" type="file" accept=".png,image/png" multiple hidden><small>背景預設鎖定；每個圖片／文字／照片框保持獨立。</small>';
     editor.parentElement.insertBefore(bar,editor);by('multilayer-enable').checked=mode;
@@ -16,7 +17,7 @@
     by('multilayer-upload').onclick=()=>by('multilayer-files').click();by('multilayer-files').onchange=e=>upload(e,false);
   }
   const originalFontOptions=new WeakMap();
-  function fontOptions(){const select=by('bf-tpl-font');if(!select)return;if(!originalFontOptions.has(select))originalFontOptions.set(select,select.innerHTML);
+  function fontOptions(){if(by('multilayer-upload'))by('multilayer-upload').disabled=!mode;const image=by('bf-tpl-image-file-v3');if(image){if(!image.dataset.multiAccept)image.dataset.multiAccept=image.accept;image.accept=mode?'.png,image/png':image.dataset.multiAccept;}const select=by('bf-tpl-font');if(!select)return;if(!originalFontOptions.has(select))originalFontOptions.set(select,select.innerHTML);
     const current=select.value;
     if(mode){select.replaceChildren();for(const [value,label] of [['jf-openhuninn','可愛粉圓'],['NotoSansTC','思源黑體'],[editable.LEGACY.Arial,'Arial（固定字型）'],[editable.LEGACY.serif,'明體（固定字型）'],[editable.LEGACY.cursive,'手寫（固定字型）']]){const option=document.createElement('option');option.value=value;option.textContent=label;select.append(option);}select.value=[...select.options].some(o=>o.value===current)?current:'jf-openhuninn';}
     else select.innerHTML=originalFontOptions.get(select);
@@ -56,6 +57,9 @@
     if(!fragment.childNodes.length){const empty=document.createElement('div');empty.className='multi-admin-empty';empty.textContent='目前沒有圖層';fragment.append(empty);}box.replaceChildren(fragment);
   }
   function hook(c){if(!c||hooked.has(c))return;hooked.add(c);multi.bind(c,true);
+    c.on('before:render',()=>syncBackground(c));
+    const setBackground=c.setBackgroundColor;
+    c.setBackgroundColor=function(color,callback){if(!mode)return setBackground.apply(this,arguments);background(c);const bg=c.getObjects().find(o=>o.isTplBg&&o.type==='rect');bg.set('fill',color&&typeof color==='object'&&!color.toLive?new fabric.Gradient(color):color);c.backgroundColor='transparent';c.fire('object:modified',{target:bg});callback?.();return c;};
     for(const event of ['object:added','object:removed','object:modified','selection:created','selection:updated','selection:cleared'])c.on(event,({target})=>{if(mode&&target&&event==='object:added'){multi.decorate(target,c);multi.permissions(c,target,true);}if(mode)setTimeout(render,0);});
   }
   let legacyBackground=null;
@@ -65,10 +69,12 @@
       const result=oldInit.apply(this,arguments);mode=!window.__bfEditingTemplate;controls();by('multilayer-enable').checked=mode;hook(canvas());if(mode)background(canvas());fontOptions();setTimeout(render,100);return result;
     };
     legacyBackground=window.uploadTemplateBg;window.uploadTemplateBg=function(event){if(!mode)return legacyBackground.apply(this,arguments);return upload(event,true);};
+    const imageInput=by('bf-tpl-image-file-v3'),imageUpload=imageInput?.onchange;
+    if(imageInput)imageInput.onchange=function(event){if(!mode)return imageUpload?.call(this,event);return upload(event,false);};
     const oldText=window.addText;window.addText=async function(){if(!mode||editable.isMember(canvas()?.getActiveObject()))return oldText.apply(this,arguments);try{await editable.font('jf-openhuninn','輸入文字');const c=canvas(),o=new fabric.Textbox('輸入文字',{fontFamily:'jf-openhuninn',fontSize:28,fill:'#603c48',width:c.width*.6,left:c.width/2,top:c.height/2,originX:'center',originY:'center',role:'template-text',strokeWidth:0});multi.decorate(o,c);c.add(o);c.setActiveObject(o);c.requestRenderAll();render();}catch(e){notify(e.message,true);}};
     const oldSave=window.saveTemplate;window.saveTemplate=async function(){if(!mode)return oldSave.apply(this,arguments);if(saving)return;const c=canvas(),name=by('tpl-name').value.trim(),model=by('tpl-model').value,style=by('tpl-style').value,profile=window.benfuwanTemplateReferenceProfile?.();if(!c||!name||!model||!style||!profile)return notify('請填名稱並選擇已配置型號／殼款',true);
       const buttons=[...by('template-modal').querySelectorAll('.mf button')];saving=true;buttons.forEach(b=>b.disabled=true);
-      try{await multi.fonts(c);await editable.rehydrate(c);const objects=multi.exportTemplate(c);c.discardActiveObject();const blob=await new Promise(resolve=>c.toCanvasElement(1).toBlob(resolve,'image/png'));const thumb=await uploadAdminImage(new File([blob],'template-preview.png',{type:'image/png'}),'template');
+      try{await multi.fonts(c);await editable.rehydrate(c);syncBackground(c);const objects=multi.exportTemplate(c);c.discardActiveObject();const blob=await new Promise(resolve=>c.toCanvasElement(1).toBlob(resolve,'image/png'));const thumb=await uploadAdminImage(new File([blob],'template-preview.png',{type:'image/png'}),'template');
         const id=by('tpl-id').value||'tpl_'+multi.uid(),old=(templatesData.templates||[]).find(t=>t.id===id)||{},next=structuredClone(templatesData),category=by('tpl-category').value.trim()||'熱門';
         const item={...old,id,name,category,universal:true,template_version:Math.max(3,old.template_version||0),model_id:'*',reference_model_id:model,reference_style_id:style,source_print_w:profile.print_w,source_print_h:profile.print_h,source_canvas_w:c.width,source_canvas_h:c.height,layer_contract_version:multi.VERSION,objects_json:objects,slots:[],thumb_url:thumb};delete item.layout_v3;
         const index=next.templates.findIndex(t=>t.id===id);if(index<0)next.templates.push(item);else next.templates[index]=item;if(!next.categories.includes(category))next.categories.push(category);
