@@ -106,6 +106,12 @@ def validate(design):
             raise ValueError('缺少原始圖片')
         if item['type'] in ('text', 'textbox', 'i-text') and item.get('fontFamily') not in FONTS:
             raise ValueError('生產文字必須使用站內字型，請改用可愛粉圓／思源黑體')
+        if item['type'] in ('text', 'textbox', 'i-text'):
+            if not isinstance(item.get('text'),str) or len(item['text'])>2000:
+                raise ValueError('文字最多 2000 字')
+            numeric(item.get('fontSize'),1,1000,'字級')
+        if item.get('path') and len(item['path'])>5000:
+            raise ValueError('向量路徑過於複雜')
         role = item.get('role')
         if role in ('editable-sticker-bg', 'editable-sticker-text'):
             if item.get('type') != ('image' if role.endswith('-bg') else 'textbox'):

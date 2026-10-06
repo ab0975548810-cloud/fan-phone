@@ -61,6 +61,18 @@
       fabric.Object.prototype.__editableSerializer=true;
     }
     if(bound.has(c))return;bound.add(c);let removing=false;
+    let ordering=false;
+    for(const [name,delta] of [['bringForward',1],['sendBackwards',-1],['bringToFront','top'],['sendToBack','bottom'],['moveTo','index']]){
+      const original=c[name];c[name]=function(o,index){
+        if(ordering||!isMember(o))return original.apply(this,arguments);
+        const {bg,text}=pair(c,o),objects=c.getObjects(),others=objects.filter(x=>x!==bg&&x!==text);
+        const current=Math.min(objects.indexOf(bg),objects.indexOf(text));
+        const target=Math.max(0,Math.min(others.length,delta==='top'?others.length:delta==='bottom'?0:delta==='index'?index:current+delta));
+        const arranged=[...others.slice(0,target),bg,text,...others.slice(target)];ordering=true;
+        try{arranged.forEach((object,i)=>c.moveTo(object,i));}finally{ordering=false;}
+        c.requestRenderAll();return c;
+      };
+    }
     for(const event of ['object:moving','object:scaling','object:rotating','object:modified'])c.on(event,({target})=>{if(isMember(target)){const {bg,text}=pair(c,target);sync(bg,text);c.requestRenderAll();}});
     c.on('object:removed',({target})=>{if(!isMember(target)||removing)return;removing=true;members(c,target).forEach(o=>c.remove(o));removing=false;});
     c.on('mouse:dblclick',({target})=>{if(!isMember(target))return;const {text}=pair(c,target);text.__editableEntering=true;c.setActiveObject(text);text.enterEditing();text.__editableEntering=false;text.selectAll();c.requestRenderAll();});
@@ -113,6 +125,7 @@
       const texts=[];const scan=o=>{if(['text','textbox','i-text'].includes(o.type))texts.push(o);(o.objects||[]).forEach(scan);};data.objects.forEach(scan);
       await Promise.all(texts.map(o=>font(o.fontFamily,o.text)));
       await new Promise(resolve=>c.loadFromJSON(data,resolve));await rehydrate(c);
+      c.getObjects().forEach(o=>o.set('objectCaching',false));
       const image=await new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=()=>reject(Error('生產遮罩無法載入'));im.src=maskSrc;});
       const mask=BenfuwanPrintMask.normalizeMaskImage(image);
       const output=BenfuwanPrintMask.renderPrint(c,mask,width,height);
