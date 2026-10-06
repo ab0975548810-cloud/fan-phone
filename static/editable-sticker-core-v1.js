@@ -15,10 +15,13 @@
     if(!a||!['x','y','width','height'].every(k=>Number.isFinite(a[k])&&a[k]>=0&&a[k]<=1)||a.width<=0||a.height<=0||a.x+a.width>1.000001||a.y+a.height>1.000001)throw Error('文字安全區設定無效');
     return {...a};
   }
+  function fontManifest(){
+    if(!coveragePromise)coveragePromise=fetch('/static/fonts/editable-font-manifest.json').then(r=>{if(!r.ok)throw Error('字型契約無法載入');return r.json();}).catch(e=>{coveragePromise=null;throw e;});
+    return coveragePromise;
+  }
   async function font(family,text='文字'){
     if(!ASSETS[family])throw Error('請使用站內字型');
-    if(!coveragePromise)coveragePromise=fetch('/static/fonts/editable-font-manifest.json').then(r=>{if(!r.ok)throw Error('字型契約無法載入');return r.json();}).catch(e=>{coveragePromise=null;throw e;});
-    const coverage=await coveragePromise;
+    const coverage=await fontManifest();
     const ranges=coverage[family]?.ranges;if(!ranges)throw Error('字型契約缺失');
     for(const character of String(text)){const n=character.codePointAt(0);let lo=0,hi=ranges.length;while(lo<hi){const mid=(lo+hi)>>1;if(ranges[mid][1]<n)lo=mid+1;else hi=mid;}if(![9,10,13].includes(n)&&!(ranges[lo]?.[0]<=n))throw Error('字型不支援部分字元，請更換字型或文字');}
     if(!loaded.has(family))loaded.set(family,(async()=>{
@@ -149,17 +152,24 @@
     await textFonts(c);
     const data=c.toJSON(PROPS);delete data.clipPath;
     data.objects=data.objects.filter(o=>!['guide','slot-guide'].includes(o.role));
-    const visit=(raw,obj)=>{
+    const visit=async(raw,obj)=>{
       if(raw.type==='image'){
-        const el=obj.getElement();if(typeof el.src==='string'&&el.src.startsWith('data:image/png;base64,')){raw.src=el.src;return;}const source=document.createElement('canvas');source.width=el.naturalWidth||el.width;source.height=el.naturalHeight||el.height;
+        const el=obj.getElement();raw.sourceSize={width:el.naturalWidth||el.width,height:el.naturalHeight||el.height};
+        if(typeof el.src==='string'&&el.src.startsWith('data:image/png;base64,')){raw.src=el.src;return;}
+        if(raw.templateLayerId&&raw.publicSrc){
+          const url=window.benfuwanTemplateProxyUrl?.(raw.publicSrc)||raw.publicSrc;
+          const response=await fetch(url);if(!response.ok)throw Error('模板原始素材無法讀取');const blob=await response.blob();
+          if(blob.type==='image/png'){raw.src=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(blob);});return;}
+        }
+        const source=document.createElement('canvas');source.width=el.naturalWidth||el.width;source.height=el.naturalHeight||el.height;
         if(!source.width||source.width*source.height>32_000_000)throw Error('原始素材尺寸無效');
         source.getContext('2d').drawImage(el,0,0);raw.src=source.toDataURL('image/png');source.width=source.height=1;
       }
-      if(raw.objects)raw.objects.forEach((r,i)=>visit(r,obj._objects[i]));
-      if(raw.clipPath&&obj.clipPath)visit(raw.clipPath,obj.clipPath);
+      if(raw.objects)for(const [i,r] of raw.objects.entries())await visit(r,obj._objects[i]);
+      if(raw.clipPath&&obj.clipPath)await visit(raw.clipPath,obj.clipPath);
     };
-    const objs=c.getObjects().filter(o=>!['guide','slot-guide'].includes(o.role));data.objects.forEach((r,i)=>visit(r,objs[i]));
-    const coverage=await coveragePromise;
+    const objs=c.getObjects().filter(o=>!['guide','slot-guide'].includes(o.role));for(const [i,r] of data.objects.entries())await visit(r,objs[i]);
+    const coverage=await fontManifest();
     return {...data,render_contract_version:VERSION,fontHashes:Object.fromEntries(Object.entries(coverage).map(([key,value])=>[key,value.sha256])),logicalCanvas:{width:c.width,height:c.height},production:{printW:context.printW,printH:context.printH},modelId:context.modelId,styleId:context.styleId};
   }
   async function render(data,maskSrc,width,height){
@@ -167,7 +177,8 @@
     try{
       const texts=[];const scan=o=>{if(['text','textbox','i-text'].includes(o.type))texts.push(o);(o.objects||[]).forEach(scan);};data.objects.forEach(scan);
       await Promise.all(texts.map(async o=>{if(o.role==='editable-sticker-text')await font(o.fontFamily,o.text);else o.fontFamily=await ordinaryFont(o.fontFamily,o.text);}));
-      await new Promise(resolve=>c.loadFromJSON({version:data.version,background:data.background,objects:data.objects},resolve));await rehydrate(c);
+      await new Promise(resolve=>c.loadFromJSON({version:data.version,background:data.background,objects:data.objects},resolve));
+      await window.BenfuwanMultilayer?.prepareRender(c,data);await rehydrate(c);
       c.getObjects().forEach(o=>o.set('objectCaching',false));
       const image=await new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=()=>reject(Error('生產遮罩無法載入'));im.src=maskSrc;});
       const mask=BenfuwanPrintMask.normalizeMaskImage(image);

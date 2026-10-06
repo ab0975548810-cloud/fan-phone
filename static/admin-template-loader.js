@@ -8,20 +8,20 @@
     '/static/admin-universal-templates.js?v=20260929style1',
     '/static/admin-template-editor-v2.js?v=20260929style1',
     '/static/admin-template-editor-v3.js?v=20260914h',
-    '/static/admin-template-editor-v4.js?v=20260914h',
-    '/static/admin-template-editor-v4-fix.js?v=20260914h',
+    '/static/admin-template-editor-v4.js?v=20261006review1',
+    '/static/admin-template-editor-v4-fix.js?v=20261006review1',
     '/static/admin-global-canvas-bridge.js?v=20260914h',
     '/static/admin-template-clean-v2.js?v=20260914h',
-    '/static/admin-template-outline-v2.js?v=20260914h',
-    '/static/admin-template-image-tools-v2.js?v=20260914h',
+    '/static/admin-template-outline-v2.js?v=20261006review1',
+    '/static/admin-template-image-tools-v2.js?v=20261006review1',
     '/static/admin-template-image-tools-v2-fix.js?v=20260914h',
     '/static/admin-upload-optimizer.js?v=20260914h',
     '/static/admin-template-normalized-v5.js?v=20260914j',
     '/static/ai-remove-client-v2.js?v=20261004providers1',
     '/static/ai-interactive-core-v1.js?v=20261004providers2',
-    '/static/admin-ai-v5.js?v=20261004providers1',
+    '/static/admin-ai-v5.js?v=20261006review1',
     '/static/admin-template-history-v1.js?v=20260915b',
-    '/static/admin-template-upload-fix-v1.js?v=20260916a'
+    '/static/admin-template-upload-fix-v1.js?v=20261006review1'
   ];
   let loading=null,loaded=false;
 
@@ -34,6 +34,7 @@
       loaded=true;
       window.__benfuwanTemplateStackReady=true;
       window.bfInstallEditableTemplate?.();
+      window.bfInstallMultilayerTemplate?.();
       // The heavy editor contains an older list renderer. Restore the light
       // management workspace after the editor modules finish installing.
       window.BenfuwanAdminLibraryWorkspace?.installTemplateRender?.();

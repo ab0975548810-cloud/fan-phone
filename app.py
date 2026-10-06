@@ -1106,10 +1106,17 @@ def admin_save_templates():
         return no_cache_json({'status':'error'}, 401)
     try:
         payload = request.get_json(silent=True) or {}
+        from multilayer_templates import prepare_template
+        document=payload.get('data')
+        if isinstance(document,dict):
+            images={}
+            for template in document.get('templates',[]):prepare_template(sys.modules[__name__],template,images)
         version = cloud_compare_and_swap_json('templates', TEMPLATES_FILE, payload.get('data'), payload.get('expected_version'))
         return no_cache_json({'status':'success','msg':'模板儲存成功','version':version})
     except StaleDataError as exc:
         return no_cache_json({'status':'error','code':exc.code,'msg':str(exc)}, exc.status)
+    except ValueError as exc:
+        return no_cache_json({'status':'error','msg':str(exc)},400)
     except Exception as exc:
         return no_cache_json({'status':'error','msg':str(exc)}, 500)
 
@@ -1200,6 +1207,8 @@ from editable_sticker_admin import install as install_editable_sticker_admin
 install_editable_sticker_admin(sys.modules[__name__])
 from design_sources import install as install_design_sources
 install_design_sources(sys.modules[__name__])
+from multilayer_templates import install as install_multilayer_templates
+install_multilayer_templates(sys.modules[__name__])
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))

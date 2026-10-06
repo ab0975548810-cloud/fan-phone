@@ -1685,7 +1685,7 @@ def admin_test(browser, base):
     asset_category_src = page.locator('script[src*="admin-asset-categories.js"]').get_attribute('src')
     assert asset_category_src and 'v=20261002a' in asset_category_src, asset_category_src
     template_loader_src = page.locator('script[src*="admin-template-loader.js"]').get_attribute('src')
-    assert template_loader_src and 'v=20261002a' in template_loader_src, template_loader_src
+    assert template_loader_src and 'v=20261006review1' in template_loader_src, template_loader_src
     library_workspace_src = page.locator('script[src*="admin-library-workspace-v1.js"]').get_attribute('src')
     assert library_workspace_src and 'v=20261002a' in library_workspace_src, library_workspace_src
     commerce_src = page.locator('script[src*="admin-commerce-v1.js"]').get_attribute('src')
@@ -2455,6 +2455,11 @@ def admin_test(browser, base):
     page.locator('#view-templates .titlebar .btn').click()
     poll(page, "() => document.getElementById('template-modal')?.classList.contains('show') && !!visualCanvas", timeout=30000)
 
+    # This block covers the unchanged legacy editor-v2 save/error contract.
+    # New multilayer save/toast behavior has its own real authoring regression.
+    poll(page,"() => document.getElementById('multilayer-enable')?.checked === true")
+    page.locator('#multilayer-enable').uncheck()
+
     template_server_original = page.evaluate("() => ({data:structuredClone(templatesData),version:templatesVersion})")
     template_winner = copy.deepcopy(template_server_original['data'])
     template_winner['templates'].append({'id':'cas-template-a','name':'CAS 模板 A','category':'熱門','model_id':'*','universal':True})
@@ -2793,6 +2798,7 @@ def main():
                 runpy.run_path(str(ROOT / '.github/tests/test_model_cat_icon.py'))['model_cat_icon_test'](browser,base,poll)
                 runpy.run_path(str(ROOT / '.github/tests/test_ai_provider_browser.py'))['ai_provider_browser_test'](browser,base,poll)
                 runpy.run_path(str(ROOT / '.github/tests/test_editable_stickers_browser.py'))['editable_sticker_test'](browser,base,poll)
+                runpy.run_path(str(ROOT / '.github/tests/test_multilayer_browser.py'))['multilayer_browser_test'](browser,base,poll)
             finally: browser.close()
             durable_receipt_test(p, base)
         print('AI_EDITOR_WEBKIT_OK')

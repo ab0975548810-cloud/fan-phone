@@ -15,12 +15,12 @@
         if(!blob.size||blob.size>MAX_FILE)throw Error('單張原始素材上限為 24MB');
         const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await blob.arrayBuffer())),v=>v.toString(16).padStart(2,'0')).join('');
         if(!seen.has(hash)){
-          total+=blob.size;pixels+=item.width*item.height;
+          const intrinsic=item.sourceSize||item;total+=blob.size;pixels+=intrinsic.width*intrinsic.height;
           if(total>MAX_TOTAL||pixels>MAX_PIXELS)throw Error('原始素材總容量或總像素過大，請減少圖片');
           const form=new FormData();form.append('checkout',checkout);form.append('file',blob,'source.png');
           const response=await fetch('/api/design-sources',{method:'POST',body:form,credentials:'same-origin',cache:'no-store'}),data=await response.json();
           if(!response.ok||data.status!=='success')throw Error(data.msg||'原始素材上傳失敗');
-          if(data.sha256!==hash||data.width!==item.width||data.height!==item.height)throw Error('原始素材驗證不一致');
+          if(data.sha256!==hash||data.width!==intrinsic.width||data.height!==intrinsic.height)throw Error('原始素材驗證不一致');
           seen.set(hash,data);
         }
         const source=seen.get(hash);item.sourceRef=source.sourceRef;item.sourceSha256=hash;delete item.src;delete item.publicSrc;

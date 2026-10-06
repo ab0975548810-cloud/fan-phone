@@ -96,7 +96,10 @@ def text_style(value):
 
 
 def configured(design):
-    return isinstance(design, dict) and design.get('render_contract_version') == VERSION
+    if not isinstance(design,dict):return False
+    objects=design.get('objects')
+    tagged=isinstance(objects,list) and any(isinstance(o,dict) and o.get('templateLayerId') for o in objects)
+    return design.get('render_contract_version')==VERSION or bool(design.get('layer_contract_version') or design.get('templateBinding') or tagged)
 
 
 def nodes(design):
@@ -118,7 +121,7 @@ def nodes(design):
 
 
 def validate(design):
-    if not configured(design) or design.get('truncated'):
+    if not configured(design) or design.get('render_contract_version')!=VERSION or design.get('truncated'):
         raise ValueError('新版文字貼紙缺少可重建設計')
     if design.get('background') is not None and not isinstance(design['background'],str):
         raise ValueError('不支援程式化背景')
@@ -134,7 +137,9 @@ def validate(design):
             raise ValueError('不支援的設計物件')
         for key in ('fill', 'stroke', 'backgroundColor'):
             if item.get(key) is not None and not isinstance(item[key], str):
-                raise ValueError('不支援動態圖案或程式化填色')
+                from multilayer_templates import validate_gradient
+                if design.get('layer_contract_version')!='multilayer-v1' or key!='fill':raise ValueError('不支援動態圖案或程式化填色')
+                validate_gradient(item[key])
         if item.get('filters'):
             raise ValueError('請先套用圖片濾鏡再保存')
         for key in ('left', 'top', 'width', 'height', 'scaleX', 'scaleY', 'angle', 'opacity'):
@@ -177,10 +182,12 @@ def validate(design):
             if role.endswith('-text'):
                 normalized_area(item.get('textArea'))
                 text_style({**item, 'fontSize': item.get('requestedFontSize', item.get('fontSize'))})
-    if not pairs or any(set(p) != {'editable-sticker-bg', 'editable-sticker-text'} for p in pairs.values()):
+    multilayer=design.get('layer_contract_version')=='multilayer-v1'
+    if (not pairs and not multilayer) or any(set(p) != {'editable-sticker-bg', 'editable-sticker-text'} for p in pairs.values()):
         raise ValueError('文字貼紙缺少圖片或文字')
     if any(p['editable-sticker-bg']['editableStickerId'] != p['editable-sticker-text']['editableStickerId'] for p in pairs.values()):
         raise ValueError('文字貼紙成員識別不一致')
+    if any(item.get('templateLayerId') for item in nodes(design)) and not multilayer:raise ValueError('多圖層設計不可降級送印')
     return design
 
 
@@ -231,6 +238,9 @@ def public_image(app, url):
 def snapshot(app, design, order_id, model, style_id, upload_paths):
     from print_center import _complete_model_style_profile
     design=validate(copy.deepcopy(design))
+    if design.get('layer_contract_version')=='multilayer-v1':
+        from multilayer_templates import verify_design
+        verify_design(app,design)
     hashes={family:hashlib.sha256((ROOT/file).read_bytes()).hexdigest() for family,file in FONTS.items()}
     if design.get('fontHashes')!=hashes:raise ValueError('字型版本已更新，請重新開啟設計')
     profile=_complete_model_style_profile(model, style_id)
@@ -250,7 +260,8 @@ def snapshot(app, design, order_id, model, style_id, upload_paths):
             if not isinstance(src,str) or item.get('src'):
                 raise ValueError('新版訂單必須先上傳原始素材，不可嵌入圖片資料')
             claim=receipt(app,src,design.get('sourceCheckout'))
-            if item.get('sourceSha256')!=claim['sha256'] or (item.get('width'),item.get('height'))!=(claim['width'],claim['height']):raise ValueError('原始素材引用與尺寸不一致')
+            intrinsic=item.get('sourceSize') or {'width':item.get('width'),'height':item.get('height')}
+            if item.get('sourceSha256')!=claim['sha256'] or (intrinsic.get('width'),intrinsic.get('height'))!=(claim['width'],claim['height']):raise ValueError('原始素材引用與尺寸不一致')
             total+=claim['bytes'];pixels+=claim['width']*claim['height']
             if total > MAX_BYTES:raise ValueError('設計原始素材總容量過大')
             if pixels>MAX_SOURCE_PIXELS:raise ValueError('原始素材總像素過多，請減少圖片')
@@ -259,6 +270,10 @@ def snapshot(app, design, order_id, model, style_id, upload_paths):
     for src,claim in list(seen.items()):
             raw=read(app,stored_path(app,claim));size=image_bytes(raw)
             if len(raw)!=claim['bytes'] or hashlib.sha256(raw).hexdigest()!=claim['sha256'] or size!=(claim['width'],claim['height']):raise ValueError('原始素材驗證失敗')
+            if design.get('layer_contract_version')=='multilayer-v1':
+                from multilayer_templates import verify_source
+                for source_item in nodes(design):
+                    if source_item.get('sourceRef')==src:verify_source(design,source_item,raw)
             digest=hashlib.sha256(raw).hexdigest()
             intended=f'orders/{order_id}/sources/{digest}.png'
             path=intended if app.USE_SUPABASE else intended.replace('/','_')
@@ -269,7 +284,11 @@ def snapshot(app, design, order_id, model, style_id, upload_paths):
         if item['type']!='image':continue
         src=item['sourceRef']
         path,size=seen[src]
-        if (item.get('width'),item.get('height')) != size:raise ValueError('原始圖片尺寸與結構不一致')
+        intrinsic=item.get('sourceSize') or {'width':item.get('width'),'height':item.get('height')}
+        if (intrinsic.get('width'),intrinsic.get('height')) != size:raise ValueError('原始圖片尺寸與結構不一致')
+        for key,extent,limit in (('cropX','width',size[0]),('cropY','height',size[1])):
+            start=item.get(key,0)
+            if not isinstance(start,(int,float)) or start<0 or start+item[extent]>limit+.001 or item[extent]<=0:raise ValueError('圖片裁切超出原始素材')
         item['src']=path;item.pop('sourceRef',None)
     mask=public_image(app,profile['print_line_img'])
     intended=f'orders/{order_id}/sources/print-mask.png'
@@ -278,14 +297,17 @@ def snapshot(app, design, order_id, model, style_id, upload_paths):
     design['production']={'printW':float(profile['print_w']),'printH':float(profile['print_h']), 'maskPath':mask_path,'maskUrl':profile['print_line_img']}
     design['fontHashes']=hashes
     design.pop('sourceCheckout',None)
+    if design.get('layer_contract_version')=='multilayer-v1':
+        from multilayer_templates import seal
+        seal(app,design,order_id)
     return design
 
 
 def _worker(payload):
     from playwright.sync_api import sync_playwright
     resources=payload['resources']
-    html='<html><head></head><body><script src="/static/vendor/fabric-5.3.1.min.js"></script><script src="/static/front-print-mask.js"></script><script src="/static/editable-sticker-core-v1.js"></script></body></html>'
-    scripts={'/static/vendor/fabric-5.3.1.min.js','/static/front-print-mask.js','/static/editable-sticker-core-v1.js'}
+    html='<html><head></head><body><script src="/static/vendor/fabric-5.3.1.min.js"></script><script src="/static/front-print-mask.js"></script><script src="/static/editable-sticker-core-v1.js"></script><script src="/static/multilayer-template-core-v1.js"></script></body></html>'
+    scripts={'/static/vendor/fabric-5.3.1.min.js','/static/front-print-mask.js','/static/editable-sticker-core-v1.js','/static/multilayer-template-core-v1.js'}
     with sync_playwright() as p:
         browser=p.chromium.launch()
         try:
@@ -307,6 +329,9 @@ def _worker(payload):
 
 def render(app, order, profile, read):
     design=validate(copy.deepcopy(order.get('design_json')))
+    if design.get('layer_contract_version')=='multilayer-v1':
+        from multilayer_templates import verify_seal
+        verify_seal(app,design,order['id'])
     contract=design['production']
     for field,key in (('width_mm','printW'),('height_mm','printH')):
         if abs(float(profile[field])-float(contract[key]))>.001:raise ValueError('生產尺寸已更新，生產圖無法重建')
