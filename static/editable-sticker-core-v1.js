@@ -5,6 +5,8 @@
   const VERSION='editable-text-v1';
   const PROPS=['editableStickerId','editableStickerInstanceId','textArea','minFontSize','requestedFontSize','editableStickerStyle','role','publicSrc','assetId','slotId','slotMeta','isSlot','isTplBg'];
   const FONTS={'jf-openhuninn':{name:'可愛粉圓',url:'/static/fonts/jf-openhuninn-2.1.ttf'},'NotoSansTC':{name:'思源黑體',url:'/static/fonts/NotoSansTC.woff2'}};
+  const LEGACY={Arial:'BF-Arimo, NotoSansTC, BF-Emoji','sans-serif':'NotoSansTC, BF-Emoji',serif:'BF-Tinos, BF-SerifTC, BF-Emoji',cursive:'BF-Caveat, jf-openhuninn, BF-Emoji','Times New Roman':'BF-Tinos, BF-SerifTC, BF-Emoji'};
+  const ASSETS={...FONTS};for(const name of ['BF-Arimo','BF-ArimoItalic','BF-Tinos','BF-TinosBold','BF-TinosItalic','BF-TinosBoldItalic','BF-Caveat','BF-Emoji','BF-SerifTC'])ASSETS[name]={url:'/static/fonts/'+name+'.woff2'};
   const loaded=new Map(),bound=new WeakSet();
   let coveragePromise=null;
   const uuid=()=>crypto.randomUUID();
@@ -14,20 +16,44 @@
     return {...a};
   }
   async function font(family,text='文字'){
-    if(!FONTS[family])throw Error('請使用站內字型（可愛粉圓／思源黑體）');
+    if(!ASSETS[family])throw Error('請使用站內字型');
     if(!coveragePromise)coveragePromise=fetch('/static/fonts/editable-font-manifest.json').then(r=>{if(!r.ok)throw Error('字型契約無法載入');return r.json();}).catch(e=>{coveragePromise=null;throw e;});
     const coverage=await coveragePromise;
     const ranges=coverage[family]?.ranges;if(!ranges)throw Error('字型契約缺失');
     for(const character of String(text)){const n=character.codePointAt(0);let lo=0,hi=ranges.length;while(lo<hi){const mid=(lo+hi)>>1;if(ranges[mid][1]<n)lo=mid+1;else hi=mid;}if(![9,10,13].includes(n)&&!(ranges[lo]?.[0]<=n))throw Error('字型不支援部分字元，請更換字型或文字');}
     if(!loaded.has(family))loaded.set(family,(async()=>{
-      const response=await fetch(FONTS[family].url+'?sha='+coverage[family].sha256);if(!response.ok)throw Error('字型載入失敗');const bytes=await response.arrayBuffer();
+      const response=await fetch(ASSETS[family].url+'?sha='+coverage[family].sha256);if(!response.ok)throw Error('字型載入失敗');const bytes=await response.arrayBuffer();
       const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),x=>x.toString(16).padStart(2,'0')).join('');if(hash!==coverage[family].sha256)throw Error('字型版本不一致');
-      const face=new FontFace(family,bytes,family==='NotoSansTC'?{weight:'100 900'}:{});
+      const faceFamily=family.replace(/BoldItalic|Bold|Italic/g,''),descriptor={weight:family.includes('Bold')?'700':(['NotoSansTC','BF-Arimo','BF-ArimoItalic','BF-Caveat','BF-Emoji','BF-SerifTC'].includes(family)?'100 900':'400'),style:family.includes('Italic')?'italic':'normal'};
+      const face=new FontFace(faceFamily,bytes,descriptor);
       await face.load();document.fonts.add(face);window.fabric?.util?.clearFabricFontCache?.(family);return face;
     })().catch(e=>{loaded.delete(family);throw Error('字型載入失敗，不能安全排版');}));
     await loaded.get(family);
-    const result=await document.fonts.load('16px "'+family+'"',String(text||'文字'));
+    const result=await document.fonts.load('16px "'+family.replace(/BoldItalic|Bold|Italic/g,'')+'"',String(text||' '));
     if(!result.length)throw Error('字型尚未準備好');
+  }
+  async function ordinaryFont(family,text){
+    const mapped=LEGACY[family]||family;
+    if(FONTS[mapped]){await font(mapped,text);return mapped;}
+    const families=mapped.split(',').map(x=>x.trim());
+    if(!Object.values(LEGACY).includes(mapped)&&mapped!=='BF-Emoji')throw Error('此舊字型無法安全重建，請先選擇站內固定字型');
+    await Promise.all(families.map(f=>font(f,'')));
+    if(families.includes('BF-Arimo'))await font('BF-ArimoItalic','');
+    if(families.includes('BF-Tinos'))await Promise.all(['BF-TinosBold','BF-TinosItalic','BF-TinosBoldItalic'].map(f=>font(f,'')));
+    const coverage=await coveragePromise;
+    for(const ch of String(text||'')){const n=ch.codePointAt(0);if([9,10,13,0x200d,0xfe0f,0xfe0e].includes(n))continue;
+      if(!families.some(f=>coverage[f].ranges.some(([a,b])=>n>=a&&n<=b)))throw Error('站內固定字型不支援部分字元，請先更換文字');
+    }
+    return mapped;
+  }
+  async function textFonts(c){
+    async function visit(o){if(['text','textbox','i-text'].includes(o.type)){
+      const family=o.role==='editable-sticker-text'?o.fontFamily:await ordinaryFont(o.fontFamily,o.text);
+      if(family!==o.fontFamily)window.bfLegacyFontNotice?.();
+      if(o.role==='editable-sticker-text')await font(family,o.text);
+      o.set('fontFamily',family);o.initDimensions();o.setCoords();
+    }await Promise.all((o._objects||[]).map(visit));}
+    await Promise.all(c.getObjects().map(visit));c.requestRenderAll();
   }
   function members(c,o){const id=typeof o==='string'?o:o?.editableStickerInstanceId;return c.getObjects().filter(x=>x.editableStickerInstanceId===id);}
   function pair(c,o){const list=members(c,o);return {bg:list.find(x=>x.role==='editable-sticker-bg'),text:list.find(x=>x.role==='editable-sticker-text')};}
@@ -54,6 +80,7 @@
     t.setCoords();bg.setCoords();
   }
   async function rehydrate(c){
+    await textFonts(c);
     for(const o of c.getObjects().filter(isMember))o.role=o.type==='image'?'editable-sticker-bg':'editable-sticker-text';
     const texts=c.getObjects().filter(o=>o.role==='editable-sticker-text');
     await Promise.all(texts.map(o=>font(o.fontFamily,o.text)));
@@ -69,7 +96,7 @@
     }
     if(bound.has(c))return;bound.add(c);let removing=false;
     let hydrationQueued=false;
-    c.on('object:added',({target})=>{if(!isMember(target)||hydrationQueued)return;hydrationQueued=true;queueMicrotask(async()=>{try{await rehydrate(c);}catch(e){if(typeof toast==='function')toast(e.message);}finally{hydrationQueued=false;}});});
+    c.on('object:added',({target})=>{if((!isMember(target)&&!['text','textbox','i-text'].includes(target.type))||hydrationQueued)return;hydrationQueued=true;queueMicrotask(async()=>{try{await rehydrate(c);}catch(e){if(typeof toast==='function')toast(e.message);}finally{hydrationQueued=false;}});});
     if(c.findTarget){const find=c.findTarget;c.findTarget=function(){const target=find.apply(this,arguments);return target?.role==='editable-sticker-text'&&!target.isEditing&&!target.__editableEntering?pair(c,target).bg:target;};}
     let ordering=false;
     for(const [name,delta] of [['bringForward',1],['sendBackwards',-1],['bringToFront','top'],['sendToBack','bottom'],['moveTo','index']]){
@@ -119,7 +146,7 @@
   }
   async function serialize(c,context){
     await rehydrate(c);c.discardActiveObject();
-    const fontChecks=[];const check=o=>{if(['text','textbox','i-text'].includes(o.type))fontChecks.push(font(o.fontFamily,o.text));(o._objects||[]).forEach(check);};c.getObjects().forEach(check);await Promise.all(fontChecks);
+    await textFonts(c);
     const data=c.toJSON(PROPS);delete data.clipPath;
     data.objects=data.objects.filter(o=>!['guide','slot-guide'].includes(o.role));
     const visit=(raw,obj)=>{
@@ -129,6 +156,7 @@
         source.getContext('2d').drawImage(el,0,0);raw.src=source.toDataURL('image/png');source.width=source.height=1;
       }
       if(raw.objects)raw.objects.forEach((r,i)=>visit(r,obj._objects[i]));
+      if(raw.clipPath&&obj.clipPath)visit(raw.clipPath,obj.clipPath);
     };
     const objs=c.getObjects().filter(o=>!['guide','slot-guide'].includes(o.role));data.objects.forEach((r,i)=>visit(r,objs[i]));
     const coverage=await coveragePromise;
@@ -138,14 +166,14 @@
     const c=new fabric.StaticCanvas(null,{width:data.logicalCanvas.width,height:data.logicalCanvas.height,enableRetinaScaling:false});
     try{
       const texts=[];const scan=o=>{if(['text','textbox','i-text'].includes(o.type))texts.push(o);(o.objects||[]).forEach(scan);};data.objects.forEach(scan);
-      await Promise.all(texts.map(o=>font(o.fontFamily,o.text)));
+      await Promise.all(texts.map(async o=>{if(o.role==='editable-sticker-text')await font(o.fontFamily,o.text);else o.fontFamily=await ordinaryFont(o.fontFamily,o.text);}));
       await new Promise(resolve=>c.loadFromJSON({version:data.version,background:data.background,objects:data.objects},resolve));await rehydrate(c);
       c.getObjects().forEach(o=>o.set('objectCaching',false));
       const image=await new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=()=>reject(Error('生產遮罩無法載入'));im.src=maskSrc;});
       const mask=BenfuwanPrintMask.normalizeMaskImage(image);
       const output=BenfuwanPrintMask.renderPrint(c,mask,width,height);
-      return {png:output.toDataURL('image/png'),layouts:c.getObjects().filter(o=>o.role==='editable-sticker-text').map(o=>({id:o.editableStickerInstanceId,fontSize:o.fontSize,lines:o._textLines.map(a=>a.join(''))}))};
+      return {png:output.toDataURL('image/png'),layouts:c.getObjects().filter(o=>['text','textbox','i-text'].includes(o.type)).map(o=>({id:o.editableStickerInstanceId||o.role,fontSize:o.fontSize,left:o.left,top:o.top,lines:o._textLines.map(a=>a.join(''))}))};
     }finally{c.dispose();}
   }
-  window.BenfuwanEditableSticker={VERSION,PROPS,FONTS,area,font,fit,sync,syncAll,bind,add,duplicate,update,pair,isMember,rehydrate,serialize,render};
+  window.BenfuwanEditableSticker={VERSION,PROPS,FONTS,LEGACY,ordinaryFont,textFonts,area,font,fit,sync,syncAll,bind,add,duplicate,update,pair,isMember,rehydrate,serialize,render};
 })();

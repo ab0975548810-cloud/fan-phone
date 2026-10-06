@@ -74,12 +74,28 @@ def editable_sticker_test(browser,base,poll):
     page.evaluate("() => {window.__pair=BenfuwanEditableSticker.pair(canvas,canvas.getObjects().find(o=>o.editableStickerInstanceId));const mask=document.createElement('canvas');mask.width=200;mask.height=400;const g=mask.getContext('2d');g.fillStyle='#000';g.fillRect(10,10,180,380);g.clearRect(15,15,35,35);window.__editableMask=mask.toDataURL();}")
     assert page.evaluate('__pair.text.type')=='textbox'
     page.evaluate("""async()=>{await BenfuwanEditableSticker.update(canvas,__pair.bg,{text:'重繪文字測試',fontFamily:'jf-openhuninn',fill:'#000000',strokeWidth:0,fontWeight:'400',fontStyle:'normal',fontSize:80});__pair.bg.set({left:canvas.width/2,top:canvas.height/2,angle:0,scaleX:.19,scaleY:.19});BenfuwanEditableSticker.sync(__pair.bg,__pair.text);window.__contract=await BenfuwanEditableSticker.serialize(canvas,ctx);}""")
-    contract=page.evaluate('BenfuwanOrderPayload.compactDesign({...__contract,padding:"x".repeat(1600000)})')
-    assert contract['render_contract_version']=='editable-text-v1' and contract['objects'][0]['src'].startswith('data:image/png;base64,')
+    contract=page.evaluate('async()=>{window.__uploadedContract=await BenfuwanDesignSources.prepare(__contract);return BenfuwanOrderPayload.compactDesign(__uploadedContract);}')
+    assert contract['render_contract_version']=='editable-text-v1' and 'src' not in contract['objects'][0] and contract['objects'][0]['sourceRef']
+    assert len(__import__('json').dumps(contract))<1500000 and 'data:image/png;base64' not in __import__('json').dumps(contract)
     assert contract['objects'][1]['textArea']==dict(x=.15,y=.2,width=.7,height=.45)
     assert page.evaluate("""async()=>{const old={modelId:ctx.modelId,styleId:ctx.styleId,printBase64:'existing',designJson:{keep:true}};cartItem=old;ctx.printBase64=null;ctx.productionMeta=null;await confirmDesignToCart();return cartItem===old&&cartItem.designJson.keep===true;}""")
     production=page.evaluate("""async()=>{const front=__pair.text._textLines.map(a=>a.join(''));const high=await BenfuwanEditableSticker.render(__contract,__editableMask,2030,4241);const low=await BenfuwanEditableSticker.render(__contract,__editableMask,200,418);return {front,layouts:high.layouts,png:high.png,low:low.png}}""")
     assert production['layouts'][0]['lines']==production['front']
+    mixed=page.evaluate(r"""async()=>{
+      for(const [family,text] of [['Arial','Arial 普通文字\n第二行'],['serif','明體文字\n第二行'],['cursive','手寫文字\n第二行']]){
+        const f=await BenfuwanEditableSticker.ordinaryFont(family,text);
+        canvas.add(new fabric.Textbox(text,{fontFamily:f,fontSize:18,width:100,left:20,top:30,role:'text'}));
+      }
+      await addEmojiSticker('🐱💖');await ensureCanvasFonts();recordHistory();
+      const raw=await BenfuwanEditableSticker.serialize(canvas,ctx);
+      const expected=canvas.getObjects().filter(o=>['textbox','text'].includes(o.type)).map(o=>({fontSize:o.fontSize,left:o.left,top:o.top,lines:o._textLines.map(a=>a.join(''))}));
+      const high=await BenfuwanEditableSticker.render(raw,__editableMask,2030,4241);
+      const uploaded=await BenfuwanDesignSources.prepare(raw);const compact=BenfuwanOrderPayload.compactDesign(uploaded);await BenfuwanDesignSources.release(uploaded);
+      return {expected,actual:high.layouts.map(({id,...rest})=>rest),family:raw.objects.filter(o=>['text','textbox'].includes(o.type)).map(o=>o.fontFamily),bytes:JSON.stringify(compact).length};
+    }""")
+    assert mixed['expected']==mixed['actual'],mixed
+    assert any('BF-Arimo' in f for f in mixed['family']) and 'BF-Emoji' in mixed['family'] and mixed['bytes']<1500000
+    page.evaluate("canvas.getObjects().filter(o=>['text','textbox'].includes(o.type)&&!o.editableStickerInstanceId).forEach(o=>canvas.remove(o))")
     high=Image.open(io.BytesIO(base64.b64decode(production['png'].split(',')[1]))).convert('RGBA');low=Image.open(io.BytesIO(base64.b64decode(production['low'].split(',')[1]))).convert('RGBA').resize(high.size,Image.Resampling.BILINEAR)
     assert high.size==(2030,4241) and high.getpixel((0,0))[3]==0
     # Text grayscale transition band is thinner when rendered from Textbox at HQ.

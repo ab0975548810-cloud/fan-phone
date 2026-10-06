@@ -342,7 +342,7 @@ def upload_private_bytes(path, raw, mime='image/png'):
 
 def delete_private_path(path):
     if not path:
-        return
+        return True
     try:
         if USE_SUPABASE:
             SUPABASE.storage.from_(SUPABASE_PRIVATE_BUCKET).remove([path])
@@ -350,8 +350,10 @@ def delete_private_path(path):
             fp = os.path.join(SAVE_DIR, path)
             if os.path.exists(fp):
                 os.remove(fp)
+        return True
     except Exception as exc:
         print('cleanup warning:', exc)
+        return False
 
 
 def decode_png_data_url(value, max_bytes=10 * 1024 * 1024):
@@ -711,8 +713,13 @@ def create_order():
     print_path = None
     mockup_path = None
     source_paths = []
+    committed = False
+    original_design = None
+    cleanup_record = None
+    order_id = None
     try:
         data = request.get_json(silent=True) or {}
+        original_design = data.get('design_json')
         model_id = str(data.get('model_id') or '')
         style_id = str(data.get('style_id') or '')
         if not model_id or not style_id:
@@ -741,10 +748,17 @@ def create_order():
         order_id = f"{time.strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6].upper()}"
         timestamp = int(time.time())
 
+        # Durable rollback intent exists before image writes. Unknown DB commits
+        # are checked before cleanup and retried later, never deleting a live order.
+        from design_sources import cleanup_plan
+        cleanup_record = cleanup_plan(sys.modules[__name__], order_id)
+
         print_store_path = f'orders/{order_id}/print.png'
         mockup_store_path = f'orders/{order_id}/preview.png'
-        print_path = upload_private_bytes(print_store_path, print_raw)
-        mockup_path = upload_private_bytes(mockup_store_path, mockup_raw)
+        print_path = print_store_path if USE_SUPABASE else print_store_path.replace('/', '_')
+        mockup_path = mockup_store_path if USE_SUPABASE else mockup_store_path.replace('/', '_')
+        upload_private_bytes(print_store_path, print_raw)
+        upload_private_bytes(mockup_store_path, mockup_raw)
 
         design_json = data.get('design_json')
         from editable_stickers import configured as editable_contract, snapshot as snapshot_editable, nodes as design_nodes
@@ -776,6 +790,7 @@ def create_order():
             if getattr(g, '_bf_order_color', ''):
                 order_payload['style_name'] += '・' + g._bf_order_color
             result = commerce.create(order_payload)
+            committed = result['order_id'] == order_id
             if result['order_id'] != order_id:
                 delete_private_path(print_path)
                 delete_private_path(mockup_path)
@@ -787,8 +802,6 @@ def create_order():
             try:
                 SUPABASE.table('orders').insert(order_payload).execute()
             except Exception:
-                delete_private_path(print_path)
-                delete_private_path(mockup_path)
                 raise
         else:
             local_info = {
@@ -810,16 +823,30 @@ def create_order():
             }
             local_save_json(os.path.join(SAVE_DIR, f'{order_id}_info.json'), local_info)
 
+        committed = True
         return no_cache_json({'status':'success','order_id':order_id,'total':total,'msg':'訂單建立成功'})
     except CommerceError:
         raise
     except ValueError as exc:
-        for source_path in source_paths:
-            delete_private_path(source_path)
         return no_cache_json({'status':'error','msg':str(exc)}, 400)
     except Exception as exc:
         print('create_order error:', repr(exc))
         return no_cache_json({'status':'error','msg':f'訂單建立失敗：{exc}'}, 500)
+    finally:
+        if not committed:
+            try:
+                from design_sources import existing_order
+                found = existing_order(sys.modules[__name__],order_id) if order_id else None
+                if found:
+                    committed = True
+                else:
+                    cleaned = all([delete_private_path(path) for path in set([print_path, mockup_path, *source_paths])])
+                    if cleaned:delete_private_path(cleanup_record)
+            except Exception:
+                app.logger.warning('order cleanup deferred until commit status can be verified')
+        if committed:delete_private_path(cleanup_record)
+        from design_sources import release
+        release(sys.modules[__name__], original_design)
 
 
 @app.route('/api/admin/get_orders', methods=['GET'])
@@ -1162,6 +1189,8 @@ def custom_static_orders(filename):
 
 from editable_sticker_admin import install as install_editable_sticker_admin
 install_editable_sticker_admin(sys.modules[__name__])
+from design_sources import install as install_design_sources
+install_design_sources(sys.modules[__name__])
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))

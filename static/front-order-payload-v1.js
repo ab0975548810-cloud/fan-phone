@@ -54,7 +54,8 @@
     // This contract is already deduplicated into one original image per object.
     // A text/source manifest must never be silently stripped or truncated.
     if(design.render_contract_version==='editable-text-v1'){
-      if(designBytes(design)>95*1024*1024)throw new Error('文字貼紙原始素材容量過大，請減少圖片');
+      if(designBytes(design)>1500000)throw new Error('設計結構過大，請減少物件');
+      const check=o=>{if(o.type==='image'&&(!o.sourceRef||o.src))throw Error('原始素材必須先上傳');(o.objects||[]).forEach(check);if(o.clipPath)check(o.clipPath);};(design.objects||[]).forEach(check);
       return structuredClone(design);
     }
     let compact=cloneCompact(design);
@@ -88,11 +89,14 @@
       if(!item&&typeof idbGet==='function')item=await idbGet('cart');
       if(!item)return;
       const before=designBytes(item.designJson);
-      if(item.designJson?.render_contract_version==='editable-text-v1'&&before+(item.printBase64?.length||0)+(item.mockupBase64?.length||0)+16384>96*1024*1024)throw new Error('設計與生產圖總容量過大，請減少圖片；原圖不會被壓縮');
+      if(item.designJson?.render_contract_version==='editable-text-v1'){
+        item.designJson=await BenfuwanDesignSources.prepare(item.designJson);
+        if(designBytes(item.designJson)+(item.printBase64?.length||0)+(item.mockupBase64?.length||0)+65536>36*1024*1024)throw new Error('生產圖與預覽總容量過大，請減少圖片；原圖不會被壓縮');
+      }
       item.designJson=compactDesign(item.designJson);
       const after=designBytes(item.designJson);
       if(typeof cartItem!=='undefined')cartItem=item;
-      if(typeof idbSet==='function')await idbSet('cart',item);
+      if(typeof idbSet==='function'&&item.designJson?.render_contract_version!=='editable-text-v1')await idbSet('cart',item);
       console.info('[ORDER] compact design payload',before,'->',after,'bytes');
     }catch(e){
       if(item?.designJson?.render_contract_version==='editable-text-v1')throw e;
@@ -104,10 +108,25 @@
   }
 
   const baseSubmit=window.submitOrder;
+  let preparing=false;
   if(typeof baseSubmit==='function'&&!baseSubmit.__bfPayloadWrapped){
     const wrapped=async function(){
-      try{await compactCartBeforeSubmit();}catch(error){if(typeof toast==='function')toast(error.message||'設計資料無法保存');return;}
-      return baseSubmit.apply(this,arguments);
+      if(preparing)return;
+      if(!document.getElementById('form-surname')?.value.trim())return baseSubmit.apply(this,arguments);
+      preparing=true;let original=null,submitted=null,item=null;
+      try{
+        item=cartItem||await idbGet('cart');original=item?.designJson;
+        if(item)cartItem=item;
+        if(original?.render_contract_version==='editable-text-v1'&&!item.orderKey){item.orderKey=crypto.randomUUID();await idbSet('cart',item);}
+        await compactCartBeforeSubmit();submitted=item?.designJson;
+        return await baseSubmit.apply(this,arguments);
+      }catch(error){if(typeof toast==='function')toast(error.message||'設計資料無法保存');}
+      finally{
+        submitted=submitted||item?.designJson;
+        if(submitted?.sourceCheckout)await BenfuwanDesignSources.release(submitted);
+        preparing=false;
+        if(item&&cartItem===item&&original?.render_contract_version==='editable-text-v1')item.designJson=original;
+      }
     };
     wrapped.__bfPayloadWrapped=true;
     window.submitOrder=wrapped;

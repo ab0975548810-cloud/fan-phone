@@ -20,12 +20,15 @@ from PIL import Image
 VERSION = 'editable-text-v1'
 ROOT = Path(__file__).resolve().parent
 FONTS = {'jf-openhuninn': 'static/fonts/jf-openhuninn-2.1.ttf', 'NotoSansTC': 'static/fonts/NotoSansTC.woff2'}
+STICKER_FONTS=set(FONTS)
+FONTS.update({name:'static/fonts/'+name+'.woff2' for name in ('BF-Arimo','BF-ArimoItalic','BF-Tinos','BF-TinosBold','BF-TinosItalic','BF-TinosBoldItalic','BF-Caveat','BF-Emoji','BF-SerifTC')})
+LEGACY_FONTS={'Arial':'BF-Arimo, NotoSansTC, BF-Emoji','sans-serif':'NotoSansTC, BF-Emoji','serif':'BF-Tinos, BF-SerifTC, BF-Emoji','cursive':'BF-Caveat, jf-openhuninn, BF-Emoji','Times New Roman':'BF-Tinos, BF-SerifTC, BF-Emoji'}
 MAX_BYTES = 70 * 1024 * 1024
 MAX_SOURCE_PIXELS = 64000000
 _RENDER_SLOT = threading.BoundedSemaphore(1)
 
 
-@lru_cache(maxsize=2)
+@lru_cache(maxsize=16)
 def glyph_ranges(family):
     manifest=json.loads((ROOT/'static/fonts/editable-font-manifest.json').read_text(encoding='utf-8'))
     ranges=manifest[family]['ranges']
@@ -38,6 +41,19 @@ def check_glyphs(family,text):
         point=ord(ch);index=bisect_left(ends,point)
         if point not in (9,10,13) and (index>=len(ranges) or ranges[index][0]>point):
             raise ValueError('字型不支援部分字元，請更換字型或文字')
+
+
+def check_ordinary_font(family,text):
+    mapped=LEGACY_FONTS.get(family,family)
+    if mapped in STICKER_FONTS:return check_glyphs(mapped,text)
+    if mapped not in set(LEGACY_FONTS.values())|{'BF-Emoji'}:raise ValueError('請先選擇站內固定字型')
+    families=mapped.split(', ')
+    for ch in text:
+        if ord(ch) in (9,10,13,0x200d,0xfe0e,0xfe0f):continue
+        for part in families:
+            try:check_glyphs(part,ch);break
+            except ValueError:pass
+        else:raise ValueError('站內固定字型不支援部分字元')
 
 
 def normalized_area(value):
@@ -61,7 +77,7 @@ def numeric(value, low, high, label):
 
 
 def text_style(value):
-    if not isinstance(value, dict) or value.get('fontFamily') not in FONTS:
+    if not isinstance(value, dict) or value.get('fontFamily') not in STICKER_FONTS:
         raise ValueError('請選站內字型')
     out = {key: value.get(key) for key in ('text', 'fontFamily', 'fontWeight', 'fontStyle', 'fill', 'stroke', 'textAlign')}
     if not isinstance(out['text'], str) or len(out['text']) > 2000:
@@ -124,15 +140,16 @@ def validate(design):
         for key in ('left', 'top', 'width', 'height', 'scaleX', 'scaleY', 'angle', 'opacity'):
             if key in item:
                 numeric(item[key], -100000, 100000, key)
-        if item['type'] == 'image' and not item.get('src'):
+        if item['type'] == 'image' and not (item.get('src') or item.get('sourceRef')):
             raise ValueError('缺少原始圖片')
-        if item['type'] in ('text', 'textbox', 'i-text') and item.get('fontFamily') not in FONTS:
-            raise ValueError('生產文字必須使用站內字型，請改用可愛粉圓／思源黑體')
         if item['type'] in ('text', 'textbox', 'i-text'):
             if not isinstance(item.get('text'),str) or len(item['text'])>2000:
                 raise ValueError('文字最多 2000 字')
             numeric(item.get('fontSize'),1,1000,'字級')
-            check_glyphs(item['fontFamily'],item['text'])
+            if item.get('role')=='editable-sticker-text':
+                if item.get('fontFamily') not in STICKER_FONTS:raise ValueError('文字貼紙必須使用站內字型')
+                check_glyphs(item['fontFamily'],item['text'])
+            else:check_ordinary_font(item.get('fontFamily'),item['text'])
             def style_values(value,depth=0):
                 if depth>5:raise ValueError('文字樣式過於複雜')
                 if isinstance(value,list):
@@ -223,27 +240,44 @@ def snapshot(app, design, order_id, model, style_id, upload_paths):
     for key, source in (('printW','print_w'),('printH','print_h')):
         if abs(float((design.get('production') or {}).get(key,0))-float(profile[source])) > .001:
             raise ValueError('生產尺寸已更新，請重新設計')
+    from design_sources import receipt, stored_path, read
     seen={};total=0
     pixels=0
     for item in nodes(design):
         if item['type'] != 'image':continue
-        src=item['src']
+        src=item.get('sourceRef')
         if src not in seen:
-            if not isinstance(src,str) or not src.startswith('data:image/png;base64,'):
-                raise ValueError('新版訂單需保留原始 PNG 圖片')
-            raw=base64.b64decode(src.split(',',1)[1],validate=True);size=image_bytes(raw);total+=len(raw);pixels+=size[0]*size[1]
+            if not isinstance(src,str) or item.get('src'):
+                raise ValueError('新版訂單必須先上傳原始素材，不可嵌入圖片資料')
+            claim=receipt(app,src,design.get('sourceCheckout'))
+            if item.get('sourceSha256')!=claim['sha256'] or (item.get('width'),item.get('height'))!=(claim['width'],claim['height']):raise ValueError('原始素材引用與尺寸不一致')
+            total+=claim['bytes'];pixels+=claim['width']*claim['height']
             if total > MAX_BYTES:raise ValueError('設計原始素材總容量過大')
             if pixels>MAX_SOURCE_PIXELS:raise ValueError('原始素材總像素過多，請減少圖片')
+            seen[src]=claim
+    # Full preflight before promotion; no partial uploads when total guards fail.
+    for src,claim in list(seen.items()):
+            raw=read(app,stored_path(app,claim));size=image_bytes(raw)
+            if len(raw)!=claim['bytes'] or hashlib.sha256(raw).hexdigest()!=claim['sha256'] or size!=(claim['width'],claim['height']):raise ValueError('原始素材驗證失敗')
             digest=hashlib.sha256(raw).hexdigest()
-            path=app.upload_private_bytes(f'orders/{order_id}/sources/{digest}.png',raw);upload_paths.append(path)
+            intended=f'orders/{order_id}/sources/{digest}.png'
+            path=intended if app.USE_SUPABASE else intended.replace('/','_')
+            if path not in upload_paths:
+                upload_paths.append(path);app.upload_private_bytes(intended,raw)
             seen[src]=(path,size)
+    for item in nodes(design):
+        if item['type']!='image':continue
+        src=item['sourceRef']
         path,size=seen[src]
         if (item.get('width'),item.get('height')) != size:raise ValueError('原始圖片尺寸與結構不一致')
-        item['src']=path
+        item['src']=path;item.pop('sourceRef',None)
     mask=public_image(app,profile['print_line_img'])
-    mask_path=app.upload_private_bytes(f'orders/{order_id}/sources/print-mask.png',mask);upload_paths.append(mask_path)
+    intended=f'orders/{order_id}/sources/print-mask.png'
+    mask_path=intended if app.USE_SUPABASE else intended.replace('/','_')
+    upload_paths.append(mask_path);app.upload_private_bytes(intended,mask)
     design['production']={'printW':float(profile['print_w']),'printH':float(profile['print_h']), 'maskPath':mask_path,'maskUrl':profile['print_line_img']}
     design['fontHashes']=hashes
+    design.pop('sourceCheckout',None)
     return design
 
 
@@ -323,6 +357,25 @@ def store_generated(app,path,raw):
     try:os.replace(temporary,full)
     finally:temporary.unlink(missing_ok=True)
     return filename
+
+
+def delete_order_sources(app, order):
+    """Delete owned sources and generated artifacts after permanent order deletion."""
+    order_id=order['id']
+    if not __import__('re').fullmatch(r'[A-Za-z0-9-]+',order_id):raise ValueError('訂單識別無效')
+    if app.USE_SUPABASE:
+        bucket=app.SUPABASE.storage.from_(app.SUPABASE_PRIVATE_BUCKET)
+        for folder in ('sources','rendered'):
+            prefix=f'orders/{order_id}/{folder}'
+            while True:
+                rows=bucket.list(prefix,{'limit':100})
+                paths=[prefix+'/'+r['name'] for r in rows if '/' not in r['name'] and '\\' not in r['name'] and r['name'] not in ('.','..')]
+                if not paths:break
+                bucket.remove(paths)
+    else:
+        for folder in ('sources','rendered'):
+            for path in Path(app.SAVE_DIR).glob(f'orders_{order_id}_{folder}_*'):
+                path.unlink(missing_ok=True)
 
 
 if __name__=='__main__' and '--worker' in sys.argv:

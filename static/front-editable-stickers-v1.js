@@ -3,6 +3,15 @@
   const core=window.BenfuwanEditableSticker;if(!core)return;
   CUSTOM_PROPS.push(...core.PROPS.filter(k=>!CUSTOM_PROPS.includes(k)));
   const say=m=>typeof toast==='function'&&toast(m);
+  let fontNoticed=false;window.bfLegacyFontNotice=()=>{if(!fontNoticed){fontNoticed=true;say('舊系統字型已轉為站內固定字型，請在編輯器確認文字排版；Emoji 為固定單色。');}};
+  // Explicit fixed-font choices are shown before creation, never converted at checkout.
+  const fontSelect=document.getElementById('text-font');
+  for(const option of fontSelect?.options||[]){if(core.LEGACY[option.value]){option.value=core.LEGACY[option.value];option.textContent+='（站內固定字型）';}}
+  const fontNote=document.createElement('small');fontNote.textContent='一般文字使用站內固定字型；Emoji 使用固定單色字型，預覽與生產一致。';fontSelect?.parentElement.append(fontNote);
+  const editorFont=window.ensureEditorFont;
+  window.ensureEditorFont=async function(family,text){if(core.FONTS[family])return core.font(family,text);return core.ordinaryFont(family,text);};
+  const emoji=window.addEmojiSticker;
+  window.addEmojiSticker=async function(value){try{await core.ordinaryFont('BF-Emoji',value);emoji(value);const o=get()?.getActiveObject();if(o){o.set('fontFamily','BF-Emoji');o.initDimensions();o.setCoords();get().requestRenderAll();recordHistory();}say('Emoji 使用站內固定單色字型');}catch(error){say(error.message);}};
   const get=()=>typeof canvas!=='undefined'?canvas:null;
   const has=c=>c?.getObjects().some(core.isMember);
   function restoreViewport(){const app=document.querySelector('.app');if(app){app.scrollTop=0;app.scrollLeft=0;}requestAnimationFrame(()=>window.BenfuwanEditorAccess?.fitCanvas?.());}
@@ -13,7 +22,7 @@
   const hydrate=window.rehydrateCanvas;
   window.rehydrateCanvas=function(){const r=hydrate.apply(this,arguments);const c=get();if(has(c))core.rehydrate(c).catch(e=>say(e.message));return r;};
   const fonts=window.ensureCanvasFonts;
-  window.ensureCanvasFonts=async function(){await fonts?.();if(has(get()))await core.rehydrate(get());};
+  window.ensureCanvasFonts=async function(){await fonts?.();if(get()){await core.textFonts(get());if(has(get()))await core.rehydrate(get());}};
   for(const name of ['nudgeActive','centerActive','changeAngle','changeOpacity','flipActive','commitObjectAdjustment','bringForward','sendBackward','moveToTop','moveToBottom']){
     const old=window[name];window[name]=function(){const r=old.apply(this,arguments),c=get();if(has(c)){core.syncAll(c);c.requestRenderAll();}return r;};
   }
