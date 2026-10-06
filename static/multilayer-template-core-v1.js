@@ -3,7 +3,7 @@
   'use strict';if(window.BenfuwanMultilayer)return;
   const VERSION='multilayer-v1';
   const FLAGS=['locked','canMove','canScale','canRotate','canDelete','canDuplicate','canEdit'];
-  const PROPS=['layerId','templateLayerId','layerInstanceId','templateApplicationId','layerName','assetId','duplicateOf','normalizedGeometry','zIndex',...FLAGS,'sourceSize','cropX','cropY','templateSlot','slotId','slotMeta','isSlot','isTplBg','templateState','layer_contract_version'];
+  const PROPS=['role','layerId','templateLayerId','layerInstanceId','templateApplicationId','layerName','assetId','duplicateOf','normalizedGeometry','zIndex',...FLAGS,'sourceSize','cropX','cropY','templateSlot','slotId','slotMeta','isSlot','isTplBg','templateState','layer_contract_version'];
   const uid=()=>crypto.randomUUID(),clone=v=>structuredClone(v);
   const text=o=>['text','textbox','i-text'].includes(o.type);
   const core=()=>window.BenfuwanEditableSticker;

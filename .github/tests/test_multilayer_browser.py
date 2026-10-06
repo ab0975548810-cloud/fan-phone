@@ -80,7 +80,8 @@ def multilayer_browser_test(browser,base,poll):
               visualCanvas.requestRenderAll();
             }""")
             # Lock an image above another image to test transparent hit-through.
-            info=admin.evaluate("""()=>{const images=visualCanvas.getObjects().filter(o=>o.type==='image'&&!o.editableStickerInstanceId);const lower=images[0],upper=images[1];upper.setPositionByOrigin(lower.getCenterPoint(),'center','center');upper.setCoords();return {lower:lower.layerId,upper:upper.layerId,rotated:images[3].layerId}}""")
+            info=admin.evaluate("""()=>{const images=visualCanvas.getObjects().filter(o=>o.type==='image'&&!o.editableStickerInstanceId);const lower=images[0],upper=images[1];upper.setPositionByOrigin(lower.getCenterPoint(),'center','center');upper.setCoords();return {lower:lower.layerId,upper:upper.layerId,rotated:images[3].layerId,tools:images.slice(4,9).map(o=>o.layerId)}}""")
+            image_tools_regression(admin,poll,info)
             admin.locator('#bf-tpl-layers-btn-v3').click()
             for label,flag in (('Layer 10','canEdit'),('Layer 11','canRotate')):
                 # Resolve the row by the actual editable layer label.
@@ -100,6 +101,12 @@ def multilayer_browser_test(browser,base,poll):
             poll(admin,"() => !document.getElementById('template-modal').classList.contains('show')",timeout=60000)
             data=app_module.cloud_get_json('templates',app_module.TEMPLATES_FILE,app_module.DEFAULT_TEMPLATES);tpl=data['templates'][0]
             assert tpl['layer_contract_version']=='multilayer-v1' and len(tpl['objects_json']['objects'])==30
+            assert all(not o.get('filters') and not o.get('__bfAdjust') for o in tpl['objects_json']['objects'])
+            baked=next(o for o in tpl['objects_json']['objects'] if o['layerId']==info['lower'])
+            assert baked['src'].endswith('.png') and baked['src']!=admin.evaluate('__beforeBakeSource')
+            with Image.open(Path(app_module.__file__).parent/baked['src'].lstrip('/')) as image:
+                assert image.size==(512,256) and image.convert('RGBA').getpixel((0,0))[3]==0
+                assert image.convert('RGBA').getpixel((256,128))!=Image.open(io.BytesIO(png('#9ac8e5'))).convert('RGBA').getpixel((256,128))
             assert len({o['layerId'] for o in tpl['objects_json']['objects']})==30
             original_layers=copy.deepcopy(tpl['objects_json']['objects'])
             admin.close()
@@ -237,6 +244,41 @@ def single_touch_drag_test(page,browser):
           emit('touchstart',0,0);for(let i=1;i<=5;i++)emit('touchmove',i*3,i*2);emit('touchend',15,10);
         }""",point)
     assert abs(page.evaluate('canvas.getActiveObject().left')-point['left'])>3
+
+
+def image_tools_regression(page,poll,info):
+    uploads=[];cloud=[]
+    page.on('request',lambda request:uploads.append(request.post_data_buffer) if '/api/admin/upload_image' in request.url else None)
+    page.route('**/api/ai/remove-background',lambda route:(cloud.append(route.request.url),route.fulfill(status=500,content_type='application/json',body='{"status":"error"}')))
+    def select(identity):
+        page.evaluate("id=>{visualCanvas.setActiveObject(visualCanvas.getObjects().find(o=>o.layerId===id));visualCanvas.requestRenderAll();}",identity)
+        poll(page,"() => document.getElementById('bf-tpl-objectbar').classList.contains('bf-imgtools')")
+    def source(identity):return page.evaluate("id=>visualCanvas.getObjects().find(o=>o.layerId===id).publicSrc",identity)
+    crop,replacement,ai,outline,expand=info['tools']
+    select(crop);before=source(crop);page.locator('[data-bf-imgtool=crop]').click();page.locator('#bf-imgtool-panel [data-ratio="1"]').click()
+    poll(page,f"() => visualCanvas.getObjects().find(o=>o.layerId==='{crop}').publicSrc !== '{before}'")
+    assert source(crop).endswith('.png') and page.evaluate("id=>visualCanvas.getObjects().find(o=>o.layerId===id).width",crop)==256
+    select(replacement);before=source(replacement);page.locator('#bf-it-replace-file').set_input_files({'name':'replacement.png','mimeType':'image/png','buffer':png('#a1d0f0')})
+    poll(page,f"() => visualCanvas.getObjects().find(o=>o.layerId==='{replacement}').publicSrc !== '{before}'")
+    assert source(replacement).endswith('.png')
+    select(ai);before=source(ai);page.evaluate('() => bfAdminRemoveBackground()')
+    assert source(ai).endswith('.png') and source(ai)!=before and cloud==[]
+    select(outline);before=source(outline);page.locator('.bf-outline-v2-btn').click();page.locator('#bf-outline-v2-panel [data-style=white]').click()
+    poll(page,f"() => visualCanvas.getObjects().find(o=>o.layerId==='{outline}').publicSrc !== '{before}'")
+    assert source(outline).endswith('.png')
+    # The existing smart-expand entry remains hidden; exercise its handler
+    # without enabling any UI feature or calling a cloud/vendor provider.
+    select(expand);before=source(expand);page.evaluate('() => document.getElementById("bf-tpl-expand-v4").onclick()')
+    assert source(expand).endswith('.png') and source(expand)!=before
+    select(info['lower']);page.evaluate('window.__beforeBakeSource=visualCanvas.getActiveObject().publicSrc')
+    page.locator('[data-bf-imgtool=adjust]').click();poll(page,"() => !!document.getElementById('bf-it-bright').dataset.bfFilterFix")
+    for name,start,end in (('bright',.5,.68),('contrast',.5,.57),('sat',.5,.57),('blur',0,.05)):
+        slider=page.locator('#bf-it-'+name);slider.scroll_into_view_if_needed();box=slider.bounding_box();x=box['x'];y=box['y']+box['height']/2
+        page.mouse.move(x+box['width']*start,y);page.mouse.down();page.mouse.move(x+box['width']*end,y,steps=6);page.mouse.up()
+    assert page.evaluate("visualCanvas.getActiveObject().filters.length")==4
+    assert uploads and all(b'name="source_contract"' in body and b'multilayer-v1' in body and b'Content-Type: image/png' in body for body in uploads)
+    page.locator('#bf-imgtool-panel [data-close]').click()
+    page.unroute('**/api/ai/remove-background')
 
 
 def gesture_test(page,browser):

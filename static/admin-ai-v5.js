@@ -22,6 +22,7 @@ async function sourceElement(o){
 }
 
 async function uploadResult(blob){
+  if(window.BenfuwanAdminMultilayer?.enabled(canvas()))return BenfuwanAdminMultilayer.upload(await BenfuwanAdminMultilayer.pngFile(new File([blob],'ai.png',{type:blob.type||'image/png'})));
   if(typeof window.uploadAdminImage!=='function')return '';
   const mime=/^image\/(png|jpeg|webp)$/i.test(blob.type||'')?blob.type:'image/png';
   const ext=mime==='image/webp'?'webp':(mime==='image/jpeg'?'jpg':'png');
@@ -30,6 +31,7 @@ async function uploadResult(blob){
 }
 
 async function replace(old,blob,publicUrl){
+  if(window.BenfuwanAdminMultilayer?.enabled(canvas()))return BenfuwanAdminMultilayer.replace(old,blob,publicUrl,{aiBackgroundRemoved:true},{stretch:true});
   const core=window.BenfuwanAiRemoveV2,c=canvas();if(!core||!c)throw new Error('模板畫布尚未準備好');
   if(!c.getObjects?.().includes(old))throw new Error('圖片狀態已改變，請重新選取後再試');
   const src=await core.blobToDataURL(blob),el=await load(src),idx=c.getObjects().indexOf(old),center=old.getCenterPoint(),ow=Math.max(1,old.getScaledWidth?.()||((old.width||1)*(old.scaleX||1))),oh=Math.max(1,old.getScaledHeight?.()||((old.height||1)*(old.scaleY||1)));
@@ -47,11 +49,12 @@ async function replace(old,blob,publicUrl){
 }
 
 async function runRemove(aiMode='general'){
-  if(busy)return;const old=active();if(!isImage(old)){alert('請先選取一張圖片');return}
+  if(busy)return;let old=active();if(!isImage(old)){alert('請先選取一張圖片');return}
   if(aiMode==='general'&&old.aiBackgroundRemoved){alert('這張圖片已經完成通用去背');return}
   const core=window.BenfuwanAiRemoveV2;if(!core){alert('通用去背核心尚未載入，請重新整理後再試');return}
   busy=true;status('正在準備高解析圖片…');
   try{
+    if(window.BenfuwanAdminMultilayer?.enabled(canvas()))old=await BenfuwanAdminMultilayer.bakeImage(old);
     const source=await sourceElement(old);status('正在保留全部圖案並移除外圍背景…');
     const opts={filename:(old.originalName||'template').replace(/\.[^.]+$/,'')+'.png',timeoutMs:195000};
     const result=aiMode==='interactive'?{blob:await window.BenfuwanAiTools.interactive(source),mode:'interactive-mask'}:await (aiMode==='stamp'?core.cloudRemoveFromElement:core.universalRemoveFromElement)(source,opts),out=result.blob;

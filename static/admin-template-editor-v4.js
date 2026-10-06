@@ -95,9 +95,10 @@
 
   function loadImage(src){return new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=()=>reject(new Error('圖片載入失敗'));im.src=src})}
   function fileUrl(file){return URL.createObjectURL(file)}
-  function canvasBlob(c,type='image/webp',quality=.9){return new Promise((resolve,reject)=>c.toBlob(b=>b?resolve(b):reject(new Error('圖片壓縮失敗')),type,quality))}
+  function canvasBlob(c,type='image/webp',quality=.9){if(window.BenfuwanAdminMultilayer?.enabled(visualCanvas))return BenfuwanAdminMultilayer.pngBlob(c);return new Promise((resolve,reject)=>c.toBlob(b=>b?resolve(b):reject(new Error('圖片壓縮失敗')),type,quality))}
 
   async function compressFile(file,maxEdge=3200,maxBytes=7.5*1024*1024){
+    if(window.BenfuwanAdminMultilayer?.enabled(visualCanvas))return BenfuwanAdminMultilayer.pngFile(file);
     if(!file)throw new Error('沒有選擇圖片');
     if(!/^image\/(png|jpeg|webp)$/i.test(file.type||''))throw new Error('只支援 PNG / JPG / WEBP');
     const src=fileUrl(file);let im;
@@ -170,6 +171,7 @@
   }
 
   async function replaceImage(oldObj,blob,publicUrl,extra={}){
+    if(window.BenfuwanAdminMultilayer?.enabled(visualCanvas))return BenfuwanAdminMultilayer.replace(oldObj,blob,publicUrl,extra);
     const src=URL.createObjectURL(blob);let el;try{el=await loadImage(src)}finally{URL.revokeObjectURL(src)}
     const c=visualCanvas,index=c.getObjects().indexOf(oldObj);const oldW=Math.max(1,oldObj.getScaledWidth()),oldH=Math.max(1,oldObj.getScaledHeight());
     const neo=new fabric.Image(el,{left:oldObj.left,top:oldObj.top,originX:oldObj.originX||'center',originY:oldObj.originY||'center',angle:oldObj.angle||0,flipX:!!oldObj.flipX,flipY:!!oldObj.flipY,opacity:oldObj.opacity??1,objectCaching:true});
@@ -182,17 +184,17 @@
       const inputBlob=await fabricImageBlob(o,1800,.9);if(inputBlob.size>6*1024*1024)throw new Error('圖片處理後仍超過 AI 限制');
       const fd=new FormData();fd.append('image',new File([inputBlob],'template-ai.webp',{type:'image/webp'}));setProgress('AI 正在摳圖，第一次啟動可能要等一下…');
       const r=await fetch('/api/ai/remove-background',{method:'POST',body:fd});if(!r.ok){let msg='AI 摳圖失敗';try{const j=await r.json();msg=j.msg||msg}catch(e){}throw new Error(msg)}
-      const png=await r.blob();setProgress('摳圖完成，正在最佳化並儲存…');const opt=await compressBlob(png,3000,7.5*1024*1024,.94);const file=new File([opt],'ai-cutout.webp',{type:'image/webp'});const url=await uploadAdminImage(file,'template');await replaceImage(o,opt,url,{aiBackgroundRemoved:true});setProgress('AI 摳圖完成 ✓');status('AI 摳圖完成，可繼續排版');setTimeout(()=>setProgress('',false),1200);
+      const png=await r.blob();setProgress('摳圖完成，正在最佳化並儲存…');const opt=await compressBlob(png,3000,7.5*1024*1024,.94);const file=new File([opt],opt.type==='image/png'?'ai-cutout.png':'ai-cutout.webp',{type:opt.type});const url=await uploadAdminImage(file,'template');await replaceImage(o,opt,url,{aiBackgroundRemoved:true});setProgress('AI 摳圖完成 ✓');status('AI 摳圖完成，可繼續排版');setTimeout(()=>setProgress('',false),1200);
     }catch(e){console.error(e);setProgress('',false);alert(e.message||'AI 摳圖失敗')}
     finally{busy=false}
   }
 
-  async function compressBlob(blob,maxEdge=3000,maxBytes=7.5*1024*1024,quality=.92){const src=URL.createObjectURL(blob);let im;try{im=await loadImage(src)}finally{URL.revokeObjectURL(src)}const ratio=Math.min(1,maxEdge/Math.max(im.naturalWidth||im.width,im.naturalHeight||im.height));const w=Math.max(1,Math.round((im.naturalWidth||im.width)*ratio)),h=Math.max(1,Math.round((im.naturalHeight||im.height)*ratio));const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(im,0,0,w,h);let q=quality,out=await canvasBlob(c,'image/webp',q);while(out.size>maxBytes&&q>.6){q-=.08;out=await canvasBlob(c,'image/webp',q)}c.width=c.height=1;if(out.size>maxBytes)throw new Error('圖片最佳化後仍過大');return out}
+  async function compressBlob(blob,maxEdge=3000,maxBytes=7.5*1024*1024,quality=.92){if(window.BenfuwanAdminMultilayer?.enabled(visualCanvas))return BenfuwanAdminMultilayer.pngFile(new File([blob],'image.png',{type:blob.type}));const src=URL.createObjectURL(blob);let im;try{im=await loadImage(src)}finally{URL.revokeObjectURL(src)}const ratio=Math.min(1,maxEdge/Math.max(im.naturalWidth||im.width,im.naturalHeight||im.height));const w=Math.max(1,Math.round((im.naturalWidth||im.width)*ratio)),h=Math.max(1,Math.round((im.naturalHeight||im.height)*ratio));const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(im,0,0,w,h);let q=quality,out=await canvasBlob(c,'image/webp',q);while(out.size>maxBytes&&q>.6){q-=.08;out=await canvasBlob(c,'image/webp',q)}c.width=c.height=1;if(out.size>maxBytes)throw new Error('圖片最佳化後仍過大');return out}
 
   async function runSmartExpand(){
     if(busy)return;const o=visualCanvas?.getActiveObject();if(!isImage(o)){alert('請先點選一張圖片');return}busy=true;by('bf-tpl-ai-panel-v4')?.classList.add('show');setProgress('正在產生智慧補邊…');
     try{
-      const el=o.getElement?.()||o._element,nw=el.naturalWidth||el.width,nh=el.naturalHeight||el.height;if(!nw||!nh)throw new Error('圖片尺寸讀取失敗');const max=2600,base=Math.min(1,max/Math.max(nw,nh)),iw=Math.round(nw*base),ih=Math.round(nh*base),w=Math.round(iw*1.4),h=Math.round(ih*1.4);const c=document.createElement('canvas');c.width=w;c.height=h;const g=c.getContext('2d');g.save();g.filter='blur(28px) brightness(.9)';const cover=Math.max(w/iw,h/ih);const cw=iw*cover,ch=ih*cover;g.drawImage(el,(w-cw)/2,(h-ch)/2,cw,ch);g.restore();g.fillStyle='rgba(255,255,255,.08)';g.fillRect(0,0,w,h);g.drawImage(el,(w-iw)/2,(h-ih)/2,iw,ih);const blob=await canvasBlob(c,'image/webp',.92);c.width=c.height=1;setProgress('補邊完成，正在儲存…');const url=await uploadAdminImage(new File([blob],'smart-expand.webp',{type:'image/webp'}),'template');await replaceImage(o,blob,url,{smartExpanded:true});setProgress('智慧補邊完成 ✓');status('已增加四周留白，可繼續調整位置');setTimeout(()=>setProgress('',false),1200);
+      const el=o.getElement?.()||o._element,nw=el.naturalWidth||el.width,nh=el.naturalHeight||el.height;if(!nw||!nh)throw new Error('圖片尺寸讀取失敗');const max=2600,base=window.BenfuwanAdminMultilayer?.enabled(visualCanvas)?1:Math.min(1,max/Math.max(nw,nh)),iw=Math.round(nw*base),ih=Math.round(nh*base),w=Math.round(iw*1.4),h=Math.round(ih*1.4);const c=document.createElement('canvas');c.width=w;c.height=h;const g=c.getContext('2d');g.save();g.filter='blur(28px) brightness(.9)';const cover=Math.max(w/iw,h/ih);const cw=iw*cover,ch=ih*cover;g.drawImage(el,(w-cw)/2,(h-ch)/2,cw,ch);g.restore();g.fillStyle='rgba(255,255,255,.08)';g.fillRect(0,0,w,h);g.drawImage(el,(w-iw)/2,(h-ih)/2,iw,ih);const blob=await canvasBlob(c,'image/webp',.92);c.width=c.height=1;setProgress('補邊完成，正在儲存…');const url=await uploadAdminImage(new File([blob],blob.type==='image/png'?'smart-expand.png':'smart-expand.webp',{type:blob.type}),'template');await replaceImage(o,blob,url,{smartExpanded:true});setProgress('智慧補邊完成 ✓');status('已增加四周留白，可繼續調整位置');setTimeout(()=>setProgress('',false),1200);
     }catch(e){console.error(e);setProgress('',false);alert(e.message||'智慧補邊失敗')}
     finally{busy=false}
   }

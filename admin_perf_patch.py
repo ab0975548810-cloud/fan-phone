@@ -26,7 +26,7 @@ def install(app_module):
                     '/static/admin-model-colors.js?v=20260926audit1',
                     '/static/admin-model-profiles.js?v=20260929style1',
                     '/static/admin-asset-categories.js?v=20261002a',
-                    '/static/admin-template-loader.js?v=20261006multi1',
+                    '/static/admin-template-loader.js?v=20261006review1',
                     '/static/admin-orders-v3.js?v=20261003operations3',
                     '/static/admin-steward-v1.js?v=20261001a',
                     '/static/admin-shell-v1.js?v=20261001a',
@@ -34,8 +34,8 @@ def install(app_module):
                     '/static/admin-library-workspace-v1.js?v=20261002a',
                     '/static/editable-sticker-core-v1.js?v=20261006multi1',
                     '/static/admin-editable-stickers-v1.js?v=20261006a',
-                    '/static/multilayer-template-core-v1.js?v=20261006a',
-                    '/static/admin-multilayer-template-v1.js?v=20261006a',
+                    '/static/multilayer-template-core-v1.js?v=20261006review1',
+                    '/static/admin-multilayer-template-v1.js?v=20261006review1',
                 ]
                 for src in scripts:
                     if src not in html and '</body>' in html:

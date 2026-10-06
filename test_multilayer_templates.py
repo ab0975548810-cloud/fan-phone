@@ -151,11 +151,51 @@ class MultilayerTests(unittest.TestCase):
         data=self.design();data.pop('layer_contract_version')
         with self.assertRaises(ValueError):editable.validate(data)
 
+    def test_canonical_template_rejects_unbaked_image_filters(self):
+        for filters in ([{'type':'Brightness','brightness':.2}],[{'type':'Blur','blur':.1}]):
+            data=copy.deepcopy(self.tpl);data['objects_json']['objects'][3]['filters']=filters
+            _,version=app.cloud_get_json_versioned('templates',app.TEMPLATES_FILE,app.DEFAULT_TEMPLATES)
+            with mock.patch('editable_stickers.public_image',return_value=fixture.image()):
+                response=self.client.post('/api/admin/save_templates',json={'data':{'templates':[data],'categories':[]},'expected_version':version})
+            self.assertEqual(response.status_code,400,response.json)
+
+    def test_non_slot_cannot_disappear_into_empty_slot_manifest(self):
+        for index in (0,1,3):
+            # Use the authoritative non-deletable policy; every image/text/shape
+            # must remain printed, never qualify as an empty slot.
+            self.tpl['objects_json']['objects'][index]['canDelete']=False
+            app.local_save_json(app.TEMPLATES_FILE,{'templates':[self.tpl],'categories':[]})
+            self.contract=self.client.get('/api/template_contract/'+self.tpl['id'],query_string={'model_id':self.model,'style_id':self.style}).json
+            data=self.design();row=data['objects'].pop(index);data['emptyTemplateSlots']=[row]
+            for i,item in enumerate(data['objects']):item['zIndex']=i
+            self.create(data,400)
+
+    def test_empty_slots_require_canonical_origin_role_and_type(self):
+        slot=layer(30);slot.update(role='template-photo-slot',templateSlot=True,isSlot=True,slotId='slot-a',canDelete=False)
+        self.tpl['objects_json']['objects'].append(slot);app.local_save_json(app.TEMPLATES_FILE,{'templates':[self.tpl],'categories':[]})
+        self.contract=self.client.get('/api/template_contract/'+self.tpl['id'],query_string={'model_id':self.model,'style_id':self.style}).json
+        valid=self.design();empty=valid['objects'].pop();empty['role']='slot-guide';valid['emptyTemplateSlots']=[empty]
+        self.create(valid)
+        for field,value in (('layerId','other'),('templateApplicationId',str(uuid.uuid4())),('layerInstanceId',str(uuid.uuid4())),('role','template-sticker'),('type','image'),('duplicateOf',empty['layerInstanceId'])):
+            data=copy.deepcopy(valid);data['emptyTemplateSlots'][0][field]=value
+            with self.client.session_transaction() as session:identity=session['_bf_client_id']
+            with app.app.test_request_context('/api/create_order'):
+                app.session['_bf_client_id']=identity
+                with self.assertRaisesRegex(ValueError,'空照片框'):multi.verify_design(app,data)
+
     def test_missing_render_contract_cannot_use_legacy_print_path(self):
         for marker in ('layer_contract_version','templateLayerId'):
             data=self.design();data.pop('render_contract_version')
             if marker=='templateLayerId':data.pop('layer_contract_version');data.pop('templateBinding')
             self.assertTrue(editable.configured(data));self.create(data,400)
+
+    def test_legacy_template_upload_keeps_webp_optimizer(self):
+        import quality_perf_patch
+        maximum=app.app.config['MAX_CONTENT_LENGTH'];quality_perf_patch.install(app);app.app.config['MAX_CONTENT_LENGTH']=maximum
+        response=self.client.post('/api/admin/upload_image',data={'type':'template','file':(io.BytesIO(fixture.image()),'legacy.png','image/png')})
+        self.assertEqual(response.status_code,200,response.json)
+        path=editable.ROOT/response.json['url'].lstrip('/');self.addCleanup(path.unlink,missing_ok=True)
+        with Image.open(path) as image:self.assertEqual(image.format,'WEBP')
 
     def test_multilayer_asset_upload_preserves_original_png(self):
         import quality_perf_patch

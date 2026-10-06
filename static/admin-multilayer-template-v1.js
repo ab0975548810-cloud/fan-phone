@@ -12,7 +12,7 @@
     editor.parentElement.insertBefore(bar,editor);by('multilayer-enable').checked=mode;
     by('multilayer-enable').onchange=e=>{if(saving){e.target.checked=mode;return;}if(!e.target.checked&&window.__bfEditingTemplate?.layer_contract_version===multi.VERSION){e.target.checked=true;notify('已保存的多圖層模板不能降級；舊模板維持原流程',true);return;}mode=e.target.checked;
       if(!mode){for(const o of canvas()?.getObjects()||[])for(const key of ['layerId','templateLayerId','layerInstanceId','templateApplicationId','normalizedGeometry','zIndex',...multi.FLAGS])delete o[key];if(canvas()){delete canvas().templateState;delete canvas().layer_contract_version;}}
-      if(mode){background(canvas());notify('已啟用多圖層；普通文字使用站內固定字型，請確認排版');for(const o of canvas()?.getObjects()||[]){multi.decorate(o,canvas());if(['text','textbox','i-text'].includes(o.type)&&!editable.FONTS[o.fontFamily]&&!editable.LEGACY[o.fontFamily]&&!Object.values(editable.LEGACY).includes(o.fontFamily))o.set('fontFamily','NotoSansTC');}}
+      if(mode){canvas().layer_contract_version=multi.VERSION;background(canvas());notify('已啟用多圖層；普通文字使用站內固定字型，請確認排版');for(const o of canvas()?.getObjects()||[]){multi.decorate(o,canvas());if(['text','textbox','i-text'].includes(o.type)&&!editable.FONTS[o.fontFamily]&&!editable.LEGACY[o.fontFamily]&&!Object.values(editable.LEGACY).includes(o.fontFamily))o.set('fontFamily','NotoSansTC');}}
       fontOptions();render();};
     by('multilayer-upload').onclick=()=>by('multilayer-files').click();by('multilayer-files').onchange=e=>upload(e,false);
   }
@@ -25,6 +25,29 @@
   async function originalPng(file){if(!file||file.type!=='image/png'||file.size>10*1024*1024)throw Error('圖層請使用 10MB 內原始 PNG，不會自動縮圖');
     const form=new FormData();form.append('file',file);form.append('type','template');form.append('source_contract','multilayer-v1');const response=await apiJson('/api/admin/upload_image',{method:'POST',body:form});return response.url;
   }
+  const enabled=c=>(c||canvas())?.layer_contract_version===multi.VERSION;
+  function pngBlob(surface){if(!surface.width||!surface.height||surface.width*surface.height>32_000_000)throw Error('圖片像素超過安全範圍');return new Promise((resolve,reject)=>surface.toBlob(b=>b?resolve(b):reject(Error('PNG 輸出失敗')),'image/png'));}
+  async function pngFile(file){if(file.type==='image/png')return file;if(file.size>10*1024*1024)throw Error('原始圖片超過容量限制');const src=URL.createObjectURL(file);try{const image=await new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=()=>reject(Error('圖片讀取失敗'));im.src=src;});const w=image.naturalWidth,h=image.naturalHeight;if(!w||w*h>32_000_000)throw Error('圖片像素超過安全範圍');const out=document.createElement('canvas');out.width=w;out.height=h;try{out.getContext('2d').drawImage(image,0,0);return new File([await pngBlob(out)],'image.png',{type:'image/png'});}finally{out.width=out.height=1;}}finally{URL.revokeObjectURL(src);}}
+  async function replacePng(old,blob,url,extra={},options={}){const c=options.canvas||canvas();if(!enabled(c)||!c.getObjects().includes(old))throw Error('圖片狀態已變更');
+    const neo=await new Promise((resolve,reject)=>fabric.Image.fromURL(url,img=>img?.width?resolve(img):reject(Error('PNG 無法讀取')),{crossOrigin:'anonymous'}));
+    const props=old.toObject([...multi.PROPS,...editable.PROPS,'originalName','stickerId','aiBackgroundRemoved','aiOutlineSourcePublic','aiOutlineStyle','aiOutlineWidth','aiOutlineColor','smartExpanded']);
+    const size={width:neo.width,height:neo.height},center=old.getCenterPoint(),w=old.getScaledWidth(),h=old.getScaledHeight();
+    for(const key of ['type','src','width','height','scaleX','scaleY','cropX','cropY','filters','resizeFilter','__bfAdjust','sourceSize'])delete props[key];
+    neo.set({...props,originX:'center',originY:'center',left:center.x,top:center.y,clipPath:old.clipPath||null,filters:[],resizeFilter:null,publicSrc:url,sourceSize:size,...extra});delete neo.__bfAdjust;
+    if(options.preserveViewport)neo.set({width:old.width,height:old.height,cropX:old.cropX||0,cropY:old.cropY||0,scaleX:old.scaleX,scaleY:old.scaleY});
+    else{const fit=Math.min(w/size.width,h/size.height);neo.set({scaleX:options.stretch?w/size.width:fit,scaleY:options.stretch?h/size.height:fit});}
+    const index=c.getObjects().indexOf(old),pairId=old.editableStickerInstanceId;if(pairId)delete old.editableStickerInstanceId;
+    try{c.remove(old);}finally{if(pairId)old.editableStickerInstanceId=pairId;}
+    c.insertAt(neo,index,false);multi.permissions(c,neo,true);if(editable.isMember(neo))await editable.rehydrate(c);c.setActiveObject(neo);neo.setCoords();c.requestRenderAll();c.fire('object:modified',{target:neo});return neo;
+  }
+  async function bakeImage(o,c=canvas()){if(!enabled(c)||o.type!=='image')return o;if(o.resizeFilter)throw Error('請先移除不支援的圖片縮放效果');if(!o.filters?.length){delete o.__bfAdjust;return o;}
+    const source=o.getOriginalElement?.()||o._originalElement||o.getElement();if(!source.width||source.width*source.height>32_000_000)throw Error('圖片像素超過安全範圍');
+    const backend=fabric.filterBackend;try{fabric.filterBackend=new fabric.Canvas2dFilterBackend();o.applyFilters();}finally{fabric.filterBackend=backend;}
+    const el=o.getElement(),out=document.createElement('canvas');out.width=el.naturalWidth||el.width;out.height=el.naturalHeight||el.height;
+    try{if(!out.width||out.width*out.height>32_000_000)throw Error('圖片像素超過安全範圍');out.getContext('2d').drawImage(el,0,0);const blob=await pngBlob(out),url=await originalPng(new File([blob],'effects.png',{type:'image/png'}));return await replacePng(o,blob,url,{}, {canvas:c,preserveViewport:true});}finally{out.width=out.height=1;}
+  }
+  async function bakeImages(c){for(const o of [...c.getObjects()])if(o.type==='image')await bakeImage(o,c);}
+  window.BenfuwanAdminMultilayer={enabled,pngBlob,pngFile,replace:replacePng,bakeImage,upload:originalPng};
   async function upload(event,bg){const files=[...(event.target.files||[])];event.target.value='';const c=canvas();if(!c)return;
     if(!mode){if(bg)return legacyBackground(event);return;}
     try{for(const file of files){const url=await originalPng(file),o=await new Promise((resolve,reject)=>fabric.Image.fromURL(url,img=>img?.width?resolve(img):reject(Error('PNG 無法讀取')),{crossOrigin:'anonymous'}));
@@ -64,9 +87,10 @@
   }
   let legacyBackground=null;
   window.bfInstallMultilayerTemplate=function(){if(window.__multiAdminInstalled)return;window.__multiAdminInstalled=true;controls();
+    const uploadImage=window.uploadAdminImage;window.uploadAdminImage=async function(file,type){if(enabled()&&type==='template')return originalPng(await pngFile(file));return uploadImage.apply(this,arguments);};
     const oldInit=window.initEditor;window.initEditor=function(slots=[],raw=null,fallback=''){
       const parsed=typeof raw==='string'?JSON.parse(raw):raw;if(parsed?.layer_contract_version===multi.VERSION){mode=true;const result=oldInit.call(this,[],null,'');hook(canvas());multi.apply(canvas(),{id:by('tpl-id').value,objects_json:parsed},{},true).then(()=>{controls();by('multilayer-enable').checked=true;fontOptions();render();}).catch(e=>notify(e.message,true));return result;}
-      const result=oldInit.apply(this,arguments);mode=!window.__bfEditingTemplate;controls();by('multilayer-enable').checked=mode;hook(canvas());if(mode)background(canvas());fontOptions();setTimeout(render,100);return result;
+      const result=oldInit.apply(this,arguments);mode=!window.__bfEditingTemplate;controls();by('multilayer-enable').checked=mode;hook(canvas());if(mode){canvas().layer_contract_version=multi.VERSION;background(canvas());}fontOptions();setTimeout(render,100);return result;
     };
     legacyBackground=window.uploadTemplateBg;window.uploadTemplateBg=function(event){if(!mode)return legacyBackground.apply(this,arguments);return upload(event,true);};
     const imageInput=by('bf-tpl-image-file-v3'),imageUpload=imageInput?.onchange;
@@ -74,7 +98,7 @@
     const oldText=window.addText;window.addText=async function(){if(!mode||editable.isMember(canvas()?.getActiveObject()))return oldText.apply(this,arguments);try{await editable.font('jf-openhuninn','輸入文字');const c=canvas(),o=new fabric.Textbox('輸入文字',{fontFamily:'jf-openhuninn',fontSize:28,fill:'#603c48',width:c.width*.6,left:c.width/2,top:c.height/2,originX:'center',originY:'center',role:'template-text',strokeWidth:0});multi.decorate(o,c);c.add(o);c.setActiveObject(o);c.requestRenderAll();render();}catch(e){notify(e.message,true);}};
     const oldSave=window.saveTemplate;window.saveTemplate=async function(){if(!mode)return oldSave.apply(this,arguments);if(saving)return;const c=canvas(),name=by('tpl-name').value.trim(),model=by('tpl-model').value,style=by('tpl-style').value,profile=window.benfuwanTemplateReferenceProfile?.();if(!c||!name||!model||!style||!profile)return notify('請填名稱並選擇已配置型號／殼款',true);
       const buttons=[...by('template-modal').querySelectorAll('.mf button')];saving=true;buttons.forEach(b=>b.disabled=true);
-      try{await multi.fonts(c);await editable.rehydrate(c);syncBackground(c);const objects=multi.exportTemplate(c);c.discardActiveObject();const blob=await new Promise(resolve=>c.toCanvasElement(1).toBlob(resolve,'image/png'));const thumb=await uploadAdminImage(new File([blob],'template-preview.png',{type:'image/png'}),'template');
+      try{await bakeImages(c);await multi.fonts(c);await editable.rehydrate(c);syncBackground(c);const objects=multi.exportTemplate(c);c.discardActiveObject();const blob=await new Promise(resolve=>c.toCanvasElement(1).toBlob(resolve,'image/png'));const thumb=await uploadAdminImage(new File([blob],'template-preview.png',{type:'image/png'}),'template');
         const id=by('tpl-id').value||'tpl_'+multi.uid(),old=(templatesData.templates||[]).find(t=>t.id===id)||{},next=structuredClone(templatesData),category=by('tpl-category').value.trim()||'熱門';
         const item={...old,id,name,category,universal:true,template_version:Math.max(3,old.template_version||0),model_id:'*',reference_model_id:model,reference_style_id:style,source_print_w:profile.print_w,source_print_h:profile.print_h,source_canvas_w:c.width,source_canvas_h:c.height,layer_contract_version:multi.VERSION,objects_json:objects,slots:[],thumb_url:thumb};delete item.layout_v3;
         const index=next.templates.findIndex(t=>t.id===id);if(index<0)next.templates.push(item);else next.templates[index]=item;if(!next.categories.includes(category))next.categories.push(category);

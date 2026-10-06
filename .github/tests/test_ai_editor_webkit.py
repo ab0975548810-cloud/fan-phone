@@ -1685,7 +1685,7 @@ def admin_test(browser, base):
     asset_category_src = page.locator('script[src*="admin-asset-categories.js"]').get_attribute('src')
     assert asset_category_src and 'v=20261002a' in asset_category_src, asset_category_src
     template_loader_src = page.locator('script[src*="admin-template-loader.js"]').get_attribute('src')
-    assert template_loader_src and 'v=20261006multi1' in template_loader_src, template_loader_src
+    assert template_loader_src and 'v=20261006review1' in template_loader_src, template_loader_src
     library_workspace_src = page.locator('script[src*="admin-library-workspace-v1.js"]').get_attribute('src')
     assert library_workspace_src and 'v=20261002a' in library_workspace_src, library_workspace_src
     commerce_src = page.locator('script[src*="admin-commerce-v1.js"]').get_attribute('src')

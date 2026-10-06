@@ -92,6 +92,7 @@ def prepare_template(app,template,images=None):
             else:check_ordinary_font(item.get('fontFamily'),item.get('text',''))
         if item.get('editableStickerInstanceId'):pairs[item['editableStickerInstanceId']].append(item)
         if item['type']=='image':
+            if item.get('filters') or item.get('resizeFilter'):raise ValueError('圖片效果尚未烤平為 PNG，不可發布模板')
             src=item.get('src')
             if not isinstance(src,str) or not src or src.startswith(('data:','blob:')):raise ValueError('模板需引用已保存的原始 PNG')
             if src not in cache:
@@ -138,6 +139,14 @@ def verify_design(app,design):
     objects=design.get('objects',[]);empty=design.get('emptyTemplateSlots',[])
     if any(o.get('zIndex')!=index or isinstance(o.get('zIndex'),bool) for index,o in enumerate(objects)):raise ValueError('圖層輸出順序無效')
     if not isinstance(empty,list) or len(empty)>100:raise ValueError('照片框資料無效')
+    for item in empty:
+        if not isinstance(item,dict):raise ValueError('照片框資料無效')
+        expected=original.get(item.get('templateLayerId'))
+        if not expected or expected.get('templateSlot') is not True:raise ValueError('非照片框圖層不可放入空照片框清單')
+        if (item.get('layerId')!=expected['layerId'] or item.get('templateApplicationId')!=app_id or
+                item.get('layerInstanceId')!=app_id+':'+expected['layerId'] or item.get('duplicateOf') or
+                item.get('templateSlot') is not True or item.get('role')!='slot-guide' or item.get('type')!=expected['type'] or expected['type']!='rect'):
+            raise ValueError('空照片框與原始圖層不一致')
     for index,item in enumerate(objects+empty):
         layer_id=item.get('templateLayerId')
         if not layer_id:continue
@@ -162,7 +171,7 @@ def verify_design(app,design):
                 for k in CONTENT_FIELDS:
                     if item.get(k)!=expected.get(k):raise ValueError('固定圖層內容已被修改')
         if expected.get('templateSlot'):
-            if item in empty and item.get('type')!='rect':raise ValueError('照片框初始資料無效')
+            if item in empty and item.get('role')!='slot-guide':raise ValueError('照片框初始資料無效')
             if item in objects and (item.get('role')!='slot-photo' or item.get('type')!='image' or not expected['canEdit']):raise ValueError('照片框不可替換')
         elif item.get('type')!=expected.get('type') or item.get('role')!=expected.get('role'):raise ValueError('模板圖層類型不可修改')
     for identity,expected in original.items():

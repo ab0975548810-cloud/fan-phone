@@ -25,6 +25,7 @@
   }
 
   async function uploadTemplateFile(file){
+    if(window.BenfuwanAdminMultilayer?.enabled(getCanvas()))return BenfuwanAdminMultilayer.upload(await BenfuwanAdminMultilayer.pngFile(normalizedFile(file)));
     const f=normalizedFile(file);
     const fd=new FormData();fd.append('file',f);fd.append('type','template');
     const r=await fetch('/api/admin/upload_image',{method:'POST',body:fd,cache:'no-store'});
