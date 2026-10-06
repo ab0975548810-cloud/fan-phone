@@ -71,6 +71,7 @@ def prepare_template(app,template,images=None):
     cache=images if images is not None else {};pixels=total=0;counted_sources=set();pairs=defaultdict(list)
     for index,item in enumerate(items):
         if item.get('type') not in ('image','text','textbox','i-text','rect','circle','ellipse','triangle','line','path','polygon','polyline') or item.get('objects'):raise ValueError('V1 僅接受獨立圖層，不支援群組')
+        if item.get('filters') or item.get('resizeFilter'):raise ValueError('圖片效果尚未烤平為 PNG，不可發布模板')
         identity=item.get('layerId');instance=item.get('layerInstanceId')
         if not isinstance(identity,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}',identity) or identity in ids:raise ValueError('圖層 layerId 缺失或重複')
         if not isinstance(instance,str) or not 1<=len(instance)<=150 or instance in instances:raise ValueError('圖層 instance ID 缺失或重複')
@@ -92,7 +93,6 @@ def prepare_template(app,template,images=None):
             else:check_ordinary_font(item.get('fontFamily'),item.get('text',''))
         if item.get('editableStickerInstanceId'):pairs[item['editableStickerInstanceId']].append(item)
         if item['type']=='image':
-            if item.get('filters') or item.get('resizeFilter'):raise ValueError('圖片效果尚未烤平為 PNG，不可發布模板')
             src=item.get('src')
             if not isinstance(src,str) or not src or src.startswith(('data:','blob:')):raise ValueError('模板需引用已保存的原始 PNG')
             if src not in cache:

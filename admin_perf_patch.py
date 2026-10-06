@@ -35,7 +35,7 @@ def install(app_module):
                     '/static/editable-sticker-core-v1.js?v=20261006multi1',
                     '/static/admin-editable-stickers-v1.js?v=20261006a',
                     '/static/multilayer-template-core-v1.js?v=20261006review1',
-                    '/static/admin-multilayer-template-v1.js?v=20261006review1',
+                    '/static/admin-multilayer-template-v1.js?v=20261006review2',
                 ]
                 for src in scripts:
                     if src not in html and '</body>' in html:

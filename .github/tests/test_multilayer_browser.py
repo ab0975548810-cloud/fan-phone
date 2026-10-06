@@ -276,7 +276,7 @@ def image_tools_regression(page,poll,info):
         slider=page.locator('#bf-it-'+name);slider.scroll_into_view_if_needed();box=slider.bounding_box();x=box['x'];y=box['y']+box['height']/2
         page.mouse.move(x+box['width']*start,y);page.mouse.down();page.mouse.move(x+box['width']*end,y,steps=6);page.mouse.up()
     assert page.evaluate("visualCanvas.getActiveObject().filters.length")==4
-    assert uploads and all(b'name="source_contract"' in body and b'multilayer-v1' in body and b'Content-Type: image/png' in body for body in uploads)
+    assert uploads and all(b'name="source_contract"' in body and b'multilayer-v1' in body and b'content-type: image/png' in body.lower() for body in uploads)
     page.locator('#bf-imgtool-panel [data-close]').click()
     page.unroute('**/api/ai/remove-background')
 

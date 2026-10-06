@@ -83,7 +83,7 @@
       const g=target.normalizedGeometry||multi.geometry(target,c),w=g.width*c.width,h=g.height*c.height,scale=Math.max(w/image.width,h/image.height),width=w/scale,height=h/scale;
       const sourceSize={width:image.width,height:image.height};
       image.set({width,height,cropX:(image.width-width)/2,cropY:(image.height-height)/2,sourceSize,role:'slot-photo',templateSlot:true,isSlot:false,slotId:target.slotId,originalName:file.name,angle:target.angle,opacity:target.opacity,flipX:target.flipX,flipY:target.flipY,strokeWidth:0});
-      for(const key of multi.PROPS)if(target[key]!==undefined&&!['sourceSize','isSlot','cropX','cropY','templateState','layer_contract_version'].includes(key))image[key]=multi.clone(target[key]);
+      for(const key of multi.PROPS)if(target[key]!==undefined&&!['role','sourceSize','isSlot','cropX','cropY','templateState','layer_contract_version'].includes(key))image[key]=multi.clone(target[key]);
       image.slotMeta={x:(g.x-g.width/2)*c.width,y:(g.y-g.height/2)*c.height,w,h,id:image.slotId};
       multi.map(image,g,c);styleEditableObject(image);multi.permissions(c,image);const index=c.getObjects().indexOf(target);
       c.remove(target);c.insertAt(image,index,false);c.setActiveObject(image);activeSlotGuide=null;c.requestRenderAll();recordHistory();renderLayerList();

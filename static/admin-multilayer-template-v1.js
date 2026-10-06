@@ -30,6 +30,7 @@
   async function pngFile(file){if(file.type==='image/png')return file;if(file.size>10*1024*1024)throw Error('原始圖片超過容量限制');const src=URL.createObjectURL(file);try{const image=await new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=()=>reject(Error('圖片讀取失敗'));im.src=src;});const w=image.naturalWidth,h=image.naturalHeight;if(!w||w*h>32_000_000)throw Error('圖片像素超過安全範圍');const out=document.createElement('canvas');out.width=w;out.height=h;try{out.getContext('2d').drawImage(image,0,0);return new File([await pngBlob(out)],'image.png',{type:'image/png'});}finally{out.width=out.height=1;}}finally{URL.revokeObjectURL(src);}}
   async function replacePng(old,blob,url,extra={},options={}){const c=options.canvas||canvas();if(!enabled(c)||!c.getObjects().includes(old))throw Error('圖片狀態已變更');
     const neo=await new Promise((resolve,reject)=>fabric.Image.fromURL(url,img=>img?.width?resolve(img):reject(Error('PNG 無法讀取')),{crossOrigin:'anonymous'}));
+    if(!enabled(c)||!c.getObjects().includes(old))throw Error('圖片狀態已變更');
     const props=old.toObject([...multi.PROPS,...editable.PROPS,'originalName','stickerId','aiBackgroundRemoved','aiOutlineSourcePublic','aiOutlineStyle','aiOutlineWidth','aiOutlineColor','smartExpanded']);
     const size={width:neo.width,height:neo.height},center=old.getCenterPoint(),w=old.getScaledWidth(),h=old.getScaledHeight();
     for(const key of ['type','src','width','height','scaleX','scaleY','cropX','cropY','filters','resizeFilter','__bfAdjust','sourceSize'])delete props[key];
