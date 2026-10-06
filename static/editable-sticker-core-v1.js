@@ -61,6 +61,7 @@
       fabric.Object.prototype.__editableSerializer=true;
     }
     if(bound.has(c))return;bound.add(c);let removing=false;
+    if(c.findTarget){const find=c.findTarget;c.findTarget=function(){const target=find.apply(this,arguments);return target?.role==='editable-sticker-text'&&!target.isEditing&&!target.__editableEntering?pair(c,target).bg:target;};}
     let ordering=false;
     for(const [name,delta] of [['bringForward',1],['sendBackwards',-1],['bringToFront','top'],['sendToBack','bottom'],['moveTo','index']]){
       const original=c[name];c[name]=function(o,index){

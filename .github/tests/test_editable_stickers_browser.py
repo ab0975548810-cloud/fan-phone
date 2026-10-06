@@ -32,6 +32,7 @@ def editable_sticker_test(browser,base,poll):
     poll(page,"() => canvas.getObjects().filter(o=>o.editableStickerInstanceId).length===2")
     state=page.evaluate("""()=>{const p=BenfuwanEditableSticker.pair(canvas,canvas.getActiveObject());window.__pair=p;return {types:[p.bg.type,p.text.type],roles:[p.bg.role,p.text.role],same:p.bg.editableStickerInstanceId===p.text.editableStickerInstanceId}}""")
     assert state['types']==['image','textbox'] and state['roles']==['editable-sticker-bg','editable-sticker-text'] and state['same'],state
+    page.evaluate('() => new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
     # Actual pointer drag on the frame, then Fabric's real transform event paths.
     point=page.evaluate("""()=>{const r=canvas.upperCanvasEl.getBoundingClientRect(),p=__pair.bg.getCenterPoint();return {x:r.x+p.x*r.width/canvas.width,y:r.y+p.y*r.height/canvas.height}}""")
     before=page.evaluate('({bg:__pair.bg.getCenterPoint(),text:__pair.text.getCenterPoint()})')
