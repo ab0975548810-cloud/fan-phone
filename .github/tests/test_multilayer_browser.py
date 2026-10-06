@@ -105,7 +105,7 @@ def multilayer_browser_test(browser,base,poll):
             page.goto(base);poll(page,"() => !!window.BenfuwanMultilayer && typeof shopData!=='undefined' && shopData.models.length===3")
             # An image-only template still needs a font manifest without having
             # previously selected any text or loaded a FontFace.
-            image_only=page.evaluate("""async()=>{const c=new fabric.StaticCanvas(null,{width:200,height:400});c.add(new fabric.Rect({width:20,height:20,strokeWidth:0,fill:'#ffccdd'}));try{return await BenfuwanEditableSticker.serialize(c,{modelId:'fixture',styleId:'fixture',printW:70,printH:140});}finally{c.dispose();}}""")
+            image_only=page.evaluate("""async()=>{const c=new fabric.Canvas(null,{width:200,height:400});c.add(new fabric.Rect({width:20,height:20,strokeWidth:0,fill:'#ffccdd'}));try{return await BenfuwanEditableSticker.serialize(c,{modelId:'fixture',styleId:'fixture',printW:70,printH:140});}finally{c.dispose();}}""")
             assert image_only['fontHashes'] and len(image_only['objects'])==1
             page.evaluate("""args=>{ctx={...ctx,modelId:args.model,styleId:args.style,printW:70,printH:140,maskUrl:args.mask,printLineUrl:args.mask};navigate('page-editor');initCanvas();return new Promise(resolve=>applyTemplate(args.template,resolve));}""",{'model':ids[0],'style':style_id,'mask':mask_url,'template':tpl})
             assert page.evaluate('canvas.getObjects().length')==30
@@ -190,6 +190,20 @@ def multilayer_browser_test(browser,base,poll):
             poll(page,"() => cartItem?.designJson?.layer_contract_version==='multilayer-v1'")
             assert page.evaluate('cartItem.designJson.objects.length')==29
             assert page.evaluate('cartItem.productionMeta?.dpi')==720
+            # Submit the actual Fabric-generated contract through #71 receipts,
+            # then rebuild in Print Center. The CI DB/storage are local, and
+            # prepare never sends a vendor task or starts physical printing.
+            body=page.evaluate("""async()=>({idempotency_key:'multilayer-'+crypto.randomUUID(),model_id:cartItem.modelId,style_id:cartItem.styleId,color_name:cartItem.colorName||'透明',customer_name:'Multilayer browser fixture',quantity:1,payment_method:'現金',print_file:cartItem.printBase64,mockup_file:cartItem.mockupBase64,design_json:await BenfuwanDesignSources.prepare(cartItem.designJson)})""")
+            response=page.request.post(base+'/api/create_order',data=body)
+            assert response.status==200,response.text()
+            order_id=response.json()['order_id'];order=app_module.commerce.store.order(order_id)
+            assert order['design_json']['layerSeal'] and len(order['design_json']['objects'])==29
+            assert 'base64' not in json.dumps(order['design_json'])
+            job=app_module.print_center.prepare(order_id,'multilayer-browser-'+uuid.uuid4().hex)
+            rendered=Image.open(io.BytesIO(app_module.print_center._download_artwork(job['artwork_path'])))
+            assert rendered.size==(round(77.6*720/25.4),round(160.7*720/25.4))
+            assert abs(rendered.info['dpi'][0]-720)<.05 and job['state']=='PREPARED'
+            assert job['artwork_path']!=order['print_path']
             page.close()
             print('MULTILAYER_30_LAYERS_AUTHORING_LOCK_HIT_THROUGH_TOUCH_DUPLICATE_RESET_PHOTO_DRAFT_NORMALIZED_ORDER_RESPONSIVE_OK')
         finally:
@@ -233,3 +247,18 @@ def gesture_test(page,browser):
         }""")
     after=page.evaluate('({scale:canvas.getActiveObject().scaleX,angle:canvas.getActiveObject().angle})')
     assert after['scale']>before['scale']*1.3 and abs(after['angle']-before['angle'])>20,(before,after)
+
+
+if __name__=='__main__':
+    # Run the focused feature first in CI, then retain the full existing suite.
+    # Reuse its isolated local server/middleware fixture, never production.
+    import runpy,time
+    from playwright.sync_api import sync_playwright
+    helper=runpy.run_path(str(Path(__file__).with_name('test_ai_editor_webkit.py')))
+    server=helper['ServerThread']();server.start();time.sleep(.8)
+    try:
+        with sync_playwright() as playwright:
+            browser=getattr(playwright,os.environ.get('BROWSER_ENGINE','webkit')).launch()
+            try:multilayer_browser_test(browser,f"http://127.0.0.1:{helper['BROWSER_TEST_PORT']}",helper['poll'])
+            finally:browser.close()
+    finally:server.close()
