@@ -19,6 +19,7 @@ if not (os.environ.get('SESSION_COOKIE_SECURE') or '').strip():
 worker_class = 'gthread'
 workers = 1
 threads = 4
+bind = '0.0.0.0:' + os.environ.get('PORT', '8080')
 timeout = 330
 graceful_timeout = 30
 keepalive = 5

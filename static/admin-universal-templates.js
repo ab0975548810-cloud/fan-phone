@@ -105,7 +105,8 @@
     slotObjs.forEach(o=>o.set('opacity',0));visualCanvas.renderAll();
     const dataUrl=visualCanvas.toDataURL({format:'png',multiplier:2});
     slotObjs.forEach(o=>o.set('opacity',1));visualCanvas.renderAll();
-    const objects=visualCanvas.toJSON(['isSlot','isTplBg','slotId']);
+    await window.BenfuwanEditableSticker?.rehydrate(visualCanvas);
+    const objects=visualCanvas.toJSON(['isSlot','isTplBg','slotId',...(window.BenfuwanEditableSticker?.PROPS||[])]);
     objects.objects=(objects.objects||[]).filter(o=>!o.isSlot);
 
     try{

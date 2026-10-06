@@ -31,7 +31,8 @@
     const keys=[
       'type','role','left','top','width','height','scaleX','scaleY','angle','flipX','flipY','opacity','visible',
       'text','fontFamily','fontSize','fontWeight','fontStyle','fill','stroke','strokeWidth','textAlign','charSpacing','lineHeight',
-      'slotId','materialType','originalName','aiBackgroundRemoved','aiHeadCutout','aiHeadMode','aiOutlineStrength','aiOutlineColor'
+      'slotId','materialType','originalName','aiBackgroundRemoved','aiHeadCutout','aiHeadMode','aiOutlineStrength','aiOutlineColor',
+      'editableStickerId','editableStickerInstanceId','assetId','minFontSize','requestedFontSize','originX','originY'
     ];
     const out={};
     for(const key of keys){
@@ -42,12 +43,20 @@
     }
     const src=safeUrl(o.publicSrc)||safeUrl(o.src);
     if(src)out.src=src;
+    if(o.textArea)out.textArea=cloneCompact(o.textArea);
+    if(o.clipPath)out.clipPath=cloneCompact(o.clipPath);
     return out;
   }
 
   function compactDesign(design){
     if(design==null)return null;
     if(typeof design!=='object')return null;
+    // This contract is already deduplicated into one original image per object.
+    // A text/source manifest must never be silently stripped or truncated.
+    if(design.render_contract_version==='editable-text-v1'){
+      if(designBytes(design)>95*1024*1024)throw new Error('文字貼紙原始素材容量過大，請減少圖片');
+      return structuredClone(design);
+    }
     let compact=cloneCompact(design);
     if(compact&&typeof compact==='object')compact.__benfuwanCompactVersion=1;
     try{
@@ -85,6 +94,7 @@
       if(typeof idbSet==='function')await idbSet('cart',item);
       console.info('[ORDER] compact design payload',before,'->',after,'bytes');
     }catch(e){
+      if(item?.designJson?.render_contract_version==='editable-text-v1')throw e;
       console.warn('[ORDER] design compaction fallback',e);
       try{
         if(item){item.designJson=null;if(typeof cartItem!=='undefined')cartItem=item}

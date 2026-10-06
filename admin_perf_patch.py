@@ -32,6 +32,8 @@ def install(app_module):
                     '/static/admin-shell-v1.js?v=20261001a',
                     '/static/admin-product-workspace-v1.js?v=20261001b',
                     '/static/admin-library-workspace-v1.js?v=20261002a',
+                    '/static/editable-sticker-core-v1.js?v=20261006a',
+                    '/static/admin-editable-stickers-v1.js?v=20261006a',
                 ]
                 for src in scripts:
                     if src not in html and '</body>' in html:

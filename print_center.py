@@ -362,8 +362,19 @@ class PrintService:
         profile = self._materialize_sku_profile(order, sku_id)
         if not profile:
             raise PrintError("PROFILE_MISSING", "請先到「品牌及型號」儲存此型號的列印參數")
-        raw = self._download_artwork(order["print_path"])
-        job = self.store.create_job(order, sku_id, profile, hashlib.sha256(raw).hexdigest(), secrets.token_urlsafe(18))
+        from editable_stickers import configured as editable_contract, render as render_editable
+        print_order = order
+        if editable_contract(order.get("design_json")):
+            try:
+                path, raw, _ = render_editable(self.app, order, profile, self._download_artwork)
+            except (ValueError, OSError) as exc:
+                raise PrintError("PRODUCTION_REBUILD_FAILED", "生產圖無法重建：" + str(exc), 422) from exc
+            print_order = {**order, "print_path": path}
+        else:
+            if isinstance(order.get("design_json"), dict) and order["design_json"].get("render_contract_version"):
+                raise PrintError("PRODUCTION_REBUILD_FAILED", "生產圖無法重建：不支援此生產結構版本", 422)
+            raw = self._download_artwork(order["print_path"])
+        job = self.store.create_job(print_order, sku_id, profile, hashlib.sha256(raw).hexdigest(), secrets.token_urlsafe(18))
         owner, _ = self.store.claim_request(key, "prepare", job["id"], fingerprint)
         if owner:
             self.store.finish_request(key, "COMPLETED", {"job_id": job["id"]})

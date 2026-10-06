@@ -1,5 +1,6 @@
 from flask import g, Flask, request, jsonify, send_file, session, redirect, url_for, send_from_directory, Response
 import os
+import sys
 import json
 import time
 import base64
@@ -709,6 +710,7 @@ def ai_remove_background():
 def create_order():
     print_path = None
     mockup_path = None
+    source_paths = []
     try:
         data = request.get_json(silent=True) or {}
         model_id = str(data.get('model_id') or '')
@@ -745,6 +747,13 @@ def create_order():
         mockup_path = upload_private_bytes(mockup_store_path, mockup_raw)
 
         design_json = data.get('design_json')
+        from editable_stickers import configured as editable_contract, snapshot as snapshot_editable, nodes as design_nodes
+        if editable_contract(design_json):
+            design_json = snapshot_editable(sys.modules[__name__], design_json, order_id, model, style_id, source_paths)
+        elif isinstance(design_json, dict) and design_json.get('render_contract_version'):
+            raise ValueError('不支援此生產結構版本')
+        elif isinstance(design_json, dict) and isinstance(design_json.get('objects'), list) and any(str(o.get('role') or '').startswith('editable-sticker-') for o in design_nodes(design_json)):
+            raise ValueError('文字貼紙缺少新版生產結構，不可降級送印')
         order_payload = {
             'id': order_id,
             'customer_name': customer_name,
@@ -770,6 +779,8 @@ def create_order():
             if result['order_id'] != order_id:
                 delete_private_path(print_path)
                 delete_private_path(mockup_path)
+                for source_path in source_paths:
+                    delete_private_path(source_path)
             return no_cache_json(result)
 
         if USE_SUPABASE:
@@ -803,6 +814,8 @@ def create_order():
     except CommerceError:
         raise
     except ValueError as exc:
+        for source_path in source_paths:
+            delete_private_path(source_path)
         return no_cache_json({'status':'error','msg':str(exc)}, 400)
     except Exception as exc:
         print('create_order error:', repr(exc))
@@ -1146,6 +1159,9 @@ def custom_static_orders(filename):
         return 'Access denied', 403
     return send_from_directory(SAVE_DIR, filename)
 
+
+from editable_sticker_admin import install as install_editable_sticker_admin
+install_editable_sticker_admin(sys.modules[__name__])
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
