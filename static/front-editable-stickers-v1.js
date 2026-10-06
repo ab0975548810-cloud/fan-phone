@@ -21,8 +21,8 @@
   const cart=window.confirmDesignToCart;
   window.confirmDesignToCart=async function(){
     if(!has(get()))return cart.apply(this,arguments);
-    try{await ensureCanvasFonts();const data=await core.serialize(get(),ctx);await cart.apply(this,arguments);
-      if(cartItem){cartItem.designJson=data;await idbSet('cart',cartItem);}
+    try{await ensureCanvasFonts();const data=await core.serialize(get(),ctx),previous=cartItem;await cart.apply(this,arguments);
+      if(cartItem&&cartItem!==previous&&cartItem.printBase64===ctx.printBase64&&cartItem.modelId===ctx.modelId&&cartItem.styleId===ctx.styleId){cartItem.designJson=data;await idbSet('cart',cartItem);}
     }catch(e){say('文字貼紙無法保存：'+e.message);}
   };
   const renderCats=window.renderStickerCats;

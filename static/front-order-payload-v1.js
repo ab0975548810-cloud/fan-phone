@@ -105,7 +105,7 @@
   const baseSubmit=window.submitOrder;
   if(typeof baseSubmit==='function'&&!baseSubmit.__bfPayloadWrapped){
     const wrapped=async function(){
-      await compactCartBeforeSubmit();
+      try{await compactCartBeforeSubmit();}catch(error){if(typeof toast==='function')toast(error.message||'設計資料無法保存');return;}
       return baseSubmit.apply(this,arguments);
     };
     wrapped.__bfPayloadWrapped=true;

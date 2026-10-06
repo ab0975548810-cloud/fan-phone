@@ -118,7 +118,7 @@
     data.objects=data.objects.filter(o=>!['guide','slot-guide'].includes(o.role));
     const visit=(raw,obj)=>{
       if(raw.type==='image'){
-        const el=obj.getElement();const source=document.createElement('canvas');source.width=el.naturalWidth||el.width;source.height=el.naturalHeight||el.height;
+        const el=obj.getElement();if(typeof el.src==='string'&&el.src.startsWith('data:image/png;base64,')){raw.src=el.src;return;}const source=document.createElement('canvas');source.width=el.naturalWidth||el.width;source.height=el.naturalHeight||el.height;
         if(!source.width||source.width*source.height>32_000_000)throw Error('原始素材尺寸無效');
         source.getContext('2d').drawImage(el,0,0);raw.src=source.toDataURL('image/png');source.width=source.height=1;
       }
