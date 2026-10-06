@@ -6,6 +6,7 @@
   const PROPS=['editableStickerId','editableStickerInstanceId','textArea','minFontSize','requestedFontSize','editableStickerStyle','role','publicSrc','assetId','slotId','slotMeta','isSlot','isTplBg'];
   const FONTS={'jf-openhuninn':{name:'可愛粉圓',url:'/static/fonts/jf-openhuninn-2.1.ttf'},'NotoSansTC':{name:'思源黑體',url:'/static/fonts/NotoSansTC.woff2'}};
   const loaded=new Map(),bound=new WeakSet();
+  let coveragePromise=null;
   const uuid=()=>crypto.randomUUID();
   const isMember=o=>!!o?.editableStickerInstanceId;
   function area(a){
@@ -14,8 +15,14 @@
   }
   async function font(family,text='文字'){
     if(!FONTS[family])throw Error('請使用站內字型（可愛粉圓／思源黑體）');
+    if(!coveragePromise)coveragePromise=fetch('/static/fonts/editable-font-manifest.json').then(r=>{if(!r.ok)throw Error('字型契約無法載入');return r.json();}).catch(e=>{coveragePromise=null;throw e;});
+    const coverage=await coveragePromise;
+    const ranges=coverage[family]?.ranges;if(!ranges)throw Error('字型契約缺失');
+    for(const character of String(text)){const n=character.codePointAt(0);let lo=0,hi=ranges.length;while(lo<hi){const mid=(lo+hi)>>1;if(ranges[mid][1]<n)lo=mid+1;else hi=mid;}if(![9,10,13].includes(n)&&!(ranges[lo]?.[0]<=n))throw Error('字型不支援部分字元，請更換字型或文字');}
     if(!loaded.has(family))loaded.set(family,(async()=>{
-      const face=new FontFace(family,'url("'+FONTS[family].url+'")');
+      const response=await fetch(FONTS[family].url+'?sha='+coverage[family].sha256);if(!response.ok)throw Error('字型載入失敗');const bytes=await response.arrayBuffer();
+      const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),x=>x.toString(16).padStart(2,'0')).join('');if(hash!==coverage[family].sha256)throw Error('字型版本不一致');
+      const face=new FontFace(family,bytes);
       await face.load();document.fonts.add(face);return face;
     })().catch(e=>{loaded.delete(family);throw Error('字型載入失敗，不能安全排版');}));
     await loaded.get(family);
@@ -118,14 +125,15 @@
       if(raw.objects)raw.objects.forEach((r,i)=>visit(r,obj._objects[i]));
     };
     const objs=c.getObjects().filter(o=>!['guide','slot-guide'].includes(o.role));data.objects.forEach((r,i)=>visit(r,objs[i]));
-    return {...data,render_contract_version:VERSION,logicalCanvas:{width:c.width,height:c.height},production:{printW:context.printW,printH:context.printH},modelId:context.modelId,styleId:context.styleId};
+    const coverage=await coveragePromise;
+    return {...data,render_contract_version:VERSION,fontHashes:Object.fromEntries(Object.entries(coverage).map(([key,value])=>[key,value.sha256])),logicalCanvas:{width:c.width,height:c.height},production:{printW:context.printW,printH:context.printH},modelId:context.modelId,styleId:context.styleId};
   }
   async function render(data,maskSrc,width,height){
     const c=new fabric.StaticCanvas(null,{width:data.logicalCanvas.width,height:data.logicalCanvas.height,enableRetinaScaling:false});
     try{
       const texts=[];const scan=o=>{if(['text','textbox','i-text'].includes(o.type))texts.push(o);(o.objects||[]).forEach(scan);};data.objects.forEach(scan);
       await Promise.all(texts.map(o=>font(o.fontFamily,o.text)));
-      await new Promise(resolve=>c.loadFromJSON(data,resolve));await rehydrate(c);
+      await new Promise(resolve=>c.loadFromJSON({version:data.version,background:data.background,objects:data.objects},resolve));await rehydrate(c);
       c.getObjects().forEach(o=>o.set('objectCaching',false));
       const image=await new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=()=>reject(Error('生產遮罩無法載入'));im.src=maskSrc;});
       const mask=BenfuwanPrintMask.normalizeMaskImage(image);

@@ -10,6 +10,8 @@ from pathlib import Path
 import subprocess
 import sys
 import threading
+from functools import lru_cache
+from bisect import bisect_left
 from urllib.parse import urlsplit
 
 from PIL import Image
@@ -19,6 +21,21 @@ ROOT = Path(__file__).resolve().parent
 FONTS = {'jf-openhuninn': 'static/fonts/jf-openhuninn-2.1.ttf', 'NotoSansTC': 'static/fonts/NotoSansTC.woff2'}
 MAX_BYTES = 70 * 1024 * 1024
 _RENDER_SLOT = threading.BoundedSemaphore(1)
+
+
+@lru_cache(maxsize=2)
+def glyph_ranges(family):
+    manifest=json.loads((ROOT/'static/fonts/editable-font-manifest.json').read_text(encoding='utf-8'))
+    ranges=manifest[family]['ranges']
+    return ranges,[b for a,b in ranges]
+
+
+def check_glyphs(family,text):
+    ranges,ends=glyph_ranges(family)
+    for ch in text:
+        point=ord(ch);index=bisect_left(ends,point)
+        if point not in (9,10,13) and (index>=len(ranges) or ranges[index][0]>point):
+            raise ValueError('字型不支援部分字元，請更換字型或文字')
 
 
 def normalized_area(value):
@@ -47,6 +64,7 @@ def text_style(value):
     out = {key: value.get(key) for key in ('text', 'fontFamily', 'fontWeight', 'fontStyle', 'fill', 'stroke', 'textAlign')}
     if not isinstance(out['text'], str) or len(out['text']) > 2000:
         raise ValueError('文字最多 2000 字')
+    check_glyphs(out['fontFamily'],out['text'])
     if out['fontWeight'] not in ('400', '700', 400, 700, 'normal', 'bold') or out['fontStyle'] not in ('normal', 'italic') or out['textAlign'] not in ('left', 'center', 'right'):
         raise ValueError('文字樣式格式錯誤')
     for key in ('fill', 'stroke'):
@@ -84,6 +102,8 @@ def nodes(design):
 def validate(design):
     if not configured(design) or design.get('truncated'):
         raise ValueError('新版文字貼紙缺少可重建設計')
+    if design.get('background') is not None and not isinstance(design['background'],str):
+        raise ValueError('不支援程式化背景')
     logical = design.get('logicalCanvas') or {}
     for key in ('width', 'height'):
         numeric(logical.get(key), 1, 2000, '畫布' + key)
@@ -110,6 +130,7 @@ def validate(design):
             if not isinstance(item.get('text'),str) or len(item['text'])>2000:
                 raise ValueError('文字最多 2000 字')
             numeric(item.get('fontSize'),1,1000,'字級')
+            check_glyphs(item['fontFamily'],item['text'])
         if item.get('path') and len(item['path'])>5000:
             raise ValueError('向量路徑過於複雜')
         role = item.get('role')
@@ -180,6 +201,8 @@ def public_image(app, url):
 def snapshot(app, design, order_id, model, style_id, upload_paths):
     from print_center import _complete_model_style_profile
     design=validate(copy.deepcopy(design))
+    hashes={family:hashlib.sha256((ROOT/file).read_bytes()).hexdigest() for family,file in FONTS.items()}
+    if design.get('fontHashes')!=hashes:raise ValueError('字型版本已更新，請重新開啟設計')
     profile=_complete_model_style_profile(model, style_id)
     if not profile:raise ValueError('型號與殼款尚未完成生產設定')
     if design.get('modelId') != model['id'] or design.get('styleId') != style_id:
@@ -205,7 +228,7 @@ def snapshot(app, design, order_id, model, style_id, upload_paths):
     mask=public_image(app,profile['print_line_img'])
     mask_path=app.upload_private_bytes(f'orders/{order_id}/sources/print-mask.png',mask);upload_paths.append(mask_path)
     design['production']={'printW':float(profile['print_w']),'printH':float(profile['print_h']), 'maskPath':mask_path,'maskUrl':profile['print_line_img']}
-    design['fontHashes']={family:hashlib.sha256((ROOT/file).read_bytes()).hexdigest() for family,file in FONTS.items()}
+    design['fontHashes']=hashes
     return design
 
 
@@ -223,6 +246,7 @@ def _worker(payload):
                 if parsed.hostname != 'renderer.invalid':return route.abort()
                 if path=='/':return route.fulfill(status=200,body=html,content_type='text/html')
                 if path in scripts:return route.fulfill(status=200,body=(ROOT/path.lstrip('/')).read_bytes(),content_type='text/javascript')
+                if path=='/static/fonts/editable-font-manifest.json':return route.fulfill(status=200,body=(ROOT/path.lstrip('/')).read_bytes(),content_type='application/json')
                 if path in resources:return route.fulfill(status=200,body=base64.b64decode(resources[path]),content_type='image/png')
                 if path.lstrip('/') in FONTS.values():return route.fulfill(status=200,body=(ROOT/path.lstrip('/')).read_bytes(),content_type='font/ttf')
                 return route.abort()

@@ -36,9 +36,10 @@ def editable_sticker_test(browser,base,poll):
     # Actual pointer drag on the frame, then Fabric's real transform event paths.
     point=page.evaluate("""()=>{const r=canvas.upperCanvasEl.getBoundingClientRect(),p=__pair.bg.getCenterPoint();return {x:r.x+p.x*r.width/canvas.width,y:r.y+p.y*r.height/canvas.height}}""")
     before=page.evaluate('({bg:__pair.bg.getCenterPoint(),text:__pair.text.getCenterPoint()})')
+    diagnostic=page.evaluate("""p=>{window.__dragEvents=[];canvas.on('mouse:down',e=>__dragEvents.push({event:'down',role:e.target?.role,pointer:e.pointer}));canvas.on('object:moving',e=>__dragEvents.push({event:'moving',role:e.target?.role}));const r=canvas.upperCanvasEl.getBoundingClientRect();const hit=document.elementFromPoint(p.x,p.y);return {point:p,rect:{x:r.x,y:r.y,width:r.width,height:r.height},hit:hit?.outerHTML.slice(0,300),zoom:canvas.getZoom(),offset:canvas._offset,objects:canvas.getObjects().map(o=>({role:o.role,left:o.left,top:o.top,selectable:o.selectable,evented:o.evented,lockX:o.lockMovementX,lockY:o.lockMovementY}))}}""",point)
     page.mouse.move(point['x'],point['y']);page.mouse.down();page.mouse.move(point['x']+15,point['y']+10,steps=8);page.mouse.up()
     after=page.evaluate('({bg:__pair.bg.getCenterPoint(),text:__pair.text.getCenterPoint()})')
-    assert abs(after['bg']['x']-before['bg']['x'])>2,after
+    assert abs(after['bg']['x']-before['bg']['x'])>2,(after,diagnostic,page.evaluate('__dragEvents'))
     assert abs((after['bg']['x']-before['bg']['x'])-(after['text']['x']-before['text']['x']))<.01,(before,after)
     page.evaluate("""()=>{__pair.bg.set({scaleX:.19,scaleY:.23,angle:27});canvas.fire('object:scaling',{target:__pair.bg});canvas.fire('object:rotating',{target:__pair.bg});recordHistory();}""")
     transformed=page.evaluate('({bg:[__pair.bg.scaleX,__pair.bg.scaleY,__pair.bg.angle],text:[__pair.text.scaleX,__pair.text.scaleY,__pair.text.angle]})')

@@ -24,7 +24,7 @@ def design(model,style):
     common={'editableStickerId':'dialog-a','editableStickerInstanceId':'instance-a','originX':'center','originY':'center','left':100,'top':200,'scaleX':.35,'scaleY':.35,'angle':0,'flipX':False,'flipY':False,'opacity':1,'visible':True}
     text={'type':'textbox','role':'editable-sticker-text','text':'繁體中文\n文字貼紙測試','fontFamily':'jf-openhuninn','fontSize':36,'requestedFontSize':36,'minFontSize':12,'fontWeight':'400','fontStyle':'normal','fill':'#332222','stroke':'#fff','strokeWidth':0,'textAlign':'center','charSpacing':20,'lineHeight':1.2,'width':350,'height':75,'textArea':{'x':.15,'y':.2,'width':.7,'height':.45},**common}
     bg={'type':'image','role':'editable-sticker-bg','assetId':'dialog-a','src':'data:image/png;base64,'+base64.b64encode(image()).decode(),'width':512,'height':256,**common}
-    return {'render_contract_version':editable.VERSION,'modelId':model,'styleId':style,'logicalCanvas':{'width':200,'height':400},'production':{'printW':71.63,'printH':149.61},'objects':[bg,text],'background':'transparent'}
+    return {'render_contract_version':editable.VERSION,'fontHashes':{family:hashlib.sha256((editable.ROOT/file).read_bytes()).hexdigest() for family,file in editable.FONTS.items()},'modelId':model,'styleId':style,'logicalCanvas':{'width':200,'height':400},'production':{'printW':71.63,'printH':149.61},'objects':[bg,text],'background':'transparent'}
 
 
 class EditableTests(unittest.TestCase):
@@ -48,6 +48,8 @@ class EditableTests(unittest.TestCase):
         for area in ({'x':.8,'y':.1,'width':.3,'height':.5},{'x':0,'y':0,'width':0,'height':1},{'x':True,'y':0,'width':.5,'height':1}):
             with self.assertRaises(ValueError):editable.normalized_area(area)
         bad=copy.deepcopy(self.draft);bad['objects'].pop()
+        with self.assertRaises(ValueError):editable.validate(bad)
+        bad=copy.deepcopy(self.draft);bad['objects'][1]['text']='\U0001fae8'
         with self.assertRaises(ValueError):editable.validate(bad)
 
     def test_sources_and_complete_text_contract_persist(self):
