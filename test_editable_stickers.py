@@ -81,6 +81,13 @@ class EditableTests(unittest.TestCase):
         bad=copy.deepcopy(self.draft);bad['objects'][1]['fontFamily']='https://evil.invalid/font.ttf'
         with self.assertRaises(ValueError):editable.validate(bad)
 
+    def test_stale_browser_font_hash_is_rejected_before_order(self):
+        bad=copy.deepcopy(self.draft);bad['fontHashes']['jf-openhuninn']='stale'
+        with mock.patch.object(editable,'public_image',return_value=mask()),mock.patch.object(app,'upload_private_bytes') as upload:
+            model=app.cloud_get_json('shop_data',app.DATA_FILE,app.DEFAULT_SHOP_DATA)['models'][0]
+            with self.assertRaises(ValueError):editable.snapshot(app,bad,'font-stale',model,self.style,[])
+        upload.assert_not_called()
+
     def test_geometry_change_fail_closed(self):
         order=app.commerce.store.order(self.create());profile=app.print_center.store.profile(self.fixture.sku_id);profile['width_mm']=80
         with self.assertRaises(ValueError):editable.render(app,order,profile,app.print_center._download_artwork)

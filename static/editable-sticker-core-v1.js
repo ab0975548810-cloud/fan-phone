@@ -119,6 +119,7 @@
   }
   async function serialize(c,context){
     await rehydrate(c);c.discardActiveObject();
+    const fontChecks=[];const check=o=>{if(['text','textbox','i-text'].includes(o.type))fontChecks.push(font(o.fontFamily,o.text));(o._objects||[]).forEach(check);};c.getObjects().forEach(check);await Promise.all(fontChecks);
     const data=c.toJSON(PROPS);delete data.clipPath;
     data.objects=data.objects.filter(o=>!['guide','slot-guide'].includes(o.role));
     const visit=(raw,obj)=>{
