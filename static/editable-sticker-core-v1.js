@@ -23,7 +23,7 @@
       const response=await fetch(FONTS[family].url+'?sha='+coverage[family].sha256);if(!response.ok)throw Error('字型載入失敗');const bytes=await response.arrayBuffer();
       const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),x=>x.toString(16).padStart(2,'0')).join('');if(hash!==coverage[family].sha256)throw Error('字型版本不一致');
       const face=new FontFace(family,bytes,family==='NotoSansTC'?{weight:'100 900'}:{});
-      await face.load();document.fonts.add(face);return face;
+      await face.load();document.fonts.add(face);window.fabric?.util?.clearFabricFontCache?.(family);return face;
     })().catch(e=>{loaded.delete(family);throw Error('字型載入失敗，不能安全排版');}));
     await loaded.get(family);
     const result=await document.fonts.load('16px "'+family+'"',String(text||'文字'));
@@ -90,6 +90,7 @@
     c.on('text:editing:exited',({target})=>{if(isMember(target))c.fire('object:modified',{target});if(typeof recordHistory==='function'&&c===window.__editableFrontCanvas)recordHistory();});
     const select=({selected})=>{const o=selected?.[0];if(o?.role==='editable-sticker-text'&&!o.isEditing&&!o.__editableEntering){const {bg}=pair(c,o);c.setActiveObject(bg);}if(typeof window.bfEditableSelection==='function')window.bfEditableSelection(c,o);};
     c.on('selection:created',select);c.on('selection:updated',select);
+    c.on('selection:cleared',()=>window.bfEditableSelection?.(c,null));
   }
   async function add(c,asset){
     const a=area(asset.textArea),s={text:'輸入文字',fontFamily:'jf-openhuninn',fontSize:160,minFontSize:24,fill:'#604047',stroke:null,strokeWidth:0,textAlign:'center',charSpacing:0,lineHeight:1.2,fontWeight:'400',fontStyle:'normal',...(asset.defaultTextStyle||{})};
@@ -109,7 +110,9 @@
   }
   async function update(c,o,props){
     const {bg,text}=pair(c,o);if(!text)throw Error('請選文字貼紙');
-    const saved=text.toObject(PROPS);await font(props.fontFamily||text.fontFamily,props.text||text.text);
+    const saved=Object.fromEntries([...new Set([...Object.keys(props),'text','fontSize','requestedFontSize','width','height'])].map(key=>[key,text[key]]));saved.styles=structuredClone(text.styles);
+    await font(props.fontFamily||text.fontFamily,props.text||text.text);
+    if(!c.getObjects().includes(bg)||!c.getObjects().includes(text))throw Error('文字貼紙已刪除或設計已切換');
     text.set(props);if(props.fontSize!=null)text.requestedFontSize=Number(props.fontSize);
     try{sync(bg,text);text.__lastValid=text.text;}catch(e){text.set(saved);sync(bg,text);throw e;}
     c.requestRenderAll();return text;

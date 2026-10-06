@@ -133,6 +133,17 @@ def validate(design):
                 raise ValueError('文字最多 2000 字')
             numeric(item.get('fontSize'),1,1000,'字級')
             check_glyphs(item['fontFamily'],item['text'])
+            def style_values(value,depth=0):
+                if depth>5:raise ValueError('文字樣式過於複雜')
+                if isinstance(value,list):
+                    for part in value:style_values(part,depth+1)
+                elif isinstance(value,dict):
+                    for key,part in value.items():
+                        if key=='fontFamily' and part!=item['fontFamily']:raise ValueError('請對整段文字使用同一站內字型')
+                        if key=='fontSize':numeric(part,1,1000,'字級')
+                        if key in ('fill','stroke','textBackgroundColor') and part is not None and not isinstance(part,str):raise ValueError('不支援程式化文字填色')
+                        if isinstance(part,(list,dict)):style_values(part,depth+1)
+            style_values(item.get('styles',{}))
         if item.get('path') and len(item['path'])>5000:
             raise ValueError('向量路徑過於複雜')
         role = item.get('role')
