@@ -109,6 +109,7 @@ def multilayer_browser_test(browser,base,poll):
                 assert image.convert('RGBA').getpixel((256,128))!=Image.open(io.BytesIO(png('#9ac8e5'))).convert('RGBA').getpixel((256,128))
             assert len({o['layerId'] for o in tpl['objects_json']['objects']})==30
             original_layers=copy.deepcopy(tpl['objects_json']['objects'])
+            legacy_image_tools_regression(admin,poll)
             admin.close()
             page=browser.new_page(viewport={'width':390,'height':844},has_touch=True,is_mobile=True)
             page.on('dialog',lambda dialog:dialog.accept())
@@ -279,6 +280,30 @@ def image_tools_regression(page,poll,info):
     assert uploads and all(b'name="source_contract"' in body and b'multilayer-v1' in body and b'content-type: image/png' in body.lower() for body in uploads)
     page.locator('#bf-imgtool-panel [data-close]').click()
     page.unroute('**/api/ai/remove-background')
+
+
+def legacy_image_tools_regression(page,poll):
+    calls=[]
+    def capture(request):
+        if '/api/admin/upload_image' in request.url:calls.append(request.post_data_buffer)
+    page.on('request',capture)
+    page.evaluate('window.__legacyPreviousCanvas=visualCanvas')
+    page.locator('#view-templates .titlebar button').filter(has_text='建立模板').click()
+    poll(page,"() => visualCanvas!==window.__legacyPreviousCanvas && document.getElementById('multilayer-enable')?.checked")
+    page.locator('#multilayer-enable').uncheck()
+    assert page.evaluate('BenfuwanAdminMultilayer.enabled()') is False
+    page.locator('#bf-tpl-image-file-v3').set_input_files({'name':'legacy.png','mimeType':'image/png','buffer':png()})
+    poll(page,"() => visualCanvas.getObjects().filter(o=>o.type==='image').length===1")
+    assert page.evaluate('visualCanvas.getActiveObject().publicSrc.endsWith(".webp")')
+    assert b'name="source_contract"' not in calls[-1]
+    before=page.evaluate('visualCanvas.getActiveObject().publicSrc')
+    poll(page,"() => document.getElementById('bf-tpl-objectbar').classList.contains('bf-imgtools')")
+    page.locator('[data-bf-imgtool=crop]').click();page.locator('#bf-imgtool-panel [data-ratio="1"]').click()
+    poll(page,f"() => visualCanvas.getActiveObject().publicSrc!=='{before}'")
+    assert page.evaluate('visualCanvas.getActiveObject().publicSrc.endsWith(".webp")')
+    assert b'name="source_contract"' not in calls[-1] and b'content-type: image/webp' in calls[-1].lower()
+    page.remove_listener('request',capture)
+    page.evaluate('closeModal("template-modal")')
 
 
 def gesture_test(page,browser):
