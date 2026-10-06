@@ -68,6 +68,8 @@
       fabric.Object.prototype.__editableSerializer=true;
     }
     if(bound.has(c))return;bound.add(c);let removing=false;
+    let hydrationQueued=false;
+    c.on('object:added',({target})=>{if(!isMember(target)||hydrationQueued)return;hydrationQueued=true;queueMicrotask(async()=>{try{await rehydrate(c);}catch(e){if(typeof toast==='function')toast(e.message);}finally{hydrationQueued=false;}});});
     if(c.findTarget){const find=c.findTarget;c.findTarget=function(){const target=find.apply(this,arguments);return target?.role==='editable-sticker-text'&&!target.isEditing&&!target.__editableEntering?pair(c,target).bg:target;};}
     let ordering=false;
     for(const [name,delta] of [['bringForward',1],['sendBackwards',-1],['bringToFront','top'],['sendToBack','bottom'],['moveTo','index']]){
@@ -85,7 +87,7 @@
     c.on('object:removed',({target})=>{if(!isMember(target)||removing)return;removing=true;members(c,target).forEach(o=>c.remove(o));removing=false;});
     c.on('mouse:dblclick',({target})=>{if(!isMember(target))return;const {text}=pair(c,target);text.__editableEntering=true;c.setActiveObject(text);text.enterEditing();text.__editableEntering=false;text.selectAll();c.requestRenderAll();});
     c.on('text:changed',({target})=>{if(!isMember(target))return;const {bg,text}=pair(c,target);try{sync(bg,text);text.__lastValid=text.text;}catch(e){text.text=text.__lastValid||'';sync(bg,text);if(typeof toast==='function')toast(e.message);}c.requestRenderAll();});
-    c.on('text:editing:exited',()=>{if(typeof recordHistory==='function'&&c===window.__editableFrontCanvas)recordHistory();});
+    c.on('text:editing:exited',({target})=>{if(isMember(target))c.fire('object:modified',{target});if(typeof recordHistory==='function'&&c===window.__editableFrontCanvas)recordHistory();});
     const select=({selected})=>{const o=selected?.[0];if(o?.role==='editable-sticker-text'&&!o.isEditing&&!o.__editableEntering){const {bg}=pair(c,o);c.setActiveObject(bg);}if(typeof window.bfEditableSelection==='function')window.bfEditableSelection(c,o);};
     c.on('selection:created',select);c.on('selection:updated',select);
   }

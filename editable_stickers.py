@@ -10,6 +10,7 @@ from pathlib import Path
 import subprocess
 import sys
 import threading
+import tempfile
 from functools import lru_cache
 from bisect import bisect_left
 from urllib.parse import urlsplit
@@ -282,8 +283,28 @@ def render(app, order, profile, read):
     raw=base64.b64decode(output['png'].split(',',1)[1],validate=True)
     if image_bytes(raw)!=(width,height):raise ValueError('生產圖尺寸不一致')
     image=Image.open(io.BytesIO(raw));buffer=io.BytesIO();image.save(buffer,'PNG',dpi=(720,720));raw=buffer.getvalue()
-    path=app.upload_private_bytes(f'orders/{order["id"]}/rendered/{hashlib.sha256(raw).hexdigest()}.png',raw)
+    path=store_generated(app,f'orders/{order["id"]}/rendered/{hashlib.sha256(raw).hexdigest()}.png',raw)
     return path,raw,output['layouts']
+
+
+def store_generated(app,path,raw):
+    """Immutable artifact; concurrent retries cannot expose a partly-written PNG."""
+    if app.USE_SUPABASE:
+        try:return app.upload_private_bytes(path,raw)
+        except Exception as exc:
+            try:existing=app.SUPABASE.storage.from_(app.SUPABASE_PRIVATE_BUCKET).download(path)
+            except Exception:raise ValueError('生產圖無法保存') from exc
+            if existing!=raw:raise ValueError('生產圖保存衝突') from exc
+            return path
+    filename=path.replace('/','_');full=Path(app.SAVE_DIR)/filename
+    if full.exists():
+        if full.read_bytes()!=raw:raise ValueError('生產圖保存衝突')
+        return filename
+    with tempfile.NamedTemporaryFile(dir=app.SAVE_DIR,delete=False) as temp:
+        temp.write(raw);temporary=Path(temp.name)
+    try:os.replace(temporary,full)
+    finally:temporary.unlink(missing_ok=True)
+    return filename
 
 
 if __name__=='__main__' and '--worker' in sys.argv:

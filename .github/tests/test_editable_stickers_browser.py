@@ -69,7 +69,7 @@ def editable_sticker_test(browser,base,poll):
     assert page.evaluate('__pair.text.type')=='textbox'
     page.reload()
     poll(page,"() => window.BenfuwanDesignDraft?.state().prompt==='ready'")
-    page.locator('#design-draft-prompt .continue').click()
+    page.locator('#home-design-card').click()
     poll(page,"() => document.getElementById('page-editor').classList.contains('active') && canvas?.getObjects().some(o=>o.editableStickerInstanceId)")
     page.evaluate("() => {window.__pair=BenfuwanEditableSticker.pair(canvas,canvas.getObjects().find(o=>o.editableStickerInstanceId));const mask=document.createElement('canvas');mask.width=200;mask.height=400;const g=mask.getContext('2d');g.fillStyle='#000';g.fillRect(10,10,180,380);g.clearRect(15,15,35,35);window.__editableMask=mask.toDataURL();}")
     assert page.evaluate('__pair.text.type')=='textbox'
@@ -77,6 +77,7 @@ def editable_sticker_test(browser,base,poll):
     contract=page.evaluate('BenfuwanOrderPayload.compactDesign({...__contract,padding:"x".repeat(1600000)})')
     assert contract['render_contract_version']=='editable-text-v1' and contract['objects'][0]['src'].startswith('data:image/png;base64,')
     assert contract['objects'][1]['textArea']==dict(x=.15,y=.2,width=.7,height=.45)
+    assert page.evaluate("""async()=>{const old={modelId:ctx.modelId,styleId:ctx.styleId,printBase64:'existing',designJson:{keep:true}};cartItem=old;ctx.printBase64=null;ctx.productionMeta=null;await confirmDesignToCart();return cartItem===old&&cartItem.designJson.keep===true;}""")
     production=page.evaluate("""async()=>{const front=__pair.text._textLines.map(a=>a.join(''));const high=await BenfuwanEditableSticker.render(__contract,__editableMask,2030,4241);const low=await BenfuwanEditableSticker.render(__contract,__editableMask,200,418);return {front,layouts:high.layouts,png:high.png,low:low.png}}""")
     assert production['layouts'][0]['lines']==production['front']
     high=Image.open(io.BytesIO(base64.b64decode(production['png'].split(',')[1]))).convert('RGBA');low=Image.open(io.BytesIO(base64.b64decode(production['low'].split(',')[1]))).convert('RGBA').resize(high.size,Image.Resampling.BILINEAR)
@@ -95,6 +96,20 @@ def editable_sticker_test(browser,base,poll):
     assert result['area']==dict(x=.15,y=.2,width=.7,height=.45) and result['angle']==38 and result['scale']==.13
     for width,height in ((390,844),(768,1024),(1180,900)):
         page.set_viewport_size(dict(width=width,height=height));assert page.locator('#editable-text-tools').evaluate('(e)=>e.scrollWidth<=e.clientWidth+1')
+    template_results=page.evaluate("""async()=>{
+      const sourceModel=ctx.modelId,styleId=ctx.styleId,tpl={id:'editable-universal',model_id:'*',universal:true,template_version:3,reference_model_id:sourceModel,reference_style_id:styleId,source_print_w:ctx.printW,source_print_h:ctx.printH,source_canvas_w:canvas.width,source_canvas_h:canvas.height,objects_json:canvas.toJSON(CUSTOM_PROPS),slots:[]};
+      const results=[];
+      for(const [id,name,w,h] of [['editable-iphone-13','iPhone 13',70,140],['editable-iphone-17','iPhone 17 Pro',71.63,149.61]]){
+        const profile={preview_mask_img:__editableMask,print_line_img:__editableMask,print_w:w,print_h:h,print_x:12,print_y:13,print_angle:90};
+        shopData.models.push({id,name,status:true,case_profiles:{[styleId]:profile}});ctx={...ctx,modelId:id,printW:w,printH:h,printLineUrl:__editableMask,maskUrl:__editableMask};
+        initCanvas();await new Promise(resolve=>applyTemplate(tpl,resolve));await BenfuwanEditableSticker.rehydrate(canvas);
+        __pair=BenfuwanEditableSticker.pair(canvas,canvas.getObjects().find(o=>o.editableStickerInstanceId));
+        results.push({model:name,area:__pair.text.textArea,widthRatio:__pair.text.width/__pair.bg.width,font:__pair.text.fontFamily});
+      }
+      return results;
+    }""")
+    assert [r['model'] for r in template_results]==['iPhone 13','iPhone 17 Pro']
+    assert all(r['area']==dict(x=.15,y=.2,width=.7,height=.45) and abs(r['widthRatio']-.7)<.01 for r in template_results),template_results
     page.evaluate('canvas.setActiveObject(__pair.text);deleteActive()');assert page.evaluate('canvas.getObjects().filter(o=>o.editableStickerInstanceId).length')==0
     page.evaluate("() => addStickerImage('/static/test-dialog.png')");poll(page,"() => canvas.getObjects().some(o=>o.role==='sticker' && !o.editableStickerInstanceId)")
     page.close()

@@ -89,6 +89,13 @@ class EditableTests(unittest.TestCase):
         order=app.commerce.store.order(self.fixture.order_id);job=app.print_center.prepare(order['id'],'legacy-preserved')
         self.assertEqual(job['artwork_path'],order['print_path'])
 
+    def test_generated_artifact_retry_is_immutable(self):
+        path='orders/fixture/rendered/content.png';raw=image()
+        saved=editable.store_generated(app,path,raw)
+        full=__import__('pathlib').Path(app.SAVE_DIR)/saved;stamp=full.stat().st_mtime_ns
+        self.assertEqual(editable.store_generated(app,path,raw),saved);self.assertEqual(full.stat().st_mtime_ns,stamp)
+        with self.assertRaises(ValueError):editable.store_generated(app,path,b'wrong')
+
     def test_admin_auth_cas_and_defaults(self):
         old=app.ASSETS_FILE;app.ASSETS_FILE=str(__import__('pathlib').Path(self.fixture.tmp.name)/'assets.json');self.addCleanup(setattr,app,'ASSETS_FILE',old)
         anonymous=app.app.test_client();self.assertEqual(anonymous.post('/api/admin/editable_sticker',json={}).status_code,401)
