@@ -10,6 +10,7 @@ from pathlib import Path
 from itsdangerous import URLSafeSerializer, BadSignature
 from flask import request, session
 from PIL import Image
+from PIL.PngImagePlugin import PngInfo
 
 MAX_FILE_BYTES = 24 * 1024 * 1024  # multipart fits the unchanged 36 MB Flask gate
 TTL = 24 * 3600
@@ -83,10 +84,15 @@ def cleanup_expired(app, now=None):
 
 
 def cleanup_plan(app,order_id):
+    # The existing private artwork bucket may allow only image MIME types.
+    # Use a real tiny PNG with private metadata, never JSON mislabeled as PNG;
+    # this rollback intent is not production artwork or a customer design source.
     expires=((int(time.time())+TTL+3599)//3600)*3600
-    intended=f'design-cleanup/{expires}/{order_id}-{uuid.uuid4().hex}.json'
+    intended=f'design-cleanup/{expires}/{order_id}-{uuid.uuid4().hex}.png'
     path=intended if app.USE_SUPABASE else intended.replace('/','_')
-    try:app.upload_private_bytes(intended,json.dumps({'order_id':order_id}).encode(),'application/json')
+    metadata=PngInfo();metadata.add_text('benfuwan_cleanup',json.dumps({'order_id':order_id}))
+    raw=io.BytesIO();Image.new('RGBA',(1,1),(0,0,0,0)).save(raw,'PNG',pnginfo=metadata)
+    try:app.upload_private_bytes(intended,raw.getvalue(),'image/png')
     except Exception:
         app.delete_private_path(path)
         raise
@@ -101,15 +107,23 @@ def cleanup_pending(app,now):
         for row in bucket.list('design-cleanup',{'limit':20,'sortBy':{'column':'name','order':'asc'}}):
             name=row['name']
             if name.isdigit() and int(name)<=now:
-                paths.extend(f'design-cleanup/{name}/{r["name"]}' for r in bucket.list('design-cleanup/'+name,{'limit':100}) if re.fullmatch(r'[A-Za-z0-9-]+\.json',r['name']))
+                paths.extend(f'design-cleanup/{name}/{r["name"]}' for r in bucket.list('design-cleanup/'+name,{'limit':100}) if re.fullmatch(r'[A-Za-z0-9-]+\.(?:png|json)',r['name']))
     else:
-        for path in sorted(Path(app.SAVE_DIR).glob('design-cleanup_*.json'))[:200]:
+        candidates=[p for p in Path(app.SAVE_DIR).glob('design-cleanup_*') if p.suffix in ('.png','.json')]
+        for path in sorted(candidates)[:200]:
             parts=path.name.split('_',2)
             if parts[1].isdigit() and int(parts[1])<=now:paths.append(path.name)
     from editable_stickers import delete_order_sources
     for path in paths:
         # On DB outage, keep the private cleanup record. Never guess a commit failed.
-        record=json.loads(read(app,path));order_id=record['order_id']
+        raw=read(app,path)
+        if path.endswith('.png'):
+            with Image.open(io.BytesIO(raw)) as marker:
+                if marker.format!='PNG' or marker.size!=(1,1):raise ValueError('invalid private cleanup marker')
+                record=json.loads(marker.info['benfuwan_cleanup'])
+        else:record=json.loads(raw)  # Retry existing JSON intents without migration.
+        order_id=record['order_id']
+        if not isinstance(order_id,str) or not re.fullmatch(r'[A-Za-z0-9-]{1,100}',order_id):raise ValueError('invalid cleanup order identity')
         if existing_order(app,order_id):
             app.delete_private_path(path);continue
         delete_order_sources(app,{'id':order_id})
