@@ -44,6 +44,6 @@ Admin 保存時驗 canonical layer IDs、geometry、權限與 original PNG pixel
 
 後端測試：canonical schema／CAS／legacy、權限／identity／geometry／source tamper、private source snapshot、native slot crop、歷史 seal、原始 PNG 保存、30-layer 720 DPI rebuild。
 
-Browser：真實 Admin 建立 30 layers，locked hit-through、拖曳、雙指、duplicate/delete、hide/order、ordinary text／editable text、slot／reset、draft reload、三種 iPhone normalized mapping、390／768／1180、原 HQ preview/cart。Chromium 用 CDP multi-touch；WebKit 用 DOM TouchEvent 經公開輸入 handler（Playwright WebKit 無 CDP），不直接設定 transform 假測手勢。實機 Safari 驗收仍應另做。
+Browser：真實 Admin 建立 30 layers，locked hit-through、拖曳、雙指、duplicate/delete、hide/order、ordinary text／editable text、slot／reset、draft reload、三種 iPhone normalized mapping、390／768／1180、原 HQ preview/cart。Chromium 用 CDP multi-touch；WebKit 用帶 touches 的 DOM Event 經公開輸入 handler（Linux WebKit 不允許 Touch constructor，Playwright WebKit 無 CDP），不直接設定 transform 假測手勢。實機 Safari 驗收仍應另做。
 
 無多選／新 Group／吸附／自動對齊／協作編輯。

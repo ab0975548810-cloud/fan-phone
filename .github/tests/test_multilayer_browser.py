@@ -49,7 +49,7 @@ def multilayer_browser_test(browser,base,poll):
             poll(admin,"() => !!window.visualCanvas && !!document.getElementById('multilayer-enable')")
             assert admin.locator('#multilayer-enable').is_checked()
             admin.locator('#bf-tpl-bg-btn-v3').click();admin.locator('#bf-tpl-bg-transparent-v3').click()
-            assert admin.evaluate("visualCanvas.getObjects().find(o=>o.isTplBg).fill")=='transparent'
+            assert admin.evaluate("visualCanvas.getObjects().find(o=>o.isTplBg).fill")=='rgba(0,0,0,0)'
             admin.locator('#bf-tpl-bg-white-v3').click();admin.locator('#bf-tpl-bg-close-v3').click()
             assert admin.evaluate("visualCanvas.getObjects().find(o=>o.isTplBg).fill")=='#ffffff'
             admin.locator('#tpl-name').fill('Multi-layer 30')
