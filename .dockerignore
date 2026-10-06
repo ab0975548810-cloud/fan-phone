@@ -1,0 +1,9 @@
+.git
+__pycache__
+*.sqlite3*
+orders
+shop_data.json*
+commerce_data.json*
+assets.json*
+templates.json*
+.env*

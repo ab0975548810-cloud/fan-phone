@@ -329,6 +329,7 @@ class Commerce:
     def action(self, order_id, action, target, key=''):
         signature = [order_id, action, target]
         cleanup = self.store.order(order_id) if action == 'delete' else None
+        cleanup_record = None
         if action == 'delete' and hasattr(self.app, 'print_center'):
             active = self.app.print_center.store.active_job(order_id)
             if active:
@@ -370,10 +371,17 @@ class Commerce:
             if key:
                 data['actions'][key] = dict(signature=signature, response=result)
             return result, dict(id=order_id, status=target), 'delete' if action == 'delete' else 'status'
+        if cleanup:
+            from design_sources import cleanup_plan
+            cleanup_record = cleanup_plan(self.app, order_id)
         result = self.mutate(update)
         if cleanup:
+            cleaned = True
             for name in ('print_path', 'mockup_path'):
-                self.app.delete_private_path(cleanup.get(name))
+                cleaned = self.app.delete_private_path(cleanup.get(name)) and cleaned
+            from editable_stickers import delete_order_sources
+            delete_order_sources(self.app, cleanup)
+            if cleaned:self.app.delete_private_path(cleanup_record)
         return result
 
 
@@ -505,7 +513,13 @@ def install(app_module):
         key = request.headers.get('Idempotency-Key') or req.get('idempotency_key', '')
         if not isinstance(key, str) or not re.fullmatch(r'[A-Za-z0-9_-]{16,100}', key):
             raise CommerceError('IDEMPOTENCY_REQUIRED', '請重新整理頁面後送單（缺少送單識別）', 400)
-        fingerprint = hashlib.sha256(json.dumps({k: v for k, v in req.items() if k != 'idempotency_key'},
+        from design_sources import identity, release
+        logical_req={k:v for k,v in req.items() if k!='idempotency_key'}
+        try:logical_req['design_json']=identity(app_module,req.get('design_json'))
+        except ValueError as exc:
+            release(app_module,req.get('design_json'))
+            raise CommerceError('BAD_SOURCE_REFERENCE',str(exc),400)
+        fingerprint = hashlib.sha256(json.dumps(logical_req,
             ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
         g.commerce_key, g.commerce_fingerprint = key, fingerprint
         # Color is saved inside the transaction, not by a post-response write.
@@ -531,6 +545,8 @@ def install(app_module):
         except Exception:
             app.logger.exception('Checkout persistence unavailable')
             return reply(dict(status='error', code='COMMERCE_UNAVAILABLE', msg='訂單尚未確認，請重試原訂單'), 503)
+        finally:
+            release(app_module,req.get('design_json'))
     app.view_functions['create_order'] = create_order
 
     @app.after_request

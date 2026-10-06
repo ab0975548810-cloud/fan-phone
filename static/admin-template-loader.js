@@ -33,6 +33,7 @@
       for(const src of STACK)await loadOne(src);
       loaded=true;
       window.__benfuwanTemplateStackReady=true;
+      window.bfInstallEditableTemplate?.();
       // The heavy editor contains an older list renderer. Restore the light
       // management workspace after the editor modules finish installing.
       window.BenfuwanAdminLibraryWorkspace?.installTemplateRender?.();
