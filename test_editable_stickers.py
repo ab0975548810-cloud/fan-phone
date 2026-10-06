@@ -296,4 +296,22 @@ class EditableTests(unittest.TestCase):
         design_sources.cleanup_expired(app,now=__import__('time').time()+2*86400)
         self.assertEqual(self.order_files(),[]);self.assertFalse(list(root.glob('design-cleanup*')))
 
+    def test_cloud_commit_still_pending_does_not_delete_artwork(self):
+        uploaded=self.upload(self.draft);claims=design_sources.signer(app).loads(uploaded['objects'][0]['sourceRef'])
+        files={f'design-temp/{claims["expires"]}/{claims["id"]}.png':image()}
+        bucket=mock.Mock();bucket.download.side_effect=lambda path:files[path]
+        storage=mock.Mock();storage.from_.return_value=bucket
+        from types import SimpleNamespace
+        fake=SimpleNamespace(storage=storage)
+        shop=app.cloud_get_json('shop_data',app.DATA_FILE,app.DEFAULT_SHOP_DATA)
+        def upload(path,raw,mime='image/png'):files[path]=raw;return path
+        def delete(path):files.pop(path,None);return True
+        cookie=self.client.get_cookie('session').value
+        with app.app.test_request_context('/api/create_order',method='POST',json=self.body(uploaded),headers={'Cookie':'session='+cookie}),mock.patch.object(app,'USE_SUPABASE',True),mock.patch.object(app,'SUPABASE',fake),mock.patch.object(app,'upload_private_bytes',side_effect=upload),mock.patch.object(app,'delete_private_path',side_effect=delete),mock.patch.object(app.commerce,'create',side_effect=TimeoutError('RPC still running')),mock.patch.object(app.commerce.store,'order',return_value=None),mock.patch.object(editable,'public_image',return_value=mask()):
+            app.g.commerce_shop=shop
+            response=app.create_order()
+        self.assertEqual(response.status_code,500)
+        self.assertTrue(any(path.startswith('orders/') and '/sources/' in path for path in files))
+        self.assertTrue(any(path.startswith('design-cleanup/') for path in files))
+
 if __name__=='__main__':unittest.main(verbosity=2)

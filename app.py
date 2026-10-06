@@ -717,6 +717,8 @@ def create_order():
     original_design = None
     cleanup_record = None
     order_id = None
+    db_write_started = False
+    db_write_uncertain = False
     try:
         data = request.get_json(silent=True) or {}
         original_design = data.get('design_json')
@@ -789,6 +791,7 @@ def create_order():
         if 'commerce' in globals():
             if getattr(g, '_bf_order_color', ''):
                 order_payload['style_name'] += '・' + g._bf_order_color
+            db_write_started = USE_SUPABASE
             result = commerce.create(order_payload)
             committed = result['order_id'] == order_id
             if result['order_id'] != order_id:
@@ -800,6 +803,7 @@ def create_order():
 
         if USE_SUPABASE:
             try:
+                db_write_started = True
                 SUPABASE.table('orders').insert(order_payload).execute()
             except Exception:
                 raise
@@ -830,6 +834,7 @@ def create_order():
     except ValueError as exc:
         return no_cache_json({'status':'error','msg':str(exc)}, 400)
     except Exception as exc:
+        db_write_uncertain = db_write_started
         print('create_order error:', repr(exc))
         return no_cache_json({'status':'error','msg':f'訂單建立失敗：{exc}'}, 500)
     finally:
@@ -839,6 +844,10 @@ def create_order():
                 found = existing_order(sys.modules[__name__],order_id) if order_id else None
                 if found:
                     committed = True
+                elif db_write_uncertain:
+                    # A timed-out RPC may still commit after this read. The
+                    # durable janitor waits for expiration before proving absence.
+                    app.logger.warning('cloud commit result uncertain; deferred private cleanup')
                 else:
                     cleaned = all([delete_private_path(path) for path in set([print_path, mockup_path, *source_paths])])
                     if cleaned:delete_private_path(cleanup_record)
