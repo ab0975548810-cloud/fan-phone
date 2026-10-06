@@ -114,3 +114,54 @@ def editable_sticker_test(browser,base,poll):
     page.evaluate("() => addStickerImage('/static/test-dialog.png')");poll(page,"() => canvas.getObjects().some(o=>o.role==='sticker' && !o.editableStickerInstanceId)")
     page.close()
     print('EDITABLE_STICKER_PAIR_EDIT_FIT_DRAFT_CONTRACT_REAL_HQ_FONTS_RESPONSIVE_OK')
+    editable_admin_test(browser,base,poll,catalog)
+
+
+def editable_admin_test(browser,base,poll,catalog):
+    page=browser.new_page(viewport={'width':1180,'height':900})
+    page.on('dialog',lambda dialog:dialog.accept())
+    page.route('**/static/test-dialog.png',lambda r:r.fulfill(status=200,body=png(),content_type='image/png'))
+    page.route('**/api/shop_data',catalog)
+    assets={'stickers':[],'categories':['全部'],'editable_stickers':[]};writes=[]
+    page.route('**/api/assets?*',lambda route:route.fulfill(status=200,json={'status':'success','data':assets,'version':'asset-fixture'}))
+    page.route('**/api/admin/upload_image',lambda route:route.fulfill(status=200,json={'status':'success','url':'/static/test-dialog.png'}))
+    def save(route):
+        body=route.request.post_data_json;writes.append(body)
+        assets['editable_stickers']=[{**body,'id':'admin-dialog','intrinsicSize':{'width':1024,'height':512}}]
+        route.fulfill(status=200,json={'status':'success','version':'asset-fixture-2','data':assets})
+    page.route('**/api/admin/editable_sticker',save)
+    page.goto(base+'/admin')
+    if '/login' in page.url:
+        if not page.locator('input[name=password]').is_visible():page.locator('#password-toggle').click()
+        page.locator('input[name=password]').fill('fan123');page.locator('form button[type=submit]').click();page.wait_for_url('**/admin')
+    page.locator('.nav button[data-view=assets]').click()
+    page.get_by_role('button',name='建立文字貼紙',exact=True).click()
+    dialog=page.locator('.editable-config-dialog')
+    dialog.locator('[name=name]').fill('管理者對話框')
+    dialog.locator('[name=image]').set_input_files({'name':'dialog.png','mimeType':'image/png','buffer':png()})
+    poll(page,"() => document.querySelector('.editable-config-stage img').naturalWidth===1024 && !document.querySelector('.editable-config-dialog [type=submit]').disabled")
+    box=dialog.locator('.editable-config-area').bounding_box();page.mouse.move(box['x']+15,box['y']+15);page.mouse.down();page.mouse.move(box['x']+35,box['y']+25,steps=6);page.mouse.up()
+    assert float(dialog.locator('[name=area-x]').input_value())>.15
+    dialog.locator('[name=fontSize]').fill('80');dialog.locator('[name=minFontSize]').fill('18')
+    dialog.get_by_role('button',name='儲存',exact=True).click();poll(page,"() => !document.querySelector('.editable-config-dialog').open")
+    assert len(writes)==1 and writes[0]['expected_version']=='asset-fixture'
+    assert writes[0]['textArea']['x']>.15 and writes[0]['defaultTextStyle']['fontFamily']=='jf-openhuninn'
+    assert assets['stickers']==[]
+    assert not page.evaluate("!!window.__benfuwanTemplateStackReady")
+    page.locator('.nav button[data-view=templates]').click()
+    page.locator('#view-templates .titlebar button').filter(has_text='建立模板').click()
+    poll(page,"() => !!window.__benfuwanTemplateStackReady && !!window.visualCanvas")
+    page.get_by_role('button',name='加入文字貼紙',exact=True).click()
+    page.locator('dialog').filter(has=page.get_by_role('button',name='管理者對話框',exact=True)).get_by_role('button',name='管理者對話框',exact=True).click()
+    poll(page,"() => visualCanvas.getObjects().filter(o=>o.editableStickerInstanceId).length===2")
+    saved=page.evaluate("""()=>{const raw=visualCanvas.toJSON(['isSlot','isTplBg','slotId']);return raw.objects.filter(o=>o.editableStickerInstanceId)}""")
+    assert [o['role'] for o in saved]==['editable-sticker-bg','editable-sticker-text']
+    assert saved[1]['textArea']==writes[0]['textArea']
+    page.evaluate("() => {const bg=visualCanvas.getObjects().find(o=>o.role==='editable-sticker-bg');visualCanvas.setActiveObject(bg);addText();}")
+    assert page.evaluate("visualCanvas.getActiveObject().isEditing===true")
+    page.keyboard.insert_text('模板文字')
+    page.evaluate('visualCanvas.getActiveObject().exitEditing()')
+    for width,height in ((390,844),(768,1024),(1180,900)):
+        page.set_viewport_size(dict(width=width,height=height));assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+2')
+    page.close()
+    print('EDITABLE_ADMIN_NORMALIZED_AREA_CAS_LAZY_TEMPLATE_METADATA_EDIT_OK')

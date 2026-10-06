@@ -66,7 +66,7 @@ def text_style(value):
     if not isinstance(out['text'], str) or len(out['text']) > 2000:
         raise ValueError('文字最多 2000 字')
     check_glyphs(out['fontFamily'],out['text'])
-    if out['fontWeight'] not in ('400', '700', 400, 700, 'normal', 'bold') or out['fontStyle'] not in ('normal', 'italic') or out['textAlign'] not in ('left', 'center', 'right'):
+    if str(out['fontWeight']) not in ('100','200','300','400','500','600','700','800','900','normal','bold') or out['fontStyle'] not in ('normal', 'italic') or out['textAlign'] not in ('left', 'center', 'right'):
         raise ValueError('文字樣式格式錯誤')
     for key in ('fill', 'stroke'):
         if out[key] is not None and (not isinstance(out[key], str) or len(out[key]) > 64 or any(x in out[key].lower() for x in ('url(', '<', '>'))):

@@ -22,7 +22,7 @@
     if(!loaded.has(family))loaded.set(family,(async()=>{
       const response=await fetch(FONTS[family].url+'?sha='+coverage[family].sha256);if(!response.ok)throw Error('字型載入失敗');const bytes=await response.arrayBuffer();
       const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),x=>x.toString(16).padStart(2,'0')).join('');if(hash!==coverage[family].sha256)throw Error('字型版本不一致');
-      const face=new FontFace(family,bytes);
+      const face=new FontFace(family,bytes,family==='NotoSansTC'?{weight:'100 900'}:{});
       await face.load();document.fonts.add(face);return face;
     })().catch(e=>{loaded.delete(family);throw Error('字型載入失敗，不能安全排版');}));
     await loaded.get(family);
