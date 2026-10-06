@@ -103,6 +103,28 @@ class EditableTests(unittest.TestCase):
         self.assertEqual(editable.store_generated(app,path,raw),saved);self.assertEqual(full.stat().st_mtime_ns,stamp)
         with self.assertRaises(ValueError):editable.store_generated(app,path,b'wrong')
 
+    def test_storage_conflict_or_lost_response_reuses_only_exact_artifact(self):
+        from types import SimpleNamespace
+        bucket=mock.Mock();bucket.download.return_value=image()
+        storage=mock.Mock();storage.from_.return_value=bucket
+        fake=SimpleNamespace(USE_SUPABASE=True,SUPABASE=SimpleNamespace(storage=storage),SUPABASE_PRIVATE_BUCKET='test-only',upload_private_bytes=mock.Mock(side_effect=TimeoutError('lost reply')))
+        self.assertEqual(editable.store_generated(fake,'orders/test/rendered/hash.png',image()),'orders/test/rendered/hash.png')
+        bucket.download.return_value=b'wrong'
+        with self.assertRaises(ValueError):editable.store_generated(fake,'orders/test/rendered/hash.png',image())
+
+    def test_total_source_pixel_guard_runs_before_upload(self):
+        model=app.cloud_get_json('shop_data',app.DATA_FILE,app.DEFAULT_SHOP_DATA)['models'][0]
+        with mock.patch.object(editable,'MAX_SOURCE_PIXELS',1),mock.patch.object(app,'upload_private_bytes') as upload:
+            with self.assertRaises(ValueError):editable.snapshot(app,self.draft,'pixel-limit',model,self.style,[])
+        upload.assert_not_called()
+
+    def test_cross_order_source_is_rejected_before_read(self):
+        order=app.commerce.store.order(self.create());profile=app.print_center.store.profile(self.fixture.sku_id)
+        order['design_json']['objects'][0]['src']='orders_other_sources_wrong.png'
+        reader=mock.Mock()
+        with self.assertRaises(ValueError):editable.render(app,order,profile,reader)
+        reader.assert_not_called()
+
     def test_admin_auth_cas_and_defaults(self):
         old=app.ASSETS_FILE;app.ASSETS_FILE=str(__import__('pathlib').Path(self.fixture.tmp.name)/'assets.json');self.addCleanup(setattr,app,'ASSETS_FILE',old)
         anonymous=app.app.test_client();self.assertEqual(anonymous.post('/api/admin/editable_sticker',json={}).status_code,401)

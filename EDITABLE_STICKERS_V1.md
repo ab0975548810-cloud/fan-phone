@@ -19,6 +19,7 @@ fontSize/minFontSize 使用原圖座標單位，跟隨整組縮放。後台拖�
 文字工具 dock 是 editor 的 flex sibling，縮小可見 workspace，不覆蓋畫布。
 文字先等站內 FontFace ready，再按字級逐 1 原图單位縮至 minFontSize，包含換行、字距、行距、描邊／斜體留白；仍不合則拒絕，保留最後有效內容。
 兩個固定字型：jf-openhuninn 2.1（OFL）、Noto Sans TC（OFL，官方字型無損 WOFF2）。不接受任意字型 URL。
+字型 bytes 以 SHA256 校驗；glyph coverage manifest 拒絕缺字，不會以 system font 補字。字型載入後清除 Fabric 的舊度量 cache，避免草稿還原曾量到 fallback 字型。
 新版 structured 設計中的其他文字也須選上述站內字型，不能讓 production 默默使用系統字型。舊訂單與無文字貼紙設計保持原流程。
 
 ## 訂單與重建
@@ -39,6 +40,7 @@ Print Center prepare 對新版訂單：
 
 Renderer 不接受 DOM screenshot；browser request 全數攔截，只有本機固定 JS／字型與本訂單來源 bytes 能載入。
 每 process 同時最多一個 renderer，等待最多 5 秒、子程序最多 90 秒，最大輸出 18MP。
+來源另有每張 32MP／總計 64MP／70MB 安全限制，不因此壓縮原圖或轉 JPEG。相同來源重用；content-addressed artifact 使用 atomic 本機寫入，Supabase 重送／回覆遺失僅在 bytes 完全一致時重用。
 缺資源／不支援字型／geometry 更新／renderer 無法啟動 → PRODUCTION_REBUILD_FAILED；不 fallback 客戶 PNG。
 舊訂單没有 render contract，仍讀既有 print_path。vendor payload／startPrint 安全規則未改。
 
