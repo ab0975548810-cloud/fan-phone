@@ -80,6 +80,13 @@ def multilayer_browser_test(browser,base,poll):
             admin.locator('#bf-tpl-layers-btn-v3').click()
             admin.locator(f'.multi-admin-layer[data-layer-id="{info["upper"]}"] [data-locked]').check()
             assert admin.locator(f'.multi-admin-layer[data-layer-id="{info["upper"]}"] [data-permission=canMove]').is_disabled()
+            admin.route('**/api/admin/save_templates',lambda route:route.fulfill(status=503,content_type='application/json',body='{"status":"error"}'))
+            admin.locator('#template-modal .mf button').filter(has_text='儲存').click()
+            poll(admin,"() => document.getElementById('bf-product-message')?.textContent.includes('模板儲存失敗')")
+            assert admin.locator('#bf-product-message').is_visible()
+            assert admin.locator('#template-modal').is_visible() and admin.locator('#tpl-name').input_value()=='Multi-layer 30'
+            assert admin.locator('#template-modal .mf button').filter(has_text='儲存').is_enabled()
+            admin.unroute('**/api/admin/save_templates')
             admin.locator('#template-modal .mf button').filter(has_text='儲存').click()
             poll(admin,"() => !document.getElementById('template-modal').classList.contains('show')",timeout=60000)
             data=app_module.cloud_get_json('templates',app_module.TEMPLATES_FILE,app_module.DEFAULT_TEMPLATES);tpl=data['templates'][0]
@@ -91,6 +98,10 @@ def multilayer_browser_test(browser,base,poll):
             page.on('dialog',lambda dialog:dialog.accept())
             page.on('pageerror',lambda e:print('MULTILAYER_FRONT_ERROR',str(e),flush=True))
             page.goto(base);poll(page,"() => !!window.BenfuwanMultilayer && typeof shopData!=='undefined' && shopData.models.length===3")
+            # An image-only template still needs a font manifest without having
+            # previously selected any text or loaded a FontFace.
+            image_only=page.evaluate("""async()=>{const c=new fabric.StaticCanvas(null,{width:200,height:400});c.add(new fabric.Rect({width:20,height:20,strokeWidth:0,fill:'#ffccdd'}));try{return await BenfuwanEditableSticker.serialize(c,{modelId:'fixture',styleId:'fixture',printW:70,printH:140});}finally{c.dispose();}}""")
+            assert image_only['fontHashes'] and len(image_only['objects'])==1
             page.evaluate("""args=>{ctx={...ctx,modelId:args.model,styleId:args.style,printW:70,printH:140,maskUrl:args.mask,printLineUrl:args.mask};navigate('page-editor');initCanvas();return new Promise(resolve=>applyTemplate(args.template,resolve));}""",{'model':ids[0],'style':style_id,'mask':mask_url,'template':tpl})
             assert page.evaluate('canvas.getObjects().length')==30
             selected=page.evaluate("""()=>{const out=[];for(const o of canvas.getObjects()){if(!o.locked&&o.role!=='slot-guide'&&o.role!=='editable-sticker-text'){canvas.setActiveObject(o);out.push(canvas.getActiveObject().layerInstanceId)}}return out;}""")

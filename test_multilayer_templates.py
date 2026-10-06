@@ -99,6 +99,14 @@ class MultilayerTests(unittest.TestCase):
                 app.session['_bf_client_id']=identity
                 with self.assertRaisesRegex(ValueError,'固定圖層內容'):multi.verify_design(app,data)
 
+    def test_shared_authoring_download_cache_does_not_bypass_template_pixel_budget(self):
+        data=copy.deepcopy(self.tpl);cache={};raw=fixture.image()
+        for index in (3,6,9):
+            src='/static/budget-'+str(index)+'.png';data['objects_json']['objects'][index]['src']=src
+            cache[src]=(raw,multi.image_digest(raw)[0],(6000,5000))
+        with mock.patch('editable_stickers.public_image',return_value=raw),self.assertRaisesRegex(ValueError,'總量過大'):
+            multi.prepare_template(app,data,cache)
+
     def test_binding_owner_and_updated_template_fail_closed(self):
         uploaded=self.fx.upload(self.design());other=app.app.test_client()
         with mock.patch('editable_stickers.public_image',return_value=fixture.mask()):self.assertEqual(other.post('/api/create_order',json=self.fx.body(uploaded)).status_code,400)

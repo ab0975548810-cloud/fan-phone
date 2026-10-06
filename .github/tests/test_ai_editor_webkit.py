@@ -2455,6 +2455,10 @@ def admin_test(browser, base):
     page.locator('#view-templates .titlebar .btn').click()
     poll(page, "() => document.getElementById('template-modal')?.classList.contains('show') && !!visualCanvas", timeout=30000)
 
+    # This block covers the unchanged legacy editor-v2 save/error contract.
+    # New multilayer save/toast behavior has its own real authoring regression.
+    page.locator('#multilayer-enable').uncheck()
+
     template_server_original = page.evaluate("() => ({data:structuredClone(templatesData),version:templatesVersion})")
     template_winner = copy.deepcopy(template_server_original['data'])
     template_winner['templates'].append({'id':'cas-template-a','name':'CAS 模板 A','category':'熱門','model_id':'*','universal':True})

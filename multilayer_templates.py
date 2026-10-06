@@ -68,7 +68,7 @@ def prepare_template(app,template,images=None):
     for k in ('width','height'):
         n=canvas.get(k)
         if isinstance(n,bool) or not isinstance(n,(int,float)) or not 1<=n<=2000:raise ValueError('模板 logical canvas 無效')
-    cache=images if images is not None else {};pixels=total=0;pairs=defaultdict(list)
+    cache=images if images is not None else {};pixels=total=0;counted_sources=set();pairs=defaultdict(list)
     for index,item in enumerate(items):
         if item.get('type') not in ('image','text','textbox','i-text','rect','circle','ellipse','triangle','line','path','polygon','polyline') or item.get('objects'):raise ValueError('V1 僅接受獨立圖層，不支援群組')
         identity=item.get('layerId');instance=item.get('layerInstanceId')
@@ -96,7 +96,8 @@ def prepare_template(app,template,images=None):
             if not isinstance(src,str) or not src or src.startswith(('data:','blob:')):raise ValueError('模板需引用已保存的原始 PNG')
             if src not in cache:
                 raw=public_image(app,src);image_bytes(raw);cache[src]=(raw,*image_digest(raw))
-                pixels+=cache[src][2][0]*cache[src][2][1];total+=len(raw)
+            if src not in counted_sources:
+                pixels+=cache[src][2][0]*cache[src][2][1];total+=len(cache[src][0]);counted_sources.add(src)
             raw,pixel_hash,size=cache[src]
             if pixels>64000000 or total>70*1024*1024:raise ValueError('模板原始素材總量過大')
             item['assetPixelHash']=pixel_hash;item['sourceSize']={'width':size[0],'height':size[1]}

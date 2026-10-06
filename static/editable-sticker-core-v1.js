@@ -15,10 +15,13 @@
     if(!a||!['x','y','width','height'].every(k=>Number.isFinite(a[k])&&a[k]>=0&&a[k]<=1)||a.width<=0||a.height<=0||a.x+a.width>1.000001||a.y+a.height>1.000001)throw Error('文字安全區設定無效');
     return {...a};
   }
+  function fontManifest(){
+    if(!coveragePromise)coveragePromise=fetch('/static/fonts/editable-font-manifest.json').then(r=>{if(!r.ok)throw Error('字型契約無法載入');return r.json();}).catch(e=>{coveragePromise=null;throw e;});
+    return coveragePromise;
+  }
   async function font(family,text='文字'){
     if(!ASSETS[family])throw Error('請使用站內字型');
-    if(!coveragePromise)coveragePromise=fetch('/static/fonts/editable-font-manifest.json').then(r=>{if(!r.ok)throw Error('字型契約無法載入');return r.json();}).catch(e=>{coveragePromise=null;throw e;});
-    const coverage=await coveragePromise;
+    const coverage=await fontManifest();
     const ranges=coverage[family]?.ranges;if(!ranges)throw Error('字型契約缺失');
     for(const character of String(text)){const n=character.codePointAt(0);let lo=0,hi=ranges.length;while(lo<hi){const mid=(lo+hi)>>1;if(ranges[mid][1]<n)lo=mid+1;else hi=mid;}if(![9,10,13].includes(n)&&!(ranges[lo]?.[0]<=n))throw Error('字型不支援部分字元，請更換字型或文字');}
     if(!loaded.has(family))loaded.set(family,(async()=>{
@@ -166,7 +169,7 @@
       if(raw.clipPath&&obj.clipPath)await visit(raw.clipPath,obj.clipPath);
     };
     const objs=c.getObjects().filter(o=>!['guide','slot-guide'].includes(o.role));for(const [i,r] of data.objects.entries())await visit(r,objs[i]);
-    const coverage=await coveragePromise;
+    const coverage=await fontManifest();
     return {...data,render_contract_version:VERSION,fontHashes:Object.fromEntries(Object.entries(coverage).map(([key,value])=>[key,value.sha256])),logicalCanvas:{width:c.width,height:c.height},production:{printW:context.printW,printH:context.printH},modelId:context.modelId,styleId:context.styleId};
   }
   async function render(data,maskSrc,width,height){

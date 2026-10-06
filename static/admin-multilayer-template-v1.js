@@ -2,7 +2,7 @@
   'use strict';const multi=window.BenfuwanMultilayer,editable=window.BenfuwanEditableSticker;if(!multi)return;
   let mode=false,saving=false,hooked=new WeakSet(),observed=null;
   const by=id=>document.getElementById(id),canvas=()=>window.visualCanvas;
-  const notify=(m,error=false)=>window.BenfuwanAdminProductWorkspace?.notify?.(m,error?'error':'success')||console.info(m);
+  const notify=(m,error=false)=>{if(window.BenfuwanAdminProductWorkspace?.notify)window.BenfuwanAdminProductWorkspace.notify(m,error?'error':'success');else console.info(m);};
   function background(c){if(!c||c.getObjects().some(o=>o.isTplBg))return;
     const bg=new fabric.Rect({width:c.width,height:c.height,left:0,top:0,strokeWidth:0,fill:typeof c.backgroundColor==='string'&&c.backgroundColor!=='transparent'?c.backgroundColor:'#fff',isTplBg:true,role:'template-bg',layerName:'背景'});multi.decorate(bg,c);c.insertAt(bg,0,false);c.backgroundColor='transparent';multi.permissions(c,bg,true);c.requestRenderAll();
   }
