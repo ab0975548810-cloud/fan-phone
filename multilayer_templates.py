@@ -72,6 +72,7 @@ def prepare_template(app,template,images=None):
     for index,item in enumerate(items):
         if item.get('type') not in ('image','text','textbox','i-text','rect','circle','ellipse','triangle','line','path','polygon','polyline') or item.get('objects'):raise ValueError('V1 僅接受獨立圖層，不支援群組')
         if item.get('filters') or item.get('resizeFilter'):raise ValueError('圖片效果尚未烤平為 PNG，不可發布模板')
+        if item.get('templateSlot') and (item.get('templateSlot') is not True or item['type']!='rect' or item.get('role')!='template-photo-slot' or item.get('isSlot') is not True):raise ValueError('模板照片框類型無效')
         identity=item.get('layerId');instance=item.get('layerInstanceId')
         if not isinstance(identity,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}',identity) or identity in ids:raise ValueError('圖層 layerId 缺失或重複')
         if not isinstance(instance,str) or not 1<=len(instance)<=150 or instance in instances:raise ValueError('圖層 instance ID 缺失或重複')
@@ -145,7 +146,8 @@ def verify_design(app,design):
         if not expected or expected.get('templateSlot') is not True:raise ValueError('非照片框圖層不可放入空照片框清單')
         if (item.get('layerId')!=expected['layerId'] or item.get('templateApplicationId')!=app_id or
                 item.get('layerInstanceId')!=app_id+':'+expected['layerId'] or item.get('duplicateOf') or
-                item.get('templateSlot') is not True or item.get('role')!='slot-guide' or item.get('type')!=expected['type'] or expected['type']!='rect'):
+                item.get('templateSlot') is not True or item.get('isSlot') is not True or item.get('slotId')!=expected.get('slotId') or
+                item.get('role')!='slot-guide' or expected.get('role')!='template-photo-slot' or item.get('type')!=expected['type'] or expected['type']!='rect'):
             raise ValueError('空照片框與原始圖層不一致')
     for index,item in enumerate(objects+empty):
         layer_id=item.get('templateLayerId')

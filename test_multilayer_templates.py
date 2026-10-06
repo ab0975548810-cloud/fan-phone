@@ -176,12 +176,16 @@ class MultilayerTests(unittest.TestCase):
         self.contract=self.client.get('/api/template_contract/'+self.tpl['id'],query_string={'model_id':self.model,'style_id':self.style}).json
         valid=self.design();empty=valid['objects'].pop();empty['role']='slot-guide';valid['emptyTemplateSlots']=[empty]
         self.create(valid)
-        for field,value in (('layerId','other'),('templateApplicationId',str(uuid.uuid4())),('layerInstanceId',str(uuid.uuid4())),('role','template-sticker'),('type','image'),('duplicateOf',empty['layerInstanceId'])):
+        for field,value in (('layerId','other'),('templateApplicationId',str(uuid.uuid4())),('layerInstanceId',str(uuid.uuid4())),('slotId','other-slot'),('isSlot',False),('templateSlot',False),('role','template-sticker'),('type','image'),('duplicateOf',empty['layerInstanceId'])):
             data=copy.deepcopy(valid);data['emptyTemplateSlots'][0][field]=value
             with self.client.session_transaction() as session:identity=session['_bf_client_id']
             with app.app.test_request_context('/api/create_order'):
                 app.session['_bf_client_id']=identity
                 with self.assertRaisesRegex(ValueError,'空照片框'):multi.verify_design(app,data)
+        data=copy.deepcopy(valid);data['emptyTemplateSlots'].append(copy.deepcopy(empty))
+        with app.app.test_request_context('/api/create_order'):
+            app.session['_bf_client_id']=identity
+            with self.assertRaisesRegex(ValueError,'重複'):multi.verify_design(app,data)
 
     def test_missing_render_contract_cannot_use_legacy_print_path(self):
         for marker in ('layer_contract_version','templateLayerId'):
