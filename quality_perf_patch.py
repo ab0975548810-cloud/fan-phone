@@ -78,6 +78,15 @@ def install(app_module):
             raise ValueError('單張原圖需小於 75MB')
 
         if folder in ('template', 'templates'):
+            from flask import request
+            if request.form.get('source_contract') == 'multilayer-v1':
+                # This asset is a canonical production source, not a preview.
+                # Leave the legacy template optimization path unchanged.
+                from editable_stickers import image_bytes
+                image_bytes(raw)
+                if mime != 'image/png' or not raw.startswith(b'\x89PNG\r\n\x1a\n') or len(raw)>10*1024*1024:
+                    raise ValueError('多圖層原始素材需為 10MB 內 PNG')
+                return _upload_bytes(raw,'image/png','templates','png')
             try:
                 optimized, new_mime, new_ext = _optimize_template(raw)
                 if optimized and new_mime and new_ext:

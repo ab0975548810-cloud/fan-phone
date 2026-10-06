@@ -140,7 +140,8 @@ def identity(app, design):
     for item in nodes(result):
         if item['type']!='image':continue
         claim=receipt(app,item.get('sourceRef'),result.get('sourceCheckout'))
-        if item.get('src') or item.get('sourceSha256')!=claim['sha256'] or (item.get('width'),item.get('height'))!=(claim['width'],claim['height']):raise ValueError('原始素材引用無效')
+        intrinsic=item.get('sourceSize') or {'width':item.get('width'),'height':item.get('height')}
+        if item.get('src') or item.get('sourceSha256')!=claim['sha256'] or (intrinsic.get('width'),intrinsic.get('height'))!=(claim['width'],claim['height']):raise ValueError('原始素材引用無效')
         item.pop('sourceRef')
     result.pop('sourceCheckout',None)
     return result

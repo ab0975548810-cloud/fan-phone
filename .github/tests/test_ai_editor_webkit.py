@@ -1155,1654 +1155,1288 @@ def checkout_test(browser, base):
         if len(sent) == 1:
             # Server commits, browser receives a simulated transport failure.
             result = route.fetch()
-            assert result.status == 200, result.text()
-            route.abort('failed')
-        else:
-            route.continue_()
-    page.route('**/api/create_order', intercept)
-    page.goto(base + '/', wait_until='domcontentloaded')
-    poll(page, "() => !!window.BenfuwanOrderPayload && typeof shopData !== 'undefined' && shopData.models?.length")
-    page.evaluate("""async () => {
-      const c=document.createElement('canvas');c.width=2;c.height=2;
-      cartItem={modelId:shopData.models[0].id,styleId:shopData.styles[0].id,modelName:shopData.models[0].name,styleName:shopData.styles[0].name,quantity:1,payment:'ç¾é‡‘',printBase64:c.toDataURL(),designJson:{}};
-      await idbSet('cart',cartItem);document.getElementById('form-surname').value='æ¸¬è©¦';await submitOrder();
-    }""")
-    page.wait_for_timeout(100)
-    assert sent == [], sent
-    print('FRONT_SUBMIT_REJECTS_NON_HQ_CART_OK')
-    page.evaluate("""async () => {
-      const c=document.createElement('canvas');c.width=2;c.height=2;
-      cartItem={modelId:shopData.models[0].id,styleId:shopData.styles[0].id,modelName:shopData.models[0].name,styleName:shopData.styles[0].name,colorName:'é€æ˜Ž',quantity:1,payment:'ç¾é‡‘',printBase64:c.toDataURL(),productionMeta:{ppm:window.BenfuwanProductionHQ.PPM,dpi:720,width:2,height:2},designJson:{}};
-      await idbSet('cart',cartItem);document.getElementById('form-surname').value='æ¸¬è©¦';await submitOrder();
-    }""")
-    assert len(sent) == 1 and sent[0]['idempotency_key']
-    page.reload(wait_until='domcontentloaded')
-    poll(page, "() => !!window.BenfuwanOrderPayload && typeof shopData !== 'undefined' && shopData.models?.length")
-    page.evaluate("async () => {document.getElementById('form-surname').value='æ¸¬è©¦';await submitOrder()}")
-    assert len(sent) == 2 and sent[0] == sent[1], sent
-    assert page.evaluate("() => !!document.getElementById('success-id').textContent")
-    assert page.evaluate("() => idbGet('cart')") is None
-    print('CHECKOUT_LOST_RESPONSE_RELOAD_OK')
-    page.close()
-
-
-def admin_steward_test(page):
-    requests_seen = []
-    mode = {
-        'quota_used': 10,
-        'active': 0,
-        'quota_unavailable': False,
-        'ai_failure': False,
-        'print_failure': False,
-        'print_states': ['PREPARED', 'COMPLETED'],
-    }
-    now = int(time.time())
-    orders = [
-        {'order_id': 'TODAY-PENDING', 'status': 'å¾…è™•ç†', 'time': now},
-        {'order_id': 'TODAY-DONE', 'status': 'å·²å®Œæˆ', 'time': now},
-        {'order_id': 'TODAY-MAKING', 'status': 'è£½ä½œä¸­', 'time': now},
-        {'order_id': 'YESTERDAY', 'status': 'å¾…è™•ç†', 'time': now - 86400},
-    ]
-
-    def reply(route, payload, status=200):
-        requests_seen.append({'method': route.request.method, 'url': route.request.url})
-        route.fulfill(status=status, content_type='application/json', body=json.dumps(payload, ensure_ascii=False))
-
-    def health(route):
-        reply(route, {'status': 'success', 'persistence': 'supabase'})
-
-    def ai(route):
-        if mode['ai_failure']:
-            reply(route, {'status': 'error', 'code': 'AI_DIAG_UNAVAILABLE'}, 500)
-            return
-        quota = {
-            'client_limit_24h': 5, 'ip_limit_24h': 15, 'global_limit_24h': 60,
-            'active_limit': 2,
-            'global_used_24h': None if mode['quota_unavailable'] else mode['quota_used'],
-            'active_now': None if mode['quota_unavailable'] else mode['active'],
-        }
-        reply(route, {'status': 'transport_ok', 'ai_quota': quota})
-
-    def order_list(route):
-        reply(route, {'status': 'success', 'data': orders})
-
-    def print_jobs(route):
-        if mode['print_failure']:
-            reply(route, {'status': 'error', 'code': 'PRINT_UNAVAILABLE'}, 500)
-            return
-        rows = [{'order_id': f'PRINT-{index}', 'job': {'state': state}} for index, state in enumerate(mode['print_states'])]
-        reply(route, {'status': 'success', 'rows': rows, 'vendor_ready': True, 'vendor_connected': True})
-
-    page.route('**/api/health*', health)
-    page.route('**/api/admin/ai_remove_diagnose*', ai)
-    page.route('**/api/admin/get_orders*', order_list)
-    page.route('**/api/admin/print/jobs*', print_jobs)
-    poll(page, "() => !!window.BenfuwanStewardV1 && !!document.getElementById('bf-steward-launch')")
-    assert requests_seen == [], requests_seen
-    assert page.locator('#bf-steward-launch').inner_text() == 'ðŸ± æœ¬ç¦ä¸¸'
-
-    page.set_viewport_size({'width': 390, 'height': 844})
-    page.locator('#bf-steward-launch').click()
-    poll(page, "() => window.BenfuwanStewardV1.lastOverall==='normal'")
-    assert page.locator('#bf-steward-panel').get_attribute('aria-hidden') == 'false'
-    assert page.locator('#bf-steward-overall-text').inner_text() == 'ç³»çµ±ç›®å‰æ­£å¸¸ à¸…^â€¢ï»Œâ€¢^à¸…'
-    assert page.locator('#bf-steward-ai-usage').inner_text() == '10 / 60'
-    assert page.locator('#bf-steward-ai-active').inner_text() == '0 / 2'
-    assert page.locator('#bf-steward-order-total').inner_text() == '3'
-    assert page.locator('#bf-steward-order-pending').inner_text() == '1'
-    assert page.locator('#bf-steward-order-completed').inner_text() == '1'
-    assert page.locator('#bf-steward-print-pending').inner_text() == '1'
-    assert page.locator('#bf-steward-print-failed').inner_text() == '0'
-    assert page.locator('#bf-steward-print-unknown').inner_text() == '0'
-    assert len(requests_seen) == 4 and {row['method'] for row in requests_seen} == {'GET'}, requests_seen
-    mobile_box = page.locator('#bf-steward-panel').bounding_box()
-    assert mobile_box and mobile_box['width'] <= 390 and mobile_box['height'] <= 844 * .83, mobile_box
-    assert page.locator('.bf-steward-backdrop').count() == 0
-    page.locator('#bf-steward-close').click()
-    assert page.locator('#bf-steward-panel').get_attribute('aria-hidden') == 'true'
-
-    page.set_viewport_size({'width': 768, 'height': 1024})
-    page.locator('#bf-steward-launch').click()
-    poll(page, "() => document.getElementById('bf-steward-panel').classList.contains('open')")
-    poll(page, "() => !document.getElementById('bf-steward-refresh').disabled")
-    ipad_box = page.locator('#bf-steward-panel').bounding_box()
-    assert ipad_box and ipad_box['width'] <= 402 and ipad_box['x'] >= 350, ipad_box
-
-    mode['quota_used'] = 45
-    page.evaluate("() => window.BenfuwanStewardV1.refresh()")
-    assert page.evaluate("() => window.BenfuwanStewardV1.lastOverall") == 'attention'
-    assert page.locator('#bf-steward-overall-text').inner_text() == 'æœ‰å¹¾å€‹é …ç›®éœ€è¦æ³¨æ„ï¼Œæˆ‘å·²ç¶“å¹«ä½ æ¨™å‡ºä¾†ã€‚'
-
-    mode.update(quota_used=10, print_states=['FAILED', 'UNKNOWN', 'COMPLETED'])
-    page.evaluate("() => window.BenfuwanStewardV1.refresh()")
-    assert page.evaluate("() => window.BenfuwanStewardV1.lastOverall") == 'attention'
-    assert page.locator('#bf-steward-print-failed').inner_text() == '1'
-    assert page.locator('#bf-steward-print-unknown').inner_text() == '1'
-
-    mode.update(quota_unavailable=True, print_states=['COMPLETED'])
-    page.evaluate("() => window.BenfuwanStewardV1.refresh()")
-    assert page.evaluate("() => window.BenfuwanStewardV1.lastOverall") == 'error'
-    assert page.locator('#bf-steward-quota').get_attribute('data-level') == 'error'
-
-    mode.update(quota_unavailable=False, ai_failure=True, quota_used=10)
-    page.evaluate("() => window.BenfuwanStewardV1.refresh()")
-    assert page.evaluate("() => window.BenfuwanStewardV1.lastOverall") == 'error'
-    assert page.locator('#bf-steward-runpod').get_attribute('data-level') == 'error'
-    assert page.locator('#bf-steward-order-total').inner_text() == '3'
-    assert page.locator('#bf-steward-print-failed').inner_text() == '0'
-
-    mode['ai_failure'] = False
-    before_refresh = len(requests_seen)
-    page.locator('#bf-steward-refresh').click()
-    poll(page, "() => !document.getElementById('bf-steward-refresh').disabled")
-    assert len(requests_seen) >= before_refresh + 4, requests_seen[before_refresh:]
-    assert {row['method'] for row in requests_seen[before_refresh:]} == {'GET'}, requests_seen[before_refresh:]
-
-    page.locator('#bf-steward-orders-link').click()
-    poll(page, "() => document.getElementById('view-orders').classList.contains('active') && document.getElementById('bf-steward-panel').getAttribute('aria-hidden')==='true'")
-    page.locator('#bf-steward-launch').click()
-    poll(page, "() => document.getElementById('bf-steward-panel').classList.contains('open')")
-    page.locator('#bf-steward-print-link').click()
-    poll(page, "() => document.getElementById('view-print-center').classList.contains('active') && document.getElementById('bf-steward-panel').getAttribute('aria-hidden')==='true'")
-
-    page.unroute('**/api/health*')
-    page.unroute('**/api/admin/ai_remove_diagnose*')
-    page.unroute('**/api/admin/get_orders*')
-    page.unroute('**/api/admin/print/jobs*')
-    page.set_viewport_size({'width': 1180, 'height': 900})
-    print('ADMIN_BENFUWAN_STEWARD_READ_ONLY_RESPONSIVE_OK')
-
-
-def admin_shell_test(page):
-    poll(page, "() => !!window.BenfuwanAdminShellV1 && !!document.querySelector('.nav button[data-view=\"commerce\"]') && !!document.querySelector('.nav button[data-view=\"print-center\"]')")
-    expected = {
-        'operations': ['orders', 'commerce', 'print-center'],
-        'catalog': ['models', 'styles', 'assets', 'templates'],
-        'system': ['security'],
-    }
-    groups = page.evaluate("""() => Object.fromEntries([...document.querySelectorAll('[data-nav-group]')].map(group=>[
-      group.dataset.navGroup,[...group.querySelectorAll('.admin-nav-items>button[data-view]')].map(button=>button.dataset.view)
-    ]))""")
-    assert groups == expected, groups
-    assert page.locator('[data-nav-group="operations"] .admin-nav-label').inner_text() == 'ç‡Ÿé‹'
-    assert page.locator('[data-nav-group="catalog"] .admin-nav-label').inner_text() == 'å•†å“è¨­å®š'
-    assert page.locator('[data-nav-group="system"] .admin-nav-label').inner_text() == 'ç³»çµ±'
-
-    writes = []
-    def capture_write(request):
-        if request.method in {'POST', 'PUT', 'PATCH', 'DELETE'}:
-            writes.append({'method': request.method, 'url': request.url})
-    page.on('request', capture_write)
-
-    page.set_viewport_size({'width': 1180, 'height': 900})
-    desktop = page.evaluate("""() => {
-      const side=document.getElementById('admin-sidebar'),menu=document.getElementById('admin-menu-toggle');
-      return {width:side.getBoundingClientRect().width,menu:getComputedStyle(menu).display,labels:[...document.querySelectorAll('.nav button span')].every(node=>getComputedStyle(node).display!=='none'),inert:side.inert};
-    }""")
-    assert desktop['width'] >= 230 and desktop['menu'] == 'none' and desktop['labels'] and not desktop['inert'], desktop
-
-    for view, label in (
-        ('orders', 'è¨‚å–®ç®¡ç†'), ('commerce', 'å•†å“èˆ‡ç‡Ÿé‹'), ('print-center', 'åˆ—å°ä¸­å¿ƒ'),
-        ('models', 'å“ç‰ŒåŠåž‹è™Ÿ'), ('styles', 'æ‰‹æ©Ÿæ®¼æè³ª'), ('assets', 'ç´ æåº«'),
-        ('templates', 'æ¨¡æ¿åº«'), ('security', 'ç™»å…¥å®‰å…¨'),
-    ):
-        page.locator(f'.nav button[data-view="{view}"]').click()
-        poll(page, f"() => document.getElementById('view-{view}')?.classList.contains('active') && document.getElementById('admin-workspace-title')?.textContent==={json.dumps(label, ensure_ascii=False)}")
-        assert page.locator(f'.nav button[data-view="{view}"]').get_attribute('aria-current') == 'page'
-
-    page.evaluate("() => openModal('model-modal')")
-    layers = page.evaluate("""() => ({
-      modal:+getComputedStyle(document.getElementById('model-modal')).zIndex,
-      sidebar:+getComputedStyle(document.getElementById('admin-sidebar')).zIndex||0
-    })""")
-    assert layers['modal'] > layers['sidebar'], layers
-    page.evaluate("() => closeModal('model-modal')")
-
-    page.set_viewport_size({'width': 390, 'height': 844})
-    poll(page, "() => document.getElementById('admin-sidebar').getAttribute('aria-hidden')==='true' && document.getElementById('admin-sidebar').inert===true")
-    poll(page, "() => document.getElementById('admin-sidebar').getBoundingClientRect().x < -1")
-    mobile = page.evaluate("""() => ({
-      viewport:document.documentElement.clientWidth,
-      main:document.querySelector('.main').getBoundingClientRect().width,
-      menu:getComputedStyle(document.getElementById('admin-menu-toggle')).display,
-      sideX:document.getElementById('admin-sidebar').getBoundingClientRect().x
-    })""")
-    assert mobile['main'] == mobile['viewport'] == 390 and mobile['menu'] != 'none' and mobile['sideX'] < -1, mobile
-    page.evaluate("() => document.activeElement?.blur()")
-    page.keyboard.press('Tab')
-    assert not page.evaluate("() => document.getElementById('admin-sidebar').contains(document.activeElement)")
-    page.locator('#admin-menu-toggle').click()
-    poll(page, "() => document.body.classList.contains('admin-nav-open') && document.getElementById('admin-sidebar').getBoundingClientRect().x>=-1 && document.getElementById('admin-sidebar').inert===false")
-    assert page.evaluate("() => document.getElementById('admin-sidebar').contains(document.activeElement) && document.activeElement.matches('.nav button.active')")
-    page.locator('.nav button[data-view="models"]').click()
-    poll(page, "() => !document.body.classList.contains('admin-nav-open') && document.getElementById('admin-sidebar').inert===true && document.getElementById('admin-workspace-title').textContent==='å“ç‰ŒåŠåž‹è™Ÿ'")
-    page.locator('#admin-menu-toggle').click()
-    poll(page, "() => document.body.classList.contains('admin-nav-open')")
-    page.keyboard.press('Escape')
-    poll(page, "() => !document.body.classList.contains('admin-nav-open') && document.getElementById('admin-sidebar').inert===true")
-    page.locator('#admin-menu-toggle').click()
-    poll(page, "() => document.body.classList.contains('admin-nav-open') && document.getElementById('admin-sidebar').inert===false")
-    page.locator('#admin-nav-backdrop').click(position={'x': 380, 'y': 20})
-    poll(page, "() => !document.body.classList.contains('admin-nav-open') && document.getElementById('admin-sidebar').inert===true")
-
-    page.locator('#admin-actions-toggle').click()
-    poll(page, "() => document.querySelector('.top').classList.contains('admin-actions-open')")
-    actions = page.evaluate("""() => [...document.querySelectorAll('#admin-top-actions>a,#admin-top-actions>form')].map(node=>{
-      const box=node.getBoundingClientRect();return {visible:box.width>0&&box.height>0,top:box.top,bottom:box.bottom};
-    })""")
-    assert len(actions) == 3 and all(row['visible'] for row in actions), actions
-    assert actions[0]['bottom'] <= actions[1]['top'] + 1 and actions[1]['bottom'] <= actions[2]['top'] + 1, actions
-    page.keyboard.press('Escape')
-    assert not page.evaluate("() => document.querySelector('.top').classList.contains('admin-actions-open')")
-
-    page.set_viewport_size({'width': 768, 'height': 1024})
-    poll(page, "() => document.getElementById('admin-sidebar').inert===false")
-    ipad = page.evaluate("""() => ({
-      width:document.getElementById('admin-sidebar').getBoundingClientRect().width,
-      menu:getComputedStyle(document.getElementById('admin-menu-toggle')).display,
-      labels:[...document.querySelectorAll('.nav button span')].every(node=>getComputedStyle(node).display!=='none'&&node.getBoundingClientRect().width>0),
-      inert:document.getElementById('admin-sidebar').inert
-    })""")
-    assert 160 <= ipad['width'] <= 190 and ipad['menu'] == 'none' and ipad['labels'] and not ipad['inert'], ipad
-    assert writes == [], writes
-    page.remove_listener('request', capture_write)
-    page.set_viewport_size({'width': 1180, 'height': 900})
-    print('ADMIN_NAVIGATION_SHELL_RESPONSIVE_READ_ONLY_OK', {'desktop':desktop,'mobile':mobile,'ipad':ipad,'groups':groups})
-
-
-def admin_test(browser, base):
-    page = browser.new_page(viewport={'width': 1180, 'height': 900})
-    page.add_init_script("""(() => {
-      window.PublicKeyCredential=function(){};window.__passkeyCreateCalls=0;
-      Object.defineProperty(navigator,'credentials',{configurable:true,value:{
-        get:async()=>{throw new DOMException('cancelled','NotAllowedError')},
-        create:async()=>{window.__passkeyCreateCalls++;return {id:'mock-admin-credential',rawId:new Uint8Array([2]).buffer,type:'public-key',authenticatorAttachment:'platform',getClientExtensionResults:()=>({}),response:{clientDataJSON:new Uint8Array([3]).buffer,attestationObject:new Uint8Array([4]).buffer,getTransports:()=>['internal']}}}
-      }});
-    })()""")
-    page.on('console', lambda msg: print('ADMIN_CONSOLE', msg.type, msg.text))
-    page.on('pageerror', lambda exc: print('ADMIN_PAGEERROR', str(exc)))
-    page.route('**/api/ai/remove-background', lambda route: route.fulfill(status=200, body=GOOD, content_type='image/png'))
-    page.goto(base + '/login', wait_until='domcontentloaded')
-    page.locator('#password-toggle').click()
-    page.locator('input[name="password"]').fill('fan123')
-    submit = page.locator('button[type="submit"],input[type="submit"]').first
-    if submit.count(): submit.click()
-    else: page.locator('form').evaluate('(f)=>f.submit()')
-    page.wait_for_url('**/admin')
-
-    admin_steward_test(page)
-    admin_shell_test(page)
-
-    # The first setup path is password login, then explicit enablement in the
-    # dedicated login-security view. WebAuthn is mocked only at the browser edge;
-    # cryptographic verification is covered by test_passkey_auth.py.
-    registered = {'value': False, 'verify': None}
-    def passkey_list(route):
-        credentials = [] if not registered['value'] else [{'credential_id':'mock-admin-credential','device_label':'é€™å°è£ç½®çš„ Passkey','transports':['internal'],'created_at':'2026-09-25T00:00:00+00:00','last_used_at':None}]
-        route.fulfill(status=200, content_type='application/json', body=json.dumps({'status':'success','configured':True,'credentials':credentials}))
-    def passkey_register_options(route):
-        route.fulfill(status=200, content_type='application/json', body=json.dumps({'status':'success','ceremony_id':'mock-register','publicKey':{'challenge':'AQ','rp':{'id':'127.0.0.1','name':'æœ¬ç¦ä¸¸è¨‚è£½'},'user':{'id':'Ag','name':'admin','displayName':'æœ¬ç¦ä¸¸ç®¡ç†å“¡'},'pubKeyCredParams':[{'type':'public-key','alg':-7}]}}))
-    def passkey_register_verify(route):
-        registered['verify'] = route.request.post_data_json
-        registered['value'] = True
-        route.fulfill(status=200, content_type='application/json', body='{"status":"success"}')
-    page.route('**/api/admin/passkeys', passkey_list)
-    page.route('**/api/admin/passkey/register/options', passkey_register_options)
-    page.route('**/api/admin/passkey/register/verify', passkey_register_verify)
-    page.locator('.nav button[data-view="security"]').click()
-    poll(page, "() => document.getElementById('view-security')?.classList.contains('active') && !document.getElementById('passkey-enable').disabled")
-    page.locator('#passkey-enable').click()
-    poll(page, "() => window.__passkeyCreateCalls===1 && document.querySelectorAll('#passkey-list .passkey-item').length===1")
-    assert registered['verify']['ceremony_id'] == 'mock-register'
-    assert registered['verify']['credential']['authenticatorAttachment'] == 'platform'
-    page.unroute('**/api/admin/passkeys')
-    page.unroute('**/api/admin/passkey/register/options')
-    page.unroute('**/api/admin/passkey/register/verify')
-    print('ADMIN_PASSKEY_ENABLE_WEBKIT_OK')
-
-    page.evaluate("() => loadShop()")
-    poll(page, "() => typeof shopLoaded !== 'undefined' && shopLoaded")
-    xss_payload = "å“ç‰Œ');window.__adminStoredXss=1;//"
-    xss_result = page.evaluate("""payload => {
-      const originalData=structuredClone(shopData),originalEdit=window.editBrand;
-      window.__adminStoredXss=0;window.__adminEditedBrand='';
-      window.editBrand=value=>{window.__adminEditedBrand=value};
-      shopData.brands=[payload];renderBrands();
-      const button=document.querySelector('#brands-body [data-edit-brand]');
-      const inlineHandlers=document.querySelectorAll('#brands-body [onclick],#models-body [onclick],#styles-body [onclick]').length;
-      button.click();
-      const result={executed:window.__adminStoredXss,edited:window.__adminEditedBrand,inlineHandlers};
-      window.editBrand=originalEdit;shopData=originalData;renderBrands();renderModels();renderStyles();
-      return result;
-    }""", xss_payload)
-    assert xss_result == {'executed': 0, 'edited': xss_payload, 'inlineHandlers': 0}, xss_result
-    assert page.locator('.top form[action="/logout"] button[type="submit"]').is_visible()
-    print('ADMIN_STORED_DATA_ACTIONS_AND_LOGOUT_OK')
-
-    listing_original = page.evaluate("() => ({data:structuredClone(shopData),version:shopVersion})")
-    model_status_requests = []
-    def model_status_response(route):
-        model_status_requests.append(route.request.post_data_json)
-        route.fulfill(status=200, content_type='application/json', body='{"status":"success","version":"model-status-version"}')
-    page.route('**/api/admin/print/model-profiles', model_status_response)
-    model_id = listing_original['data']['models'][0]['id']
-    page.evaluate("""id => {
-      openModelEditor(id);document.getElementById('model-active').checked=false;
-      document.getElementById('model-profile-mask-url').value='fixture://admin-preview';
-      document.getElementById('model-profile-line-url').value='fixture://admin-print';
-      document.getElementById('model-profile-w').value='80';document.getElementById('model-profile-h').value='160';
-    }""", model_id)
-    page.evaluate("() => saveModel()")
-    assert len(model_status_requests) == 1
-    assert next(row for row in model_status_requests[0]['shop_data']['models'] if row['id'] == model_id)['status'] is False
-    assert page.evaluate("id => shopData.models.find(row=>row.id===id).status===false && !document.getElementById('model-modal').classList.contains('show')", model_id)
-    page.unroute('**/api/admin/print/model-profiles')
-
-    style_status_requests = []
-    def style_status_response(route):
-        style_status_requests.append(route.request.post_data_json)
-        route.fulfill(status=200, content_type='application/json', body='{"status":"success","version":"style-status-version"}')
-    page.route('**/api/admin/save_shop_data', style_status_response)
-    style_id = listing_original['data']['styles'][0]['id']
-    page.evaluate("id => {openStyleEditor(id);document.getElementById('style-active').checked=false}", style_id)
-    page.evaluate("() => saveStyle()")
-    assert len(style_status_requests) == 1
-    assert next(row for row in style_status_requests[0]['data']['styles'] if row['id'] == style_id)['status'] is False
-    assert page.evaluate("id => shopData.styles.find(row=>row.id===id).status===false && !document.getElementById('style-modal').classList.contains('show')", style_id)
-    page.unroute('**/api/admin/save_shop_data')
-    page.evaluate("snapshot => {shopData=structuredClone(snapshot.data);shopVersion=snapshot.version;renderBrands();renderModels();renderStyles()}", listing_original)
-    print('ADMIN_MODEL_STYLE_LISTING_CONTROL_OK')
-
-    # Product settings workspace keeps the existing catalog contracts while
-    # replacing prompts/wide mobile tables with explicit, filterable controls.
-    workspace_original = page.evaluate("() => ({data:structuredClone(shopData),version:shopVersion})")
-    workspace_fixture = {
-        'brands':['Apple','Samsung'],
-        'styles':[
-            {'id':'style_1789287807818','name':'æ™¶å½©','price':490,'colors':['ç™½è‰²','é»‘è‰²'],'model_colors':{'model-a':['é€æ˜Ž']},'mask_img':'fixture://crystal-mask','status':True},
-            {'id':'style-mirror','name':'é¡é¢','price':590,'colors':['é»‘è‰²'],'model_colors':{},'mask_img':'fixture://mirror-mask','status':True},
-            {'id':'style-off','name':'åœå”®æ®¼æ¬¾','price':390,'colors':['ç™½è‰²'],'model_colors':{},'mask_img':'','status':False},
-        ],
-        'models':[
-            {'id':'model-a','brand':'Apple','name':'iPhone 17 Pro','status':True,'case_profiles':{
-                'style_1789287807818':{'preview_mask_img':'fixture://a-preview','print_line_img':'fixture://a-print','print_x':11,'print_y':12,'print_w':71,'print_h':150,'print_angle':90},
-                'style-mirror':{'preview_mask_img':'fixture://b-preview','print_line_img':'fixture://b-print','print_x':21,'print_y':22,'print_w':72,'print_h':151,'print_angle':0},
-            }},
-            {'id':'model-b','brand':'Samsung','name':'Galaxy S25','status':False,'case_profiles':{}},
-        ],
-    }
-    page.evaluate("fixture => {shopData=structuredClone(fixture);renderBrands();renderModels();renderStyles()}", workspace_fixture)
-    page.evaluate("() => {showView('models',document.querySelector('.nav button[data-view=\"models\"]'));switchModelAdminTab('brands')}")
-    prompt_calls = page.evaluate("""() => {window.__workspacePrompt=window.prompt;window.__workspacePromptCalls=0;window.prompt=()=>{window.__workspacePromptCalls++;return 'ä¸æ‡‰å‘¼å«'};return window.__workspacePromptCalls}""")
-    assert prompt_calls == 0
-
-    # A pending brand mutation owns its dialog until the request settles. A
-    # stale response must never close or write errors into a newer editor.
-    page.evaluate("""() => {
-      window.__workspaceRealFetch=window.fetch;
-      window.__workspaceBrandPending=[];
-      window.fetch=(input,options)=>{
-        if(String(input).includes('/api/admin/save_shop_data')){
-          return new Promise(resolve=>window.__workspaceBrandPending.push(resolve));
-        }
-        return window.__workspaceRealFetch(input,options);
-      };
-    }""")
-    page.locator('#brand-admin-view .titlebar .btn').click()
-    page.locator('#bf-brand-name').fill('å»¶é²å„²å­˜å“ç‰Œ')
-    page.locator('#bf-brand-save').click()
-    poll(page, "() => window.__workspaceBrandPending.length===1")
-    saving_brand = page.evaluate("""() => ({
-      open:document.getElementById('bf-brand-modal').classList.contains('show'),
-      busy:document.getElementById('bf-brand-modal').getAttribute('aria-busy'),
-      saveDisabled:document.getElementById('bf-brand-save').disabled,
-      closeDisabled:[...document.querySelectorAll('#bf-brand-modal [data-brand-close]')].every(button=>button.disabled),
-      value:document.getElementById('bf-brand-name').value
-    })""")
-    assert saving_brand == {'open':True,'busy':'true','saveDisabled':True,'closeDisabled':True,'value':'å»¶é²å„²å­˜å“ç‰Œ'}, saving_brand
-    blocked_close = page.evaluate("""() => {
-      document.querySelector('#bf-brand-modal [data-brand-close]').click();
-      document.getElementById('bf-brand-modal').click();
-      addBrand();
-      editBrand('Apple');
-      return {
-        open:document.getElementById('bf-brand-modal').classList.contains('show'),
-        title:document.getElementById('bf-brand-title').textContent,
-        value:document.getElementById('bf-brand-name').value,
-        pending:window.__workspaceBrandPending.length
-      };
-    }""")
-    assert blocked_close == {'open':True,'title':'æ–°å¢žå“ç‰Œ','value':'å»¶é²å„²å­˜å“ç‰Œ','pending':1}, blocked_close
-    page.evaluate("""() => window.__workspaceBrandPending.shift()(new Response(JSON.stringify({status:'success',version:'brand-delayed-success'}),{status:200,headers:{'Content-Type':'application/json'}}))""")
-    poll(page, "() => shopData.brands.includes('å»¶é²å„²å­˜å“ç‰Œ') && !document.getElementById('bf-brand-modal').classList.contains('show')")
-
-    page.locator('#brand-admin-view .titlebar .btn').click()
-    page.locator('#bf-brand-name').fill('å»¶é²å¤±æ•—å“ç‰Œ')
-    page.locator('#bf-brand-save').click()
-    poll(page, "() => window.__workspaceBrandPending.length===1")
-    page.evaluate("""() => window.__workspaceBrandPending.shift()(new Response(JSON.stringify({status:'error',msg:'å»¶é²å„²å­˜å¤±æ•—'}),{status:503,headers:{'Content-Type':'application/json'}}))""")
-    poll(page, "() => document.getElementById('bf-brand-error').textContent.includes('å»¶é²å„²å­˜å¤±æ•—')")
-    failed_brand = page.evaluate("""() => ({
-      open:document.getElementById('bf-brand-modal').classList.contains('show'),
-      value:document.getElementById('bf-brand-name').value,
-      saveDisabled:document.getElementById('bf-brand-save').disabled,
-      closeDisabled:[...document.querySelectorAll('#bf-brand-modal [data-brand-close]')].some(button=>button.disabled),
-      error:document.getElementById('bf-brand-error').textContent
-    })""")
-    assert failed_brand['open'] and failed_brand['value'] == 'å»¶é²å¤±æ•—å“ç‰Œ', failed_brand
-    assert not failed_brand['saveDisabled'] and not failed_brand['closeDisabled'] and 'å»¶é²å„²å­˜å¤±æ•—' in failed_brand['error'], failed_brand
-    page.locator('#bf-brand-modal [data-brand-close]').last.click()
-    page.evaluate("""() => {window.fetch=window.__workspaceRealFetch;delete window.__workspaceRealFetch;delete window.__workspaceBrandPending}""")
-
-    workspace_writes = []
-    def workspace_save(route):
-        workspace_writes.append(route.request.post_data_json)
-        route.fulfill(status=200, content_type='application/json', body='{"status":"success","version":"workspace-version"}')
-    page.route('**/api/admin/save_shop_data', workspace_save)
-    page.locator('#brand-admin-view .titlebar .btn').click()
-    assert page.locator('#bf-brand-modal.show').count() == 1
-    page.locator('#bf-brand-name').fill('Apple')
-    page.locator('#bf-brand-save').click()
-    poll(page, "() => document.getElementById('bf-brand-error').textContent.includes('å“ç‰Œå·²å­˜åœ¨')")
-    assert workspace_writes == [] and page.evaluate("() => window.__workspacePromptCalls") == 0
-    page.locator('#bf-brand-name').fill('Google')
-    page.locator('#bf-brand-save').click()
-    poll(page, "() => shopData.brands.includes('Google') && !document.getElementById('bf-brand-modal').classList.contains('show')")
-    page.locator('#brands-body [data-edit-brand="Apple"]').click()
-    page.locator('#bf-brand-name').fill('Apple Inc.')
-    page.locator('#bf-brand-save').click()
-    poll(page, "() => shopData.brands.includes('Apple Inc.') && shopData.models.find(x=>x.id==='model-a').brand==='Apple Inc.'")
-    assert len(workspace_writes) == 2 and page.evaluate("() => window.__workspacePromptCalls") == 0
-    assert page.locator('#brands-body tr[data-brand="Apple Inc."] .bf-count-chip').inner_text() == '1 å€‹åž‹è™Ÿ'
-    page.unroute('**/api/admin/save_shop_data')
-
-    page.locator('#model-tab-btn').click()
-    page.locator('#bf-model-search').fill('17 Pro')
-    assert page.locator('#models-body tr[data-model-id]').count() == 1
-    page.locator('#bf-model-search').fill('')
-    page.locator('#bf-model-brand-filter').select_option('Samsung')
-    assert page.locator('#models-body tr[data-model-id="model-b"]').count() == 1
-    page.locator('#bf-model-brand-filter').select_option('')
-    page.locator('#bf-model-status-filter').select_option('active')
-    assert page.locator('#models-body tr[data-model-id]').count() == 1
-    page.locator('#bf-model-status-filter').select_option('all')
-
-    page.locator('#models-body [data-model-id="model-a"][data-model-style="style-mirror"]').click()
-    assert page.evaluate("() => BenfuwanModelProfilesAdmin.getActiveStyleId()") == 'style-mirror'
-    assert page.locator('#model-profile-x').input_value() == '21'
-    page.locator('#model-profile-x').fill('99')
-    dirty_guard = page.evaluate("""() => {window.__workspaceConfirm=window.confirm;window.__workspaceConfirmCalls=0;window.confirm=()=>{window.__workspaceConfirmCalls++;return false};document.querySelector('[data-profile-style="style_1789287807818"]').click();return {calls:window.__workspaceConfirmCalls,style:BenfuwanModelProfilesAdmin.getActiveStyleId(),dirty:BenfuwanModelProfilesAdmin.isDirty()}}""")
-    assert dirty_guard == {'calls':1,'style':'style-mirror','dirty':True}, dirty_guard
-    page.evaluate("() => {window.confirm=()=>true;document.querySelector('[data-profile-style=\"style_1789287807818\"]').click()}")
-    assert page.evaluate("() => BenfuwanModelProfilesAdmin.getActiveStyleId()") == 'style_1789287807818'
-    assert page.locator('#model-profile-x').input_value() == '11'
-    page.evaluate("() => {window.confirm=window.__workspaceConfirm;delete window.__workspaceConfirm;delete window.__workspaceConfirmCalls}")
-
-    profile_writes = []
-    def workspace_profile_save(route):
-        profile_writes.append(route.request.post_data_json)
-        route.fulfill(status=200, content_type='application/json', body='{"status":"success","version":"workspace-profile-version"}')
-    page.route('**/api/admin/print/model-profiles', workspace_profile_save)
-    page.locator('#model-profile-x').fill('13.5')
-    page.locator('#model-save').click()
-    poll(page, "() => !document.getElementById('model-modal').classList.contains('show')")
-    assert len(profile_writes) == 1
-    saved_model = next(row for row in profile_writes[0]['shop_data']['models'] if row['id'] == 'model-a')
-    assert profile_writes[0]['style_id'] == 'style_1789287807818'
-    assert saved_model['case_profiles']['style_1789287807818']['print_x'] == 13.5
-    assert saved_model['case_profiles']['style-mirror'] == workspace_fixture['models'][0]['case_profiles']['style-mirror']
-    page.unroute('**/api/admin/print/model-profiles')
-
-    page.locator('.nav button[data-view="styles"]').click()
-    page.locator('#bf-style-search').fill('é¡é¢')
-    assert page.locator('#styles-body tr[data-style-id="style-mirror"]').count() == 1
-    page.locator('#bf-style-search').fill('')
-    page.locator('#bf-style-status-filter').select_option('inactive')
-    assert page.locator('#styles-body tr[data-style-id="style-off"]').count() == 1
-    page.locator('#bf-style-status-filter').select_option('all')
-    page.locator('#styles-body [data-edit-style="style_1789287807818"]').click()
-    assert page.locator('#style-colors').input_value() == 'ç™½è‰², é»‘è‰²'
-    assert page.locator('#bf-model-color-list [data-model-id="model-a"]').input_value() == 'é€æ˜Ž'
-    page.locator('#style-modal .mh button').click()
-
-    for width, height in ((390,844),(768,1024),(1180,900)):
-        page.set_viewport_size({'width':width,'height':height})
-        page.locator('.nav button[data-view="models"]').click() if width >= 600 else page.evaluate("() => showView('models',document.querySelector('.nav button[data-view=\"models\"]'))")
-        page.locator('#model-tab-btn').click()
-        layout = page.evaluate("""() => ({scroll:document.documentElement.scrollWidth,viewport:document.documentElement.clientWidth,row:getComputedStyle(document.querySelector('#models-body tr[data-model-id]')).display})""")
-        assert layout['scroll'] <= layout['viewport'] + 2, (width, layout)
-        assert (layout['row'] == 'grid') == (width < 600), (width, layout)
-    page.set_viewport_size({'width':1180,'height':900})
-    page.evaluate("snapshot => {shopData=structuredClone(snapshot.data);shopVersion=snapshot.version;window.prompt=window.__workspacePrompt;delete window.__workspacePrompt;delete window.__workspacePromptCalls;renderBrands();renderModels();renderStyles()}", workspace_original)
-    print('ADMIN_PRODUCT_SETTINGS_WORKSPACE_V1_OK')
-
-    model_color_src = page.locator('script[src*="admin-model-colors.js"]').get_attribute('src')
-    assert model_color_src and 'v=20260926audit1' in model_color_src, model_color_src
-    model_profile_src = page.locator('script[src*="admin-model-profiles.js"]').get_attribute('src')
-    assert model_profile_src and 'v=20260929style1' in model_profile_src, model_profile_src
-    product_workspace_src = page.locator('script[src*="admin-product-workspace-v1.js"]').get_attribute('src')
-    assert product_workspace_src and 'v=20261001b' in product_workspace_src, product_workspace_src
-    asset_category_src = page.locator('script[src*="admin-asset-categories.js"]').get_attribute('src')
-    assert asset_category_src and 'v=20261002a' in asset_category_src, asset_category_src
-    template_loader_src = page.locator('script[src*="admin-template-loader.js"]').get_attribute('src')
-    assert template_loader_src and 'v=20261002a' in template_loader_src, template_loader_src
-    library_workspace_src = page.locator('script[src*="admin-library-workspace-v1.js"]').get_attribute('src')
-    assert library_workspace_src and 'v=20261002a' in library_workspace_src, library_workspace_src
-    commerce_src = page.locator('script[src*="admin-commerce-v1.js"]').get_attribute('src')
-    assert commerce_src and 'v=20261003launch1' in commerce_src, commerce_src
-    def ux_error(route):
-        status = int(route.request.url.rsplit('-', 1)[-1])
-        route.fulfill(status=status, content_type='application/json', body='{"status":"error"}')
-    page.route('**/api/admin/ux-probe-*', ux_error)
-    api_messages = page.evaluate("""async () => {
-      const out={};
-      for(const status of [401,409,503]){
-        try{await apiJson('/api/admin/ux-probe-'+status)}catch(e){out[status]=e.message}
-      }
-      return out;
-    }""")
-    assert api_messages == {
-        '401':'ç™»å…¥å·²éŽæœŸï¼Œè«‹é‡æ–°ç™»å…¥å¾Œå†è©¦',
-        '409':'è³‡æ–™å·²è¢«å…¶ä»–æ“ä½œæ›´æ–°ï¼Œè«‹é‡æ–°è¼‰å…¥å¾Œå†è©¦',
-        '503':'æœå‹™æš«æ™‚ç„¡æ³•ä½¿ç”¨ï¼Œè«‹ç¨å¾Œå†è©¦'
-    }, api_messages
-    page.unroute('**/api/admin/ux-probe-*')
-    print('ADMIN_API_FEEDBACK_CACHE_KEY_OK')
-
-    # POS UI is injected only for authenticated admin and must coexist with the
-    # existing order/template editor without leaking private data publicly.
-    poll(page, "() => !!window.BenfuwanCommerce && !!document.querySelector('.nav button[data-view=\"commerce\"]')")
-    page.locator('.nav button[data-view="commerce"]').click()
-    poll(page, "() => document.getElementById('view-commerce')?.classList.contains('active') && document.querySelectorAll('#commerce-summary .commerce-kpi').length===4")
-    commerce_diag = page.evaluate("""() => ({version:window.BenfuwanCommerce?.version||'',publicCostLeak:JSON.stringify(shopData||{}).includes('cost_price'),view:document.getElementById('view-commerce')?.classList.contains('active')})""")
-    assert commerce_diag['version'].startswith('2.0') and commerce_diag['view'] and not commerce_diag['publicCostLeak'], commerce_diag
-    print('ADMIN_COMMERCE_WEBKIT_OK', commerce_diag['version'])
-    page.locator('[data-tab="stock"]').click()
-
-    # Real Phase 2 controls, including a committed receipt with lost response.
-    assert page.request.post(base + '/api/admin/commerce_sync_skus', data={}).ok
-    data = page.request.get(base + '/api/admin/commerce_data').json()['data']
-    sku = data['skus'][0]
-    sku.update(stock_qty=1, cost_price=100, low_stock_threshold=2, target_stock=8, track_stock=True)
-    assert page.request.post(base + '/api/admin/save_commerce_data', data=data).ok
-    page.locator('#commerce-reload').click()
-    poll(page, "() => window.BenfuwanCommerce.state.skus[0]?.target_stock===8")
-    card = page.locator('[data-sku="' + sku['id'] + '"]')
-    card.locator('[data-field="target_stock"]').fill('10')
-    page.locator('#commerce-save').click()
-    poll(page, "() => document.getElementById('pos-message').textContent==='å•†å“è¨­å®šå·²å„²å­˜'")
-    page.locator('[data-tab="restock"]').click()
-    assert page.locator('#commerce-low-only').is_checked()
-    assert card.is_visible()
-    page.locator('#pos-list').click()
-    page.locator('#pos-export-text').wait_for(state='visible')
-    assert 'å»ºè­° 9 ä»¶' in page.locator('#pos-export-text').input_value()
-    page.locator('#pos-close').click()
-    receipts = []
-    def receive(route):
-        receipts.append(route.request.post_data_json)
-        if len(receipts) == 1:
-            assert route.fetch().status == 200
-            route.abort('failed')
-        else:
-            route.continue_()
-    page.route('**/api/admin/purchase_received', receive)
-    card.locator('[data-receive]').click()
-    page.locator('#pos-receive-qty').fill('3')
-    page.locator('#pos-dialog-submit').click()
-    poll(page, "() => document.getElementById('pos-message').classList.contains('error')")
-    page.reload(wait_until='domcontentloaded')
-    page.locator('.nav button[data-view="commerce"]').click()
-    page.locator('#pos-retry').click()
-    poll(page, "() => !localStorage.getItem('bf-pos2-pending') && window.BenfuwanCommerce.state.skus[0]?.stock_qty===4")
-    assert len(receipts) == 2 and receipts[0] == receipts[1], receipts
-    page.locator('[data-tab="expenses"]').click()
-    page.locator('#pos-expense-category').select_option('å»£å‘Š')
-    page.locator('#pos-expense-amount').fill('20.25')
-    page.locator('#pos-expense-note').fill('ç€è¦½å™¨æ¸¬è©¦æ”¯å‡º')
-    page.locator('#pos-expense-save').click()
-    page.locator('.pos-expense').filter(has_text='ç€è¦½å™¨æ¸¬è©¦æ”¯å‡º').wait_for()
-    for width, height in ((390,844),(1024,768),(1440,900)):
-        page.set_viewport_size(dict(width=width,height=height))
-        for tab in ('stock','restock','reports','expenses'):
-            page.locator('[data-tab="'+tab+'"]').click()
-            if tab == 'reports':
-                poll(page, "() => document.querySelectorAll('#pos-metrics .pos-metric').length===9")
-            metrics = page.evaluate("""() => ({width:innerWidth,scroll:document.documentElement.scrollWidth,view:document.getElementById('view-commerce').getBoundingClientRect().width})""")
-            assert metrics['scroll'] <= width + 2 and metrics['view'] > 200, (tab,metrics)
-            if os.environ.get('POS_SCREENSHOT_DIR'):
-                folder = Path(os.environ['POS_SCREENSHOT_DIR']);folder.mkdir(parents=True,exist_ok=True)
-                page.screenshot(path=str(folder / f'pos-{width}-{tab}.png'), full_page=True)
-    page.locator('[data-tab="reports"]').click()
-    for period in ('week','month','year','custom'):
-        page.locator('#pos-period').select_option(period)
-        page.locator('#pos-report-form button').click()
-        poll(page, "() => document.querySelectorAll('#pos-metrics .pos-metric').length===9 && document.getElementById('pos-metrics').getAttribute('aria-busy')===null")
-    print('POS_PHASE2_RESPONSIVE_RECEIPT_EXPENSE_REPORT_OK')
-
-    page.locator('.nav button[data-view="models"]').click()
-    page.locator('#model-tab-btn').click()
-    poll(page, "() => document.getElementById('view-models').classList.contains('active') && document.getElementById('model-admin-view').classList.contains('active') && document.querySelector('#models-body button')")
-    page.locator('#models-body button').first.click()
-    page.locator('#model-modal.show').wait_for()
-    model_text = page.locator('#model-modal').inner_text()
-    assert 'A5 æœ‰æ•ˆç¯„åœç‚º 200 Ã— 230 mm' in model_text
-    assert 'åº§æ¨™åŽŸé»žåœ¨æ²»å…·å³ä¸‹è§’' in model_text
-    page.evaluate("""() => {
-      document.getElementById('model-profile-mask-url').value='fixture://admin-preview';
-      document.getElementById('model-profile-line-url').value='fixture://admin-print';
-    }""")
-    page.locator('#model-profile-x').fill('1.5');page.locator('#model-profile-y').fill('2.5')
-    page.locator('#model-profile-w').fill('80');page.locator('#model-profile-h').fill('160');page.locator('#model-profile-angle').fill('0')
-    model_requests = []
-    def save_model(route):
-        model_requests.append(route.request.post_data_json)
-        result = route.fetch()
-        time.sleep(.15)
-        route.fulfill(response=result)
-    page.route('**/api/admin/print/model-profiles', save_model)
-    page.evaluate("() => Promise.all([saveModel(),saveModel()])")
-    assert len(model_requests) == 1, model_requests
-    assert model_requests[0]['style_id'] and model_requests[0]['model_id'], model_requests
-    page.unroute('**/api/admin/print/model-profiles')
-    page.locator('#model-modal').wait_for(state='hidden')
-    page.locator('.nav button[data-view="styles"]').click()
-    poll(page, "() => document.getElementById('view-styles').classList.contains('active') && document.querySelector('#styles-body button')")
-    page.locator('#styles-body button').first.click()
-    page.locator('#style-modal.show').wait_for()
-    assert page.locator('#style-x,#style-y,#style-w,#style-h').count() == 0
-    page.locator('#style-modal .mh button').click()
-
-    style_requests = []
-    dialogs = []
-    page.on('dialog', lambda dialog: (dialogs.append(dialog.message), dialog.dismiss()))
-    def save_style(route):
-        style_requests.append(route.request.post_data_json)
-        if len(style_requests) == 1:
-            route.fulfill(status=503, content_type='application/json', body='{"status":"error"}')
-        else:
-            time.sleep(.15)
-            route.fulfill(status=200, content_type='application/json', body='{"status":"success","version":"mock-style-version"}')
-    page.route('**/api/admin/save_shop_data', save_style)
-    before_styles = page.evaluate("() => shopData.styles.length")
-    page.locator('#view-styles .titlebar .btn').click()
-    page.locator('#style-name').fill('é‡è¤‡é€å‡ºå›žæ­¸æ®¼æ¬¾')
-    page.locator('#style-price').fill('490')
-    page.evaluate("() => Promise.all([saveStyle(),saveStyle()])")
-    assert len(style_requests) == 1, style_requests
-    failed = page.evaluate("""() => ({
-      count:shopData.styles.filter(x=>x.name==='é‡è¤‡é€å‡ºå›žæ­¸æ®¼æ¬¾').length,
-      open:document.getElementById('style-modal').classList.contains('show'),
-      value:document.getElementById('style-name').value,
-      disabled:document.getElementById('style-save').disabled
-    })""")
-    assert failed == {'count':0,'open':True,'value':'é‡è¤‡é€å‡ºå›žæ­¸æ®¼æ¬¾','disabled':False}, failed
-    assert 'æœå‹™æš«æ™‚ç„¡æ³•ä½¿ç”¨ï¼Œè«‹ç¨å¾Œå†è©¦' in page.locator('#bf-product-message').inner_text()
-    style_failure_layers = page.evaluate("""() => {
-      const message=document.getElementById('bf-product-message');
-      const modal=document.getElementById('style-modal');
-      return {
-        messageZ:Number.parseInt(getComputedStyle(message).zIndex,10),
-        modalZ:Number.parseInt(getComputedStyle(modal).zIndex,10),
-        visible:message.classList.contains('show') && Number.parseFloat(getComputedStyle(message).opacity)>0
-      };
-    }""")
-    assert style_failure_layers['messageZ'] > style_failure_layers['modalZ'] and style_failure_layers['visible'], style_failure_layers
-    page.evaluate("() => Promise.all([saveStyle(),saveStyle()])")
-    saved = page.evaluate("""() => ({
-      total:shopData.styles.length,
-      count:shopData.styles.filter(x=>x.name==='é‡è¤‡é€å‡ºå›žæ­¸æ®¼æ¬¾').length,
-      open:document.getElementById('style-modal').classList.contains('show')
-    })""")
-    assert len(style_requests) == 2 and saved == {'total':before_styles+1,'count':1,'open':False}, (style_requests,saved)
-    page.unroute('**/api/admin/save_shop_data')
-    page.evaluate("() => loadShop(true)")
-    print('ADMIN_STYLE_RETRY_DOUBLE_SUBMIT_OK')
-    print('MODEL_PROFILE_SINGLE_ENTRY_WEBKIT_OK')
-
-    # Catalog CRUD must not mutate browser state until the server accepts it.
-    catalog_original = page.evaluate("() => structuredClone(shopData)")
-    catalog_fixture = {
-        'brands':['Issue29å“ç‰Œ','Issue29ç©ºå“ç‰Œ'],
-        'models':[{'id':'issue29-model','brand':'Issue29å“ç‰Œ','name':'Issue29åž‹è™Ÿ','status':True}],
-        'styles':[{'id':'issue29-style','name':'Issue29ç³»åˆ—','price':390,'colors':['é€æ˜Ž'],'status':True}],
-    }
-    page.evaluate("() => {window.__issue29Confirm=window.confirm}")
-
-    def catalog_case(label, action, failure_check, success_check, feedback_check):
-        page.evaluate("data => {shopData=structuredClone(data);renderBrands();renderModels();renderStyles()}", catalog_fixture)
-        requests = []
-        def respond(route):
-            requests.append(route.request.post_data_json)
-            if len(requests) == 1:
-                route.fulfill(status=503, content_type='application/json', body='{"status":"error"}')
-            else:
-                time.sleep(.15)
-                route.fulfill(status=200, content_type='application/json', body='{"status":"success","version":"mock-catalog-version"}')
-        page.route('**/api/admin/save_shop_data', respond)
-        page.evaluate(action)
-        failed = page.evaluate(failure_check)
-        assert len(requests) == 1 and failed, (label, requests, failed)
-        assert page.evaluate(feedback_check), label
-        page.evaluate(action)
-        saved = page.evaluate(success_check)
-        assert len(requests) == 2 and saved, (label, requests, saved)
-        page.unroute('**/api/admin/save_shop_data')
-
-    catalog_case(
-        'addBrand',
-        """() => {addBrand();document.getElementById('bf-brand-name').value='Issue29æ–°å¢žå“ç‰Œ';return Promise.all([BenfuwanAdminProductWorkspace.submitBrand(),BenfuwanAdminProductWorkspace.submitBrand()])}""",
-        """() => JSON.stringify(shopData)===JSON.stringify({brands:['Issue29å“ç‰Œ','Issue29ç©ºå“ç‰Œ'],models:[{id:'issue29-model',brand:'Issue29å“ç‰Œ',name:'Issue29åž‹è™Ÿ',status:true}],styles:[{id:'issue29-style',name:'Issue29ç³»åˆ—',price:390,colors:['é€æ˜Ž'],status:true}]}) && !shopMutationBusy""",
-        """() => shopData.brands.filter(x=>x==='Issue29æ–°å¢žå“ç‰Œ').length===1 && !shopMutationBusy""",
-        """() => document.getElementById('bf-brand-error').textContent.includes('æœå‹™æš«æ™‚ç„¡æ³•ä½¿ç”¨')""",
-    )
-    catalog_case(
-        'editBrand',
-        """() => {editBrand('Issue29å“ç‰Œ');document.getElementById('bf-brand-name').value='Issue29å“ç‰Œæ”¹å';return Promise.all([BenfuwanAdminProductWorkspace.submitBrand(),BenfuwanAdminProductWorkspace.submitBrand()])}""",
-        """() => shopData.brands.includes('Issue29å“ç‰Œ') && !shopData.brands.includes('Issue29å“ç‰Œæ”¹å') && shopData.models[0].brand==='Issue29å“ç‰Œ' && !shopMutationBusy""",
-        """() => !shopData.brands.includes('Issue29å“ç‰Œ') && shopData.brands.filter(x=>x==='Issue29å“ç‰Œæ”¹å').length===1 && shopData.models[0].brand==='Issue29å“ç‰Œæ”¹å' && !shopMutationBusy""",
-        """() => document.getElementById('bf-brand-error').textContent.includes('æœå‹™æš«æ™‚ç„¡æ³•ä½¿ç”¨')""",
-    )
-    catalog_case(
-        'deleteBrand',
-        """() => {window.confirm=()=>true;return Promise.all([deleteBrand('Issue29å“ç‰Œ'),deleteBrand('Issue29å“ç‰Œ')])}""",
-        """() => shopData.brands.includes('Issue29å“ç‰Œ') && !shopData.brands.includes('æœªåˆ†é¡ž') && shopData.models[0].brand==='Issue29å“ç‰Œ' && !shopMutationBusy""",
-        """() => !shopData.brands.includes('Issue29å“ç‰Œ') && shopData.brands.filter(x=>x==='æœªåˆ†é¡ž').length===1 && shopData.models[0].brand==='æœªåˆ†é¡ž' && !shopMutationBusy""",
-        """() => document.getElementById('bf-product-message').textContent.includes('æœå‹™æš«æ™‚ç„¡æ³•ä½¿ç”¨')""",
-    )
-    catalog_case(
-        'deleteModel',
-        """() => {window.confirm=()=>true;return Promise.all([deleteModel('issue29-model'),deleteModel('issue29-model')])}""",
-        """() => shopData.models.some(x=>x.id==='issue29-model') && document.getElementById('models-body').textContent.includes('Issue29åž‹è™Ÿ') && !shopMutationBusy""",
-        """() => !shopData.models.some(x=>x.id==='issue29-model') && !shopMutationBusy""",
-        """() => document.getElementById('bf-product-message').textContent.includes('æœå‹™æš«æ™‚ç„¡æ³•ä½¿ç”¨')""",
-    )
-    catalog_case(
-        'deleteStyle',
-        """() => {window.confirm=()=>true;return Promise.all([deleteStyle('issue29-style'),deleteStyle('issue29-style')])}""",
-        """() => shopData.styles.some(x=>x.id==='issue29-style') && document.getElementById('styles-body').textContent.includes('Issue29ç³»åˆ—') && !shopMutationBusy""",
-        """() => !shopData.styles.some(x=>x.id==='issue29-style') && !shopMutationBusy""",
-        """() => document.getElementById('bf-product-message').textContent.includes('æœå‹™æš«æ™‚ç„¡æ³•ä½¿ç”¨')""",
-    )
-    page.evaluate("async () => {await loadShop(true);window.confirm=window.__issue29Confirm;delete window.__issue29Confirm}")
-    print('ADMIN_CATALOG_CRUD_STATE_RETRY_DOUBLE_SUBMIT_OK')
-
-    # Catalog commit can succeed before production-profile sync fails. The
-    # browser must adopt that committed candidate and returned version so its
-    # next catalog mutation cannot legally CAS stale data over the model edit.
-    partial_before = page.evaluate("() => ({data:structuredClone(shopData),model:structuredClone(shopData.models[0]),version:shopVersion})")
-    primed_catalog = page.request.get(base + '/api/shop_data')
-    assert primed_catalog.headers.get('x-benfuwan-cache') == 'HIT', primed_catalog.headers
-    assert primed_catalog.json()['version'] == partial_before['version']
-    partial_model_name = f'Partial Success åž‹è™Ÿ {time.time_ns()}'
-    partial_brand = f'éƒ¨åˆ†æˆåŠŸå¾Œå“ç‰Œ {time.time_ns()}'
-    page.evaluate("id => openModelEditor(id)", partial_before['model']['id'])
-    page.locator('#model-name').fill(partial_model_name)
-    original_save_profiles = app_module.print_center.store.save_profiles
-    def fail_profile_sync(_profiles):
-        raise RuntimeError('browser fixture')
-    app_module.print_center.store.save_profiles = fail_profile_sync
-    try:
-        page.evaluate("() => saveModel()")
-    finally:
-        app_module.print_center.store.save_profiles = original_save_profiles
-    server_partial, server_partial_version = app_module.cloud_get_json_versioned(
-        'shop_data', app_module.DATA_FILE, app_module.DEFAULT_SHOP_DATA)
-    partial_state = page.evaluate("""() => ({
-      open:document.getElementById('model-modal').classList.contains('show'),
-      input:document.getElementById('model-name').value,
-      id:document.getElementById('model-id').value,
-      local:shopData.models.find(x=>x.id===document.getElementById('model-id').value)?.name,
-      version:shopVersion
-    })""")
-    assert partial_state == {
-        'open':True, 'input':partial_model_name, 'id':partial_before['model']['id'],
-        'local':partial_model_name, 'version':server_partial_version,
-    }, partial_state
-    assert server_partial_version != partial_before['version']
-    assert next(row for row in server_partial['models'] if row['id'] == partial_before['model']['id'])['name'] == partial_model_name
-    assert 'åž‹è™Ÿè³‡æ–™å·²å„²å­˜ï¼Œä½†æ­£å¼åˆ—å°åƒæ•¸åŒæ­¥å¤±æ•—' in page.locator('#bf-product-message').inner_text()
-    model_failure_layers = page.evaluate("""() => {
-      const message=document.getElementById('bf-product-message');
-      const modal=document.getElementById('model-modal');
-      return {
-        messageZ:Number.parseInt(getComputedStyle(message).zIndex,10),
-        modalZ:Number.parseInt(getComputedStyle(modal).zIndex,10),
-        visible:message.classList.contains('show') && Number.parseFloat(getComputedStyle(message).opacity)>0
-      };
-    }""")
-    assert model_failure_layers['messageZ'] > model_failure_layers['modalZ'] and model_failure_layers['visible'], model_failure_layers
-    fresh_after_partial = page.request.get(base + '/api/shop_data')
-    assert fresh_after_partial.headers.get('x-benfuwan-cache') == 'MISS', fresh_after_partial.headers
-    fresh_after_partial_data = fresh_after_partial.json()
-    assert fresh_after_partial_data['version'] == server_partial_version
-    assert next(row for row in fresh_after_partial_data['data']['models'] if row['id'] == partial_before['model']['id'])['name'] == partial_model_name
-    print('ADMIN_MODEL_PROFILE_PARTIAL_SUCCESS_CACHE_INVALIDATION_OK')
-
-    page.evaluate("""async brand => {addBrand();document.getElementById('bf-brand-name').value=brand;await BenfuwanAdminProductWorkspace.submitBrand()}""", partial_brand)
-    server_after_mutation = page.request.get(base + '/api/shop_data').json()
-    assert partial_brand in server_after_mutation['data']['brands']
-    assert next(row for row in server_after_mutation['data']['models'] if row['id'] == partial_before['model']['id'])['name'] == partial_model_name
-    assert page.evaluate("brand => shopData.brands.includes(brand) && document.getElementById('model-modal').classList.contains('show')", partial_brand)
-    page.evaluate("() => saveModel()")
-    assert 'show' not in page.locator('#model-modal').get_attribute('class')
-    partial_restore = page.request.post(base + '/api/admin/save_shop_data', data={
-        'data':partial_before['data'], 'expected_version':page.evaluate('() => shopVersion'),
-    })
-    assert partial_restore.status == 200, partial_restore.text()
-    page.evaluate("() => loadShop(true)")
-    print('ADMIN_MODEL_PROFILE_PARTIAL_SUCCESS_STATE_OK')
-
-    # A second tab/device wins the catalog CAS. This tab must keep its unsaved
-    # inputs and local state across all shop_data write paths until reload.
-    stale_shop = page.evaluate("() => ({data:structuredClone(shopData),version:shopVersion})")
-    winner_shop = copy.deepcopy(stale_shop['data'])
-    winner_shop['brands'].append('CAS åˆ†é  A')
-    winner = page.request.post(base + '/api/admin/save_shop_data', data={
-        'data': winner_shop, 'expected_version': stale_shop['version'],
-    })
-    assert winner.status == 200, winner.text()
-    winner_version = winner.json()['version']
-    winner_cached = page.request.get(base + '/api/shop_data')
-    assert winner_cached.headers.get('x-benfuwan-cache') == 'MISS', winner_cached.headers
-    assert winner_cached.json()['version'] == winner_version
-
-    page.evaluate("""() => {openStyleEditor();document.getElementById('style-name').value='CAS åˆ†é  B ç³»åˆ—';document.getElementById('style-price').value='555'}""")
-    page.evaluate("() => saveStyle()")
-    style_stale = page.evaluate("""() => ({
-      open:document.getElementById('style-modal').classList.contains('show'),
-      input:document.getElementById('style-name').value,
-      local:shopData.styles.some(x=>x.name==='CAS åˆ†é  B ç³»åˆ—'),
-      version:shopVersion
-    })""")
-    assert style_stale == {'open':True,'input':'CAS åˆ†é  B ç³»åˆ—','local':False,'version':stale_shop['version']}, style_stale
-    page.locator('#style-modal .mh button').click()
-
-    original_model = stale_shop['data']['models'][0]
-    page.evaluate("id => openModelEditor(id)", original_model['id'])
-    page.locator('#model-name').fill('CAS åˆ†é  B åž‹è™Ÿ')
-    page.evaluate("() => saveModel()")
-    model_stale = page.evaluate("""() => ({
-      open:document.getElementById('model-modal').classList.contains('show'),
-      input:document.getElementById('model-name').value,
-      local:shopData.models.some(x=>x.name==='CAS åˆ†é  B åž‹è™Ÿ'),
-      version:shopVersion
-    })""")
-    assert model_stale == {'open':True,'input':'CAS åˆ†é  B åž‹è™Ÿ','local':False,'version':stale_shop['version']}, model_stale
-    cache_after_stale = page.request.get(base + '/api/shop_data')
-    assert cache_after_stale.headers.get('x-benfuwan-cache') == 'HIT', cache_after_stale.headers
-    assert cache_after_stale.json()['version'] == winner_version
-    page.locator('#model-modal .mh button').click()
-
-    page.locator('.nav button[data-view="commerce"]').click()
-    poll(page, "() => document.getElementById('view-commerce')?.classList.contains('active')")
-    page.locator('[data-tab="stock"]').click()
-    poll(page, "() => !document.getElementById('pos-stock-panel').hidden")
-    local_price = page.evaluate("""() => {const id=document.querySelector('#pos-series [data-series].selected')?.dataset.series||shopData.styles[0].id;return {id,price:Number(shopData.styles.find(x=>String(x.id)===String(id))?.price)}}""")
-    page.locator('#pos-series-price').fill('888')
-    page.locator('#pos-price-form button').click()
-    poll(page, "() => document.getElementById('pos-message').textContent.includes('è³‡æ–™å·²è¢«å…¶ä»–åˆ†é æˆ–è£ç½®æ›´æ–°')")
-    assert page.locator('#pos-series-price').input_value() == '888'
-    assert page.evaluate("before => Number(shopData.styles.find(x=>String(x.id)===String(before.id))?.price)===before.price", local_price)
-
-    server_after_stale = page.request.get(base + '/api/shop_data').json()
-    assert server_after_stale['version'] == winner_version
-    assert 'CAS åˆ†é  A' in server_after_stale['data']['brands']
-    assert not any(x.get('name') == 'CAS åˆ†é  B ç³»åˆ—' for x in server_after_stale['data']['styles'])
-    assert 'è³‡æ–™å·²è¢«å…¶ä»–åˆ†é æˆ–è£ç½®æ›´æ–°ï¼Œè«‹é‡æ–°è¼‰å…¥å¾Œå†ä¿®æ”¹ã€‚' in page.locator('#bf-product-message').inner_text()
-    page.evaluate("() => loadShop(true)")
-    assert page.evaluate("version => shopVersion===version && shopData.brands.includes('CAS åˆ†é  A')", winner_version)
-    restored = page.request.post(base + '/api/admin/save_shop_data', data={
-        'data': stale_shop['data'], 'expected_version': winner_version,
-    })
-    assert restored.status == 200, restored.text()
-    page.evaluate("() => loadShop(true)")
-    print('ADMIN_CATALOG_MODEL_PRICE_STALE_CAS_OK')
-
-    page.locator('.nav button[data-view="assets"]').click()
-    poll(page, "() => typeof assetsLoaded !== 'undefined' && assetsLoaded && !!document.getElementById('bf-asset-cat-actions')")
-    asset_before = page.evaluate("() => ({data:structuredClone(assetsData),version:assetsVersion})")
-    asset_a = f'CAS-A-{time.time_ns() % 100000000}'
-    asset_b = f'CAS-B-{time.time_ns() % 100000000}'
-    primed_assets = page.request.get(base + '/api/assets')
-    assert primed_assets.headers.get('x-benfuwan-cache') == 'HIT', primed_assets.headers
-    asset_winner = page.request.post(base + '/api/admin/sticker_category', data={
-        'action': 'create', 'name': asset_a, 'expected_version': asset_before['version'],
-    })
-    assert asset_winner.status == 200, asset_winner.text()
-    asset_winner_version = asset_winner.json()['version']
-    fresh_assets = page.request.get(base + '/api/assets')
-    assert fresh_assets.headers.get('x-benfuwan-cache') == 'MISS', fresh_assets.headers
-    assert fresh_assets.json()['version'] == asset_winner_version
-    prompt_count = page.evaluate("() => {window.__issue59Prompt=window.prompt;window.__issue59PromptCount=0;window.prompt=()=>{window.__issue59PromptCount++;return 'unexpected'};document.querySelector('[data-asset-create]').click();return window.__issue59PromptCount}")
-    assert prompt_count == 0
-    page.locator('#bf-asset-category-name').fill(asset_b)
-    page.locator('#bf-asset-category-save').click()
-    poll(page, f"() => assetsVersion==={json.dumps(asset_winner_version)}")
-    asset_stale_state = page.evaluate("""names => ({
-      version:assetsVersion,
-      hasA:assetsData.categories.includes(names.a),
-      hasB:assetsData.categories.includes(names.b)
-    })""", {'a': asset_a, 'b': asset_b})
-    assert asset_stale_state == {'version': asset_winner_version, 'hasA': True, 'hasB': False}, asset_stale_state
-    assert 'è³‡æ–™å·²è¢«å…¶ä»–åˆ†é æˆ–è£ç½®æ›´æ–°' in page.locator('#bf-asset-category-error').inner_text()
-    assert page.locator('#bf-asset-category-modal').get_attribute('class').find('show') >= 0
-    assert page.evaluate("() => window.__issue59PromptCount") == 0
-    page.locator('#bf-asset-category-modal [data-category-close]').first.click()
-    asset_restore = page.request.post(base + '/api/admin/sticker_category', data={
-        'action': 'delete', 'name': asset_a, 'expected_version': asset_winner_version,
-    })
-    assert asset_restore.status == 200, asset_restore.text()
-    page.evaluate("async () => {await loadAssets(true)}")
-    print('ADMIN_ASSET_STALE_CAS_CACHE_INVALIDATION_OK')
-
-    asset_workspace = page.evaluate("""() => {
-      window.__issue59Assets=structuredClone(assetsData);
-      assetsData={categories:['å…¨éƒ¨','è²“å’ª','èŠ±æœµ'],stickers:[
-        {id:'asset-cat-a',name:'ç¡è¦ºè²“å’ª',category:'è²“å’ª',url:'/static/missing-issue59-asset.png'},
-        {id:'asset-cat-b',name:'æ©˜è‰²å°èŠ±',category:'èŠ±æœµ',url:'/static/image.png'},
-        {id:'asset-cat-c',name:'ç«™ç«‹è²“å’ª',category:'è²“å’ª',url:'/static/image.png'}
-      ]};
-      currentAsset='å…¨éƒ¨';renderAssetTabs();renderAssets();
-      document.querySelector('[data-asset-create]').click();
-      document.getElementById('bf-asset-category-name').value='è²“å’ª';
-      document.getElementById('bf-asset-category-form').requestSubmit();
-      return {
-        promptCalls:window.__issue59PromptCount||0,
-        duplicate:document.getElementById('bf-asset-category-error').textContent,
-        count:document.getElementById('bf-asset-result-count').textContent,
-        cards:document.querySelectorAll('#asset-grid .bf-asset-card').length,
-        explicitDelete:document.querySelectorAll('#asset-grid [data-delete-sticker]').length
-      };
-    }""")
-    assert asset_workspace == {
-        'promptCalls': 0, 'duplicate': 'åˆ†é¡žåç¨±å·²å­˜åœ¨',
-        'count': 'ç›®å‰åˆ†é¡ž 3 å¼µ', 'cards': 3, 'explicitDelete': 3,
-    }, asset_workspace
-    pending_asset_image = []
-    page.route('**/issue59-delayed-asset.png', lambda route: pending_asset_image.append(route))
-    with page.expect_request('**/issue59-delayed-asset.png'):
-        page.evaluate("() => {assetsData.stickers.find(x=>x.id==='asset-cat-a').url='/issue59-delayed-asset.png';renderAssets();document.querySelector('[data-id=\"asset-cat-a\"] img').loading='eager'}")
-    asset_pending = page.evaluate("""() => {
-      const media=document.querySelector('[data-id="asset-cat-a"] .bf-card-media');
-      return {image:getComputedStyle(media.querySelector('img')).visibility,placeholder:getComputedStyle(media.querySelector('.bf-image-placeholder')).display};
-    }""")
-    assert asset_pending == {'image': 'hidden', 'placeholder': 'grid'}, asset_pending
-    assert len(pending_asset_image) == 1
-    page.locator('[data-id="asset-cat-a"] .bf-card-media img').evaluate("img => img.addEventListener('error', () => img.dataset.testError = '1')")
-    pending_asset_image.pop().fulfill(status=404, body='missing')
-    poll(page, "() => document.querySelector('[data-id=\"asset-cat-a\"] .bf-card-media img')?.dataset.testError==='1'")
-    asset_failed = page.evaluate("""() => {
-      const media=document.querySelector('[data-id="asset-cat-a"] .bf-card-media');
-      return {image:getComputedStyle(media.querySelector('img')).visibility,placeholder:getComputedStyle(media.querySelector('.bf-image-placeholder')).display};
-    }""")
-    assert asset_failed == {'image': 'hidden', 'placeholder': 'grid'}, asset_failed
-    page.unroute('**/issue59-delayed-asset.png')
-    pending_asset_success = []
-    page.route('**/issue59-ok-asset.png', lambda route: pending_asset_success.append(route))
-    with page.expect_request('**/issue59-ok-asset.png'):
-        page.evaluate("() => {assetsData.stickers.find(x=>x.id==='asset-cat-a').url='/issue59-ok-asset.png';renderAssets();document.querySelector('[data-id=\"asset-cat-a\"] img').loading='eager'}")
-    assert page.locator('[data-id="asset-cat-a"] .bf-card-media img').evaluate("img => getComputedStyle(img).visibility") == 'hidden'
-    assert len(pending_asset_success) == 1
-    pending_asset_success.pop().fulfill(status=200, body=GOOD, content_type='image/png')
-    poll(page, "() => getComputedStyle(document.querySelector('[data-id=\"asset-cat-a\"] .bf-card-media img')).visibility==='visible'")
-    asset_loaded = page.evaluate("""() => {
-      const media=document.querySelector('[data-id="asset-cat-a"] .bf-card-media');
-      return {image:getComputedStyle(media.querySelector('img')).visibility,placeholder:getComputedStyle(media.querySelector('.bf-image-placeholder')).display};
-    }""")
-    assert asset_loaded == {'image': 'visible', 'placeholder': 'none'}, asset_loaded
-    page.unroute('**/issue59-ok-asset.png')
-    page.evaluate("() => {assetsData.stickers.find(x=>x.id==='asset-cat-a').url='/static/missing-issue59-asset.png';renderAssets()}")
-    print('ADMIN_ASSET_THUMB_NO_FLASH_OK')
-    page.locator('#bf-asset-category-modal [data-category-close]').first.click()
-    page.evaluate("() => {currentAsset='è²“å’ª';renderAssetTabs();renderAssets();document.querySelector('[data-asset-rename]').click()}")
-    assert page.locator('#bf-asset-category-name').input_value() == 'è²“å’ª'
-    assert page.evaluate("() => window.__issue59PromptCount") == 0
-    page.locator('#bf-asset-category-modal [data-category-close]').first.click()
-    page.evaluate("() => {currentAsset='å…¨éƒ¨';renderAssetTabs();renderAssets()}")
-    page.locator('#bf-asset-search').fill('è²“å’ª')
-    assert page.locator('#asset-grid .bf-asset-card').count() == 2
-    assert 'æœå°‹åˆ° 2 å¼µ' in page.locator('#bf-asset-result-count').inner_text()
-
-    page.locator('#bf-asset-search').fill('')
-    page.locator('#bf-batch-cat-btn').click()
-    page.locator('[data-id="asset-cat-a"]').click()
-    move_requests = []
-    def move_asset_response(route):
-        move_requests.append(route.request.post_data_json)
-        route.fulfill(status=200, content_type='application/json', body='{"status":"success","moved":1,"version":"issue59-move"}')
-    page.route('**/api/admin/sticker_category', move_asset_response)
-    page.locator('#bf-target-category').fill('ç²¾é¸')
-    page.locator('#bf-move-assets').click()
-    poll(page, "() => assetsData.stickers.find(x=>x.id==='asset-cat-a')?.category==='ç²¾é¸'")
-    assert len(move_requests) == 1 and move_requests[0]['action'] == 'move' and move_requests[0]['ids'] == ['asset-cat-a'], move_requests
-    page.unroute('**/api/admin/sticker_category')
-
-    page.locator('#bf-batch-cat-btn').click()
-    page.locator('[data-id="asset-cat-a"]').click()
-    delete_assets = []
-    def delete_assets_response(route):
-        delete_assets.append(route.request.post_data_json)
-        route.fulfill(status=200, content_type='application/json', body='{"status":"success","deleted":1,"version":"issue59-delete"}')
-    page.route('**/api/admin/sticker_category', delete_assets_response)
-    page.evaluate("() => {window.__issue59Confirm=window.confirm;window.confirm=()=>true}")
-    page.locator('#bf-delete-assets').click()
-    poll(page, "() => !assetsData.stickers.some(x=>x.id==='asset-cat-a')")
-    assert len(delete_assets) == 1 and delete_assets[0]['action'] == 'delete_stickers', delete_assets
-    page.unroute('**/api/admin/sticker_category')
-
-    upload_attempts = []
-    def upload_asset_failure(route):
-        upload_attempts.append(route.request.post_data)
-        route.fulfill(status=503, content_type='application/json', body='{"status":"error","msg":"ä¸Šå‚³æš«æ™‚å¤±æ•—"}')
-    page.route('**/api/admin/batch_upload_stickers', upload_asset_failure)
-    page.locator('#sticker-files').set_input_files(files=[{
-        'name': 'issue59.png', 'mimeType': 'image/png',
-        'buffer': b'issue59-upload-fixture',
-    }])
-    assert page.locator('#bf-asset-upload-modal').get_attribute('class').find('show') >= 0
-    assert 'å·²é¸æ“‡ 1 å¼µåœ–ç‰‡' in page.locator('#bf-asset-upload-summary').inner_text()
-    page.locator('#bf-asset-new-category-toggle').click()
-    page.locator('#bf-asset-upload-new-category').fill('æ‰¹æ¬¡æ–°åˆ†é¡ž')
-    page.locator('#bf-asset-upload-confirm').click()
-    poll(page, "() => document.getElementById('bf-asset-upload-error').textContent.includes('ä¸Šå‚³æš«æ™‚å¤±æ•—')")
-    assert len(upload_attempts) == 1
-    assert page.locator('#bf-asset-upload-modal').get_attribute('class').find('show') >= 0
-    assert 'å·²é¸æ“‡ 1 å¼µåœ–ç‰‡' in page.locator('#bf-asset-upload-summary').inner_text()
-    assert page.locator('#bf-asset-upload-new-category').input_value() == 'æ‰¹æ¬¡æ–°åˆ†é¡ž'
-    page.unroute('**/api/admin/batch_upload_stickers')
-    upload_success = []
-    def upload_asset_success(route):
-        upload_success.append(route.request.post_data)
-        route.fulfill(status=200, content_type='application/json', body='{"status":"success","version":"issue59-upload","data":[{"id":"issue59-uploaded","category":"æ‰¹æ¬¡æ–°åˆ†é¡ž","url":"/static/missing-issue59-upload.png"}]}')
-    page.route('**/api/admin/batch_upload_stickers', upload_asset_success)
-    page.evaluate("() => {const form=document.getElementById('bf-asset-upload-form');form.requestSubmit();form.requestSubmit()}")
-    poll(page, "() => !document.getElementById('bf-asset-upload-modal').classList.contains('show')")
-    assert len(upload_success) == 1
-    assert 'å·²ä¸Šå‚³ 1 å¼µåˆ°ã€Œæ‰¹æ¬¡æ–°åˆ†é¡žã€' in page.locator('#bf-product-message').inner_text()
-    page.unroute('**/api/admin/batch_upload_stickers')
-
-    page.set_viewport_size({'width':390,'height':844})
-    page.evaluate("() => {currentAsset='å…¨éƒ¨';renderAssetTabs();renderAssets();document.getElementById('bf-batch-cat-btn').click()}")
-    asset_mobile = page.evaluate("""() => ({
-      scroll:document.documentElement.scrollWidth,
-      columns:getComputedStyle(document.getElementById('asset-grid')).gridTemplateColumns.split(' ').length,
-      deleteHeight:document.querySelector('#asset-grid [data-delete-sticker]')?.getBoundingClientRect().height||0,
-      batchOverflow:getComputedStyle(document.getElementById('asset-batchbar')).overflowX
-    })""")
-    assert asset_mobile['scroll'] <= 392 and asset_mobile['columns'] == 2 and asset_mobile['deleteHeight'] >= 43, asset_mobile
-    assert asset_mobile['batchOverflow'] == 'auto', asset_mobile
-    page.set_viewport_size({'width':1180,'height':900})
-
-    page.evaluate("""() => {
-      if(document.getElementById('asset-batchbar').classList.contains('show'))document.getElementById('bf-batch-cat-btn').click();
-      assetsData=window.__issue59Assets;delete window.__issue59Assets;
-      window.confirm=window.__issue59Confirm;delete window.__issue59Confirm;
-      window.prompt=window.__issue59Prompt;delete window.__issue59Prompt;delete window.__issue59PromptCount;
-      currentAsset='å…¨éƒ¨';renderAssetTabs();renderAssets();
-    }""")
-    print('ADMIN_ASSET_LIBRARY_WORKSPACE_OK')
-
-    print_nav = page.locator('.nav button[data-view="print-center"]')
-    print_nav.click()
-    poll(page, "() => document.querySelectorAll('#pc-grid .pc-card').length>0 && document.getElementById('view-print-center').classList.contains('active')")
-    assert page.locator('#pc-config').get_attribute('class').find('warn') >= 0
-    assert page.locator('[data-pc="start"]').count() == 0
-    assert page.locator('[data-pc="profile"]').count() == 0
-    assert page.locator('#pc-modal').count() == 0
-    assert '80 Ã— 160 mm / X 1.5 / Y 2.5' in page.locator('#pc-grid').inner_text()
-    for width, height in ((390,844),(768,1024),(1440,900)):
-        page.set_viewport_size(dict(width=width,height=height))
-        metrics = page.evaluate("""() => ({
-          width:innerWidth,scroll:document.documentElement.scrollWidth,
-          view:document.getElementById('view-print-center').getBoundingClientRect().width,
-          cards:document.querySelectorAll('#pc-grid .pc-card').length,
-          secrets:document.getElementById('view-print-center').textContent.includes('fake-key')
-        })""")
-        assert metrics['scroll'] <= width + 2 and metrics['view'] > 200 and metrics['cards'] > 0 and not metrics['secrets'], metrics
-    legacy_order = app_module.commerce.store.local_orders()[0]
-    commerce = app_module.commerce.read()
-    assert commerce['order_finance'].pop(legacy_order['id'], None), legacy_order['id']
-    assert app_module.commerce.store.commit(int(commerce.get('revision', 0)), commerce)
-    page.locator('#pc-reload').click()
-    poll(page, "() => document.querySelector('[data-pc=\"binding\"]') !== null")
-    page.locator('[data-pc="binding"]').first.click()
-    page.locator('#pc-bind-modal.show').wait_for()
-    assert 'ä¸æœƒä¿®æ”¹ç‡Ÿæ”¶ï¼æˆæœ¬ï¼åº«å­˜è³‡æ–™' in page.locator('#pc-bind-modal').inner_text()
-    assert page.locator('#pc-bind-sku option').count() >= 2
-    page.locator('#pc-bind-close').click()
-    print('PRINT_CENTER_A5_RESPONSIVE_FAIL_CLOSED_OK')
-
-    template_nav = page.locator('.nav button[data-view="templates"]')
-    template_nav.click()
-    poll(page, "() => typeof window.benfuwanEnsureTemplateEditor === 'function' && typeof shopLoaded !== 'undefined' && shopLoaded && typeof templatesLoaded !== 'undefined' && templatesLoaded")
-    lazy_before = page.evaluate("""() => ({
-      ready:!!window.__benfuwanTemplateStackReady,
-      universalScripts:document.querySelectorAll('script[src*="admin-universal-templates.js"]').length,
-      editorScripts:document.querySelectorAll('script[src*="admin-template-editor-v2.js"]').length,
-      filters:!!document.getElementById('bf-template-filters')
-    })""")
-    assert lazy_before == {'ready': False, 'universalScripts': 0, 'editorScripts': 0, 'filters': True}, lazy_before
-
-    template_library = page.evaluate("""() => {
-      window.__issue59Templates=structuredClone(templatesData);
-      window.__issue59Shop=structuredClone(shopData);
-      const model=(shopData.models||[])[0]||{id:'issue59-model',name:'æ¸¬è©¦åž‹è™Ÿ',status:true};
-      if(!(shopData.models||[]).length)shopData.models=[model];
-      const first=(shopData.styles||[])[0]||{id:'issue59-crystal',name:'æ™¶å½©',status:true};
-      if(!(shopData.styles||[]).length)shopData.styles=[first];
-      const second=(shopData.styles||[])[1]||{id:'issue59-mirror',name:'é¡é¢',status:true};
-      if(!(shopData.styles||[]).some(x=>x.id===second.id))shopData.styles.push(second);
-      templatesData={categories:['å…¨éƒ¨','ç²¾é¸','å­£ç¯€'],templates:[
-        {id:'issue59-universal',name:'æ™¶å½©è²“å’ªæ¨¡æ¿',category:'ç²¾é¸',model_id:'*',universal:true,reference_model_id:model.id,reference_style_id:first.id,thumb_url:'/static/missing-issue59-template.png'},
-        {id:'issue59-specific',name:'é¡é¢èŠ±æœµæ¨¡æ¿',category:'ç²¾é¸',model_id:model.id,case_style_id:second.id,thumb_url:'/static/image.png'}
-      ]};
-      currentTpl='å…¨éƒ¨';
-      Object.assign(BenfuwanAdminLibraryWorkspace.state,{query:'',category:'å…¨éƒ¨',model:'',style:'',type:'all'});
-      renderTemplateTabs();renderTemplates();
-      const base={cards:document.querySelectorAll('#template-grid .bf-template-card').length,text:document.getElementById('template-grid').textContent};
-      BenfuwanAdminLibraryWorkspace.state.query='æ™¶å½©';renderTemplates();const search=document.querySelectorAll('#template-grid .bf-template-card').length;
-      Object.assign(BenfuwanAdminLibraryWorkspace.state,{query:'',category:'ç²¾é¸',model:'',style:first.id,type:'all'});renderTemplates();const style=document.querySelectorAll('#template-grid .bf-template-card').length;
-      Object.assign(BenfuwanAdminLibraryWorkspace.state,{query:'',category:'ç²¾é¸',model:model.id,style:'',type:'specific'});renderTemplates();const specific=document.querySelectorAll('#template-grid .bf-template-card').length;
-      Object.assign(BenfuwanAdminLibraryWorkspace.state,{query:'',category:'ç²¾é¸',model:model.id,style:'',type:'universal'});renderTemplates();const universal=document.querySelectorAll('#template-grid .bf-template-card').length;
-      Object.assign(BenfuwanAdminLibraryWorkspace.state,{query:'',category:'å…¨éƒ¨',model:'',style:'',type:'all'});currentTpl='å…¨éƒ¨';renderTemplateTabs();renderTemplates();
-      return {base,search,style,specific,universal,model:model.name,first:first.name,second:second.name};
-    }""")
-    assert template_library['base']['cards'] == 2, template_library
-    assert all(label in template_library['base']['text'] for label in (
-        'æ™¶å½©è²“å’ªæ¨¡æ¿', 'é¡é¢èŠ±æœµæ¨¡æ¿', 'ç²¾é¸', template_library['model'],
-        template_library['first'], template_library['second'], 'å…¨åž‹è™Ÿé€šç”¨', 'æŒ‡å®šåž‹è™Ÿ',
-    )), template_library
-    assert {key: template_library[key] for key in ('search','style','specific','universal')} == {
-        'search': 1, 'style': 1, 'specific': 1, 'universal': 1,
-    }, template_library
-    pending_template_image = []
-    page.route('**/issue59-delayed-template.png', lambda route: pending_template_image.append(route))
-    with page.expect_request('**/issue59-delayed-template.png'):
-        page.evaluate("() => {templatesData.templates.find(x=>x.id==='issue59-universal').thumb_url='/issue59-delayed-template.png';renderTemplates();document.querySelector('[data-template-id=\"issue59-universal\"] img').loading='eager'}")
-    template_pending = page.evaluate("""() => {
-      const media=document.querySelector('[data-template-id="issue59-universal"] .bf-card-media');
-      return {image:getComputedStyle(media.querySelector('img')).visibility,placeholder:getComputedStyle(media.querySelector('.bf-image-placeholder')).display};
-    }""")
-    assert template_pending == {'image': 'hidden', 'placeholder': 'grid'}, template_pending
-    assert len(pending_template_image) == 1
-    page.locator('[data-template-id="issue59-universal"] .bf-card-media img').evaluate("img => img.addEventListener('error', () => img.dataset.testError = '1')")
-    pending_template_image.pop().fulfill(status=404, body='missing')
-    poll(page, "() => document.querySelector('[data-template-id=\"issue59-universal\"] .bf-card-media img')?.dataset.testError==='1'")
-    template_failed = page.evaluate("""() => {
-      const media=document.querySelector('[data-template-id="issue59-universal"] .bf-card-media');
-      return {image:getComputedStyle(media.querySelector('img')).visibility,placeholder:getComputedStyle(media.querySelector('.bf-image-placeholder')).display};
-    }""")
-    assert template_failed == {'image': 'hidden', 'placeholder': 'grid'}, template_failed
-    page.unroute('**/issue59-delayed-template.png')
-    pending_template_success = []
-    page.route('**/issue59-ok-template.png', lambda route: pending_template_success.append(route))
-    with page.expect_request('**/issue59-ok-template.png'):
-        page.evaluate("() => {templatesData.templates.find(x=>x.id==='issue59-universal').thumb_url='/issue59-ok-template.png';renderTemplates();document.querySelector('[data-template-id=\"issue59-universal\"] img').loading='eager'}")
-    assert page.locator('[data-template-id="issue59-universal"] .bf-card-media img').evaluate("img => getComputedStyle(img).visibility") == 'hidden'
-    assert len(pending_template_success) == 1
-    pending_template_success.pop().fulfill(status=200, body=GOOD, content_type='image/png')
-    poll(page, "() => getComputedStyle(document.querySelector('[data-template-id=\"issue59-universal\"] .bf-card-media img')).visibility==='visible'")
-    template_loaded = page.evaluate("""() => {
-      const media=document.querySelector('[data-template-id="issue59-universal"] .bf-card-media');
-      return {image:getComputedStyle(media.querySelector('img')).visibility,placeholder:getComputedStyle(media.querySelector('.bf-image-placeholder')).display};
-    }""")
-    assert template_loaded == {'image': 'visible', 'placeholder': 'none'}, template_loaded
-    page.unroute('**/issue59-ok-template.png')
-    page.evaluate("() => {templatesData.templates.find(x=>x.id==='issue59-universal').thumb_url='/static/missing-issue59-template.png';renderTemplates()}")
-    print('ADMIN_TEMPLATE_THUMB_NO_FLASH_OK')
-    for width, height in ((390,844),(768,1024),(1180,900)):
-        page.set_viewport_size(dict(width=width,height=height))
-        library_layout = page.evaluate("""() => ({
-          scroll:document.documentElement.scrollWidth,
-          assetColumns:getComputedStyle(document.getElementById('asset-grid')).gridTemplateColumns.split(' ').length,
-          templateColumns:getComputedStyle(document.getElementById('template-grid')).gridTemplateColumns.split(' ').length,
-          deleteHeight:document.querySelector('#template-grid [data-delete-template]')?.getBoundingClientRect().height||0
-        })""")
-        assert library_layout['scroll'] <= width + 2, (width, library_layout)
-        if width == 390:
-            assert library_layout['templateColumns'] == 2 and library_layout['deleteHeight'] >= 43, library_layout
-    page.set_viewport_size({'width': 1440, 'height': 900})
-    page.evaluate("""() => {
-      templatesData=window.__issue59Templates;shopData=window.__issue59Shop;
-      delete window.__issue59Templates;delete window.__issue59Shop;
-      Object.assign(BenfuwanAdminLibraryWorkspace.state,{query:'',category:'å…¨éƒ¨',model:'',style:'',type:'all'});
-      currentTpl='å…¨éƒ¨';renderTemplateTabs();renderTemplates();
-    }""")
-    print('ADMIN_TEMPLATE_LIBRARY_FILTERS_PLACEHOLDER_RESPONSIVE_OK')
-
-    page.evaluate("() => window.benfuwanEnsureTemplateEditor()")
-    diag = page.evaluate("""() => ({core:!!window.BenfuwanAiRemoveV2,admin:typeof window.bfAdminRemoveBackground,stackReady:!!window.__benfuwanTemplateStackReady,adminFlag:!!window.__bfAdminAiRemoveOnlyV2,models:(shopData?.models||[]).length})""")
-    print('ADMIN_STACK_DIAG', diag)
-    assert diag['core'] and diag['admin']=='function' and diag['stackReady'] and diag['adminFlag'] and diag['models'] > 0, diag
-
-    template_xss = "template');window.__adminStoredXss=2;//"
-    template_xss_result = page.evaluate("""payload => {
-      const originalData=structuredClone(templatesData),originalOpen=window.openTemplateEditor;
-      window.__adminStoredXss=0;window.__adminEditedTemplate='';
-      window.openTemplateEditor=value=>{window.__adminEditedTemplate=value};
-      templatesData.templates=[{id:payload,name:'å®‰å…¨æ¨¡æ¿',category:'ç†±é–€',model_id:'*',universal:true}];
-      currentTpl='å…¨éƒ¨';renderTemplates();
-      const inlineHandlers=document.querySelectorAll('#template-grid [onclick]').length;
-      document.querySelector('#template-grid [data-edit-template]').click();
-      const result={executed:window.__adminStoredXss,edited:window.__adminEditedTemplate,inlineHandlers};
-      window.openTemplateEditor=originalOpen;templatesData=originalData;renderTemplates();
-      return result;
-    }""", template_xss)
-    assert template_xss_result == {'executed': 0, 'edited': template_xss, 'inlineHandlers': 0}, template_xss_result
-    print('ADMIN_TEMPLATE_STORED_DATA_ACTIONS_OK')
-
-    template_fixture_profile = page.evaluate("""() => {
-      const models=(shopData?.models||[]).filter(item=>item?.status!==false);
-      const styles=(shopData?.styles||[]).filter(item=>item?.status!==false);
-      if(!models.length||!styles.length)return null;
-      for(const model of models){
-        model.case_profiles={...(model.case_profiles||{})};
-        for(const style of styles){
-          if(!window.BenfuwanCaseProfiles?.complete(model.case_profiles[style.id])){
-            model.case_profiles[style.id]={
-              preview_mask_img:model.preview_mask_img||'fixture://template-preview',
-              print_line_img:model.print_line_img||'fixture://template-print',
-              print_x:1,print_y:2,print_w:70,print_h:140,print_angle:0
-            };
-          }
-        }
-      }
-      return {models:models.length,styles:styles.length};
-    }""")
-    assert template_fixture_profile, template_fixture_profile
-    page.locator('#view-templates .titlebar .btn').click()
-    poll(page, "() => document.getElementById('template-modal')?.classList.contains('show')", timeout=30000)
-    template_open_diag = page.evaluate("""() => ({canvas:!!visualCanvas,model:document.getElementById('tpl-model')?.value,style:document.getElementById('tpl-style')?.value,profile:!!window.benfuwanTemplateReferenceProfile?.(),dialogs:window.__templateOpenDialogs||[]})""")
-    print('ADMIN_TEMPLATE_OPEN_DIAG', template_open_diag)
-    assert template_open_diag['canvas'], template_open_diag
-    template_editor_src = page.locator('script[src*="admin-template-editor-v2.js"]').get_attribute('src')
-    assert template_editor_src and 'v=20260929style1' in template_editor_src, template_editor_src
-    print('ADMIN_FABRIC_LAZY_OK')
-
-    template_contract = page.evaluate("""async () => {
-      const originalShop=structuredClone(shopData),originalTemplates=structuredClone(templatesData),originalSave=window.saveTemplates,originalUpload=window.uploadAdminImage;
-      const model={id:'geometry-model',name:'å¹¾ä½•åž‹è™Ÿ',brand:'Apple',status:true,case_profiles:{
-        crystal:{preview_mask_img:'fixture://crystal-preview',print_line_img:'fixture://crystal-print',print_w:70,print_h:140,print_x:1,print_y:2,print_angle:0},
-        mirror:{preview_mask_img:'fixture://mirror-preview',print_line_img:'fixture://mirror-print',print_w:75,print_h:150,print_x:3,print_y:4,print_angle:90}
-      }};
-      shopData={brands:['Apple'],models:[model],styles:[{id:'crystal',name:'æ™¶å½©',status:true},{id:'mirror',name:'é¡é¢',status:true},{id:'missing',name:'æœªé…ç½®',status:true}]};
-      const modelSelect=document.getElementById('tpl-model'),styleSelect=document.getElementById('tpl-style');
-      modelSelect.innerHTML='<option value="geometry-model">å¹¾ä½•åž‹è™Ÿ</option>';modelSelect.value='geometry-model';
-      styleSelect.innerHTML='<option value="crystal">æ™¶å½©</option><option value="mirror">é¡é¢</option><option value="missing">æœªé…ç½®</option>';
-      window.__bfEditingTemplate=null;
-      styleSelect.value='crystal';initEditor();const crystal={w:tplW,h:tplH};
-      styleSelect.value='mirror';initEditor();const mirror={w:tplW,h:tplH};
-      const beforeMissing={w:tplW,h:tplH};styleSelect.value='missing';const missingResult=initEditor();const afterMissing={w:tplW,h:tplH};
-      const old={id:'legacy-style-template',name:'èˆŠæ®¼æ¬¾æ¨¡æ¿',category:'ç†±é–€',model_id:'*',universal:true,case_style_id:'crystal',reference_model_id:'geometry-model',source_print_w:70,source_print_h:140,slots:[],objects_json:{version:'5.3.0',objects:[]}};
-      templatesData={templates:[old],categories:['å…¨éƒ¨','ç†±é–€']};window.__bfEditingTemplate=old;
-      document.getElementById('tpl-id').value=old.id;document.getElementById('tpl-name').value=old.name;document.getElementById('tpl-category').value=old.category;styleSelect.value='crystal';initEditor([],old.objects_json,'');
-      let captured=null;window.uploadAdminImage=async()=>'/static/uploads/geometry-template.png';window.saveTemplates=async next=>{captured=structuredClone(next);return {version:'geometry-version'}};
-      await saveTemplate();
-      const saved=captured.templates.find(row=>row.id===old.id);
-      window.saveTemplates=originalSave;window.uploadAdminImage=originalUpload;shopData=originalShop;templatesData=originalTemplates;window.__bfEditingTemplate=null;
-      return {crystal,mirror,beforeMissing,afterMissing,missingResult,saved:{case_style_id:saved.case_style_id,reference_style_id:saved.reference_style_id,source_print_w:saved.source_print_w,source_print_h:saved.source_print_h}};
-    }""")
-    assert template_contract == {
-        'crystal': {'w':140,'h':280}, 'mirror': {'w':150,'h':300},
-        'beforeMissing': {'w':150,'h':300}, 'afterMissing': {'w':150,'h':300},
-        'missingResult': False,
-        'saved': {'case_style_id':'crystal','reference_style_id':'crystal','source_print_w':70,'source_print_h':140},
-    }, template_contract
-    assert any('æ­¤åž‹è™Ÿçš„æ­¤æ®¼æ¬¾å°šæœªé…ç½®ç”Ÿç”¢è³‡æ–™' in msg for msg in dialogs), dialogs
-    print('ADMIN_TEMPLATE_MODEL_STYLE_GEOMETRY_LEGACY_STYLE_OK', template_contract)
-
-    page.locator('#view-templates .titlebar .btn').click()
-    poll(page, "() => document.getElementById('template-modal')?.classList.contains('show') && !!visualCanvas", timeout=30000)
-
-    template_server_original = page.evaluate("() => ({data:structuredClone(templatesData),version:templatesVersion})")
-    template_winner = copy.deepcopy(template_server_original['data'])
-    template_winner['templates'].append({'id':'cas-template-a','name':'CAS æ¨¡æ¿ A','category':'ç†±é–€','model_id':'*','universal':True})
-    template_winner_response = page.request.post(base + '/api/admin/save_templates', data={
-        'data': template_winner, 'expected_version': template_server_original['version'],
-    })
-    assert template_winner_response.status == 200, template_winner_response.text()
-    template_winner_version = template_winner_response.json()['version']
-    page.route('**/api/admin/upload_image', lambda route: route.fulfill(status=200, content_type='application/json', body='{"status":"success","url":"/static/materials/cas-orphan.png"}'))
-    template_stale_dialog = len(dialogs)
-    page.evaluate("""() => {document.getElementById('tpl-id').value='';document.getElementById('tpl-name').value='CAS æ¨¡æ¿ B';document.getElementById('tpl-category').value='ç†±é–€'}""")
-    page.evaluate("() => saveTemplate()")
-    template_stale = page.evaluate("""() => ({
-      open:document.getElementById('template-modal').classList.contains('show'),
-      input:document.getElementById('tpl-name').value,
-      local:templatesData.templates.some(x=>x.name==='CAS æ¨¡æ¿ B'),
-      version:templatesVersion
-    })""")
-    assert template_stale == {'open':True,'input':'CAS æ¨¡æ¿ B','local':False,'version':template_server_original['version']}, template_stale
-    page.unroute('**/api/admin/upload_image')
-    template_server_after = page.request.get(base + '/api/templates').json()
-    assert template_server_after['version'] == template_winner_version
-    assert [row['id'] for row in template_server_after['data']['templates'] if row.get('id') in ('cas-template-a','cas-template-b')] == ['cas-template-a']
-    assert any('è³‡æ–™å·²è¢«å…¶ä»–åˆ†é æˆ–è£ç½®æ›´æ–°ï¼Œè«‹é‡æ–°è¼‰å…¥å¾Œå†ä¿®æ”¹ã€‚' in msg for msg in dialogs[template_stale_dialog:]), dialogs[template_stale_dialog:]
-    page.evaluate("() => loadTemplates(true)")
-    reloaded_template = page.evaluate("version => ({version:templatesVersion,hasA:templatesData.templates.some(x=>x.id==='cas-template-a'),input:document.getElementById('tpl-name').value})", template_winner_version)
-    assert reloaded_template == {'version':template_winner_version,'hasA':True,'input':'CAS æ¨¡æ¿ B'}, reloaded_template
-    restored_templates = page.request.post(base + '/api/admin/save_templates', data={
-        'data': template_server_original['data'], 'expected_version': template_winner_version,
-    })
-    assert restored_templates.status == 200, restored_templates.text()
-    page.evaluate("() => loadTemplates(true)")
-    print('ADMIN_TEMPLATE_STALE_CAS_OK')
-
-    page.evaluate("""() => new Promise((resolve,reject)=>{const c=document.createElement('canvas');c.width=128;c.height=128;const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,128,128);g.fillStyle='#d94d75';g.fillRect(24,16,80,96);fabric.Image.fromURL(c.toDataURL('image/png'),img=>{try{img.set({left:tplW/2,top:tplH/2,originX:'center',originY:'center',scaleX:.8,scaleY:1.1,angle:13,originalName:'admin-test.png'});visualCanvas.add(img);visualCanvas.setActiveObject(img);visualCanvas.requestRenderAll();resolve()}catch(e){reject(e)}});})""")
-    before = page.evaluate("""() => {const o=visualCanvas.getActiveObject();return {w:o.getScaledWidth(),h:o.getScaledHeight(),x:o.getCenterPoint().x,y:o.getCenterPoint().y,a:o.angle};}""")
-    page.evaluate("() => window.bfAdminRemoveBackground()")
-    after = page.evaluate("""() => {const o=visualCanvas.getActiveObject();return {ai:!!o?.aiBackgroundRemoved,w:o?.getScaledWidth(),h:o?.getScaledHeight(),x:o?.getCenterPoint().x,y:o?.getCenterPoint().y,a:o?.angle,publicSrc:o?.publicSrc||''};}""")
-    assert after['ai'] is True, after
-    for k in ('w','h','x','y','a'):
-        assert abs(after[k]-before[k]) < .75, (k,before,after)
-    assert after['publicSrc'], after
-
-    # Runtime saveTemplate is the lazy-loaded editor-v2 override. Verify its
-    # existing candidate state/busy boundary, then cover deleteTemplate too.
-    template_original = page.evaluate("() => structuredClone(templatesData)")
-    template_save_requests = []
-    template_uploads = []
-    page.route('**/api/admin/upload_image', lambda route: (template_uploads.append(route.request.url), route.fulfill(status=200, content_type='application/json', body='{"status":"success","url":"/static/uploads/issue29-template.png"}')))
-    def save_template_response(route):
-        template_save_requests.append(route.request.post_data_json)
-        if len(template_save_requests) == 1:
-            route.fulfill(status=503, content_type='application/json', body='{"status":"error"}')
-        else:
-            time.sleep(.15)
-            route.fulfill(status=200, content_type='application/json', body='{"status":"success","version":"mock-template-version"}')
-    page.route('**/api/admin/save_templates', save_template_response)
-    page.evaluate("""() => {document.getElementById('tpl-id').value='';document.getElementById('tpl-name').value='Issue29æ¨¡æ¿';document.getElementById('tpl-category').value='Issue29åˆ†é¡ž'}""")
-    before_template_count = page.evaluate("() => templatesData.templates.length")
-    template_dialog_start = len(dialogs)
-    page.evaluate("() => Promise.all([saveTemplate(),saveTemplate()])")
-    template_failed = page.evaluate("""() => ({
-      count:templatesData.templates.filter(x=>x.name==='Issue29æ¨¡æ¿').length,
-      open:document.getElementById('template-modal').classList.contains('show'),
-      value:document.getElementById('tpl-name').value,
-      disabled:[...document.querySelectorAll('#template-modal .mf .btn')].find(b=>b.textContent.includes('å„²å­˜'))?.disabled||false
-    })""")
-    assert len(template_save_requests) == 1 and len(template_uploads) == 1, (template_save_requests, template_uploads)
-    assert template_failed == {'count':0,'open':True,'value':'Issue29æ¨¡æ¿','disabled':False}, template_failed
-    assert any('æœå‹™æš«æ™‚ç„¡æ³•ä½¿ç”¨ï¼Œè«‹ç¨å¾Œå†è©¦' in msg for msg in dialogs[template_dialog_start:]), dialogs[template_dialog_start:]
-    page.evaluate("() => Promise.all([saveTemplate(),saveTemplate()])")
-    template_saved = page.evaluate("""() => ({
-      total:templatesData.templates.length,
-      count:templatesData.templates.filter(x=>x.name==='Issue29æ¨¡æ¿').length,
-      open:document.getElementById('template-modal').classList.contains('show')
-    })""")
-    assert len(template_save_requests) == 2 and len(template_uploads) == 2, (template_save_requests, template_uploads)
-    assert template_saved == {'total':before_template_count+1,'count':1,'open':False}, template_saved
-    page.unroute('**/api/admin/upload_image')
-    page.unroute('**/api/admin/save_templates')
-
-    delete_requests = []
-    page.evaluate("""data => {templatesData=structuredClone(data);templatesData.templates.push({id:'issue29-delete-template',name:'Issue29åˆªé™¤æ¨¡æ¿',category:'ç†±é–€'});renderTemplateTabs();renderTemplates();window.__issue29Confirm=window.confirm;window.confirm=()=>true}""", template_original)
-    def delete_template_response(route):
-        delete_requests.append(route.request.post_data_json)
-        if len(delete_requests) == 1:
-            route.fulfill(status=503, content_type='application/json', body='{"status":"error"}')
-        else:
-            time.sleep(.15)
-            route.fulfill(status=200, content_type='application/json', body='{"status":"success","version":"mock-template-delete-version"}')
-    page.route('**/api/admin/save_templates', delete_template_response)
-    page.evaluate("() => Promise.all([deleteTemplate('issue29-delete-template'),deleteTemplate('issue29-delete-template')])")
-    delete_failed = page.evaluate("() => templatesData.templates.filter(x=>x.id==='issue29-delete-template').length===1 && document.getElementById('template-grid').textContent.includes('Issue29åˆªé™¤æ¨¡æ¿') && !templateDeleteBusy")
-    assert len(delete_requests) == 1 and delete_failed, (delete_requests, delete_failed)
-    assert 'æœå‹™æš«æ™‚ç„¡æ³•ä½¿ç”¨ï¼Œè«‹ç¨å¾Œå†è©¦' in page.locator('#bf-product-message').inner_text()
-    page.evaluate("() => Promise.all([deleteTemplate('issue29-delete-template'),deleteTemplate('issue29-delete-template')])")
-    delete_saved = page.evaluate("() => !templatesData.templates.some(x=>x.id==='issue29-delete-template') && !templateDeleteBusy")
-    assert len(delete_requests) == 2 and delete_saved, (delete_requests, delete_saved)
-    page.unroute('**/api/admin/save_templates')
-    page.evaluate("async () => {await loadTemplates(true);window.confirm=window.__issue29Confirm;delete window.__issue29Confirm}")
-    print('ADMIN_TEMPLATE_CRUD_STATE_RETRY_DOUBLE_SUBMIT_OK')
-    print('ADMIN_WEBKIT_OK')
-    page.close()
-
-
-def durable_receipt_test(playwright, base):
-    """Persist the real committed request across tab close AND browser restart."""
-    engine = getattr(playwright, os.environ.get('BROWSER_ENGINE', 'webkit'))
-    def admin(context):
-        page = context.new_page()
-        page.goto(base + '/login', wait_until='domcontentloaded')
-        if '/admin' not in page.url:
-            if not page.locator('#password-form').is_visible():
-                page.locator('#password-toggle').click()
-            page.locator('input[name="password"]').fill('fan123')
-            page.locator('button[type="submit"],input[type="submit"]').first.click()
-            page.wait_for_url('**/admin')
-        poll(page, "() => !!window.BenfuwanCommerce")
-        page.locator('.nav button[data-view="commerce"]').click()
-        poll(page, "() => window.BenfuwanCommerce.state.skus.length>0")
-        page.locator('[data-tab="stock"]').click()
-        return page
-    with tempfile.TemporaryDirectory() as profile:
-        for kind in ('purchase', 'expense'):
-            context = engine.launch_persistent_context(profile, headless=True)
-            try:
-                page = admin(context)
-                before = app_module.commerce.read()
-                sku = before['skus'][0]
-                url = '/api/admin/purchase_received' if kind == 'purchase' else '/api/admin/expense'
-                sent = []
-                def lose_response(route):
-                    sent.append(route.request.post_data_json)
-                    assert route.fetch().status == 200
-                    route.abort('failed')
-                context.route('**' + url, lose_response)
-                if kind == 'purchase':
-                    page.locator('[data-sku="'+sku['id']+'"] [data-receive]').click()
-                    page.locator('#pos-receive-qty').fill('3')
-                    page.locator('#pos-dialog-submit').click()
-                else:
-                    page.locator('[data-tab="expenses"]').click()
-                    page.locator('#pos-expense-amount').fill('37.5')
-                    page.locator('#pos-expense-note').fill('durable restart receipt')
-                    page.locator('#pos-expense-save').click()
-                poll(page, "() => document.getElementById('pos-message').classList.contains('error')")
-                saved = page.evaluate("() => JSON.parse(localStorage.getItem('bf-pos2-pending'))")
-                assert saved['body'] == sent[0]
-                # Existing/new tabs see the same receipt and cannot replace it.
-                other = admin(context)
-                assert other.locator('#pos-pending').is_visible()
-                other.locator('[data-tab="expenses"]').click()
-                other.locator('#pos-expense-amount').fill('999')
-                other.locator('#pos-expense-save').click()
-                poll(other, "() => document.getElementById('pos-message').textContent.includes('æœªé€å‡º')")
-                assert other.evaluate("() => JSON.parse(localStorage.getItem('bf-pos2-pending'))") == saved
-                page.close()
-                other.close()
-            finally:
-                context.close()  # exits browser; retain only the on-disk profile
-            context = engine.launch_persistent_context(profile, headless=True)
-            try:
-                page = admin(context)
-                assert page.locator('#pos-pending').is_visible()
-                assert page.evaluate("() => JSON.parse(localStorage.getItem('bf-pos2-pending'))") == saved
-                # Expired authentication must not discard an uncertain receipt.
-                context.route('**'+url, lambda route: route.fulfill(status=401,content_type='application/json',body='{"status":"error","msg":"login required"}'))
-                page.locator('#pos-retry').click()
-                poll(page, "() => document.getElementById('pos-message').textContent==='login required'")
-                assert page.evaluate("() => JSON.parse(localStorage.getItem('bf-pos2-pending'))") == saved
-                context.unroute('**'+url)
-                def retry(route):
-                    sent.append(route.request.post_data_json)
-                    route.continue_()
-                context.route('**'+url, retry)
-                observer = admin(context)
-                assert observer.locator('#pos-pending').is_visible()
-                page.locator('#pos-retry').click()
-                poll(page, "() => !localStorage.getItem('bf-pos2-pending')")
-                poll(observer, "() => document.getElementById('pos-pending').hidden")
-                assert len(sent) == 2 and sent[0] == sent[1], sent
-                after = app_module.commerce.read()
-                if kind == 'purchase':
-                    assert after['skus'][0]['stock_qty'] == sku['stock_qty'] + 3
-                    entries = [x for x in after['inventory_ledger'] if x.get('receipt_id') == saved['body']['idempotency_key']]
-                    assert len(entries) == 1
-                else:
-                    assert len(after['expenses']) == len(before['expenses']) + 1
-                    entries = [x for x in after['expense_ledger'] if x['id'] == saved['body']['idempotency_key']]
-                    assert len(entries) == 1
-                print('DURABLE_RECEIPT_BROWSER_RESTART_OK', kind)
-            finally:
-                context.close()
-
-
-def passkey_login_test(browser, base):
-    mock = """(() => {
-      window.PublicKeyCredential=function(){};window.__passkeyGetCalls=0;window.__passkeyMode='success';
-      Object.defineProperty(navigator,'credentials',{configurable:true,value:{
-        create:async()=>null,
-        get:async()=>{window.__passkeyGetCalls++;if(window.__passkeyMode==='cancel')throw new DOMException('cancelled','NotAllowedError');return {id:'mock-login-credential',rawId:new Uint8Array([2]).buffer,type:'public-key',authenticatorAttachment:'platform',getClientExtensionResults:()=>({}),response:{clientDataJSON:new Uint8Array([3]).buffer,authenticatorData:new Uint8Array([4]).buffer,signature:new Uint8Array([5]).buffer,userHandle:null}}}
-      }});
-    })()"""
-    page = browser.new_page(viewport={'width': 390, 'height': 844})
-    page.add_init_script(mock)
-    verify = []
-    page.route('**/api/auth/passkey/status', lambda route: route.fulfill(status=200,content_type='application/json',body='{"status":"success","configured":true,"has_credentials":true}'))
-    page.route('**/api/auth/passkey/options', lambda route: route.fulfill(status=200,content_type='application/json',body='{"status":"success","ceremony_id":"mock-login","publicKey":{"challenge":"AQ","rpId":"127.0.0.1","allowCredentials":[{"type":"public-key","id":"Ag"}],"userVerification":"required"}}'))
-    def verify_login(route):
-        verify.append(route.request.post_data_json)
-        route.fulfill(status=200,content_type='application/json',body='{"status":"success","redirect":"/api/health"}')
-    page.route('**/api/auth/passkey/verify', verify_login)
-    page.goto(base + '/login', wait_until='domcontentloaded')
-    poll(page, "() => !document.getElementById('passkey-login-button').classList.contains('hidden')")
-    assert page.locator('#passkey-login-button').inner_text() == 'ä½¿ç”¨ Face ID ç™»å…¥'
-    assert page.locator('#passkey-login-button').is_visible() and not page.locator('#password-form').is_visible()
-    assert page.evaluate('() => window.__passkeyGetCalls') == 0
-    page.locator('#passkey-login-button').click()
-    page.wait_for_url('**/api/health')
-    assert len(verify) == 1 and verify[0]['ceremony_id'] == 'mock-login'
-    assert verify[0]['credential']['authenticatorAttachment'] == 'platform'
-    page.close()
-
-    cancelled = browser.new_page(viewport={'width': 390, 'height': 844})
-    cancelled.add_init_script(mock)
-    cancelled.route('**/api/auth/passkey/status', lambda route: route.fulfill(status=200,content_type='application/json',body='{"status":"success","configured":true,"has_credentials":true}'))
-    cancelled.route('**/api/auth/passkey/options', lambda route: route.fulfill(status=200,content_type='application/json',body='{"status":"success","ceremony_id":"mock-cancel","publicKey":{"challenge":"AQ","rpId":"127.0.0.1","allowCredentials":[],"userVerification":"required"}}'))
-    cancelled.goto(base + '/login', wait_until='domcontentloaded')
-    cancelled.evaluate("() => {window.__passkeyMode='cancel'}")
-    cancelled.locator('#passkey-login-button').click()
-    poll(cancelled, "() => document.getElementById('login-message').textContent.includes('å·²å–æ¶ˆ Face ID é©—è­‰')")
-    cancelled.locator('#password-toggle').click()
-    assert cancelled.locator('#password-form').is_visible()
-    cancelled.close()
-
-    unsupported = browser.new_page(viewport={'width': 390, 'height': 844})
-    unsupported.add_init_script("Object.defineProperty(window,'PublicKeyCredential',{configurable:true,value:undefined})")
-    unsupported.goto(base + '/login', wait_until='domcontentloaded')
-    poll(unsupported, "() => document.getElementById('password-form').classList.contains('show')")
-    assert unsupported.locator('#password-form').is_visible()
-    assert not unsupported.locator('#passkey-login-button').is_visible()
-    unsupported.close()
-    print('PASSKEY_LOGIN_WEBKIT_OK')
-
-
-def order_print_workspace_test(browser, base, poll):
-    """PR #60: paged orders, exact cross-navigation, triage and safe actions."""
-    from urllib.parse import parse_qs, urlsplit
-    page = browser.new_page(viewport={'width': 1180, 'height': 900})
-    page.goto(base + '/login', wait_until='domcontentloaded')
-    if not page.locator('#password-form').is_visible():
-        page.locator('#password-toggle').click()
-    page.locator('input[name="password"]').fill('fan123')
-    page.locator('button[type="submit"]').first.click()
-    page.wait_for_url('**/admin')
-    stamp = int(time.time())
-    orders = [dict(order_id=f'ORDER-{i:03d}', customer_name='è€å®¢äºº' if i == 204 else 'å®¢äºº',
-                   model='iPhone 13', style='æ™¶å½©', payment_method='ç¾é‡‘', status='å¾…è™•ç†',
-                   time=stamp-i, has_print=True, has_mockup=False, quantity=1, total=100)
-              for i in range(205)]
-    orders[203]['status'] = 'å·²å®Œæˆ'
-    def order_route(route):
-        p = parse_qs(urlsplit(route.request.url).query)
-        found = orders
-        if 'order_id' in p: found = [o for o in found if o['order_id'] == p['order_id'][0]]
-        if 'q' in p: found = [o for o in found if p['q'][0].lower() in ' '.join(str(o[k]) for k in ('order_id','customer_name','model','style','payment_method','status')).lower()]
-        if 'status' in p: found = [o for o in found if o['status'] == p['status'][0]]
-        offset = int(p.get('offset', ['0'])[0]);limit = int(p.get('limit', ['200'])[0])
-        route.fulfill(status=200, content_type='application/json', body=json.dumps(dict(status='success',data=found[offset:offset+limit],has_more=len(found)>offset+limit,next_offset=min(len(found),offset+limit),before=stamp+10)))
-    print_rows=[]
-    for state in ('UNKNOWN','FAILED','SENDING','CANCELING','STARTING','PREPARED','QUEUED','PRINTING','COMPLETED'):
-        print_rows.append(dict(order_id='PRINT-'+state,customer_name='å®¢äºº',model='iPhone 13',style='æ™¶å½©',order_status='å¾…è™•ç†',time=stamp,
-                               has_print=True,profile_available=True,binding_required=False,sku_id='SKU',job=dict(id='JOB-'+state,state=state,state_label=state,profile_complete=True,last_error='éŠ³å°å›žå ±å¤±æ•—' if state=='FAILED' else '')))
-    print_rows.append(dict(order_id='PRINT-BIND',customer_name='å®¢äºº',model='iPhone 13',style='æ™¶å½©',order_status='å¾…è™•ç†',time=stamp,
-                           has_print=True,profile_available=False,binding_required=True,sku_id='',legacy_order=True,sku_candidates=[],job=None))
-    def print_route(route):
-        p = parse_qs(urlsplit(route.request.url).query)
-        data = [dict(order_id='ORDER-204',customer_name='è€å®¢äºº',model='iPhone 13',style='æ™¶å½©',order_status='å¾…è™•ç†',time=stamp-204,has_print=True,profile_available=True,binding_required=False,sku_id='SKU',job=None)] if p.get('order_id') == ['ORDER-204'] else print_rows
-        route.fulfill(status=200,content_type='application/json',body=json.dumps(dict(status='success',rows=data,vendor_ready=True,vendor_connected=True,device_id='fixture')))
-    mutations=[]
-    page.on('request',lambda request: mutations.append(request.url) if request.method != 'GET' and '/api/admin/print/' in request.url else None)
-    page.route('**/api/admin/get_orders?*',order_route)
-    page.route('**/api/admin/print/jobs?*',print_route)
-    page.locator('.nav button[data-view="orders"]').click()
-    page.locator('[data-range="all"]').click()
-    poll(page,"() => document.querySelectorAll('.bf-order-card').length===200 && !!document.querySelector('[data-order-more]')")
-    page.evaluate("() => window.__bfPagerButton = document.querySelector('[data-order-more]')")
-    # Normal/periodic refresh must reset page 1, never append page 2.
-    page.evaluate("() => window.refreshOrders()")
-    poll(page,"() => document.querySelectorAll('.bf-order-card').length===200 && !!document.querySelector('[data-order-more]')")
-    page.evaluate("() => window.refreshOrders()")
-    poll(page,"() => document.querySelectorAll('.bf-order-card').length===200 && !!document.querySelector('[data-order-more]')")
-    assert page.evaluate("() => window.__bfPagerButton === document.querySelector('[data-order-more]')")
-    page.locator('[data-order-more]').click()
-    poll(page,"() => document.querySelectorAll('.bf-order-card').length===205")
-    page.locator('#bf-order-search').fill('å·²å®Œæˆ')
-    poll(page,"() => document.querySelectorAll('.bf-order-card').length===1 && document.querySelector('.bf-order-id').textContent.includes('ORDER-203')")
-    page.locator('#bf-order-search').fill('è€å®¢äºº')
-    poll(page,"() => document.querySelectorAll('.bf-order-card').length===1 && document.querySelector('.bf-order-id').textContent.includes('ORDER-204')")
-    page.locator('[data-order-action="print"]').click()
-    poll(page,"() => document.querySelector('#view-print-center.active .pc-card')?.textContent.includes('ORDER-204')")
-    assert 'order_id=ORDER-204' in page.locator('#pc-exact').inner_text() or 'ORDER-204' in page.locator('#pc-exact').inner_text()
-    page.locator('[data-pc="order"]').click()
-    poll(page,"() => document.querySelector('#view-orders.active .bf-order-card')?.textContent.includes('ORDER-204')")
-    page.locator('.nav button[data-view="print-center"]').click()
-    page.locator('[data-pc="clear-exact"]').click()
-    poll(page,"() => document.querySelectorAll('#pc-grid .pc-card').length===10")
-    for key,count in [('exception',5),('attention',1),('prepared',1),('queued',1),('printing',1),('completed',1)]:
-        page.locator(f'[data-triage="{key}"]').click()
-        assert page.locator('#pc-grid .pc-card').count()==count,(key,page.locator('#pc-grid .pc-card').count())
-    page.locator('[data-triage="all"]').click()
-    for state in ('UNKNOWN','SENDING','CANCELING'):
-        card=page.locator('.pc-card').filter(has=page.locator('.pc-id',has_text='PRINT-'+state))
-        assert card.locator('[data-pc="send"]').count()==0
-        assert card.locator('[data-pc="reconcile"]').count()==1
-    assert page.locator('.pc-card').filter(has=page.locator('.pc-id',has_text='PRINT-PRINTING')).locator('[data-pc="cancel"]').count()==0
-    assert page.locator('.pc-card').filter(has=page.locator('.pc-id',has_text='PRINT-FAILED')).locator('[data-pc="send"]').count()==0
-    assert mutations==[],mutations
-    for width,height in ((390,844),(768,1024),(1180,900)):
-        page.set_viewport_size(dict(width=width,height=height))
-        assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+2'),width
-        assert page.locator('#pc-triage').evaluate('(e)=>e.scrollWidth>=e.clientWidth')
-    page.close()
-
-
-def main():
-    server = ServerThread();server.start();time.sleep(.8)
-    try:
-        with sync_playwright() as p:
-            browser = getattr(p, os.environ.get('BROWSER_ENGINE', 'webkit')).launch()
-            try:
-                base=f'http://127.0.0.1:{BROWSER_TEST_PORT}';passkey_login_test(browser,base);front_test(browser,base);home_draft_catalog_race_test(browser,base);design_draft_test(browser,base);checkout_test(browser,base);admin_test(browser,base);order_print_workspace_test(browser,base,poll)
-                import runpy
-                runpy.run_path(str(ROOT / '.github/tests/test_pos_dashboard.py'))['dashboard_test'](browser,base,poll)
-                runpy.run_path(str(ROOT / '.github/tests/test_launch_acceptance.py'))['launch_acceptance_test'](browser,base,poll)
-                runpy.run_path(str(ROOT / '.github/tests/test_model_cat_icon.py'))['model_cat_icon_test'](browser,base,poll)
-                runpy.run_path(str(ROOT / '.github/tests/test_ai_provider_browser.py'))['ai_provider_browser_test'](browser,base,poll)
-                runpy.run_path(str(ROOT / '.github/tests/test_editable_stickers_browser.py'))['editable_sticker_test'](browser,base,poll)
-            finally: browser.close()
-            durable_receipt_test(p, base)
-        print('AI_EDITOR_WEBKIT_OK')
-    finally:
-        server.close()
-        # The commerce test runs in local fallback mode; keep CI workspaces clean.
-        commerce = ROOT / 'commerce_data.json'
-        if commerce.exists():
-            try: commerce.unlink()
-            except Exception: pass
-
-
-if __name__ == '__main__': main()
+        ÷_y¶‰žËkºwµç[Z[œÊ	ÜÚÝÉÊHŠB‚ˆYÙK›ØØ]ÜŠ	ÈØœ˜[™XYZ[‹]šY]È]X˜\ˆ˜‰ÊK˜ÛXÚÊ
+BˆYÙK›ØØ]ÜŠ	ÈØ™‹Xœ˜[™[˜[YIÊK™š[
+	ùníº`l¹i,y¥eùdàyâc	ÊBˆYÙK›ØØ]ÜŠ	ÈØ™‹Xœ˜[™\Ø]™IÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆÚ[™ÝË—×ÝÛÜšÜÜXÙPœ˜[™[™[™Ë›[™ÝOOLHŠBˆYÙK™]˜[X]JˆˆŠ
+HOˆÚ[™ÝË—×ÝÛÜšÜÜXÙPœ˜[™[™[™ËœÚY
+
+J™]È™\ÜÛœÙJ”ÓÓ‹œÝš[™ÚYžJÜÝ]\Î‰Ù\œ›Ü‰Ë\ÙÎ‰ùníº`l¹a,¹kf9i,y¥eÉßJKÜÝ]\ÎLËXY\œÎžÉÐÛÛ[U\IÎ‰Ø\XØ][Û‹ÚœÛÛ‰ß_JJHˆˆŠBˆÛ
+YÙKŠ
+HOˆØÝ[Y[™Ù][[Y[žRY
+	Ø™‹Xœ˜[™Y\œ›Ü‰ÊK^ÛÛ[š[˜ÛY\Ê	ùníº`l¹a,¹kf9i,y¥eÉÊHŠBˆ˜Z[YØœ˜[™HYÙK™]˜[X]JˆˆŠ
+HOˆ
+ÂˆÜ[Ž™ØÝ[Y[™Ù][[Y[žRY
+	Ø™‹Xœ˜[™[[Ù[	ÊK˜Û\ÜÓ\Ý˜ÛÛZ[œÊ	ÜÚÝÉÊKˆ˜[YN™ØÝ[Y[™Ù][[Y[žRY
+	Ø™‹Xœ˜[™[˜[YIÊK˜[YKˆØ]™Q\ØX›Y™ØÝ[Y[™Ù][[Y[žRY
+	Ø™‹Xœ˜[™\Ø]™IÊK™\ØX›YˆÛÜÙQ\ØX›Y–Ë‹‹™ØÝ[Y[œ]Y\žTÙ[XÝÜ[
+	ÈØ™‹Xœ˜[™[[Ù[Ù]KXœ˜[™XÛÜÙWIÊWKœÛÛYJ]ÛO˜]Û‹™\ØX›Y
+Kˆ\œ›ÜŽ™ØÝ[Y[™Ù][[Y[žRY
+	Ø™‹Xœ˜[™Y\œ›Ü‰ÊK^ÛÛ[ˆJHˆˆŠBˆ\ÜÙ\˜Z[YØœ˜[™ÉÛÜ[‰×H[™˜Z[YØœ˜[™ÉÝ˜[YI×HOH	ùníº`l¹i,y¥eùdàyâc	Ë˜Z[YØœ˜[™ˆ\ÜÙ\›Ý˜Z[YØœ˜[™ÉÜØ]™Q\ØX›Y	×H[™›Ý˜Z[YØœ˜[™ÉØÛÜÙQ\ØX›Y	×H[™	ùníº`l¹a,¹kf9i,y¥eÉÈ[ˆ˜Z[YØœ˜[™ÉÙ\œ›Ü‰×K˜Z[YØœ˜[™ˆYÙK›ØØ]ÜŠ	ÈØ™‹Xœ˜[™[[Ù[Ù]KXœ˜[™XÛÜÙWIÊK›\Ý˜ÛXÚÊ
+BˆYÙK™]˜[X]JˆˆŠ
+HOˆÝÚ[™ÝË™™]Ú]Ú[™ÝË—×ÝÛÜšÜÜXÙT™X[™]ÚÙ[]HÚ[™ÝË—×ÝÛÜšÜÜXÙT™X[™]ÚÙ[]HÚ[™ÝË—×ÝÛÜšÜÜXÙPœ˜[™[™[™ßHˆˆŠB‚ˆÛÜšÜÜXÙWÝÜš]\ÈH×BˆYˆÛÜšÜÜXÙWÜØ]™J›Ý]JN‚ˆÛÜšÜÜXÙWÝÜš]\Ë˜\[™
+›Ý]Kœ™\]Y\ÝœÜÝÙ]WÚœÛÛŠBˆ›Ý]K™[š[
+Ý]\ÏLŒÛÛ[Ý\OIØ\XØ][Û‹ÚœÛÛ‰Ë›ÙOIÞÈœÝ]\ÈŽˆœÝXØÙ\ÜÈ‹™\œÚ[ÛˆŽˆÛÜšÜÜXÙK]™\œÚ[ÛˆŸIÊBˆYÙKœ›Ý]J	ÊŠ‹Ø\KØYZ[‹ÜØ]™WÜÚÜÙ]IËÛÜšÜÜXÙWÜØ]™JBˆYÙK›ØØ]ÜŠ	ÈØœ˜[™XYZ[‹]šY]È]X˜\ˆ˜‰ÊK˜ÛXÚÊ
+Bˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÈØ™‹Xœ˜[™[[Ù[œÚÝÉÊK˜ÛÝ[
+
+HOHBˆYÙK›ØØ]ÜŠ	ÈØ™‹Xœ˜[™[˜[YIÊK™š[
+	Ð\IÊBˆYÙK›ØØ]ÜŠ	ÈØ™‹Xœ˜[™\Ø]™IÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆØÝ[Y[™Ù][[Y[žRY
+	Ø™‹Xœ˜[™Y\œ›Ü‰ÊK^ÛÛ[š[˜ÛY\Ê	ùdàyâc9mì¹kf9g*	ÊHŠBˆ\ÜÙ\ÛÜšÜÜXÙWÝÜš]\ÈOH×H[™YÙK™]˜[X]JŠ
+HOˆÚ[™ÝË—×ÝÛÜšÜÜXÙT›Û\Ø[ÈŠHOHˆYÙK›ØØ]ÜŠ	ÈØ™‹Xœ˜[™[˜[YIÊK™š[
+	ÑÛÛÙÛIÊBˆYÙK›ØØ]ÜŠ	ÈØ™‹Xœ˜[™\Ø]™IÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆÚÜ]K˜œ˜[™Ëš[˜ÛY\Ê	ÑÛÛÙÛIÊH	‰ˆYØÝ[Y[™Ù][[Y[žRY
+	Ø™‹Xœ˜[™[[Ù[	ÊK˜Û\ÜÓ\Ý˜ÛÛZ[œÊ	ÜÚÝÉÊHŠBˆYÙK›ØØ]ÜŠ	ÈØœ˜[™ËX›ÙHÙ]KYY]Xœ˜[™H\H—IÊK˜ÛXÚÊ
+BˆYÙK›ØØ]ÜŠ	ÈØ™‹Xœ˜[™[˜[YIÊK™š[
+	Ð\H[˜Ë‰ÊBˆYÙK›ØØ]ÜŠ	ÈØ™‹Xœ˜[™\Ø]™IÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆÚÜ]K˜œ˜[™Ëš[˜ÛY\Ê	Ð\H[˜Ë‰ÊH	‰ˆÚÜ]K›[Ù[Ë™š[™
+OžšYOOIÛ[Ù[XIÊK˜œ˜[™OOIÐ\H[˜Ë‰ÈŠBˆ\ÜÙ\[ŠÛÜšÜÜXÙWÝÜš]\ÊHOHˆ[™YÙK™]˜[X]JŠ
+HOˆÚ[™ÝË—×ÝÛÜšÜÜXÙT›Û\Ø[ÈŠHOHˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÈØœ˜[™ËX›ÙH–Ù]KXœ˜[™H\H[˜Ëˆ—H˜™‹XÛÝ[XÚ\	ÊKš[›™\—Ý^
+
+HOH	ÌH9`"ùg¢ú&gÉÂˆYÙK[œ›Ý]J	ÊŠ‹Ø\KØYZ[‹ÜØ]™WÜÚÜÙ]IÊB‚ˆYÙK›ØØ]ÜŠ	ÈÛ[Ù[]X‹X‰ÊK˜ÛXÚÊ
+BˆYÙK›ØØ]ÜŠ	ÈØ™‹[[Ù[\ÙX\˜Ú	ÊK™š[
+	ÌMÈ›ÉÊBˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÈÛ[Ù[ËX›ÙH–Ù]K[[Ù[ZYIÊK˜ÛÝ[
+
+HOHBˆYÙK›ØØ]ÜŠ	ÈØ™‹[[Ù[\ÙX\˜Ú	ÊK™š[
+	ÉÊBˆYÙK›ØØ]ÜŠ	ÈØ™‹[[Ù[Xœ˜[™Yš[\‰ÊKœÙ[XÝÛÜ[ÛŠ	ÔØ[\Ý[™ÉÊBˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÈÛ[Ù[ËX›ÙH–Ù]K[[Ù[ZYH›[Ù[Xˆ—IÊK˜ÛÝ[
+
+HOHBˆYÙK›ØØ]ÜŠ	ÈØ™‹[[Ù[Xœ˜[™Yš[\‰ÊKœÙ[XÝÛÜ[ÛŠ	ÉÊBˆYÙK›ØØ]ÜŠ	ÈØ™‹[[Ù[\Ý]\ËYš[\‰ÊKœÙ[XÝÛÜ[ÛŠ	ØXÝ]™IÊBˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÈÛ[Ù[ËX›ÙH–Ù]K[[Ù[ZYIÊK˜ÛÝ[
+
+HOHBˆYÙK›ØØ]ÜŠ	ÈØ™‹[[Ù[\Ý]\ËYš[\‰ÊKœÙ[XÝÛÜ[ÛŠ	Ø[	ÊB‚ˆYÙK›ØØ]ÜŠ	ÈÛ[Ù[ËX›ÙHÙ]K[[Ù[ZYH›[Ù[XH—VÙ]K[[Ù[\Ý[OHœÝ[K[Z\œ›Üˆ—IÊK˜ÛXÚÊ
+Bˆ\ÜÙ\YÙK™]˜[X]JŠ
+HOˆ™[™]Ø[“[Ù[›Ùš[\ÐYZ[‹™Ù]XÝ]™TÝ[RY
+
+HŠHOH	ÜÝ[K[Z\œ›Ü‰Âˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÈÛ[Ù[\›Ùš[K^	ÊKš[œ]Ý˜[YJ
+HOH	ÌŒIÂˆYÙK›ØØ]ÜŠ	ÈÛ[Ù[\›Ùš[K^	ÊK™š[
+	ÎNIÊBˆ\WÙÝX\™HYÙK™]˜[X]JˆˆŠ
+HOˆÝÚ[™ÝË—×ÝÛÜšÜÜXÙPÛÛ™š\›O]Ú[™ÝË˜ÛÛ™š\›NÝÚ[™ÝË—×ÝÛÜšÜÜXÙPÛÛ™š\›PØ[ÏLÝÚ[™ÝË˜ÛÛ™š\›OJ
+OOžÝÚ[™ÝË—×ÝÛÜšÜÜXÙPÛÛ™š\›PØ[ÊÊÎÜ™]\›ˆ˜[Ù_NÙØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÖÙ]K\›Ùš[K\Ý[OHœÝ[WÌMÎLŽÎÎN—IÊK˜ÛXÚÊ
+NÜ™]\›ˆØØ[ÎÚ[™ÝË—×ÝÛÜšÜÜXÙPÛÛ™š\›PØ[ËÝ[N™[™]Ø[“[Ù[›Ùš[\ÐYZ[‹™Ù]XÝ]™TÝ[RY
+
+K\N™[™]Ø[“[Ù[›Ùš[\ÐYZ[‹š\Ñ\J
+__HˆˆŠBˆ\ÜÙ\\WÙÝX\™OHÉØØ[ÉÎŒK	ÜÝ[IÎ‰ÜÝ[K[Z\œ›Ü‰Ë	Ù\IÎ•Y_K\WÙÝX\™ˆYÙK™]˜[X]JŠ
+HOˆÝÚ[™ÝË˜ÛÛ™š\›OJ
+OOYNÙØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÖÙ]K\›Ùš[K\Ý[OWœÝ[WÌMÎLŽÎÎN—IÊK˜ÛXÚÊ
+_HŠBˆ\ÜÙ\YÙK™]˜[X]JŠ
+HOˆ™[™]Ø[“[Ù[›Ùš[\ÐYZ[‹™Ù]XÝ]™TÝ[RY
+
+HŠHOH	ÜÝ[WÌMÎLŽÎÎN	Âˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÈÛ[Ù[\›Ùš[K^	ÊKš[œ]Ý˜[YJ
+HOH	ÌLIÂˆYÙK™]˜[X]JŠ
+HOˆÝÚ[™ÝË˜ÛÛ™š\›O]Ú[™ÝË—×ÝÛÜšÜÜXÙPÛÛ™š\›NÙ[]HÚ[™ÝË—×ÝÛÜšÜÜXÙPÛÛ™š\›NÙ[]HÚ[™ÝË—×ÝÛÜšÜÜXÙPÛÛ™š\›PØ[ßHŠB‚ˆ›Ùš[WÝÜš]\ÈH×BˆYˆÛÜšÜÜXÙWÜ›Ùš[WÜØ]™J›Ý]JN‚ˆ›Ùš[WÝÜš]\Ë˜\[™
+›Ý]Kœ™\]Y\ÝœÜÝÙ]WÚœÛÛŠBˆ›Ý]K™[š[
+Ý]\ÏLŒÛÛ[Ý\OIØ\XØ][Û‹ÚœÛÛ‰Ë›ÙOIÞÈœÝ]\ÈŽˆœÝXØÙ\ÜÈ‹™\œÚ[ÛˆŽˆÛÜšÜÜXÙK\›Ùš[K]™\œÚ[ÛˆŸIÊBˆYÙKœ›Ý]J	ÊŠ‹Ø\KØYZ[‹Üš[Û[Ù[\›Ùš[\ÉËÛÜšÜÜXÙWÜ›Ùš[WÜØ]™JBˆYÙK›ØØ]ÜŠ	ÈÛ[Ù[\›Ùš[K^	ÊK™š[
+	ÌLËIÊBˆYÙK›ØØ]ÜŠ	ÈÛ[Ù[\Ø]™IÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆYØÝ[Y[™Ù][[Y[žRY
+	Û[Ù[[[Ù[	ÊK˜Û\ÜÓ\Ý˜ÛÛZ[œÊ	ÜÚÝÉÊHŠBˆ\ÜÙ\[Š›Ùš[WÝÜš]\ÊHOHBˆØ]™YÛ[Ù[H™^
+›ÝÈ›Üˆ›ÝÈ[ˆ›Ùš[WÝÜš]\ÖÌVÉÜÚÜÙ]I×VÉÛ[Ù[É×HYˆ›ÝÖÉÚY	×HOH	Û[Ù[XIÊBˆ\ÜÙ\›Ùš[WÝÜš]\ÖÌVÉÜÝ[WÚY	×HOH	ÜÝ[WÌMÎLŽÎÎN	Âˆ\ÜÙ\Ø]™YÛ[Ù[ÉØØ\ÙWÜ›Ùš[\É×VÉÜÝ[WÌMÎLŽÎÎN	×VÉÜš[Þ	×HOHLËBˆ\ÜÙ\Ø]™YÛ[Ù[ÉØØ\ÙWÜ›Ùš[\É×VÉÜÝ[K[Z\œ›Ü‰×HOHÛÜšÜÜXÙWÙš^\™VÉÛ[Ù[É×VÌVÉØØ\ÙWÜ›Ùš[\É×VÉÜÝ[K[Z\œ›Ü‰×BˆYÙK[œ›Ý]J	ÊŠ‹Ø\KØYZ[‹Üš[Û[Ù[\›Ùš[\ÉÊB‚ˆYÙK›ØØ]ÜŠ	Ë›˜]ˆ]Û–Ù]K]šY]ÏHœÝ[\È—IÊK˜ÛXÚÊ
+BˆYÙK›ØØ]ÜŠ	ÈØ™‹\Ý[K\ÙX\˜Ú	ÊK™š[
+	úcèzgh‰ÊBˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÈÜÝ[\ËX›ÙH–Ù]K\Ý[KZYHœÝ[K[Z\œ›Üˆ—IÊK˜ÛÝ[
+
+HOHBˆYÙK›ØØ]ÜŠ	ÈØ™‹\Ý[K\ÙX\˜Ú	ÊK™š[
+	ÉÊBˆYÙK›ØØ]ÜŠ	ÈØ™‹\Ý[K\Ý]\ËYš[\‰ÊKœÙ[XÝÛÜ[ÛŠ	Ú[˜XÝ]™IÊBˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÈÜÝ[\ËX›ÙH–Ù]K\Ý[KZYHœÝ[K[Ù™ˆ—IÊK˜ÛÝ[
+
+HOHBˆYÙK›ØØ]ÜŠ	ÈØ™‹\Ý[K\Ý]\ËYš[\‰ÊKœÙ[XÝÛÜ[ÛŠ	Ø[	ÊBˆYÙK›ØØ]ÜŠ	ÈÜÝ[\ËX›ÙHÙ]KYY]\Ý[OHœÝ[WÌMÎLŽÎÎN—IÊK˜ÛXÚÊ
+Bˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÈÜÝ[KXÛÛÜœÉÊKš[œ]Ý˜[YJ
+HOH	ùæoz"l‹:näz"l‰Âˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÈØ™‹[[Ù[XÛÛÜ‹[\ÝÙ]K[[Ù[ZYH›[Ù[XH—IÊKš[œ]Ý˜[YJ
+HOH	ú`#ù¦#‰ÂˆYÙK›ØØ]ÜŠ	ÈÜÝ[K[[Ù[›Z]Û‰ÊK˜ÛXÚÊ
+B‚ˆ›ÜˆÚYZYÚ[ˆ
+
+ÎL
+K
+ÍŽL
+K
+LNL
+JN‚ˆYÙKœÙ]ÝšY]ÜÜÜÚ^™JÉÝÚY	ÎÚY	ÚZYÚ	ÎšZYÚJBˆYÙK›ØØ]ÜŠ	Ë›˜]ˆ]Û–Ù]K]šY]ÏH›[Ù[È—IÊK˜ÛXÚÊ
+HYˆÚYHŒ[ÙHYÙK™]˜[X]JŠ
+HOˆÚÝÕšY]Ê	Û[Ù[ÉËØÝ[Y[œ]Y\žTÙ[XÝÜŠ	Ë›˜]ˆ]Û–Ù]K]šY]ÏW›[Ù[×—IÊJHŠBˆYÙK›ØØ]ÜŠ	ÈÛ[Ù[]X‹X‰ÊK˜ÛXÚÊ
+Bˆ^[Ý]HYÙK™]˜[X]JˆˆŠ
+HOˆ
+ÜØÜ›Û™ØÝ[Y[™ØÝ[Y[[[Y[œØÜ›ÛÚYšY]ÜÜ™ØÝ[Y[™ØÝ[Y[[[Y[˜ÛY[ÚY›ÝÎ™Ù]ÛÛ\]YÝ[JØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÈÛ[Ù[ËX›ÙH–Ù]K[[Ù[ZYIÊJK™\Ü^_JHˆˆŠBˆ\ÜÙ\^[Ý]ÉÜØÜ›Û	×HH^[Ý]ÉÝšY]ÜÜ	×H
+È‹
+ÚY^[Ý]
+Bˆ\ÜÙ\
+^[Ý]ÉÜ›ÝÉ×HOH	ÙÜšY	ÊHOH
+ÚYŒ
+K
+ÚY^[Ý]
+BˆYÙKœÙ]ÝšY]ÜÜÜÚ^™JÉÝÚY	ÎŒLN	ÚZYÚ	ÎŽLJBˆYÙK™]˜[X]JœÛ˜\ÚÝOˆÜÚÜ]O\ÝXÝ\™YÛÛ™JÛ˜\ÚÝ™]JNÜÚÜ™\œÚ[Û\Û˜\ÚÝ™\œÚ[ÛŽÝÚ[™ÝËœ›Û\]Ú[™ÝË—×ÝÛÜšÜÜXÙT›Û\Ù[]HÚ[™ÝË—×ÝÛÜšÜÜXÙT›Û\Ù[]HÚ[™ÝË—×ÝÛÜšÜÜXÙT›Û\Ø[ÎÜ™[™\œ˜[™Ê
+NÜ™[™\“[Ù[Ê
+NÜ™[™\”Ý[\Ê
+_H‹ÛÜšÜÜXÙWÛÜšYÚ[˜[
+Bˆš[
+	ÐQRS—Ô“ÑPÕÔÑUS‘Ô×ÕÓÔ’ÔÔPÑWÕŒWÓÒÉÊB‚ˆ[Ù[ØÛÛÜ—ÜÜ˜ÈHYÙK›ØØ]ÜŠ	ÜØÜš\ÜÜ˜ÊH˜YZ[‹[[Ù[XÛÛÜœËšœÈ—IÊK™Ù]Ø]šX]J	ÜÜ˜ÉÊBˆ\ÜÙ\[Ù[ØÛÛÜ—ÜÜ˜È[™	ÝLŒŒL˜]Y]IÈ[ˆ[Ù[ØÛÛÜ—ÜÜ˜Ë[Ù[ØÛÛÜ—ÜÜ˜Âˆ[Ù[Ü›Ùš[WÜÜ˜ÈHYÙK›ØØ]ÜŠ	ÜØÜš\ÜÜ˜ÊH˜YZ[‹[[Ù[\›Ùš[\ËšœÈ—IÊK™Ù]Ø]šX]J	ÜÜ˜ÉÊBˆ\ÜÙ\[Ù[Ü›Ùš[WÜÜ˜È[™	ÝLŒŒLŽ\Ý[LIÈ[ˆ[Ù[Ü›Ùš[WÜÜ˜Ë[Ù[Ü›Ùš[WÜÜ˜Âˆ›ÙXÝÝÛÜšÜÜXÙWÜÜ˜ÈHYÙK›ØØ]ÜŠ	ÜØÜš\ÜÜ˜ÊH˜YZ[‹\›ÙXÝ]ÛÜšÜÜXÙK]ŒKšœÈ—IÊK™Ù]Ø]šX]J	ÜÜ˜ÉÊBˆ\ÜÙ\›ÙXÝÝÛÜšÜÜXÙWÜÜ˜È[™	ÝLŒŒLX‰È[ˆ›ÙXÝÝÛÜšÜÜXÙWÜÜ˜Ë›ÙXÝÝÛÜšÜÜXÙWÜÜ˜Âˆ\ÜÙ]ØØ]YÛÜžWÜÜ˜ÈHYÙK›ØØ]ÜŠ	ÜØÜš\ÜÜ˜ÊH˜YZ[‹X\ÜÙ]XØ]YÛÜšY\ËšœÈ—IÊK™Ù]Ø]šX]J	ÜÜ˜ÉÊBˆ\ÜÙ\\ÜÙ]ØØ]YÛÜžWÜÜ˜È[™	ÝLŒŒL˜IÈ[ˆ\ÜÙ]ØØ]YÛÜžWÜÜ˜Ë\ÜÙ]ØØ]YÛÜžWÜÜ˜Âˆ[\]WÛØY\—ÜÜ˜ÈHYÙK›ØØ]ÜŠ	ÜØÜš\ÜÜ˜ÊH˜YZ[‹][\]K[ØY\‹šœÈ—IÊK™Ù]Ø]šX]J	ÜÜ˜ÉÊBˆ\ÜÙ\[\]WÛØY\—ÜÜ˜È[™	ÝLŒŒL˜IÈ[ˆ[\]WÛØY\—ÜÜ˜Ë[\]WÛØY\—ÜÜ˜ÂˆXœ˜\žWÝÛÜšÜÜXÙWÜÜ˜ÈHYÙK›ØØ]ÜŠ	ÜØÜš\ÜÜ˜ÊH˜YZ[‹[Xœ˜\žK]ÛÜšÜÜXÙK]ŒKšœÈ—IÊK™Ù]Ø]šX]J	ÜÜ˜ÉÊBˆ\ÜÙ\Xœ˜\žWÝÛÜšÜÜXÙWÜÜ˜È[™	ÝLŒŒL˜IÈ[ˆXœ˜\žWÝÛÜšÜÜXÙWÜÜ˜ËXœ˜\žWÝÛÜšÜÜXÙWÜÜ˜ÂˆÛÛ[Y\˜ÙWÜÜ˜ÈHYÙK›ØØ]ÜŠ	ÜØÜš\ÜÜ˜ÊH˜YZ[‹XÛÛ[Y\˜ÙK]ŒKšœÈ—IÊK™Ù]Ø]šX]J	ÜÜ˜ÉÊBˆ\ÜÙ\ÛÛ[Y\˜ÙWÜÜ˜È[™	ÝLŒŒLÛ][˜ÚIÈ[ˆÛÛ[Y\˜ÙWÜÜ˜ËÛÛ[Y\˜ÙWÜÜ˜ÂˆYˆ^Ù\œ›ÜŠ›Ý]JN‚ˆÝ]\ÈH[
+›Ý]Kœ™\]Y\Ý\›œœÜ]
+	ËIËJVËLWJBˆ›Ý]K™[š[
+Ý]\Ï\Ý]\ËÛÛ[Ý\OIØ\XØ][Û‹ÚœÛÛ‰Ë›ÙOIÞÈœÝ]\ÈŽˆ™\œ›ÜˆŸIÊBˆYÙKœ›Ý]J	ÊŠ‹Ø\KØYZ[‹Ý^\›Ø™KJ‰Ë^Ù\œ›ÜŠBˆ\WÛY\ÜØYÙ\ÈHYÙK™]˜[X]Jˆˆ˜\Þ[˜È
+
+HOˆÂˆÛÛœÝÝ]^ßNÂˆ›ÜŠÛÛœÝÝ]\ÈÙˆÍKKL×J^Âˆž^Ø]ØZ]\RœÛÛŠ	ËØ\KØYZ[‹Ý^\›Ø™KIÊÜÝ]\Ê_XØ]Ú
+J^ÛÝ]ÜÝ]\×OYK›Y\ÜØYÙ_BˆBˆ™]\›ˆÝ]ÂˆHˆˆŠBˆ\ÜÙ\\WÛY\ÜØYÙ\ÈOHÂˆ	ÍIÎ‰ùænùaiymìº`c¹§'ûï#:*âúaãy¥¬9ænùaiyo£9a£z*i‰Ëˆ	ÍIÎ‰ú,áù¥¦ymìº(ªùam¹.å¹¤ãy/g9¦í9¥¬;ï#:*âúaãy¥¬:/"yaiyo£9a£z*i‰Ëˆ	ÍLÉÎ‰ù§#ybæy¦ªù¦`¹á(y¬åy/oùå*;ï#:*âùê#yo£9a£z*i‰ÂˆK\WÛY\ÜØYÙ\ÂˆYÙK[œ›Ý]J	ÊŠ‹Ø\KØYZ[‹Ý^\›Ø™KJ‰ÊBˆš[
+	ÐQRS—ÐTWÑ‘QQPÒ×ÐÐPÒWÒÑVWÓÒÉÊB‚ˆÈÔÈRH\È[š™XÝYÛ›H›Üˆ]][XØ]YYZ[ˆ[™]\ÝÛÙ^\ÝÚ]BˆÈ^\Ý[™ÈÜ™\‹Ý[\]HY]ÜˆÚ]Ý]XZÚ[™Èš]˜]H]HX›XÛK‚ˆÛ
+YÙKŠ
+HOˆH]Ú[™ÝË™[™]Ø[ÛÛ[Y\˜ÙH	‰ˆHYØÝ[Y[œ]Y\žTÙ[XÝÜŠ	Ë›˜]ˆ]Û–Ù]K]šY]ÏW˜ÛÛ[Y\˜ÙW—IÊHŠBˆYÙK›ØØ]ÜŠ	Ë›˜]ˆ]Û–Ù]K]šY]ÏH˜ÛÛ[Y\˜ÙH—IÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆØÝ[Y[™Ù][[Y[žRY
+	ÝšY]ËXÛÛ[Y\˜ÙIÊOË˜Û\ÜÓ\Ý˜ÛÛZ[œÊ	ØXÝ]™IÊH	‰ˆØÝ[Y[œ]Y\žTÙ[XÝÜ[
+	ÈØÛÛ[Y\˜ÙK\Ý[[X\žH˜ÛÛ[Y\˜ÙKZÜIÊK›[™ÝOOMŠBˆÛÛ[Y\˜ÙWÙXYÈHYÙK™]˜[X]JˆˆŠ
+HOˆ
+Ý™\œÚ[ÛŽÚ[™ÝË™[™]Ø[ÛÛ[Y\˜ÙOË™\œÚ[ÛŸ	ÉËX›XÐÛÜÝXZÎ’”ÓÓ‹œÝš[™ÚYžJÚÜ]_ßJKš[˜ÛY\Ê	ØÛÜÝÜšXÙIÊKšY]Î™ØÝ[Y[™Ù][[Y[žRY
+	ÝšY]ËXÛÛ[Y\˜ÙIÊOË˜Û\ÜÓ\Ý˜ÛÛZ[œÊ	ØXÝ]™IÊ_JHˆˆŠBˆ\ÜÙ\ÛÛ[Y\˜ÙWÙXYÖÉÝ™\œÚ[Û‰×KœÝ\ÝÚ]
+	Ì‹Œ	ÊH[™ÛÛ[Y\˜ÙWÙXYÖÉÝšY]É×H[™›ÝÛÛ[Y\˜ÙWÙXYÖÉÜX›XÐÛÜÝXZÉ×KÛÛ[Y\˜ÙWÙXYÂˆš[
+	ÐQRS—ÐÓÓSQTÑWÕÑP’ÒUÓÒÉËÛÛ[Y\˜ÙWÙXYÖÉÝ™\œÚ[Û‰×JBˆYÙK›ØØ]ÜŠ	ÖÙ]K]XHœÝØÚÈ—IÊK˜ÛXÚÊ
+B‚ˆÈ™X[\ÙHˆÛÛ›ÛË[˜ÛY[™ÈHÛÛ[Z]Y™XÙZ\Ú]ÜÝ™\ÜÛœÙK‚ˆ\ÜÙ\YÙKœ™\]Y\ÝœÜÝ
+˜\ÙH
+È	ËØ\KØYZ[‹ØÛÛ[Y\˜ÙWÜÞ[˜×ÜÚÝ\ÉË]O^ßJK›ÚÂˆ]HHYÙKœ™\]Y\Ý™Ù]
+˜\ÙH
+È	ËØ\KØYZ[‹ØÛÛ[Y\˜ÙWÙ]IÊKšœÛÛŠ
+VÉÙ]I×BˆÚÝHH]VÉÜÚÝ\É×VÌBˆÚÝK\]JÝØÚ×Ü]OLKÛÜÝÜšXÙOLLÝ×ÜÝØÚ×Ý™\ÚÛL‹\™Ù]ÜÝØÚÏN˜XÚ×ÜÝØÚÏUYJBˆ\ÜÙ\YÙKœ™\]Y\ÝœÜÝ
+˜\ÙH
+È	ËØ\KØYZ[‹ÜØ]™WØÛÛ[Y\˜ÙWÙ]IË]OY]JK›ÚÂˆYÙK›ØØ]ÜŠ	ÈØÛÛ[Y\˜ÙK\™[ØY	ÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆÚ[™ÝË™[™]Ø[ÛÛ[Y\˜ÙKœÝ]KœÚÝ\ÖÌOË\™Ù]ÜÝØÚÏOONŠBˆØ\™HYÙK›ØØ]ÜŠ	ÖÙ]K\ÚÝOH‰È
+ÈÚÝVÉÚY	×H
+È	È—IÊBˆØ\™›ØØ]ÜŠ	ÖÙ]KYšY[H\™Ù]ÜÝØÚÈ—IÊK™š[
+	ÌL	ÊBˆYÙK›ØØ]ÜŠ	ÈØÛÛ[Y\˜ÙK\Ø]™IÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆØÝ[Y[™Ù][[Y[žRY
+	ÜÜË[Y\ÜØYÙIÊK^ÛÛ[OOIùea¹dàz*+yk¦¹mì¹a,¹kf	ÈŠBˆYÙK›ØØ]ÜŠ	ÖÙ]K]XHœ™\ÝØÚÈ—IÊK˜ÛXÚÊ
+Bˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÈØÛÛ[Y\˜ÙK[ÝË[Û›IÊKš\×ØÚXÚÙY
+
+Bˆ\ÜÙ\Ø\™š\×Ýš\ÚX›J
+BˆYÙK›ØØ]ÜŠ	ÈÜÜË[\Ý	ÊK˜ÛXÚÊ
+BˆYÙK›ØØ]ÜŠ	ÈÜÜËY^Ü]^	ÊKØZ]Ù›ÜŠÝ]OIÝš\ÚX›IÊBˆ\ÜÙ\	ùnîº+lH9.í‰È[ˆYÙK›ØØ]ÜŠ	ÈÜÜËY^Ü]^	ÊKš[œ]Ý˜[YJ
+BˆYÙK›ØØ]ÜŠ	ÈÜÜËXÛÜÙIÊK˜ÛXÚÊ
+Bˆ™XÙZ\ÈH×BˆYˆ™XÙZ]™J›Ý]JN‚ˆ™XÙZ\Ë˜\[™
+›Ý]Kœ™\]Y\ÝœÜÝÙ]WÚœÛÛŠBˆYˆ[Š™XÙZ\ÊHOHN‚ˆ\ÜÙ\›Ý]K™™]Ú
+
+KœÝ]\ÈOHŒˆ›Ý]K˜X›Ü
+	Ù˜Z[Y	ÊBˆ[ÙN‚ˆ›Ý]K˜ÛÛ[YWÊ
+BˆYÙKœ›Ý]J	ÊŠ‹Ø\KØYZ[‹Ü\˜Ú\ÙWÜ™XÙZ]™Y	Ë™XÙZ]™JBˆØ\™›ØØ]ÜŠ	ÖÙ]K\™XÙZ]™WIÊK˜ÛXÚÊ
+BˆYÙK›ØØ]ÜŠ	ÈÜÜË\™XÙZ]™K\]IÊK™š[
+	ÌÉÊBˆYÙK›ØØ]ÜŠ	ÈÜÜËYX[ÙË\ÝX›Z]	ÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆØÝ[Y[™Ù][[Y[žRY
+	ÜÜË[Y\ÜØYÙIÊK˜Û\ÜÓ\Ý˜ÛÛZ[œÊ	Ù\œ›Ü‰ÊHŠBˆYÙKœ™[ØY
+ØZ]Ý[[IÙÛXÛÛ[ØYY	ÊBˆYÙK›ØØ]ÜŠ	Ë›˜]ˆ]Û–Ù]K]šY]ÏH˜ÛÛ[Y\˜ÙH—IÊK˜ÛXÚÊ
+BˆYÙK›ØØ]ÜŠ	ÈÜÜË\™]žIÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆ[ØØ[ÝÜ˜YÙK™Ù]][J	Ø™‹\ÜÌ‹\[™[™ÉÊH	‰ˆÚ[™ÝË™[™]Ø[ÛÛ[Y\˜ÙKœÝ]KœÚÝ\ÖÌOËœÝØÚ×Ü]OOOMŠBˆ\ÜÙ\[Š™XÙZ\ÊHOHˆ[™™XÙZ\ÖÌHOH™XÙZ\ÖÌWK™XÙZ\ÂˆYÙK›ØØ]ÜŠ	ÖÙ]K]XH™^[œÙ\È—IÊK˜ÛXÚÊ
+BˆYÙK›ØØ]ÜŠ	ÈÜÜËY^[œÙKXØ]YÛÜžIÊKœÙ[XÝÛÜ[ÛŠ	ùnèùdb‰ÊBˆYÙK›ØØ]ÜŠ	ÈÜÜËY^[œÙKX[[Ý[	ÊK™š[
+	ÌŒŒIÊBˆYÙK›ØØ]ÜŠ	ÈÜÜËY^[œÙK[›ÝIÊK™š[
+	ùà#ú)¯yfj9®+:*i¹¥+ùaî‰ÊBˆYÙK›ØØ]ÜŠ	ÈÜÜËY^[œÙK\Ø]™IÊK˜ÛXÚÊ
+BˆYÙK›ØØ]ÜŠ	ËœÜËY^[œÙIÊK™š[\Š\×Ý^Iùà#ú)¯yfj9®+:*i¹¥+ùaî‰ÊKØZ]Ù›ÜŠ
+Bˆ›ÜˆÚYZYÚ[ˆ
+
+ÎL
+K
+LÍŽ
+K
+ML
+JN‚ˆYÙKœÙ]ÝšY]ÜÜÜÚ^™JXÝ
+ÚY]ÚYZYÚZZYÚ
+JBˆ›ÜˆXˆ[ˆ
+	ÜÝØÚÉË	Ü™\ÝØÚÉË	Ü™\ÜÉË	Ù^[œÙ\ÉÊN‚ˆYÙK›ØØ]ÜŠ	ÖÙ]K]XH‰ÊÝXŠÉÈ—IÊK˜ÛXÚÊ
+BˆYˆXˆOH	Ü™\ÜÉÎ‚ˆÛ
+YÙKŠ
+HOˆØÝ[Y[œ]Y\žTÙ[XÝÜ[
+	ÈÜÜË[Y]šXÜÈœÜË[Y]šXÉÊK›[™ÝOONHŠBˆY]šXÜÈHYÙK™]˜[X]JˆˆŠ
+HOˆ
+ÝÚYš[›™\•ÚYØÜ›Û™ØÝ[Y[™ØÝ[Y[[[Y[œØÜ›ÛÚYšY]Î™ØÝ[Y[™Ù][[Y[žRY
+	ÝšY]ËXÛÛ[Y\˜ÙIÊK™Ù]›Ý[™[™ÐÛY[™XÝ
+
+KÚYJHˆˆŠBˆ\ÜÙ\Y]šXÜÖÉÜØÜ›Û	×HHÚY
+Èˆ[™Y]šXÜÖÉÝšY]É×HˆŒ
+X‹Y]šXÜÊBˆYˆÜË™[š\›Û‹™Ù]
+	ÔÔ×ÔÐÔ‘QS”ÒÕÑT‰ÊN‚ˆ›Û\ˆH]
+ÜË™[š\›Û–ÉÔÔ×ÔÐÔ‘QS”ÒÕÑT‰×JNÙ›Û\‹›ZÙ\Š\™[ÏUYK^\ÝÛÚÏUYJBˆYÙKœØÜ™Y[œÚÝ
+]\ÝŠ›Û\ˆÈ‰ÜÜË^ÝÚYK^ÝXŸKœ™ÉÊK[ÜYÙOUYJBˆYÙK›ØØ]ÜŠ	ÖÙ]K]XHœ™\ÜÈ—IÊK˜ÛXÚÊ
+Bˆ›Üˆ\š[Ù[ˆ
+	ÝÙYZÉË	Û[Û	Ë	ÞYX\‰Ë	ØÝ\ÝÛIÊN‚ˆYÙK›ØØ]ÜŠ	ÈÜÜË\\š[Ù	ÊKœÙ[XÝÛÜ[ÛŠ\š[Ù
+BˆYÙK›ØØ]ÜŠ	ÈÜÜË\™\ÜY›Ü›H]Û‰ÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆØÝ[Y[œ]Y\žTÙ[XÝÜ[
+	ÈÜÜË[Y]šXÜÈœÜË[Y]šXÉÊK›[™ÝOONH	‰ˆØÝ[Y[™Ù][[Y[žRY
+	ÜÜË[Y]šXÜÉÊK™Ù]]šX]J	Ø\šXKX\ÞIÊOOO[[ŠBˆš[
+	ÔÔ×ÔTÑL—Ô‘TÔÓ”ÒU‘WÔ‘PÑRTÑVS”ÑWÔ‘TÔ•ÓÒÉÊB‚ˆYÙK›ØØ]ÜŠ	Ë›˜]ˆ]Û–Ù]K]šY]ÏH›[Ù[È—IÊK˜ÛXÚÊ
+BˆYÙK›ØØ]ÜŠ	ÈÛ[Ù[]X‹X‰ÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆØÝ[Y[™Ù][[Y[žRY
+	ÝšY]Ë[[Ù[ÉÊK˜Û\ÜÓ\Ý˜ÛÛZ[œÊ	ØXÝ]™IÊH	‰ˆØÝ[Y[™Ù][[Y[žRY
+	Û[Ù[XYZ[‹]šY]ÉÊK˜Û\ÜÓ\Ý˜ÛÛZ[œÊ	ØXÝ]™IÊH	‰ˆØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÈÛ[Ù[ËX›ÙH]Û‰ÊHŠBˆYÙK›ØØ]ÜŠ	ÈÛ[Ù[ËX›ÙH]Û‰ÊK™š\œÝ˜ÛXÚÊ
+BˆYÙK›ØØ]ÜŠ	ÈÛ[Ù[[[Ù[œÚÝÉÊKØZ]Ù›ÜŠ
+Bˆ[Ù[Ý^HYÙK›ØØ]ÜŠ	ÈÛ[Ù[[[Ù[	ÊKš[›™\—Ý^
+
+Bˆ\ÜÙ\	ÐMH9§"y¥b9ëá9g#yà®ˆŒ0åÈŒÌ[IÈ[ˆ[Ù[Ý^ˆ\ÜÙ\	ùn©ùª&yc§únç¹g*9¬®ùamùcìù."ú)ä‰È[ˆ[Ù[Ý^ˆYÙK™]˜[X]JˆˆŠ
+HOˆÂˆØÝ[Y[™Ù][[Y[žRY
+	Û[Ù[\›Ùš[K[X\ÚË]\›	ÊK˜[YOIÙš^\™N‹ËØYZ[‹\™]šY]ÉÎÂˆØÝ[Y[™Ù][[Y[žRY
+	Û[Ù[\›Ùš[K[[™K]\›	ÊK˜[YOIÙš^\™N‹ËØYZ[‹\š[	ÎÂˆHˆˆŠBˆYÙK›ØØ]ÜŠ	ÈÛ[Ù[\›Ùš[K^	ÊK™š[
+	ÌKIÊNÜYÙK›ØØ]ÜŠ	ÈÛ[Ù[\›Ùš[K^IÊK™š[
+	Ì‹IÊBˆYÙK›ØØ]ÜŠ	ÈÛ[Ù[\›Ùš[K]ÉÊK™š[
+	Î	ÊNÜYÙK›ØØ]ÜŠ	ÈÛ[Ù[\›Ùš[KZ	ÊK™š[
+	ÌMŒ	ÊNÜYÙK›ØØ]ÜŠ	ÈÛ[Ù[\›Ùš[KX[™ÛIÊK™š[
+	Ì	ÊBˆ[Ù[Ü™\]Y\ÝÈH×BˆYˆØ]™WÛ[Ù[
+›Ý]JN‚ˆ[Ù[Ü™\]Y\ÝË˜\[™
+›Ý]Kœ™\]Y\ÝœÜÝÙ]WÚœÛÛŠBˆ™\Ý[H›Ý]K™™]Ú
+
+Bˆ[YKœÛY\
+ŒMJBˆ›Ý]K™[š[
+™\ÜÛœÙO\™\Ý[
+BˆYÙKœ›Ý]J	ÊŠ‹Ø\KØYZ[‹Üš[Û[Ù[\›Ùš[\ÉËØ]™WÛ[Ù[
+BˆYÙK™]˜[X]JŠ
+HOˆ›ÛZ\ÙK˜[
+ÜØ]™S[Ù[
+
+KØ]™S[Ù[
+
+WJHŠBˆ\ÜÙ\[Š[Ù[Ü™\]Y\ÝÊHOHK[Ù[Ü™\]Y\ÝÂˆ\ÜÙ\[Ù[Ü™\]Y\ÝÖÌVÉÜÝ[WÚY	×H[™[Ù[Ü™\]Y\ÝÖÌVÉÛ[Ù[ÚY	×K[Ù[Ü™\]Y\ÝÂˆYÙK[œ›Ý]J	ÊŠ‹Ø\KØYZ[‹Üš[Û[Ù[\›Ùš[\ÉÊBˆYÙK›ØØ]ÜŠ	ÈÛ[Ù[[[Ù[	ÊKØZ]Ù›ÜŠÝ]OIÚY[‰ÊBˆYÙK›ØØ]ÜŠ	Ë›˜]ˆ]Û–Ù]K]šY]ÏHœÝ[\È—IÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆØÝ[Y[™Ù][[Y[žRY
+	ÝšY]Ë\Ý[\ÉÊK˜Û\ÜÓ\Ý˜ÛÛZ[œÊ	ØXÝ]™IÊH	‰ˆØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÈÜÝ[\ËX›ÙH]Û‰ÊHŠBˆYÙK›ØØ]ÜŠ	ÈÜÝ[\ËX›ÙH]Û‰ÊK™š\œÝ˜ÛXÚÊ
+BˆYÙK›ØØ]ÜŠ	ÈÜÝ[K[[Ù[œÚÝÉÊKØZ]Ù›ÜŠ
+Bˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÈÜÝ[K^ÜÝ[K^KÜÝ[K]ËÜÝ[KZ	ÊK˜ÛÝ[
+
+HOHˆYÙK›ØØ]ÜŠ	ÈÜÝ[K[[Ù[›Z]Û‰ÊK˜ÛXÚÊ
+B‚ˆÝ[WÜ™\]Y\ÝÈH×BˆX[ÙÜÈH×BˆYÙK›ÛŠ	ÙX[ÙÉË[X™HX[ÙÎˆ
+X[ÙÜË˜\[™
+X[ÙË›Y\ÜØYÙJKX[ÙË™\ÛZ\ÜÊ
+JJBˆYˆØ]™WÜÝ[J›Ý]JN‚ˆÝ[WÜ™\]Y\ÝË˜\[™
+›Ý]Kœ™\]Y\ÝœÜÝÙ]WÚœÛÛŠBˆYˆ[ŠÝ[WÜ™\]Y\ÝÊHOHN‚ˆ›Ý]K™[š[
+Ý]\ÏMLËÛÛ[Ý\OIØ\XØ][Û‹ÚœÛÛ‰Ë›ÙOIÞÈœÝ]\ÈŽˆ™\œ›ÜˆŸIÊBˆ[ÙN‚ˆ[YKœÛY\
+ŒMJBˆ›Ý]K™[š[
+Ý]\ÏLŒÛÛ[Ý\OIØ\XØ][Û‹ÚœÛÛ‰Ë›ÙOIÞÈœÝ]\ÈŽˆœÝXØÙ\ÜÈ‹™\œÚ[ÛˆŽˆ›[ØÚË\Ý[K]™\œÚ[ÛˆŸIÊBˆYÙKœ›Ý]J	ÊŠ‹Ø\KØYZ[‹ÜØ]™WÜÚÜÙ]IËØ]™WÜÝ[JBˆ™Y›Ü™WÜÝ[\ÈHYÙK™]˜[X]JŠ
+HOˆÚÜ]KœÝ[\Ë›[™ÝŠBˆYÙK›ØØ]ÜŠ	ÈÝšY]Ë\Ý[\È]X˜\ˆ˜‰ÊK˜ÛXÚÊ
+BˆYÙK›ØØ]ÜŠ	ÈÜÝ[K[˜[YIÊK™š[
+	úaãz)!ú` yaî¹fç¹«n9«¯9«/‰ÊBˆYÙK›ØØ]ÜŠ	ÈÜÝ[K\šXÙIÊK™š[
+	ÍL	ÊBˆYÙK™]˜[X]JŠ
+HOˆ›ÛZ\ÙK˜[
+ÜØ]™TÝ[J
+KØ]™TÝ[J
+WJHŠBˆ\ÜÙ\[ŠÝ[WÜ™\]Y\ÝÊHOHKÝ[WÜ™\]Y\ÝÂˆ˜Z[YHYÙK™]˜[X]JˆˆŠ
+HOˆ
+ÂˆÛÝ[œÚÜ]KœÝ[\Ë™š[\ŠOž›˜[YOOOIúaãz)!ú` yaî¹fç¹«n9«¯9«/‰ÊK›[™ÝˆÜ[Ž™ØÝ[Y[™Ù][[Y[žRY
+	ÜÝ[K[[Ù[	ÊK˜Û\ÜÓ\Ý˜ÛÛZ[œÊ	ÜÚÝÉÊKˆ˜[YN™ØÝ[Y[™Ù][[Y[žRY
+	ÜÝ[K[˜[YIÊK˜[YKˆ\ØX›Y™ØÝ[Y[™Ù][[Y[žRY
+	ÜÝ[K\Ø]™IÊK™\ØX›YˆJHˆˆŠBˆ\ÜÙ\˜Z[YOHÉØÛÝ[	ÎŒ	ÛÜ[‰Î•YK	Ý˜[YIÎ‰úaãz)!ú` yaî¹fç¹«n9«¯9«/‰Ë	Ù\ØX›Y	Î‘˜[Ù_K˜Z[Yˆ\ÜÙ\	ù§#ybæy¦ªù¦`¹á(y¬åy/oùå*;ï#:*âùê#yo£9a£z*i‰È[ˆYÙK›ØØ]ÜŠ	ÈØ™‹\›ÙXÝ[Y\ÜØYÙIÊKš[›™\—Ý^
+
+BˆÝ[WÙ˜Z[\™WÛ^Y\œÈHYÙK™]˜[X]JˆˆŠ
+HOˆÂˆÛÛœÝY\ÜØYÙOYØÝ[Y[™Ù][[Y[žRY
+	Ø™‹\›ÙXÝ[Y\ÜØYÙIÊNÂˆÛÛœÝ[Ù[YØÝ[Y[™Ù][[Y[žRY
+	ÜÝ[K[[Ù[	ÊNÂˆ™]\›ˆÂˆY\ÜØYÙVŽ“[X™\‹œ\œÙR[
+Ù]ÛÛ\]YÝ[JY\ÜØYÙJKž’[™^L
+Kˆ[Ù[Ž“[X™\‹œ\œÙR[
+Ù]ÛÛ\]YÝ[J[Ù[
+Kž’[™^L
+Kˆš\ÚX›N›Y\ÜØYÙK˜Û\ÜÓ\Ý˜ÛÛZ[œÊ	ÜÚÝÉÊH	‰ˆ[X™\‹œ\œÙQ›Ø]
+Ù]ÛÛ\]YÝ[JY\ÜØYÙJK›ÜXÚ]JOŒˆNÂˆHˆˆŠBˆ\ÜÙ\Ý[WÙ˜Z[\™WÛ^Y\œÖÉÛY\ÜØYÙV‰×HˆÝ[WÙ˜Z[\™WÛ^Y\œÖÉÛ[Ù[‰×H[™Ý[WÙ˜Z[\™WÛ^Y\œÖÉÝš\ÚX›I×KÝ[WÙ˜Z[\™WÛ^Y\œÂˆYÙK™]˜[X]JŠ
+HOˆ›ÛZ\ÙK˜[
+ÜØ]™TÝ[J
+KØ]™TÝ[J
+WJHŠBˆØ]™YHYÙK™]˜[X]JˆˆŠ
+HOˆ
+ÂˆÝ[œÚÜ]KœÝ[\Ë›[™ÝˆÛÝ[œÚÜ]KœÝ[\Ë™š[\ŠOž›˜[YOOOIúaãz)!ú` yaî¹fç¹«n9«¯9«/‰ÊK›[™ÝˆÜ[Ž™ØÝ[Y[™Ù][[Y[žRY
+	ÜÝ[K[[Ù[	ÊK˜Û\ÜÓ\Ý˜ÛÛZ[œÊ	ÜÚÝÉÊBˆJHˆˆŠBˆ\ÜÙ\[ŠÝ[WÜ™\]Y\ÝÊHOHˆ[™Ø]™YOHÉÝÝ[	Î˜™Y›Ü™WÜÝ[\ÊÌK	ØÛÝ[	ÎŒK	ÛÜ[‰Î‘˜[Ù_K
+Ý[WÜ™\]Y\ÝËØ]™Y
+BˆYÙK[œ›Ý]J	ÊŠ‹Ø\KØYZ[‹ÜØ]™WÜÚÜÙ]IÊBˆYÙK™]˜[X]JŠ
+HOˆØYÚÜ
+YJHŠBˆš[
+	ÐQRS—ÔÕSWÔ‘U–WÑÕP“WÔÕP“RUÓÒÉÊBˆš[
+	ÓSÑSÔ“Ñ’SWÔÒS‘ÓWÑS•–WÕÑP’ÒUÓÒÉÊB‚ˆÈØ][ÙÈÔ•Q]\Ý›Ý]]]Hœ›ÝÜÙ\ˆÝ]H[[HÙ\™\ˆXØÙ\È]‚ˆØ][Ù×ÛÜšYÚ[˜[HYÙK™]˜[X]JŠ
+HOˆÝXÝ\™YÛÛ™JÚÜ]JHŠBˆØ][Ù×Ùš^\™HHÂˆ	Øœ˜[™ÉÎ–ÉÒ\ÜÝYLŽydàyâc	Ë	Ò\ÜÝYLŽyên¹dàyâc	×Kˆ	Û[Ù[ÉÎ–ÞÉÚY	Î‰Ú\ÜÝYLŽK[[Ù[	Ë	Øœ˜[™	Î‰Ò\ÜÝYLŽydàyâc	Ë	Û˜[YIÎ‰Ò\ÜÝYLŽyg¢ú&gÉË	ÜÝ]\ÉÎ•Y_WKˆ	ÜÝ[\ÉÎ–ÞÉÚY	Î‰Ú\ÜÝYLŽK\Ý[IË	Û˜[YIÎ‰Ò\ÜÝYLŽyìîùb%ÉË	ÜšXÙIÎŒÎL	ØÛÛÜœÉÎ–Éú`#ù¦#‰×K	ÜÝ]\ÉÎ•Y_WKˆBˆYÙK™]˜[X]JŠ
+HOˆÝÚ[™ÝË—×Ú\ÜÝYLŽPÛÛ™š\›O]Ú[™ÝË˜ÛÛ™š\›_HŠB‚ˆYˆØ][Ù×ØØ\ÙJX™[XÝ[Û‹˜Z[\™WØÚXÚËÝXØÙ\Ü×ØÚXÚË™YY˜XÚ×ØÚXÚÊN‚ˆYÙK™]˜[X]J™]HOˆÜÚÜ]O\ÝXÝ\™YÛÛ™J]JNÜ™[™\œ˜[™Ê
+NÜ™[™\“[Ù[Ê
+NÜ™[™\”Ý[\Ê
+_H‹Ø][Ù×Ùš^\™JBˆ™\]Y\ÝÈH×BˆYˆ™\ÜÛ™
+›Ý]JN‚ˆ™\]Y\ÝË˜\[™
+›Ý]Kœ™\]Y\ÝœÜÝÙ]WÚœÛÛŠBˆYˆ[Š™\]Y\ÝÊHOHN‚ˆ›Ý]K™[š[
+Ý]\ÏMLËÛÛ[Ý\OIØ\XØ][Û‹ÚœÛÛ‰Ë›ÙOIÞÈœÝ]\ÈŽˆ™\œ›ÜˆŸIÊBˆ[ÙN‚ˆ[YKœÛY\
+ŒMJBˆ›Ý]K™[š[
+Ý]\ÏLŒÛÛ[Ý\OIØ\XØ][Û‹ÚœÛÛ‰Ë›ÙOIÞÈœÝ]\ÈŽˆœÝXØÙ\ÜÈ‹™\œÚ[ÛˆŽˆ›[ØÚËXØ][ÙË]™\œÚ[ÛˆŸIÊBˆYÙKœ›Ý]J	ÊŠ‹Ø\KØYZ[‹ÜØ]™WÜÚÜÙ]IË™\ÜÛ™
+BˆYÙK™]˜[X]JXÝ[ÛŠBˆ˜Z[YHYÙK™]˜[X]J˜Z[\™WØÚXÚÊBˆ\ÜÙ\[Š™\]Y\ÝÊHOHH[™˜Z[Y
+X™[™\]Y\ÝË˜Z[Y
+Bˆ\ÜÙ\YÙK™]˜[X]J™YY˜XÚ×ØÚXÚÊKX™[ˆYÙK™]˜[X]JXÝ[ÛŠBˆØ]™YHYÙK™]˜[X]JÝXØÙ\Ü×ØÚXÚÊBˆ\ÜÙ\[Š™\]Y\ÝÊHOHˆ[™Ø]™Y
+X™[™\]Y\ÝËØ]™Y
+BˆYÙK[œ›Ý]J	ÊŠ‹Ø\KØYZ[‹ÜØ]™WÜÚÜÙ]IÊB‚ˆØ][Ù×ØØ\ÙJˆ	ØYœ˜[™	ËˆˆˆŠ
+HOˆØYœ˜[™
+
+NÙØÝ[Y[™Ù][[Y[žRY
+	Ø™‹Xœ˜[™[˜[YIÊK˜[YOIÒ\ÜÝYLŽy¥¬9h§¹dàyâc	ÎÜ™]\›ˆ›ÛZ\ÙK˜[
+Ð™[™]Ø[YZ[”›ÙXÝÛÜšÜÜXÙKœÝX›Z]œ˜[™
+
+K™[™]Ø[YZ[”›ÙXÝÛÜšÜÜXÙKœÝX›Z]œ˜[™
+
+WJ_Hˆˆ‹ˆˆˆŠ
+HOˆ”ÓÓ‹œÝš[™ÚYžJÚÜ]JOOOR”ÓÓ‹œÝš[™ÚYžJØœ˜[™Î–ÉÒ\ÜÝYLŽydàyâc	Ë	Ò\ÜÝYLŽyên¹dàyâc	×K[Ù[Î–ÞÚY‰Ú\ÜÝYLŽK[[Ù[	Ëœ˜[™‰Ò\ÜÝYLŽydàyâc	Ë˜[YN‰Ò\ÜÝYLŽyg¢ú&gÉËÝ]\ÎY_WKÝ[\Î–ÞÚY‰Ú\ÜÝYLŽK\Ý[IË˜[YN‰Ò\ÜÝYLŽyìîùb%ÉËšXÙNŒÎLÛÛÜœÎ–Éú`#ù¦#‰×KÝ]\ÎY_W_JH	‰ˆ\ÚÜ]]][Û\ÞHˆˆ‹ˆˆˆŠ
+HOˆÚÜ]K˜œ˜[™Ë™š[\ŠOžOOIÒ\ÜÝYLŽy¥¬9h§¹dàyâc	ÊK›[™ÝOOLH	‰ˆ\ÚÜ]]][Û\ÞHˆˆ‹ˆˆˆŠ
+HOˆØÝ[Y[™Ù][[Y[žRY
+	Ø™‹Xœ˜[™Y\œ›Ü‰ÊK^ÛÛ[š[˜ÛY\Ê	ù§#ybæy¦ªù¦`¹á(y¬åy/oùå*	ÊHˆˆ‹ˆ
+BˆØ][Ù×ØØ\ÙJˆ	ÙY]œ˜[™	ËˆˆˆŠ
+HOˆÙY]œ˜[™
+	Ò\ÜÝYLŽydàyâc	ÊNÙØÝ[Y[™Ù][[Y[žRY
+	Ø™‹Xœ˜[™[˜[YIÊK˜[YOIÒ\ÜÝYLŽydàyâc9¥.yd#IÎÜ™]\›ˆ›ÛZ\ÙK˜[
+Ð™[™]Ø[YZ[”›ÙXÝÛÜšÜÜXÙKœÝX›Z]œ˜[™
+
+K™[™]Ø[YZ[”›ÙXÝÛÜšÜÜXÙKœÝX›Z]œ˜[™
+
+WJ_Hˆˆ‹ˆˆˆŠ
+HOˆÚÜ]K˜œ˜[™Ëš[˜ÛY\Ê	Ò\ÜÝYLŽydàyâc	ÊH	‰ˆ\ÚÜ]K˜œ˜[™Ëš[˜ÛY\Ê	Ò\ÜÝYLŽydàyâc9¥.yd#IÊH	‰ˆÚÜ]K›[Ù[ÖÌK˜œ˜[™OOIÒ\ÜÝYLŽydàyâc	È	‰ˆ\ÚÜ]]][Û\ÞHˆˆ‹ˆˆˆŠ
+HOˆ\ÚÜ]K˜œ˜[™Ëš[˜ÛY\Ê	Ò\ÜÝYLŽydàyâc	ÊH	‰ˆÚÜ]K˜œ˜[™Ë™š[\ŠOžOOIÒ\ÜÝYLŽydàyâc9¥.yd#IÊK›[™ÝOOLH	‰ˆÚÜ]K›[Ù[ÖÌK˜œ˜[™OOIÒ\ÜÝYLŽydàyâc9¥.yd#IÈ	‰ˆ\ÚÜ]]][Û\ÞHˆˆ‹ˆˆˆŠ
+HOˆØÝ[Y[™Ù][[Y[žRY
+	Ø™‹Xœ˜[™Y\œ›Ü‰ÊK^ÛÛ[š[˜ÛY\Ê	ù§#ybæy¦ªù¦`¹á(y¬åy/oùå*	ÊHˆˆ‹ˆ
+BˆØ][Ù×ØØ\ÙJˆ	Ù[]Pœ˜[™	ËˆˆˆŠ
+HOˆÝÚ[™ÝË˜ÛÛ™š\›OJ
+OOYNÜ™]\›ˆ›ÛZ\ÙK˜[
+Ù[]Pœ˜[™
+	Ò\ÜÝYLŽydàyâc	ÊK[]Pœ˜[™
+	Ò\ÜÝYLŽydàyâc	ÊWJ_Hˆˆ‹ˆˆˆŠ
+HOˆÚÜ]K˜œ˜[™Ëš[˜ÛY\Ê	Ò\ÜÝYLŽydàyâc	ÊH	‰ˆ\ÚÜ]K˜œ˜[™Ëš[˜ÛY\Ê	ù§*¹b!ºhg‰ÊH	‰ˆÚÜ]K›[Ù[ÖÌK˜œ˜[™OOIÒ\ÜÝYLŽydàyâc	È	‰ˆ\ÚÜ]]][Û\ÞHˆˆ‹ˆˆˆŠ
+HOˆ\ÚÜ]K˜œ˜[™Ëš[˜ÛY\Ê	Ò\ÜÝYLŽydàyâc	ÊH	‰ˆÚÜ]K˜œ˜[™Ë™š[\ŠOžOOIù§*¹b!ºhg‰ÊK›[™ÝOOLH	‰ˆÚÜ]K›[Ù[ÖÌK˜œ˜[™OOIù§*¹b!ºhg‰È	‰ˆ\ÚÜ]]][Û\ÞHˆˆ‹ˆˆˆŠ
+HOˆØÝ[Y[™Ù][[Y[žRY
+	Ø™‹\›ÙXÝ[Y\ÜØYÙIÊK^ÛÛ[š[˜ÛY\Ê	ù§#ybæy¦ªù¦`¹á(y¬åy/oùå*	ÊHˆˆ‹ˆ
+BˆØ][Ù×ØØ\ÙJˆ	Ù[]S[Ù[	ËˆˆˆŠ
+HOˆÝÚ[™ÝË˜ÛÛ™š\›OJ
+OOYNÜ™]\›ˆ›ÛZ\ÙK˜[
+Ù[]S[Ù[
+	Ú\ÜÝYLŽK[[Ù[	ÊK[]S[Ù[
+	Ú\ÜÝYLŽK[[Ù[	ÊWJ_Hˆˆ‹ˆˆˆŠ
+HOˆÚÜ]K›[Ù[ËœÛÛYJOžšYOOIÚ\ÜÝYLŽK[[Ù[	ÊH	‰ˆØÝ[Y[™Ù][[Y[žRY
+	Û[Ù[ËX›ÙIÊK^ÛÛ[š[˜ÛY\Ê	Ò\ÜÝYLŽyg¢ú&gÉÊH	‰ˆ\ÚÜ]]][Û\ÞHˆˆ‹ˆˆˆŠ
+HOˆ\ÚÜ]K›[Ù[ËœÛÛYJOžšYOOIÚ\ÜÝYLŽK[[Ù[	ÊH	‰ˆ\ÚÜ]]][Û\ÞHˆˆ‹ˆˆˆŠ
+HOˆØÝ[Y[™Ù][[Y[žRY
+	Ø™‹\›ÙXÝ[Y\ÜØYÙIÊK^ÛÛ[š[˜ÛY\Ê	ù§#ybæy¦ªù¦`¹á(y¬åy/oùå*	ÊHˆˆ‹ˆ
+BˆØ][Ù×ØØ\ÙJˆ	Ù[]TÝ[IËˆˆˆŠ
+HOˆÝÚ[™ÝË˜ÛÛ™š\›OJ
+OOYNÜ™]\›ˆ›ÛZ\ÙK˜[
+Ù[]TÝ[J	Ú\ÜÝYLŽK\Ý[IÊK[]TÝ[J	Ú\ÜÝYLŽK\Ý[IÊWJ_Hˆˆ‹ˆˆˆŠ
+HOˆÚÜ]KœÝ[\ËœÛÛYJOžšYOOIÚ\ÜÝYLŽK\Ý[IÊH	‰ˆØÝ[Y[™Ù][[Y[žRY
+	ÜÝ[\ËX›ÙIÊK^ÛÛ[š[˜ÛY\Ê	Ò\ÜÝYLŽyìîùb%ÉÊH	‰ˆ\ÚÜ]]][Û\ÞHˆˆ‹ˆˆˆŠ
+HOˆ\ÚÜ]KœÝ[\ËœÛÛYJOžšYOOIÚ\ÜÝYLŽK\Ý[IÊH	‰ˆ\ÚÜ]]][Û\ÞHˆˆ‹ˆˆˆŠ
+HOˆØÝ[Y[™Ù][[Y[žRY
+	Ø™‹\›ÙXÝ[Y\ÜØYÙIÊK^ÛÛ[š[˜ÛY\Ê	ù§#ybæy¦ªù¦`¹á(y¬åy/oùå*	ÊHˆˆ‹ˆ
+BˆYÙK™]˜[X]J˜\Þ[˜È
+
+HOˆØ]ØZ]ØYÚÜ
+YJNÝÚ[™ÝË˜ÛÛ™š\›O]Ú[™ÝË—×Ú\ÜÝYLŽPÛÛ™š\›NÙ[]HÚ[™ÝË—×Ú\ÜÝYLŽPÛÛ™š\›_HŠBˆš[
+	ÐQRS—ÐÐUSÑ×ÐÔ•QÔÕUWÔ‘U–WÑÕP“WÔÕP“RUÓÒÉÊB‚ˆÈØ][ÙÈÛÛ[Z]Ø[ˆÝXØÙYY™Y›Ü™H›ÙXÝ[Û‹\›Ùš[HÞ[˜È˜Z[ËˆBˆÈœ›ÝÜÙ\ˆ]\ÝYÜ]ÛÛ[Z]YØ[™Y]H[™™]\›™Y™\œÚ[ÛˆÛÈ]ÂˆÈ™^Ø][ÙÈ]]][ÛˆØ[››ÝYØ[HÐTÈÝ[H]HÝ™\ˆH[Ù[Y]‚ˆ\X[Ø™Y›Ü™HHYÙK™]˜[X]JŠ
+HOˆ
+Ù]NœÝXÝ\™YÛÛ™JÚÜ]JK[Ù[œÝXÝ\™YÛÛ™JÚÜ]K›[Ù[ÖÌJK™\œÚ[ÛŽœÚÜ™\œÚ[ÛŸJHŠBˆš[YYØØ][ÙÈHYÙKœ™\]Y\Ý™Ù]
+˜\ÙH
+È	ËØ\KÜÚÜÙ]IÊBˆ\ÜÙ\š[YYØØ][ÙËšXY\œË™Ù]
+	ÞX™[™]Ø[‹XØXÚIÊHOH	ÒU	Ëš[YYØØ][ÙËšXY\œÂˆ\ÜÙ\š[YYØØ][ÙËšœÛÛŠ
+VÉÝ™\œÚ[Û‰×HOH\X[Ø™Y›Ü™VÉÝ™\œÚ[Û‰×Bˆ\X[Û[Ù[Û˜[YHH‰Ô\X[ÝXØÙ\ÜÈ9g¢ú&gÈÝ[YK[YWÛœÊ
+_IÂˆ\X[Øœ˜[™H‰ú`ê9b!¹¢$9b§ùo£9dàyâcÝ[YK[YWÛœÊ
+_IÂˆYÙK™]˜[X]JšYOˆÜ[“[Ù[Y]ÜŠY
+H‹\X[Ø™Y›Ü™VÉÛ[Ù[	×VÉÚY	×JBˆYÙK›ØØ]ÜŠ	ÈÛ[Ù[[˜[YIÊK™š[
+\X[Û[Ù[Û˜[YJBˆÜšYÚ[˜[ÜØ]™WÜ›Ùš[\ÈH\Û[Ù[Kœš[ØÙ[\‹œÝÜ™KœØ]™WÜ›Ùš[\ÂˆYˆ˜Z[Ü›Ùš[WÜÞ[˜ÊÜ›Ùš[\ÊN‚ˆ˜Z\ÙH[[YQ\œ›ÜŠ	Øœ›ÝÜÙ\ˆš^\™IÊBˆ\Û[Ù[Kœš[ØÙ[\‹œÝÜ™KœØ]™WÜ›Ùš[\ÈH˜Z[Ü›Ùš[WÜÞ[˜ÂˆžN‚ˆYÙK™]˜[X]JŠ
+HOˆØ]™S[Ù[
+
+HŠBˆš[˜[N‚ˆ\Û[Ù[Kœš[ØÙ[\‹œÝÜ™KœØ]™WÜ›Ùš[\ÈHÜšYÚ[˜[ÜØ]™WÜ›Ùš[\ÂˆÙ\™\—Ü\X[Ù\™\—Ü\X[Ý™\œÚ[ÛˆH\Û[Ù[K˜ÛÝYÙÙ]ÚœÛÛ—Ý™\œÚ[Û™Y
+ˆ	ÜÚÜÙ]IË\Û[Ù[K‘UWÑ’SK\Û[Ù[K‘QUSÔÒÔÑUJBˆ\X[ÜÝ]HHYÙK™]˜[X]JˆˆŠ
+HOˆ
+ÂˆÜ[Ž™ØÝ[Y[™Ù][[Y[žRY
+	Û[Ù[[[Ù[	ÊK˜Û\ÜÓ\Ý˜ÛÛZ[œÊ	ÜÚÝÉÊKˆ[œ]™ØÝ[Y[™Ù][[Y[žRY
+	Û[Ù[[˜[YIÊK˜[YKˆY™ØÝ[Y[™Ù][[Y[žRY
+	Û[Ù[ZY	ÊK˜[YKˆØØ[œÚÜ]K›[Ù[Ë™š[™
+OžšYOOYØÝ[Y[™Ù][[Y[žRY
+	Û[Ù[ZY	ÊK˜[YJOË›˜[YKˆ™\œÚ[ÛŽœÚÜ™\œÚ[Û‚ˆJHˆˆŠBˆ\ÜÙ\\X[ÜÝ]HOHÂˆ	ÛÜ[‰Î•YK	Ú[œ]	Îœ\X[Û[Ù[Û˜[YK	ÚY	Îœ\X[Ø™Y›Ü™VÉÛ[Ù[	×VÉÚY	×Kˆ	ÛØØ[	Îœ\X[Û[Ù[Û˜[YK	Ý™\œÚ[Û‰ÎœÙ\™\—Ü\X[Ý™\œÚ[Û‹ˆK\X[ÜÝ]Bˆ\ÜÙ\Ù\™\—Ü\X[Ý™\œÚ[ÛˆOH\X[Ø™Y›Ü™VÉÝ™\œÚ[Û‰×Bˆ\ÜÙ\™^
+›ÝÈ›Üˆ›ÝÈ[ˆÙ\™\—Ü\X[ÉÛ[Ù[É×HYˆ›ÝÖÉÚY	×HOH\X[Ø™Y›Ü™VÉÛ[Ù[	×VÉÚY	×JVÉÛ˜[YI×HOH\X[Û[Ù[Û˜[YBˆ\ÜÙ\	ùg¢ú&gú,áù¥¦ymì¹a,¹kf;ï#9/a¹«hùo#ùb%ùcl9càù¥n9d#9«iyi,y¥eÉÈ[ˆYÙK›ØØ]ÜŠ	ÈØ™‹\›ÙXÝ[Y\ÜØYÙIÊKš[›™\—Ý^
+
+Bˆ[Ù[Ù˜Z[\™WÛ^Y\œÈHYÙK™]˜[X]JˆˆŠ
+HOˆÂˆÛÛœÝY\ÜØYÙOYØÝ[Y[™Ù][[Y[žRY
+	Ø™‹\›ÙXÝ[Y\ÜØYÙIÊNÂˆÛÛœÝ[Ù[YØÝ[Y[™Ù][[Y[žRY
+	Û[Ù[[[Ù[	ÊNÂˆ™]\›ˆÂˆY\ÜØYÙVŽ“[X™\‹œ\œÙR[
+Ù]ÛÛ\]YÝ[JY\ÜØYÙJKž’[™^L
+Kˆ[Ù[Ž“[X™\‹œ\œÙR[
+Ù]ÛÛ\]YÝ[J[Ù[
+Kž’[™^L
+Kˆš\ÚX›N›Y\ÜØYÙK˜Û\ÜÓ\Ý˜ÛÛZ[œÊ	ÜÚÝÉÊH	‰ˆ[X™\‹œ\œÙQ›Ø]
+Ù]ÛÛ\]YÝ[JY\ÜØYÙJK›ÜXÚ]JOŒˆNÂˆHˆˆŠBˆ\ÜÙ\[Ù[Ù˜Z[\™WÛ^Y\œÖÉÛY\ÜØYÙV‰×Hˆ[Ù[Ù˜Z[\™WÛ^Y\œÖÉÛ[Ù[‰×H[™[Ù[Ù˜Z[\™WÛ^Y\œÖÉÝš\ÚX›I×K[Ù[Ù˜Z[\™WÛ^Y\œÂˆœ™\ÚØY\—Ü\X[HYÙKœ™\]Y\Ý™Ù]
+˜\ÙH
+È	ËØ\KÜÚÜÙ]IÊBˆ\ÜÙ\œ™\ÚØY\—Ü\X[šXY\œË™Ù]
+	ÞX™[™]Ø[‹XØXÚIÊHOH	ÓRTÔÉËœ™\ÚØY\—Ü\X[šXY\œÂˆœ™\ÚØY\—Ü\X[Ù]HHœ™\ÚØY\—Ü\X[šœÛÛŠ
+Bˆ\ÜÙ\œ™\ÚØY\—Ü\X[Ù]VÉÝ™\œÚ[Û‰×HOHÙ\™\—Ü\X[Ý™\œÚ[Û‚ˆ\ÜÙ\™^
+›ÝÈ›Üˆ›ÝÈ[ˆœ™\ÚØY\—Ü\X[Ù]VÉÙ]I×VÉÛ[Ù[É×HYˆ›ÝÖÉÚY	×HOH\X[Ø™Y›Ü™VÉÛ[Ù[	×VÉÚY	×JVÉÛ˜[YI×HOH\X[Û[Ù[Û˜[YBˆš[
+	ÐQRS—ÓSÑSÔ“Ñ’SWÔT•PSÔÕPÐÑTÔ×ÐÐPÒWÒS•SQUSÓ—ÓÒÉÊB‚ˆYÙK™]˜[X]Jˆˆ˜\Þ[˜Èœ˜[™OˆØYœ˜[™
+
+NÙØÝ[Y[™Ù][[Y[žRY
+	Ø™‹Xœ˜[™[˜[YIÊK˜[YOXœ˜[™Ø]ØZ]™[™]Ø[YZ[”›ÙXÝÛÜšÜÜXÙKœÝX›Z]œ˜[™
+
+_Hˆˆ‹\X[Øœ˜[™
+BˆÙ\™\—ØY\—Û]]][ÛˆHYÙKœ™\]Y\Ý™Ù]
+˜\ÙH
+È	ËØ\KÜÚÜÙ]IÊKšœÛÛŠ
+Bˆ\ÜÙ\\X[Øœ˜[™[ˆÙ\™\—ØY\—Û]]][Û–ÉÙ]I×VÉØœ˜[™É×Bˆ\ÜÙ\™^
+›ÝÈ›Üˆ›ÝÈ[ˆÙ\™\—ØY\—Û]]][Û–ÉÙ]I×VÉÛ[Ù[É×HYˆ›ÝÖÉÚY	×HOH\X[Ø™Y›Ü™VÉÛ[Ù[	×VÉÚY	×JVÉÛ˜[YI×HOH\X[Û[Ù[Û˜[YBˆ\ÜÙ\YÙK™]˜[X]J˜œ˜[™OˆÚÜ]K˜œ˜[™Ëš[˜ÛY\Êœ˜[™
+H	‰ˆØÝ[Y[™Ù][[Y[žRY
+	Û[Ù[[[Ù[	ÊK˜Û\ÜÓ\Ý˜ÛÛZ[œÊ	ÜÚÝÉÊH‹\X[Øœ˜[™
+BˆYÙK™]˜[X]JŠ
+HOˆØ]™S[Ù[
+
+HŠBˆ\ÜÙ\	ÜÚÝÉÈ›Ý[ˆYÙK›ØØ]ÜŠ	ÈÛ[Ù[[[Ù[	ÊK™Ù]Ø]šX]J	ØÛ\ÜÉÊBˆ\X[Ü™\ÝÜ™HHYÙKœ™\]Y\ÝœÜÝ
+˜\ÙH
+È	ËØ\KØYZ[‹ÜØ]™WÜÚÜÙ]IË]O^Âˆ	Ù]IÎœ\X[Ø™Y›Ü™VÉÙ]I×K	Ù^XÝYÝ™\œÚ[Û‰ÎœYÙK™]˜[X]J	Ê
+HOˆÚÜ™\œÚ[Û‰ÊKˆJBˆ\ÜÙ\\X[Ü™\ÝÜ™KœÝ]\ÈOHŒ\X[Ü™\ÝÜ™K^
+
+BˆYÙK™]˜[X]JŠ
+HOˆØYÚÜ
+YJHŠBˆš[
+	ÐQRS—ÓSÑSÔ“Ñ’SWÔT•PSÔÕPÐÑTÔ×ÔÕUWÓÒÉÊB‚ˆÈHÙXÛÛ™X‹Ù]šXÙHÚ[œÈHØ][ÙÈÐTËˆ\ÈXˆ]\ÝÙY\]È[œØ]™YˆÈ[œ]È[™ØØ[Ý]HXÜ›ÜÜÈ[ÚÜÙ]HÜš]H]È[[™[ØY‚ˆÝ[WÜÚÜHYÙK™]˜[X]JŠ
+HOˆ
+Ù]NœÝXÝ\™YÛÛ™JÚÜ]JK™\œÚ[ÛŽœÚÜ™\œÚ[ÛŸJHŠBˆÚ[›™\—ÜÚÜHÛÜK™Y\ÛÜJÝ[WÜÚÜÉÙ]I×JBˆÚ[›™\—ÜÚÜÉØœ˜[™É×K˜\[™
+	ÐÐTÈ9b!ºh HIÊBˆÚ[›™\ˆHYÙKœ™\]Y\ÝœÜÝ
+˜\ÙH
+È	ËØ\KØYZ[‹ÜØ]™WÜÚÜÙ]IË]O^Âˆ	Ù]IÎˆÚ[›™\—ÜÚÜ	Ù^XÝYÝ™\œÚ[Û‰ÎˆÝ[WÜÚÜÉÝ™\œÚ[Û‰×KˆJBˆ\ÜÙ\Ú[›™\‹œÝ]\ÈOHŒÚ[›™\‹^
+
+BˆÚ[›™\—Ý™\œÚ[ÛˆHÚ[›™\‹šœÛÛŠ
+VÉÝ™\œÚ[Û‰×BˆÚ[›™\—ØØXÚYHYÙKœ™\]Y\Ý™Ù]
+˜\ÙH
+È	ËØ\KÜÚÜÙ]IÊBˆ\ÜÙ\Ú[›™\—ØØXÚYšXY\œË™Ù]
+	ÞX™[™]Ø[‹XØXÚIÊHOH	ÓRTÔÉËÚ[›™\—ØØXÚYšXY\œÂˆ\ÜÙ\Ú[›™\—ØØXÚYšœÛÛŠ
+VÉÝ™\œÚ[Û‰×HOHÚ[›™\—Ý™\œÚ[Û‚‚ˆYÙK™]˜[X]JˆˆŠ
+HOˆÛÜ[”Ý[QY]ÜŠ
+NÙØÝ[Y[™Ù][[Y[žRY
+	ÜÝ[K[˜[YIÊK˜[YOIÐÐTÈ9b!ºh Hˆ9ìîùb%ÉÎÙØÝ[Y[™Ù][[Y[žRY
+	ÜÝ[K\šXÙIÊK˜[YOIÍMMIßHˆˆŠBˆYÙK™]˜[X]JŠ
+HOˆØ]™TÝ[J
+HŠBˆÝ[WÜÝ[HHYÙK™]˜[X]JˆˆŠ
+HOˆ
+ÂˆÜ[Ž™ØÝ[Y[™Ù][[Y[žRY
+	ÜÝ[K[[Ù[	ÊK˜Û\ÜÓ\Ý˜ÛÛZ[œÊ	ÜÚÝÉÊKˆ[œ]™ØÝ[Y[™Ù][[Y[žRY
+	ÜÝ[K[˜[YIÊK˜[YKˆØØ[œÚÜ]KœÝ[\ËœÛÛYJOž›˜[YOOOIÐÐTÈ9b!ºh Hˆ9ìîùb%ÉÊKˆ™\œÚ[ÛŽœÚÜ™\œÚ[Û‚ˆJHˆˆŠBˆ\ÜÙ\Ý[WÜÝ[HOHÉÛÜ[‰Î•YK	Ú[œ]	Î‰ÐÐTÈ9b!ºh Hˆ9ìîùb%ÉË	ÛØØ[	Î‘˜[ÙK	Ý™\œÚ[Û‰ÎœÝ[WÜÚÜÉÝ™\œÚ[Û‰×_KÝ[WÜÝ[BˆYÙK›ØØ]ÜŠ	ÈÜÝ[K[[Ù[›Z]Û‰ÊK˜ÛXÚÊ
+B‚ˆÜšYÚ[˜[Û[Ù[HÝ[WÜÚÜÉÙ]I×VÉÛ[Ù[É×VÌBˆYÙK™]˜[X]JšYOˆÜ[“[Ù[Y]ÜŠY
+H‹ÜšYÚ[˜[Û[Ù[ÉÚY	×JBˆYÙK›ØØ]ÜŠ	ÈÛ[Ù[[˜[YIÊK™š[
+	ÐÐTÈ9b!ºh Hˆ9g¢ú&gÉÊBˆYÙK™]˜[X]JŠ
+HOˆØ]™S[Ù[
+
+HŠBˆ[Ù[ÜÝ[HHYÙK™]˜[X]JˆˆŠ
+HOˆ
+ÂˆÜ[Ž™ØÝ[Y[™Ù][[Y[žRY
+	Û[Ù[[[Ù[	ÊK˜Û\ÜÓ\Ý˜ÛÛZ[œÊ	ÜÚÝÉÊKˆ[œ]™ØÝ[Y[™Ù][[Y[žRY
+	Û[Ù[[˜[YIÊK˜[YKˆØØ[œÚÜ]K›[Ù[ËœÛÛYJOž›˜[YOOOIÐÐTÈ9b!ºh Hˆ9g¢ú&gÉÊKˆ™\œÚ[ÛŽœÚÜ™\œÚ[Û‚ˆJHˆˆŠBˆ\ÜÙ\[Ù[ÜÝ[HOHÉÛÜ[‰Î•YK	Ú[œ]	Î‰ÐÐTÈ9b!ºh Hˆ9g¢ú&gÉË	ÛØØ[	Î‘˜[ÙK	Ý™\œÚ[Û‰ÎœÝ[WÜÚÜÉÝ™\œÚ[Û‰×_K[Ù[ÜÝ[BˆØXÚWØY\—ÜÝ[HHYÙKœ™\]Y\Ý™Ù]
+˜\ÙH
+È	ËØ\KÜÚÜÙ]IÊBˆ\ÜÙ\ØXÚWØY\—ÜÝ[KšXY\œË™Ù]
+	ÞX™[™]Ø[‹XØXÚIÊHOH	ÒU	ËØXÚWØY\—ÜÝ[KšXY\œÂˆ\ÜÙ\ØXÚWØY\—ÜÝ[KšœÛÛŠ
+VÉÝ™\œÚ[Û‰×HOHÚ[›™\—Ý™\œÚ[Û‚ˆYÙK›ØØ]ÜŠ	ÈÛ[Ù[[[Ù[›Z]Û‰ÊK˜ÛXÚÊ
+B‚ˆYÙK›ØØ]ÜŠ	Ë›˜]ˆ]Û–Ù]K]šY]ÏH˜ÛÛ[Y\˜ÙH—IÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆØÝ[Y[™Ù][[Y[žRY
+	ÝšY]ËXÛÛ[Y\˜ÙIÊOË˜Û\ÜÓ\Ý˜ÛÛZ[œÊ	ØXÝ]™IÊHŠBˆYÙK›ØØ]ÜŠ	ÖÙ]K]XHœÝØÚÈ—IÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆYØÝ[Y[™Ù][[Y[žRY
+	ÜÜË\ÝØÚË\[™[	ÊKšY[ˆŠBˆØØ[ÜšXÙHHYÙK™]˜[X]JˆˆŠ
+HOˆØÛÛœÝYYØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÈÜÜË\Ù\šY\ÈÙ]K\Ù\šY\×KœÙ[XÝY	ÊOË™]\Ù]œÙ\šY\ßÚÜ]KœÝ[\ÖÌKšYÜ™]\›ˆÚYšXÙN“[X™\ŠÚÜ]KœÝ[\Ë™š[™
+O”Ýš[™ÊšY
+OOOTÝš[™ÊY
+JOËœšXÙJ__HˆˆŠBˆYÙK›ØØ]ÜŠ	ÈÜÜË\Ù\šY\Ë\šXÙIÊK™š[
+	Î	ÊBˆYÙK›ØØ]ÜŠ	ÈÜÜË\šXÙKY›Ü›H]Û‰ÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆØÝ[Y[™Ù][[Y[žRY
+	ÜÜË[Y\ÜØYÙIÊK^ÛÛ[š[˜ÛY\Ê	ú,áù¥¦ymìº(ªùam¹.å¹b!ºh y¢%º(çyïk¹¦í9¥¬	ÊHŠBˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÈÜÜË\Ù\šY\Ë\šXÙIÊKš[œ]Ý˜[YJ
+HOH	Î	Âˆ\ÜÙ\YÙK™]˜[X]J˜™Y›Ü™HOˆ[X™\ŠÚÜ]KœÝ[\Ë™š[™
+O”Ýš[™ÊšY
+OOOTÝš[™Ê™Y›Ü™KšY
+JOËœšXÙJOOOX™Y›Ü™KœšXÙH‹ØØ[ÜšXÙJB‚ˆÙ\™\—ØY\—ÜÝ[HHYÙKœ™\]Y\Ý™Ù]
+˜\ÙH
+È	ËØ\KÜÚÜÙ]IÊKšœÛÛŠ
+Bˆ\ÜÙ\Ù\™\—ØY\—ÜÝ[VÉÝ™\œÚ[Û‰×HOHÚ[›™\—Ý™\œÚ[Û‚ˆ\ÜÙ\	ÐÐTÈ9b!ºh HIÈ[ˆÙ\™\—ØY\—ÜÝ[VÉÙ]I×VÉØœ˜[™É×Bˆ\ÜÙ\›Ý[žJ™Ù]
+	Û˜[YIÊHOH	ÐÐTÈ9b!ºh Hˆ9ìîùb%ÉÈ›Üˆ[ˆÙ\™\—ØY\—ÜÝ[VÉÙ]I×VÉÜÝ[\É×JBˆ\ÜÙ\	ú,áù¥¦ymìº(ªùam¹.å¹b!ºh y¢%º(çyïk¹¦í9¥¬;ï#:*âúaãy¥¬:/"yaiyo£9a£y/ë¹¥.xà ‰È[ˆYÙK›ØØ]ÜŠ	ÈØ™‹\›ÙXÝ[Y\ÜØYÙIÊKš[›™\—Ý^
+
+BˆYÙK™]˜[X]JŠ
+HOˆØYÚÜ
+YJHŠBˆ\ÜÙ\YÙK™]˜[X]J™\œÚ[ÛˆOˆÚÜ™\œÚ[ÛOO]™\œÚ[Ûˆ	‰ˆÚÜ]K˜œ˜[™Ëš[˜ÛY\Ê	ÐÐTÈ9b!ºh HIÊH‹Ú[›™\—Ý™\œÚ[ÛŠBˆ™\ÝÜ™YHYÙKœ™\]Y\ÝœÜÝ
+˜\ÙH
+È	ËØ\KØYZ[‹ÜØ]™WÜÚÜÙ]IË]O^Âˆ	Ù]IÎˆÝ[WÜÚÜÉÙ]I×K	Ù^XÝYÝ™\œÚ[Û‰ÎˆÚ[›™\—Ý™\œÚ[Û‹ˆJBˆ\ÜÙ\™\ÝÜ™YœÝ]\ÈOHŒ™\ÝÜ™Y^
+
+BˆYÙK™]˜[X]JŠ
+HOˆØYÚÜ
+YJHŠBˆš[
+	ÐQRS—ÐÐUSÑ×ÓSÑSÔ’PÑWÔÕSWÐÐT×ÓÒÉÊB‚ˆYÙK›ØØ]ÜŠ	Ë›˜]ˆ]Û–Ù]K]šY]ÏH˜\ÜÙ]È—IÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆ\[Ùˆ\ÜÙ]ÓØYYOOH	Ý[™Yš[™Y	È	‰ˆ\ÜÙ]ÓØYY	‰ˆHYØÝ[Y[™Ù][[Y[žRY
+	Ø™‹X\ÜÙ]XØ]XXÝ[ÛœÉÊHŠBˆ\ÜÙ]Ø™Y›Ü™HHYÙK™]˜[X]JŠ
+HOˆ
+Ù]NœÝXÝ\™YÛÛ™J\ÜÙ]Ñ]JK™\œÚ[ÛŽ˜\ÜÙ]Õ™\œÚ[ÛŸJHŠBˆ\ÜÙ]ØHH‰ÐÐTËPK^Ý[YK[YWÛœÊ
+H	HLIÂˆ\ÜÙ]ØˆH‰ÐÐTËP‹^Ý[YK[YWÛœÊ
+H	HLIÂˆš[YYØ\ÜÙ]ÈHYÙKœ™\]Y\Ý™Ù]
+˜\ÙH
+È	ËØ\KØ\ÜÙ]ÉÊBˆ\ÜÙ\š[YYØ\ÜÙ]ËšXY\œË™Ù]
+	ÞX™[™]Ø[‹XØXÚIÊHOH	ÒU	Ëš[YYØ\ÜÙ]ËšXY\œÂˆ\ÜÙ]ÝÚ[›™\ˆHYÙKœ™\]Y\ÝœÜÝ
+˜\ÙH
+È	ËØ\KØYZ[‹ÜÝXÚÙ\—ØØ]YÛÜžIË]O^Âˆ	ØXÝ[Û‰Îˆ	ØÜ™X]IË	Û˜[YIÎˆ\ÜÙ]ØK	Ù^XÝYÝ™\œÚ[Û‰Îˆ\ÜÙ]Ø™Y›Ü™VÉÝ™\œÚ[Û‰×KˆJBˆ\ÜÙ\\ÜÙ]ÝÚ[›™\‹œÝ]\ÈOHŒ\ÜÙ]ÝÚ[›™\‹^
+
+Bˆ\ÜÙ]ÝÚ[›™\—Ý™\œÚ[ÛˆH\ÜÙ]ÝÚ[›™\‹šœÛÛŠ
+VÉÝ™\œÚ[Û‰×Bˆœ™\ÚØ\ÜÙ]ÈHYÙKœ™\]Y\Ý™Ù]
+˜\ÙH
+È	ËØ\KØ\ÜÙ]ÉÊBˆ\ÜÙ\œ™\ÚØ\ÜÙ]ËšXY\œË™Ù]
+	ÞX™[™]Ø[‹XØXÚIÊHOH	ÓRTÔÉËœ™\ÚØ\ÜÙ]ËšXY\œÂˆ\ÜÙ\œ™\ÚØ\ÜÙ]ËšœÛÛŠ
+VÉÝ™\œÚ[Û‰×HOH\ÜÙ]ÝÚ[›™\—Ý™\œÚ[Û‚ˆ›Û\ØÛÝ[HYÙK™]˜[X]JŠ
+HOˆÝÚ[™ÝË—×Ú\ÜÝYMNT›Û\]Ú[™ÝËœ›Û\ÝÚ[™ÝË—×Ú\ÜÝYMNT›Û\ÛÝ[LÝÚ[™ÝËœ›Û\J
+OOžÝÚ[™ÝË—×Ú\ÜÝYMNT›Û\ÛÝ[
+ÊÎÜ™]\›ˆ	Ý[™^XÝY	ßNÙØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÖÙ]KX\ÜÙ]XÜ™X]WIÊK˜ÛXÚÊ
+NÜ™]\›ˆÚ[™ÝË—×Ú\ÜÝYMNT›Û\ÛÝ[HŠBˆ\ÜÙ\›Û\ØÛÝ[OHˆYÙK›ØØ]ÜŠ	ÈØ™‹X\ÜÙ]XØ]YÛÜžK[˜[YIÊK™š[
+\ÜÙ]ØŠBˆYÙK›ØØ]ÜŠ	ÈØ™‹X\ÜÙ]XØ]YÛÜžK\Ø]™IÊK˜ÛXÚÊ
+BˆÛ
+YÙKˆŠ
+HOˆ\ÜÙ]Õ™\œÚ[ÛOO^ÚœÛÛ‹™[\Ê\ÜÙ]ÝÚ[›™\—Ý™\œÚ[ÛŠ_HŠBˆ\ÜÙ]ÜÝ[WÜÝ]HHYÙK™]˜[X]Jˆˆ›˜[Y\ÈOˆ
+Âˆ™\œÚ[ÛŽ˜\ÜÙ]Õ™\œÚ[Û‹ˆ\ÐN˜\ÜÙ]Ñ]K˜Ø]YÛÜšY\Ëš[˜ÛY\Ê˜[Y\Ë˜JKˆ\ÐŽ˜\ÜÙ]Ñ]K˜Ø]YÛÜšY\Ëš[˜ÛY\Ê˜[Y\Ë˜ŠBˆJHˆˆ‹ÉØIÎˆ\ÜÙ]ØK	Ø‰Îˆ\ÜÙ]ØŸJBˆ\ÜÙ\\ÜÙ]ÜÝ[WÜÝ]HOHÉÝ™\œÚ[Û‰Îˆ\ÜÙ]ÝÚ[›™\—Ý™\œÚ[Û‹	Ú\ÐIÎˆYK	Ú\Ð‰Îˆ˜[Ù_K\ÜÙ]ÜÝ[WÜÝ]Bˆ\ÜÙ\	ú,áù¥¦ymìº(ªùam¹.å¹b!ºh y¢%º(çyïk¹¦í9¥¬	È[ˆYÙK›ØØ]ÜŠ	ÈØ™‹X\ÜÙ]XØ]YÛÜžKY\œ›Ü‰ÊKš[›™\—Ý^
+
+Bˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÈØ™‹X\ÜÙ]XØ]YÛÜžK[[Ù[	ÊK™Ù]Ø]šX]J	ØÛ\ÜÉÊK™š[™
+	ÜÚÝÉÊHHˆ\ÜÙ\YÙK™]˜[X]JŠ
+HOˆÚ[™ÝË—×Ú\ÜÝYMNT›Û\ÛÝ[ŠHOHˆYÙK›ØØ]ÜŠ	ÈØ™‹X\ÜÙ]XØ]YÛÜžK[[Ù[Ù]KXØ]YÛÜžKXÛÜÙWIÊK™š\œÝ˜ÛXÚÊ
+Bˆ\ÜÙ]Ü™\ÝÜ™HHYÙKœ™\]Y\ÝœÜÝ
+˜\ÙH
+È	ËØ\KØYZ[‹ÜÝXÚÙ\—ØØ]YÛÜžIË]O^Âˆ	ØXÝ[Û‰Îˆ	Ù[]IË	Û˜[YIÎˆ\ÜÙ]ØK	Ù^XÝYÝ™\œÚ[Û‰Îˆ\ÜÙ]ÝÚ[›™\—Ý™\œÚ[Û‹ˆJBˆ\ÜÙ\\ÜÙ]Ü™\ÝÜ™KœÝ]\ÈOHŒ\ÜÙ]Ü™\ÝÜ™K^
+
+BˆYÙK™]˜[X]J˜\Þ[˜È
+
+HOˆØ]ØZ]ØY\ÜÙ]ÊYJ_HŠBˆš[
+	ÐQRS—ÐTÔÑUÔÕSWÐÐT×ÐÐPÒWÒS•SQUSÓ—ÓÒÉÊB‚ˆ\ÜÙ]ÝÛÜšÜÜXÙHHYÙK™]˜[X]JˆˆŠ
+HOˆÂˆÚ[™ÝË—×Ú\ÜÝYMNP\ÜÙ]Ï\ÝXÝ\™YÛÛ™J\ÜÙ]Ñ]JNÂˆ\ÜÙ]Ñ]O^ØØ]YÛÜšY\Î–Éùaj:`ê	Ë	ú,¤ùdª‰Ë	ú"¬y§-I×KÝXÚÙ\œÎ–ÂˆÚY‰Ø\ÜÙ]XØ]XIË˜[YN‰ùçhz)®º,¤ùdª‰ËØ]YÛÜžN‰ú,¤ùdª‰Ë\›‰ËÜÝ]XËÛZ\ÜÚ[™ËZ\ÜÝYMNKX\ÜÙ]œ™ÉßKˆÚY‰Ø\ÜÙ]XØ]X‰Ë˜[YN‰ùªf:"l¹l#ú"¬IËØ]YÛÜžN‰ú"¬y§-IË\›‰ËÜÝ]XËÚ[XYÙKœ™ÉßKˆÚY‰Ø\ÜÙ]XØ]XÉË˜[YN‰ùêæyêâú,¤ùdª‰ËØ]YÛÜžN‰ú,¤ùdª‰Ë\›‰ËÜÝ]XËÚ[XYÙKœ™ÉßBˆ_NÂˆÝ\œ™[\ÜÙ]Iùaj:`ê	ÎÜ™[™\\ÜÙ]XœÊ
+NÜ™[™\\ÜÙ]Ê
+NÂˆØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÖÙ]KX\ÜÙ]XÜ™X]WIÊK˜ÛXÚÊ
+NÂˆØÝ[Y[™Ù][[Y[žRY
+	Ø™‹X\ÜÙ]XØ]YÛÜžK[˜[YIÊK˜[YOIú,¤ùdª‰ÎÂˆØÝ[Y[™Ù][[Y[žRY
+	Ø™‹X\ÜÙ]XØ]YÛÜžKY›Ü›IÊKœ™\]Y\ÝÝX›Z]
+
+NÂˆ™]\›ˆÂˆ›Û\Ø[ÎÚ[™ÝË—×Ú\ÜÝYMNT›Û\ÛÝ[ˆ\XØ]N™ØÝ[Y[™Ù][[Y[žRY
+	Ø™‹X\ÜÙ]XØ]YÛÜžKY\œ›Ü‰ÊK^ÛÛ[ˆÛÝ[™ØÝ[Y[™Ù][[Y[žRY
+	Ø™‹X\ÜÙ]\™\Ý[XÛÝ[	ÊK^ÛÛ[ˆØ\™Î™ØÝ[Y[œ]Y\žTÙ[XÝÜ[
+	ÈØ\ÜÙ]YÜšY˜™‹X\ÜÙ]XØ\™	ÊK›[™Ýˆ^XÚ][]N™ØÝ[Y[œ]Y\žTÙ[XÝÜ[
+	ÈØ\ÜÙ]YÜšYÙ]KY[]K\ÝXÚÙ\—IÊK›[™ÝˆNÂˆHˆˆŠBˆ\ÜÙ\\ÜÙ]ÝÛÜšÜÜXÙHOHÂˆ	Ü›Û\Ø[ÉÎˆ	Ù\XØ]IÎˆ	ùb!ºhg¹d#yê,ymì¹kf9g*	Ëˆ	ØÛÝ[	Îˆ	ùæë¹bcyb!ºhgˆÈ9o-IË	ØØ\™ÉÎˆË	Ù^XÚ][]IÎˆËˆK\ÜÙ]ÝÛÜšÜÜXÙBˆ[™[™×Ø\ÜÙ]Ú[XYÙHH×BˆYÙKœ›Ý]J	ÊŠ‹Ú\ÜÝYMNKY[^YYX\ÜÙ]œ™ÉË[X™H›Ý]Nˆ[™[™×Ø\ÜÙ]Ú[XYÙK˜\[™
+›Ý]JJBˆÚ]YÙK™^XÝÜ™\]Y\Ý
+	ÊŠ‹Ú\ÜÝYMNKY[^YYX\ÜÙ]œ™ÉÊN‚ˆYÙK™]˜[X]JŠ
+HOˆØ\ÜÙ]Ñ]KœÝXÚÙ\œË™š[™
+OžšYOOIØ\ÜÙ]XØ]XIÊK\›IËÚ\ÜÝYMNKY[^YYX\ÜÙ]œ™ÉÎÜ™[™\\ÜÙ]Ê
+NÙØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÖÙ]KZYW˜\ÜÙ]XØ]XW—H[YÉÊK›ØY[™ÏIÙXYÙ\‰ßHŠBˆ\ÜÙ]Ü[™[™ÈHYÙK™]˜[X]JˆˆŠ
+HOˆÂˆÛÛœÝYYXOYØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÖÙ]KZYH˜\ÜÙ]XØ]XH—H˜™‹XØ\™[YYXIÊNÂˆ™]\›ˆÚ[XYÙN™Ù]ÛÛ\]YÝ[JYYXKœ]Y\žTÙ[XÝÜŠ	Ú[YÉÊJKš\ÚXš[]KXÙZÛ\Ž™Ù]ÛÛ\]YÝ[JYYXKœ]Y\žTÙ[XÝÜŠ	Ë˜™‹Z[XYÙK\XÙZÛ\‰ÊJK™\Ü^_NÂˆHˆˆŠBˆ\ÜÙ\\ÜÙ]Ü[™[™ÈOHÉÚ[XYÙIÎˆ	ÚY[‰Ë	ÜXÙZÛ\‰Îˆ	ÙÜšY	ßK\ÜÙ]Ü[™[™Âˆ\ÜÙ\[Š[™[™×Ø\ÜÙ]Ú[XYÙJHOHBˆYÙK›ØØ]ÜŠ	ÖÙ]KZYH˜\ÜÙ]XØ]XH—H˜™‹XØ\™[YYXH[YÉÊK™]˜[X]Jš[YÈOˆ[YË˜Y]™[\Ý[™\Š	Ù\œ›Ü‰Ë
+
+HOˆ[YË™]\Ù]\Ý\œ›ÜˆH	ÌIÊHŠBˆ[™[™×Ø\ÜÙ]Ú[XYÙKœÜ
+
+K™[š[
+Ý]\ÏM›ÙOIÛZ\ÜÚ[™ÉÊBˆÛ
+YÙKŠ
+HOˆØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÖÙ]KZYW˜\ÜÙ]XØ]XW—H˜™‹XØ\™[YYXH[YÉÊOË™]\Ù]\Ý\œ›ÜOOIÌIÈŠBˆ\ÜÙ]Ù˜Z[YHYÙK™]˜[X]JˆˆŠ
+HOˆÂˆÛÛœÝYYXOYØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÖÙ]KZYH˜\ÜÙ]XØ]XH—H˜™‹XØ\™[YYXIÊNÂˆ™]\›ˆÚ[XYÙN™Ù]ÛÛ\]YÝ[JYYXKœ]Y\žTÙ[XÝÜŠ	Ú[YÉÊJKš\ÚXš[]KXÙZÛ\Ž™Ù]ÛÛ\]YÝ[JYYXKœ]Y\žTÙ[XÝÜŠ	Ë˜™‹Z[XYÙK\XÙZÛ\‰ÊJK™\Ü^_NÂˆHˆˆŠBˆ\ÜÙ\\ÜÙ]Ù˜Z[YOHÉÚ[XYÙIÎˆ	ÚY[‰Ë	ÜXÙZÛ\‰Îˆ	ÙÜšY	ßK\ÜÙ]Ù˜Z[YˆYÙK[œ›Ý]J	ÊŠ‹Ú\ÜÝYMNKY[^YYX\ÜÙ]œ™ÉÊBˆ[™[™×Ø\ÜÙ]ÜÝXØÙ\ÜÈH×BˆYÙKœ›Ý]J	ÊŠ‹Ú\ÜÝYMNK[ÚËX\ÜÙ]œ™ÉË[X™H›Ý]Nˆ[™[™×Ø\ÜÙ]ÜÝXØÙ\ÜË˜\[™
+›Ý]JJBˆÚ]YÙK™^XÝÜ™\]Y\Ý
+	ÊŠ‹Ú\ÜÝYMNK[ÚËX\ÜÙ]œ™ÉÊN‚ˆYÙK™]˜[X]JŠ
+HOˆØ\ÜÙ]Ñ]KœÝXÚÙ\œË™š[™
+OžšYOOIØ\ÜÙ]XØ]XIÊK\›IËÚ\ÜÝYMNK[ÚËX\ÜÙ]œ™ÉÎÜ™[™\\ÜÙ]Ê
+NÙØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÖÙ]KZYW˜\ÜÙ]XØ]XW—H[YÉÊK›ØY[™ÏIÙXYÙ\‰ßHŠBˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÖÙ]KZYH˜\ÜÙ]XØ]XH—H˜™‹XØ\™[YYXH[YÉÊK™]˜[X]Jš[YÈOˆÙ]ÛÛ\]YÝ[J[YÊKš\ÚXš[]HŠHOH	ÚY[‰Âˆ\ÜÙ\[Š[™[™×Ø\ÜÙ]ÜÝXØÙ\ÜÊHOHBˆ[™[™×Ø\ÜÙ]ÜÝXØÙ\ÜËœÜ
+
+K™[š[
+Ý]\ÏLŒ›ÙOQÓÓÑÛÛ[Ý\OIÚ[XYÙKÜ™ÉÊBˆÛ
+YÙKŠ
+HOˆÙ]ÛÛ\]YÝ[JØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÖÙ]KZYW˜\ÜÙ]XØ]XW—H˜™‹XØ\™[YYXH[YÉÊJKš\ÚXš[]OOOIÝš\ÚX›IÈŠBˆ\ÜÙ]ÛØYYHYÙK™]˜[X]JˆˆŠ
+HOˆÂˆÛÛœÝYYXOYØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÖÙ]KZYH˜\ÜÙ]XØ]XH—H˜™‹XØ\™[YYXIÊNÂˆ™]\›ˆÚ[XYÙN™Ù]ÛÛ\]YÝ[JYYXKœ]Y\žTÙ[XÝÜŠ	Ú[YÉÊJKš\ÚXš[]KXÙZÛ\Ž™Ù]ÛÛ\]YÝ[JYYXKœ]Y\žTÙ[XÝÜŠ	Ë˜™‹Z[XYÙK\XÙZÛ\‰ÊJK™\Ü^_NÂˆHˆˆŠBˆ\ÜÙ\\ÜÙ]ÛØYYOHÉÚ[XYÙIÎˆ	Ýš\ÚX›IË	ÜXÙZÛ\‰Îˆ	Û›Û™IßK\ÜÙ]ÛØYYˆYÙK[œ›Ý]J	ÊŠ‹Ú\ÜÝYMNK[ÚËX\ÜÙ]œ™ÉÊBˆYÙK™]˜[X]JŠ
+HOˆØ\ÜÙ]Ñ]KœÝXÚÙ\œË™š[™
+OžšYOOIØ\ÜÙ]XØ]XIÊK\›IËÜÝ]XËÛZ\ÜÚ[™ËZ\ÜÝYMNKX\ÜÙ]œ™ÉÎÜ™[™\\ÜÙ]Ê
+_HŠBˆš[
+	ÐQRS—ÐTÔÑUÕSP—Ó“×Ñ“TÒÓÒÉÊBˆYÙK›ØØ]ÜŠ	ÈØ™‹X\ÜÙ]XØ]YÛÜžK[[Ù[Ù]KXØ]YÛÜžKXÛÜÙWIÊK™š\œÝ˜ÛXÚÊ
+BˆYÙK™]˜[X]JŠ
+HOˆØÝ\œ™[\ÜÙ]Iú,¤ùdª‰ÎÜ™[™\\ÜÙ]XœÊ
+NÜ™[™\\ÜÙ]Ê
+NÙØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÖÙ]KX\ÜÙ]\™[˜[YWIÊK˜ÛXÚÊ
+_HŠBˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÈØ™‹X\ÜÙ]XØ]YÛÜžK[˜[YIÊKš[œ]Ý˜[YJ
+HOH	ú,¤ùdª‰Âˆ\ÜÙ\YÙK™]˜[X]JŠ
+HOˆÚ[™ÝË—×Ú\ÜÝYMNT›Û\ÛÝ[ŠHOHˆYÙK›ØØ]ÜŠ	ÈØ™‹X\ÜÙ]XØ]YÛÜžK[[Ù[Ù]KXØ]YÛÜžKXÛÜÙWIÊK™š\œÝ˜ÛXÚÊ
+BˆYÙK™]˜[X]JŠ
+HOˆØÝ\œ™[\ÜÙ]Iùaj:`ê	ÎÜ™[™\\ÜÙ]XœÊ
+NÜ™[™\\ÜÙ]Ê
+_HŠBˆYÙK›ØØ]ÜŠ	ÈØ™‹X\ÜÙ]\ÙX\˜Ú	ÊK™š[
+	ú,¤ùdª‰ÊBˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÈØ\ÜÙ]YÜšY˜™‹X\ÜÙ]XØ\™	ÊK˜ÛÝ[
+
+HOH‚ˆ\ÜÙ\	ù¤'9l"ùb,ˆ9o-IÈ[ˆYÙK›ØØ]ÜŠ	ÈØ™‹X\ÜÙ]\™\Ý[XÛÝ[	ÊKš[›™\—Ý^
+
+B‚ˆYÙK›ØØ]ÜŠ	ÈØ™‹X\ÜÙ]\ÙX\˜Ú	ÊK™š[
+	ÉÊBˆYÙK›ØØ]ÜŠ	ÈØ™‹X˜]ÚXØ]X‰ÊK˜ÛXÚÊ
+BˆYÙK›ØØ]ÜŠ	ÖÙ]KZYH˜\ÜÙ]XØ]XH—IÊK˜ÛXÚÊ
+Bˆ[Ý™WÜ™\]Y\ÝÈH×BˆYˆ[Ý™WØ\ÜÙ]Ü™\ÜÛœÙJ›Ý]JN‚ˆ[Ý™WÜ™\]Y\ÝË˜\[™
+›Ý]Kœ™\]Y\ÝœÜÝÙ]WÚœÛÛŠBˆ›Ý]K™[š[
+Ý]\ÏLŒÛÛ[Ý\OIØ\XØ][Û‹ÚœÛÛ‰Ë›ÙOIÞÈœÝ]\ÈŽˆœÝXØÙ\ÜÈ‹›[Ý™YŽŒK™\œÚ[ÛˆŽˆš\ÜÝYMNK[[Ý™HŸIÊBˆYÙKœ›Ý]J	ÊŠ‹Ø\KØYZ[‹ÜÝXÚÙ\—ØØ]YÛÜžIË[Ý™WØ\ÜÙ]Ü™\ÜÛœÙJBˆYÙK›ØØ]ÜŠ	ÈØ™‹]\™Ù]XØ]YÛÜžIÊK™š[
+	ùì¯º`n	ÊBˆYÙK›ØØ]ÜŠ	ÈØ™‹[[Ý™KX\ÜÙ]ÉÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆ\ÜÙ]Ñ]KœÝXÚÙ\œË™š[™
+OžšYOOIØ\ÜÙ]XØ]XIÊOË˜Ø]YÛÜžOOOIùì¯º`n	ÈŠBˆ\ÜÙ\[Š[Ý™WÜ™\]Y\ÝÊHOHH[™[Ý™WÜ™\]Y\ÝÖÌVÉØXÝ[Û‰×HOH	Û[Ý™IÈ[™[Ý™WÜ™\]Y\ÝÖÌVÉÚYÉ×HOHÉØ\ÜÙ]XØ]XI×K[Ý™WÜ™\]Y\ÝÂˆYÙK[œ›Ý]J	ÊŠ‹Ø\KØYZ[‹ÜÝXÚÙ\—ØØ]YÛÜžIÊB‚ˆYÙK›ØØ]ÜŠ	ÈØ™‹X˜]ÚXØ]X‰ÊK˜ÛXÚÊ
+BˆYÙK›ØØ]ÜŠ	ÖÙ]KZYH˜\ÜÙ]XØ]XH—IÊK˜ÛXÚÊ
+Bˆ[]WØ\ÜÙ]ÈH×BˆYˆ[]WØ\ÜÙ]×Ü™\ÜÛœÙJ›Ý]JN‚ˆ[]WØ\ÜÙ]Ë˜\[™
+›Ý]Kœ™\]Y\ÝœÜÝÙ]WÚœÛÛŠBˆ›Ý]K™[š[
+Ý]\ÏLŒÛÛ[Ý\OIØ\XØ][Û‹ÚœÛÛ‰Ë›ÙOIÞÈœÝ]\ÈŽˆœÝXØÙ\ÜÈ‹™[]YŽŒK™\œÚ[ÛˆŽˆš\ÜÝYMNKY[]HŸIÊBˆYÙKœ›Ý]J	ÊŠ‹Ø\KØYZ[‹ÜÝXÚÙ\—ØØ]YÛÜžIË[]WØ\ÜÙ]×Ü™\ÜÛœÙJBˆYÙK™]˜[X]JŠ
+HOˆÝÚ[™ÝË—×Ú\ÜÝYMNPÛÛ™š\›O]Ú[™ÝË˜ÛÛ™š\›NÝÚ[™ÝË˜ÛÛ™š\›OJ
+OOY_HŠBˆYÙK›ØØ]ÜŠ	ÈØ™‹Y[]KX\ÜÙ]ÉÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆX\ÜÙ]Ñ]KœÝXÚÙ\œËœÛÛYJOžšYOOIØ\ÜÙ]XØ]XIÊHŠBˆ\ÜÙ\[Š[]WØ\ÜÙ]ÊHOHH[™[]WØ\ÜÙ]ÖÌVÉØXÝ[Û‰×HOH	Ù[]WÜÝXÚÙ\œÉË[]WØ\ÜÙ]ÂˆYÙK[œ›Ý]J	ÊŠ‹Ø\KØYZ[‹ÜÝXÚÙ\—ØØ]YÛÜžIÊB‚ˆ\ØYØ][\ÈH×BˆYˆ\ØYØ\ÜÙ]Ù˜Z[\™J›Ý]JN‚ˆ\ØYØ][\Ë˜\[™
+›Ý]Kœ™\]Y\ÝœÜÝÙ]JBˆ›Ý]K™[š[
+Ý]\ÏMLËÛÛ[Ý\OIØ\XØ][Û‹ÚœÛÛ‰Ë›ÙOIÞÈœÝ]\ÈŽˆ™\œ›Üˆ‹›\ÙÈŽˆ¹."¹`¬ù¦ªù¦`¹i,y¥eÈŸIÊBˆYÙKœ›Ý]J	ÊŠ‹Ø\KØYZ[‹Ø˜]ÚÝ\ØYÜÝXÚÙ\œÉË\ØYØ\ÜÙ]Ù˜Z[\™JBˆYÙK›ØØ]ÜŠ	ÈÜÝXÚÙ\‹Yš[\ÉÊKœÙ]Ú[œ]Ùš[\Êš[\ÏVÞÂˆ	Û˜[YIÎˆ	Ú\ÜÝYMNKœ™ÉË	ÛZ[YU\IÎˆ	Ú[XYÙKÜ™ÉËˆ	ØY™™\‰Îˆ‰Ú\ÜÝYMNK]\ØYYš^\™IËˆWJBˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÈØ™‹X\ÜÙ]]\ØY[[Ù[	ÊK™Ù]Ø]šX]J	ØÛ\ÜÉÊK™š[™
+	ÜÚÝÉÊHHˆ\ÜÙ\	ùmìº`n9¤áÈH9o-yg%¹âaÉÈ[ˆYÙK›ØØ]ÜŠ	ÈØ™‹X\ÜÙ]]\ØY\Ý[[X\žIÊKš[›™\—Ý^
+
+BˆYÙK›ØØ]ÜŠ	ÈØ™‹X\ÜÙ][™]ËXØ]YÛÜžK]ÙÙÛIÊK˜ÛXÚÊ
+BˆYÙK›ØØ]ÜŠ	ÈØ™‹X\ÜÙ]]\ØY[™]ËXØ]YÛÜžIÊK™š[
+	ù¢ny«(y¥¬9b!ºhg‰ÊBˆYÙK›ØØ]ÜŠ	ÈØ™‹X\ÜÙ]]\ØYXÛÛ™š\›IÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆØÝ[Y[™Ù][[Y[žRY
+	Ø™‹X\ÜÙ]]\ØYY\œ›Ü‰ÊK^ÛÛ[š[˜ÛY\Ê	ù."¹`¬ù¦ªù¦`¹i,y¥eÉÊHŠBˆ\ÜÙ\[Š\ØYØ][\ÊHOHBˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÈØ™‹X\ÜÙ]]\ØY[[Ù[	ÊK™Ù]Ø]šX]J	ØÛ\ÜÉÊK™š[™
+	ÜÚÝÉÊHHˆ\ÜÙ\	ùmìº`n9¤áÈH9o-yg%¹âaÉÈ[ˆYÙK›ØØ]ÜŠ	ÈØ™‹X\ÜÙ]]\ØY\Ý[[X\žIÊKš[›™\—Ý^
+
+Bˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÈØ™‹X\ÜÙ]]\ØY[™]ËXØ]YÛÜžIÊKš[œ]Ý˜[YJ
+HOH	ù¢ny«(y¥¬9b!ºhg‰ÂˆYÙK[œ›Ý]J	ÊŠ‹Ø\KØYZ[‹Ø˜]ÚÝ\ØYÜÝXÚÙ\œÉÊBˆ\ØYÜÝXØÙ\ÜÈH×BˆYˆ\ØYØ\ÜÙ]ÜÝXØÙ\ÜÊ›Ý]JN‚ˆ\ØYÜÝXØÙ\ÜË˜\[™
+›Ý]Kœ™\]Y\ÝœÜÝÙ]JBˆ›Ý]K™[š[
+Ý]\ÏLŒÛÛ[Ý\OIØ\XØ][Û‹ÚœÛÛ‰Ë›ÙOIÞÈœÝ]\ÈŽˆœÝXØÙ\ÜÈ‹™\œÚ[ÛˆŽˆš\ÜÝYMNK]\ØY‹™]HŽ–ÞÈšYŽˆš\ÜÝYMNK]\ØYY‹˜Ø]YÛÜžHŽˆ¹¢ny«(y¥¬9b!ºhgˆ‹\›Žˆ‹ÜÝ]XËÛZ\ÜÚ[™ËZ\ÜÝYMNK]\ØYœ™ÈŸW_IÊBˆYÙKœ›Ý]J	ÊŠ‹Ø\KØYZ[‹Ø˜]ÚÝ\ØYÜÝXÚÙ\œÉË\ØYØ\ÜÙ]ÜÝXØÙ\ÜÊBˆYÙK™]˜[X]JŠ
+HOˆØÛÛœÝ›Ü›OYØÝ[Y[™Ù][[Y[žRY
+	Ø™‹X\ÜÙ]]\ØYY›Ü›IÊNÙ›Ü›Kœ™\]Y\ÝÝX›Z]
+
+NÙ›Ü›Kœ™\]Y\ÝÝX›Z]
+
+_HŠBˆÛ
+YÙKŠ
+HOˆYØÝ[Y[™Ù][[Y[žRY
+	Ø™‹X\ÜÙ]]\ØY[[Ù[	ÊK˜Û\ÜÓ\Ý˜ÛÛZ[œÊ	ÜÚÝÉÊHŠBˆ\ÜÙ\[Š\ØYÜÝXØÙ\ÜÊHOHBˆ\ÜÙ\	ùmì¹."¹`¬ÈH9o-yb,8à#9¢ny«(y¥¬9b!ºhg¸à#IÈ[ˆYÙK›ØØ]ÜŠ	ÈØ™‹\›ÙXÝ[Y\ÜØYÙIÊKš[›™\—Ý^
+
+BˆYÙK[œ›Ý]J	ÊŠ‹Ø\KØYZ[‹Ø˜]ÚÝ\ØYÜÝXÚÙ\œÉÊB‚ˆYÙKœÙ]ÝšY]ÜÜÜÚ^™JÉÝÚY	ÎŒÎL	ÚZYÚ	ÎŽJBˆYÙK™]˜[X]JŠ
+HOˆØÝ\œ™[\ÜÙ]Iùaj:`ê	ÎÜ™[™\\ÜÙ]XœÊ
+NÜ™[™\\ÜÙ]Ê
+NÙØÝ[Y[™Ù][[Y[žRY
+	Ø™‹X˜]ÚXØ]X‰ÊK˜ÛXÚÊ
+_HŠBˆ\ÜÙ]Û[Øš[HHYÙK™]˜[X]JˆˆŠ
+HOˆ
+ÂˆØÜ›Û™ØÝ[Y[™ØÝ[Y[[[Y[œØÜ›ÛÚYˆÛÛ[[œÎ™Ù]ÛÛ\]YÝ[JØÝ[Y[™Ù][[Y[žRY
+	Ø\ÜÙ]YÜšY	ÊJK™ÜšY[\]PÛÛ[[œËœÜ]
+	È	ÊK›[™Ýˆ[]RZYÚ™ØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÈØ\ÜÙ]YÜšYÙ]KY[]K\ÝXÚÙ\—IÊOË™Ù]›Ý[™[™ÐÛY[™XÝ
+
+KšZYÚˆ˜]ÚÝ™\™›ÝÎ™Ù]ÛÛ\]YÝ[JØÝ[Y[™Ù][[Y[žRY
+	Ø\ÜÙ]X˜]Ú˜\‰ÊJK›Ý™\™›ÝÖˆJHˆˆŠBˆ\ÜÙ\\ÜÙ]Û[Øš[VÉÜØÜ›Û	×HHÎLˆ[™\ÜÙ]Û[Øš[VÉØÛÛ[[œÉ×HOHˆ[™\ÜÙ]Û[Øš[VÉÙ[]RZYÚ	×HHË\ÜÙ]Û[Øš[Bˆ\ÜÙ\\ÜÙ]Û[Øš[VÉØ˜]ÚÝ™\™›ÝÉ×HOH	Ø]]ÉË\ÜÙ]Û[Øš[BˆYÙKœÙ]ÝšY]ÜÜÜÚ^™JÉÝÚY	ÎŒLN	ÚZYÚ	ÎŽLJB‚ˆYÙK™]˜[X]JˆˆŠ
+HOˆÂˆYŠØÝ[Y[™Ù][[Y[žRY
+	Ø\ÜÙ]X˜]Ú˜\‰ÊK˜Û\ÜÓ\Ý˜ÛÛZ[œÊ	ÜÚÝÉÊJYØÝ[Y[™Ù][[Y[žRY
+	Ø™‹X˜]ÚXØ]X‰ÊK˜ÛXÚÊ
+NÂˆ\ÜÙ]Ñ]O]Ú[™ÝË—×Ú\ÜÝYMNP\ÜÙ]ÎÙ[]HÚ[™ÝË—×Ú\ÜÝYMNP\ÜÙ]ÎÂˆÚ[™ÝË˜ÛÛ™š\›O]Ú[™ÝË—×Ú\ÜÝYMNPÛÛ™š\›NÙ[]HÚ[™ÝË—×Ú\ÜÝYMNPÛÛ™š\›NÂˆÚ[™ÝËœ›Û\]Ú[™ÝË—×Ú\ÜÝYMNT›Û\Ù[]HÚ[™ÝË—×Ú\ÜÝYMNT›Û\Ù[]HÚ[™ÝË—×Ú\ÜÝYMNT›Û\ÛÝ[ÂˆÝ\œ™[\ÜÙ]Iùaj:`ê	ÎÜ™[™\\ÜÙ]XœÊ
+NÜ™[™\\ÜÙ]Ê
+NÂˆHˆˆŠBˆš[
+	ÐQRS—ÐTÔÑUÓP”T–WÕÓÔ’ÔÔPÑWÓÒÉÊB‚ˆš[Û˜]ˆHYÙK›ØØ]ÜŠ	Ë›˜]ˆ]Û–Ù]K]šY]ÏHœš[XÙ[\ˆ—IÊBˆš[Û˜]‹˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆØÝ[Y[œ]Y\žTÙ[XÝÜ[
+	ÈÜËYÜšYœËXØ\™	ÊK›[™ÝŒ	‰ˆØÝ[Y[™Ù][[Y[žRY
+	ÝšY]Ë\š[XÙ[\‰ÊK˜Û\ÜÓ\Ý˜ÛÛZ[œÊ	ØXÝ]™IÊHŠBˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÈÜËXÛÛ™šYÉÊK™Ù]Ø]šX]J	ØÛ\ÜÉÊK™š[™
+	ÝØ\›‰ÊHHˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÖÙ]K\ÏHœÝ\—IÊK˜ÛÝ[
+
+HOHˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÖÙ]K\ÏHœ›Ùš[H—IÊK˜ÛÝ[
+
+HOHˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÈÜË[[Ù[	ÊK˜ÛÝ[
+
+HOHˆ\ÜÙ\	Î0åÈMŒ[HÈKHÈH‹IÈ[ˆYÙK›ØØ]ÜŠ	ÈÜËYÜšY	ÊKš[›™\—Ý^
+
+Bˆ›ÜˆÚYZYÚ[ˆ
+
+ÎL
+K
+ÍŽL
+K
+ML
+JN‚ˆYÙKœÙ]ÝšY]ÜÜÜÚ^™JXÝ
+ÚY]ÚYZYÚZZYÚ
+JBˆY]šXÜÈHYÙK™]˜[X]JˆˆŠ
+HOˆ
+ÂˆÚYš[›™\•ÚYØÜ›Û™ØÝ[Y[™ØÝ[Y[[[Y[œØÜ›ÛÚYˆšY]Î™ØÝ[Y[™Ù][[Y[žRY
+	ÝšY]Ë\š[XÙ[\‰ÊK™Ù]›Ý[™[™ÐÛY[™XÝ
+
+KÚYˆØ\™Î™ØÝ[Y[œ]Y\žTÙ[XÝÜ[
+	ÈÜËYÜšYœËXØ\™	ÊK›[™ÝˆÙXÜ™]Î™ØÝ[Y[™Ù][[Y[žRY
+	ÝšY]Ë\š[XÙ[\‰ÊK^ÛÛ[š[˜ÛY\Ê	Ù˜ZÙKZÙ^IÊBˆJHˆˆŠBˆ\ÜÙ\Y]šXÜÖÉÜØÜ›Û	×HHÚY
+Èˆ[™Y]šXÜÖÉÝšY]É×HˆŒ[™Y]šXÜÖÉØØ\™É×Hˆ[™›ÝY]šXÜÖÉÜÙXÜ™]É×KY]šXÜÂˆYØXÞWÛÜ™\ˆH\Û[Ù[K˜ÛÛ[Y\˜ÙKœÝÜ™K›ØØ[ÛÜ™\œÊ
+VÌBˆÛÛ[Y\˜ÙHH\Û[Ù[K˜ÛÛ[Y\˜ÙKœ™XY
+
+Bˆ\ÜÙ\ÛÛ[Y\˜ÙVÉÛÜ™\—Ùš[˜[˜ÙI×KœÜ
+YØXÞWÛÜ™\–ÉÚY	×K›Û™JKYØXÞWÛÜ™\–ÉÚY	×Bˆ\ÜÙ\\Û[Ù[K˜ÛÛ[Y\˜ÙKœÝÜ™K˜ÛÛ[Z]
+[
+ÛÛ[Y\˜ÙK™Ù]
+	Ü™]š\Ú[Û‰Ë
+JKÛÛ[Y\˜ÙJBˆYÙK›ØØ]ÜŠ	ÈÜË\™[ØY	ÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÖÙ]K\ÏW˜š[™[™×—IÊHOOH[ŠBˆYÙK›ØØ]ÜŠ	ÖÙ]K\ÏH˜š[™[™È—IÊK™š\œÝ˜ÛXÚÊ
+BˆYÙK›ØØ]ÜŠ	ÈÜËXš[™[[Ù[œÚÝÉÊKØZ]Ù›ÜŠ
+Bˆ\ÜÙ\	ù.#y§ ù/ë¹¥.yáçù¥-»ï#ù¢$9§+;ï#ùnªùkf:,áù¥¦IÈ[ˆYÙK›ØØ]ÜŠ	ÈÜËXš[™[[Ù[	ÊKš[›™\—Ý^
+
+Bˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÈÜËXš[™\ÚÝHÜ[Û‰ÊK˜ÛÝ[
+
+HH‚ˆYÙK›ØØ]ÜŠ	ÈÜËXš[™XÛÜÙIÊK˜ÛXÚÊ
+Bˆš[
+	Ô’S•ÐÑS•T—ÐMWÔ‘TÔÓ”ÒU‘WÑRSÐÓÔÑQÓÒÉÊB‚ˆ[\]WÛ˜]ˆHYÙK›ØØ]ÜŠ	Ë›˜]ˆ]Û–Ù]K]šY]ÏH[\]\È—IÊBˆ[\]WÛ˜]‹˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆ\[ÙˆÚ[™ÝË˜™[™]Ø[‘[œÝ\™U[\]QY]ÜˆOOH	Ù[˜Ý[Û‰È	‰ˆ\[ÙˆÚÜØYYOOH	Ý[™Yš[™Y	È	‰ˆÚÜØYY	‰ˆ\[Ùˆ[\]\ÓØYYOOH	Ý[™Yš[™Y	È	‰ˆ[\]\ÓØYYŠBˆ^žWØ™Y›Ü™HHYÙK™]˜[X]JˆˆŠ
+HOˆ
+Âˆ™XYNˆH]Ú[™ÝË—×Ø™[™]Ø[•[\]TÝXÚÔ™XYKˆ[š]™\œØ[ØÜš\Î™ØÝ[Y[œ]Y\žTÙ[XÝÜ[
+	ÜØÜš\ÜÜ˜ÊH˜YZ[‹][š]™\œØ[][\]\ËšœÈ—IÊK›[™ÝˆY]Ü”ØÜš\Î™ØÝ[Y[œ]Y\žTÙ[XÝÜ[
+	ÜØÜš\ÜÜ˜ÊH˜YZ[‹][\]KYY]Ü‹]Œ‹šœÈ—IÊK›[™Ýˆš[\œÎˆHYØÝ[Y[™Ù][[Y[žRY
+	Ø™‹][\]KYš[\œÉÊBˆJHˆˆŠBˆ\ÜÙ\^žWØ™Y›Ü™HOHÉÜ™XYIÎˆ˜[ÙK	Ý[š]™\œØ[ØÜš\ÉÎˆ	ÙY]Ü”ØÜš\ÉÎˆ	Ùš[\œÉÎˆY_K^žWØ™Y›Ü™B‚ˆ[\]WÛXœ˜\žHHYÙK™]˜[X]JˆˆŠ
+HOˆÂˆÚ[™ÝË—×Ú\ÜÝYMNU[\]\Ï\ÝXÝ\™YÛÛ™J[\]\Ñ]JNÂˆÚ[™ÝË—×Ú\ÜÝYMNTÚÜ\ÝXÝ\™YÛÛ™JÚÜ]JNÂˆÛÛœÝ[Ù[JÚÜ]K›[Ù[ß×JVÌ_ÚY‰Ú\ÜÝYMNK[[Ù[	Ë˜[YN‰ù®+:*i¹g¢ú&gÉËÝ]\ÎY_NÂˆYŠJÚÜ]K›[Ù[ß×JK›[™Ý
+\ÚÜ]K›[Ù[ÏVÛ[Ù[NÂˆÛÛœÝš\œÝJÚÜ]KœÝ[\ß×JVÌ_ÚY‰Ú\ÜÝYMNKXÜž\Ý[	Ë˜[YN‰ù¦m¹ojIËÝ]\ÎY_NÂˆYŠJÚÜ]KœÝ[\ß×JK›[™Ý
+\ÚÜ]KœÝ[\ÏVÙš\œÝNÂˆÛÛœÝÙXÛÛ™JÚÜ]KœÝ[\ß×JVÌW_ÚY‰Ú\ÜÝYMNK[Z\œ›Ü‰Ë˜[YN‰úcèzgh‰ËÝ]\ÎY_NÂˆYŠJÚÜ]KœÝ[\ß×JKœÛÛYJOžšYOO\ÙXÛÛ™šY
+J\ÚÜ]KœÝ[\Ëœ\Ú
+ÙXÛÛ™
+NÂˆ[\]\Ñ]O^ØØ]YÛÜšY\Î–Éùaj:`ê	Ë	ùì¯º`n	Ë	ùkhùëà	×K[\]\Î–ÂˆÚY‰Ú\ÜÝYMNK][š]™\œØ[	Ë˜[YN‰ù¦m¹ojz,¤ùdª¹ª(y§oÉËØ]YÛÜžN‰ùì¯º`n	Ë[Ù[ÚY‰Ê‰Ë[š]™\œØ[YK™Y™\™[˜ÙWÛ[Ù[ÚY›[Ù[šY™Y™\™[˜ÙWÜÝ[WÚY™š\œÝšY[X—Ý\›‰ËÜÝ]XËÛZ\ÜÚ[™ËZ\ÜÝYMNK][\]Kœ™ÉßKˆÚY‰Ú\ÜÝYMNK\ÜXÚYšXÉË˜[YN‰úcèzghº"¬y§-yª(y§oÉËØ]YÛÜžN‰ùì¯º`n	Ë[Ù[ÚY›[Ù[šYØ\ÙWÜÝ[WÚYœÙXÛÛ™šY[X—Ý\›‰ËÜÝ]XËÚ[XYÙKœ™ÉßBˆ_NÂˆÝ\œ™[Iùaj:`ê	ÎÂˆØš™XÝ˜\ÜÚYÛŠ™[™]Ø[YZ[“Xœ˜\žUÛÜšÜÜXÙKœÝ]KÜ]Y\žN‰ÉËØ]YÛÜžN‰ùaj:`ê	Ë[Ù[‰ÉËÝ[N‰ÉË\N‰Ø[	ßJNÂˆ™[™\•[\]UXœÊ
+NÜ™[™\•[\]\Ê
+NÂˆÛÛœÝ˜\ÙO^ØØ\™Î™ØÝ[Y[œ]Y\žTÙ[XÝÜ[
+	ÈÝ[\]KYÜšY˜™‹][\]KXØ\™	ÊK›[™Ý^™ØÝ[Y[™Ù][[Y[žRY
+	Ý[\]KYÜšY	ÊK^ÛÛ[NÂˆ™[™]Ø[YZ[“Xœ˜\žUÛÜšÜÜXÙKœÝ]Kœ]Y\žOIù¦m¹ojIÎÜ™[™\•[\]\Ê
+NØÛÛœÝÙX\˜ÚYØÝ[Y[œ]Y\žTÙ[XÝÜ[
+	ÈÝ[\]KYÜšY˜™‹][\]KXØ\™	ÊK›[™ÝÂˆØš™XÝ˜\ÜÚYÛŠ™[™]Ø[YZ[“Xœ˜\žUÛÜšÜÜXÙKœÝ]KÜ]Y\žN‰ÉËØ]YÛÜžN‰ùì¯º`n	Ë[Ù[‰ÉËÝ[N™š\œÝšY\N‰Ø[	ßJNÜ™[™\•[\]\Ê
+NØÛÛœÝÝ[OYØÝ[Y[œ]Y\žTÙ[XÝÜ[
+	ÈÝ[\]KYÜšY˜™‹][\]KXØ\™	ÊK›[™ÝÂˆØš™XÝ˜\ÜÚYÛŠ™[™]Ø[YZ[“Xœ˜\žUÛÜšÜÜXÙKœÝ]KÜ]Y\žN‰ÉËØ]YÛÜžN‰ùì¯º`n	Ë[Ù[›[Ù[šYÝ[N‰ÉË\N‰ÜÜXÚYšXÉßJNÜ™[™\•[\]\Ê
+NØÛÛœÝÜXÚYšXÏYØÝ[Y[œ]Y\žTÙ[XÝÜ[
+	ÈÝ[\]KYÜšY˜™‹][\]KXØ\™	ÊK›[™ÝÂˆØš™XÝ˜\ÜÚYÛŠ™[™]Ø[YZ[“Xœ˜\žUÛÜšÜÜXÙKœÝ]KÜ]Y\žN‰ÉËØ]YÛÜžN‰ùì¯º`n	Ë[Ù[›[Ù[šYÝ[N‰ÉË\N‰Ý[š]™\œØ[	ßJNÜ™[™\•[\]\Ê
+NØÛÛœÝ[š]™\œØ[YØÝ[Y[œ]Y\žTÙ[XÝÜ[
+	ÈÝ[\]KYÜšY˜™‹][\]KXØ\™	ÊK›[™ÝÂˆØš™XÝ˜\ÜÚYÛŠ™[™]Ø[YZ[“Xœ˜\žUÛÜšÜÜXÙKœÝ]KÜ]Y\žN‰ÉËØ]YÛÜžN‰ùaj:`ê	Ë[Ù[‰ÉËÝ[N‰ÉË\N‰Ø[	ßJNØÝ\œ™[Iùaj:`ê	ÎÜ™[™\•[\]UXœÊ
+NÜ™[™\•[\]\Ê
+NÂˆ™]\›ˆØ˜\ÙKÙX\˜ÚÝ[KÜXÚYšXË[š]™\œØ[[Ù[›[Ù[›˜[YKš\œÝ™š\œÝ›˜[YKÙXÛÛ™œÙXÛÛ™›˜[Y_NÂˆHˆˆŠBˆ\ÜÙ\[\]WÛXœ˜\žVÉØ˜\ÙI×VÉØØ\™É×HOH‹[\]WÛXœ˜\žBˆ\ÜÙ\[
+X™[[ˆ[\]WÛXœ˜\žVÉØ˜\ÙI×VÉÝ^	×H›ÜˆX™[[ˆ
+ˆ	ù¦m¹ojz,¤ùdª¹ª(y§oÉË	úcèzghº"¬y§-yª(y§oÉË	ùì¯º`n	Ë[\]WÛXœ˜\žVÉÛ[Ù[	×Kˆ[\]WÛXœ˜\žVÉÙš\œÝ	×K[\]WÛXœ˜\žVÉÜÙXÛÛ™	×K	ùaj9g¢ú&gú`&¹å*	Ë	ù£!ùk¦¹g¢ú&gÉËˆ
+JK[\]WÛXœ˜\žBˆ\ÜÙ\ÚÙ^Nˆ[\]WÛXœ˜\žVÚÙ^WH›ÜˆÙ^H[ˆ
+	ÜÙX\˜Ú	Ë	ÜÝ[IË	ÜÜXÚYšXÉË	Ý[š]™\œØ[	Ê_HOHÂˆ	ÜÙX\˜Ú	ÎˆK	ÜÝ[IÎˆK	ÜÜXÚYšXÉÎˆK	Ý[š]™\œØ[	ÎˆKˆK[\]WÛXœ˜\žBˆ[™[™×Ý[\]WÚ[XYÙHH×BˆYÙKœ›Ý]J	ÊŠ‹Ú\ÜÝYMNKY[^YY][\]Kœ™ÉË[X™H›Ý]Nˆ[™[™×Ý[\]WÚ[XYÙK˜\[™
+›Ý]JJBˆÚ]YÙK™^XÝÜ™\]Y\Ý
+	ÊŠ‹Ú\ÜÝYMNKY[^YY][\]Kœ™ÉÊN‚ˆYÙK™]˜[X]JŠ
+HOˆÝ[\]\Ñ]K[\]\Ë™š[™
+OžšYOOIÚ\ÜÝYMNK][š]™\œØ[	ÊK[X—Ý\›IËÚ\ÜÝYMNKY[^YY][\]Kœ™ÉÎÜ™[™\•[\]\Ê
+NÙØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÖÙ]K][\]KZYWš\ÜÝYMNK][š]™\œØ[—H[YÉÊK›ØY[™ÏIÙXYÙ\‰ßHŠBˆ[\]WÜ[™[™ÈHYÙK™]˜[X]JˆˆŠ
+HOˆÂˆÛÛœÝYYXOYØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÖÙ]K][\]KZYHš\ÜÝYMNK][š]™\œØ[—H˜™‹XØ\™[YYXIÊNÂˆ™]\›ˆÚ[XYÙN™Ù]ÛÛ\]YÝ[JYYXKœ]Y\žTÙ[XÝÜŠ	Ú[YÉÊJKš\ÚXš[]KXÙZÛ\Ž™Ù]ÛÛ\]YÝ[JYYXKœ]Y\žTÙ[XÝÜŠ	Ë˜™‹Z[XYÙK\XÙZÛ\‰ÊJK™\Ü^_NÂˆHˆˆŠBˆ\ÜÙ\[\]WÜ[™[™ÈOHÉÚ[XYÙIÎˆ	ÚY[‰Ë	ÜXÙZÛ\‰Îˆ	ÙÜšY	ßK[\]WÜ[™[™Âˆ\ÜÙ\[Š[™[™×Ý[\]WÚ[XYÙJHOHBˆYÙK›ØØ]ÜŠ	ÖÙ]K][\]KZYHš\ÜÝYMNK][š]™\œØ[—H˜™‹XØ\™[YYXH[YÉÊK™]˜[X]Jš[YÈOˆ[YË˜Y]™[\Ý[™\Š	Ù\œ›Ü‰Ë
+
+HOˆ[YË™]\Ù]\Ý\œ›ÜˆH	ÌIÊHŠBˆ[™[™×Ý[\]WÚ[XYÙKœÜ
+
+K™[š[
+Ý]\ÏM›ÙOIÛZ\ÜÚ[™ÉÊBˆÛ
+YÙKŠ
+HOˆØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÖÙ]K][\]KZYWš\ÜÝYMNK][š]™\œØ[—H˜™‹XØ\™[YYXH[YÉÊOË™]\Ù]\Ý\œ›ÜOOIÌIÈŠBˆ[\]WÙ˜Z[YHYÙK™]˜[X]JˆˆŠ
+HOˆÂˆÛÛœÝYYXOYØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÖÙ]K][\]KZYHš\ÜÝYMNK][š]™\œØ[—H˜™‹XØ\™[YYXIÊNÂˆ™]\›ˆÚ[XYÙN™Ù]ÛÛ\]YÝ[JYYXKœ]Y\žTÙ[XÝÜŠ	Ú[YÉÊJKš\ÚXš[]KXÙZÛ\Ž™Ù]ÛÛ\]YÝ[JYYXKœ]Y\žTÙ[XÝÜŠ	Ë˜™‹Z[XYÙK\XÙZÛ\‰ÊJK™\Ü^_NÂˆHˆˆŠBˆ\ÜÙ\[\]WÙ˜Z[YOHÉÚ[XYÙIÎˆ	ÚY[‰Ë	ÜXÙZÛ\‰Îˆ	ÙÜšY	ßK[\]WÙ˜Z[YˆYÙK[œ›Ý]J	ÊŠ‹Ú\ÜÝYMNKY[^YY][\]Kœ™ÉÊBˆ[™[™×Ý[\]WÜÝXØÙ\ÜÈH×BˆYÙKœ›Ý]J	ÊŠ‹Ú\ÜÝYMNK[ÚË][\]Kœ™ÉË[X™H›Ý]Nˆ[™[™×Ý[\]WÜÝXØÙ\ÜË˜\[™
+›Ý]JJBˆÚ]YÙK™^XÝÜ™\]Y\Ý
+	ÊŠ‹Ú\ÜÝYMNK[ÚË][\]Kœ™ÉÊN‚ˆYÙK™]˜[X]JŠ
+HOˆÝ[\]\Ñ]K[\]\Ë™š[™
+OžšYOOIÚ\ÜÝYMNK][š]™\œØ[	ÊK[X—Ý\›IËÚ\ÜÝYMNK[ÚË][\]Kœ™ÉÎÜ™[™\•[\]\Ê
+NÙØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÖÙ]K][\]KZYWš\ÜÝYMNK][š]™\œØ[—H[YÉÊK›ØY[™ÏIÙXYÙ\‰ßHŠBˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÖÙ]K][\]KZYHš\ÜÝYMNK][š]™\œØ[—H˜™‹XØ\™[YYXH[YÉÊK™]˜[X]Jš[YÈOˆÙ]ÛÛ\]YÝ[J[YÊKš\ÚXš[]HŠHOH	ÚY[‰Âˆ\ÜÙ\[Š[™[™×Ý[\]WÜÝXØÙ\ÜÊHOHBˆ[™[™×Ý[\]WÜÝXØÙ\ÜËœÜ
+
+K™[š[
+Ý]\ÏLŒ›ÙOQÓÓÑÛÛ[Ý\OIÚ[XYÙKÜ™ÉÊBˆÛ
+YÙKŠ
+HOˆÙ]ÛÛ\]YÝ[JØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÖÙ]K][\]KZYWš\ÜÝYMNK][š]™\œØ[—H˜™‹XØ\™[YYXH[YÉÊJKš\ÚXš[]OOOIÝš\ÚX›IÈŠBˆ[\]WÛØYYHYÙK™]˜[X]JˆˆŠ
+HOˆÂˆÛÛœÝYYXOYØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÖÙ]K][\]KZYHš\ÜÝYMNK][š]™\œØ[—H˜™‹XØ\™[YYXIÊNÂˆ™]\›ˆÚ[XYÙN™Ù]ÛÛ\]YÝ[JYYXKœ]Y\žTÙ[XÝÜŠ	Ú[YÉÊJKš\ÚXš[]KXÙZÛ\Ž™Ù]ÛÛ\]YÝ[JYYXKœ]Y\žTÙ[XÝÜŠ	Ë˜™‹Z[XYÙK\XÙZÛ\‰ÊJK™\Ü^_NÂˆHˆˆŠBˆ\ÜÙ\[\]WÛØYYOHÉÚ[XYÙIÎˆ	Ýš\ÚX›IË	ÜXÙZÛ\‰Îˆ	Û›Û™IßK[\]WÛØYYˆYÙK[œ›Ý]J	ÊŠ‹Ú\ÜÝYMNK[ÚË][\]Kœ™ÉÊBˆYÙK™]˜[X]JŠ
+HOˆÝ[\]\Ñ]K[\]\Ë™š[™
+OžšYOOIÚ\ÜÝYMNK][š]™\œØ[	ÊK[X—Ý\›IËÜÝ]XËÛZ\ÜÚ[™ËZ\ÜÝYMNK][\]Kœ™ÉÎÜ™[™\•[\]\Ê
+_HŠBˆš[
+	ÐQRS—ÕSTUWÕSP—Ó“×Ñ“TÒÓÒÉÊBˆ›ÜˆÚYZYÚ[ˆ
+
+ÎL
+K
+ÍŽL
+K
+LNL
+JN‚ˆYÙKœÙ]ÝšY]ÜÜÜÚ^™JXÝ
+ÚY]ÚYZYÚZZYÚ
+JBˆXœ˜\žWÛ^[Ý]HYÙK™]˜[X]JˆˆŠ
+HOˆ
+ÂˆØÜ›Û™ØÝ[Y[™ØÝ[Y[[[Y[œØÜ›ÛÚYˆ\ÜÙ]ÛÛ[[œÎ™Ù]ÛÛ\]YÝ[JØÝ[Y[™Ù][[Y[žRY
+	Ø\ÜÙ]YÜšY	ÊJK™ÜšY[\]PÛÛ[[œËœÜ]
+	È	ÊK›[™Ýˆ[\]PÛÛ[[œÎ™Ù]ÛÛ\]YÝ[JØÝ[Y[™Ù][[Y[žRY
+	Ý[\]KYÜšY	ÊJK™ÜšY[\]PÛÛ[[œËœÜ]
+	È	ÊK›[™Ýˆ[]RZYÚ™ØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÈÝ[\]KYÜšYÙ]KY[]K][\]WIÊOË™Ù]›Ý[™[™ÐÛY[™XÝ
+
+KšZYÚˆJHˆˆŠBˆ\ÜÙ\Xœ˜\žWÛ^[Ý]ÉÜØÜ›Û	×HHÚY
+È‹
+ÚYXœ˜\žWÛ^[Ý]
+BˆYˆÚYOHÎL‚ˆ\ÜÙ\Xœ˜\žWÛ^[Ý]ÉÝ[\]PÛÛ[[œÉ×HOHˆ[™Xœ˜\žWÛ^[Ý]ÉÙ[]RZYÚ	×HHËXœ˜\žWÛ^[Ý]ˆYÙKœÙ]ÝšY]ÜÜÜÚ^™JÉÝÚY	ÎˆM	ÚZYÚ	ÎˆLJBˆYÙK™]˜[X]JˆˆŠ
+HOˆÂˆ[\]\Ñ]O]Ú[™ÝË—×Ú\ÜÝYMNU[\]\ÎÜÚÜ]O]Ú[™ÝË—×Ú\ÜÝYMNTÚÜÂˆ[]HÚ[™ÝË—×Ú\ÜÝYMNU[\]\ÎÙ[]HÚ[™ÝË—×Ú\ÜÝYMNTÚÜÂˆØš™XÝ˜\ÜÚYÛŠ™[™]Ø[YZ[“Xœ˜\žUÛÜšÜÜXÙKœÝ]KÜ]Y\žN‰ÉËØ]YÛÜžN‰ùaj:`ê	Ë[Ù[‰ÉËÝ[N‰ÉË\N‰Ø[	ßJNÂˆÝ\œ™[Iùaj:`ê	ÎÜ™[™\•[\]UXœÊ
+NÜ™[™\•[\]\Ê
+NÂˆHˆˆŠBˆš[
+	ÐQRS—ÕSTUWÓP”T–WÑ’ST”×ÔPÑRÓT—Ô‘TÔÓ”ÒU‘WÓÒÉÊB‚ˆYÙK™]˜[X]JŠ
+HOˆÚ[™ÝË˜™[™]Ø[‘[œÝ\™U[\]QY]ÜŠ
+HŠBˆXYÈHYÙK™]˜[X]JˆˆŠ
+HOˆ
+ØÛÜ™NˆH]Ú[™ÝË™[™]Ø[ZT™[[Ý™UŒ‹YZ[Ž\[ÙˆÚ[™ÝË˜™YZ[”™[[Ý™P˜XÚÙÜ›Ý[™ÝXÚÔ™XYNˆH]Ú[™ÝË—×Ø™[™]Ø[•[\]TÝXÚÔ™XYKYZ[‘›YÎˆH]Ú[™ÝË—×Ø™YZ[ZT™[[Ý™SÛ›UŒ‹[Ù[ÎŠÚÜ]OË›[Ù[ß×JK›[™ÝJHˆˆŠBˆš[
+	ÐQRS—ÔÕPÒ×ÑPQÉËXYÊBˆ\ÜÙ\XYÖÉØÛÜ™I×H[™XYÖÉØYZ[‰×OOIÙ[˜Ý[Û‰È[™XYÖÉÜÝXÚÔ™XYI×H[™XYÖÉØYZ[‘›YÉ×H[™XYÖÉÛ[Ù[É×HˆXYÂ‚ˆ[\]WÞÜÈH[\]IÊNÝÚ[™ÝË—×ØYZ[”ÝÜ™YÜÏLŽËËÈ‚ˆ[\]WÞÜ×Ü™\Ý[HYÙK™]˜[X]Jˆˆœ^[ØYOˆÂˆÛÛœÝÜšYÚ[˜[]O\ÝXÝ\™YÛÛ™J[\]\Ñ]JKÜšYÚ[˜[Ü[]Ú[™ÝË›Ü[•[\]QY]ÜŽÂˆÚ[™ÝË—×ØYZ[”ÝÜ™YÜÏLÝÚ[™ÝË—×ØYZ[‘Y]Y[\]OIÉÎÂˆÚ[™ÝË›Ü[•[\]QY]Ü]˜[YOOžÝÚ[™ÝË—×ØYZ[‘Y]Y[\]O]˜[Y_NÂˆ[\]\Ñ]K[\]\ÏVÞÚYœ^[ØY˜[YN‰ùk¢yaj9ª(y§oÉËØ]YÛÜžN‰ùá¬ze 	Ë[Ù[ÚY‰Ê‰Ë[š]™\œØ[Y_WNÂˆÝ\œ™[Iùaj:`ê	ÎÜ™[™\•[\]\Ê
+NÂˆÛÛœÝ[›[™R[™\œÏYØÝ[Y[œ]Y\žTÙ[XÝÜ[
+	ÈÝ[\]KYÜšYÛÛ˜ÛXÚ×IÊK›[™ÝÂˆØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÈÝ[\]KYÜšYÙ]KYY]][\]WIÊK˜ÛXÚÊ
+NÂˆÛÛœÝ™\Ý[^Ù^XÝ]YÚ[™ÝË—×ØYZ[”ÝÜ™YÜËY]YÚ[™ÝË—×ØYZ[‘Y]Y[\]K[›[™R[™\œßNÂˆÚ[™ÝË›Ü[•[\]QY]Ü[ÜšYÚ[˜[Ü[ŽÝ[\]\Ñ]O[ÜšYÚ[˜[]NÜ™[™\•[\]\Ê
+NÂˆ™]\›ˆ™\Ý[ÂˆHˆˆ‹[\]WÞÜÊBˆ\ÜÙ\[\]WÞÜ×Ü™\Ý[OHÉÙ^XÝ]Y	Îˆ	ÙY]Y	Îˆ[\]WÞÜË	Ú[›[™R[™\œÉÎˆK[\]WÞÜ×Ü™\Ý[ˆš[
+	ÐQRS—ÕSTUWÔÕÔ‘QÑUWÐPÕSÓ”×ÓÒÉÊB‚ˆ[\]WÙš^\™WÜ›Ùš[HHYÙK™]˜[X]JˆˆŠ
+HOˆÂˆÛÛœÝ[Ù[ÏJÚÜ]OË›[Ù[ß×JK™š[\Š][OOš][OËœÝ]\ÈOOY˜[ÙJNÂˆÛÛœÝÝ[\ÏJÚÜ]OËœÝ[\ß×JK™š[\Š][OOš][OËœÝ]\ÈOOY˜[ÙJNÂˆYŠ[[Ù[Ë›[™Ý\Ý[\Ë›[™Ý
+\™]\›ˆ[Âˆ›ÜŠÛÛœÝ[Ù[Ùˆ[Ù[Ê^Âˆ[Ù[˜Ø\ÙWÜ›Ùš[\Ï^Ë‹‹Š[Ù[˜Ø\ÙWÜ›Ùš[\ßßJ_NÂˆ›ÜŠÛÛœÝÝ[HÙˆÝ[\Ê^ÂˆYŠ]Ú[™ÝË™[™]Ø[Ø\ÙT›Ùš[\ÏË˜ÛÛ\]J[Ù[˜Ø\ÙWÜ›Ùš[\ÖÜÝ[KšYJJ^Âˆ[Ù[˜Ø\ÙWÜ›Ùš[\ÖÜÝ[KšYO^Âˆ™]šY]×ÛX\Ú×Ú[YÎ›[Ù[œ™]šY]×ÛX\Ú×Ú[Yß	Ùš^\™N‹ËÝ[\]K\™]šY]ÉËˆš[Û[™WÚ[YÎ›[Ù[œš[Û[™WÚ[Yß	Ùš^\™N‹ËÝ[\]K\š[	Ëˆš[ÞŒKš[ÞNŒ‹š[ÝÎÌš[ÚŒMš[Ø[™ÛNŒˆNÂˆBˆBˆBˆ™]\›ˆÛ[Ù[Î›[Ù[Ë›[™ÝÝ[\ÎœÝ[\Ë›[™ÝNÂˆHˆˆŠBˆ\ÜÙ\[\]WÙš^\™WÜ›Ùš[K[\]WÙš^\™WÜ›Ùš[BˆYÙK›ØØ]ÜŠ	ÈÝšY]Ë][\]\È]X˜\ˆ˜‰ÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆØÝ[Y[™Ù][[Y[žRY
+	Ý[\]K[[Ù[	ÊOË˜Û\ÜÓ\Ý˜ÛÛZ[œÊ	ÜÚÝÉÊH‹[Y[Ý]LÌ
+Bˆ[\]WÛÜ[—ÙXYÈHYÙK™]˜[X]JˆˆŠ
+HOˆ
+ØØ[˜\ÎˆH]š\ÝX[Ø[˜\Ë[Ù[™ØÝ[Y[™Ù][[Y[žRY
+	Ý[[Ù[	ÊOË˜[YKÝ[N™ØÝ[Y[™Ù][[Y[žRY
+	Ý\Ý[IÊOË˜[YK›Ùš[NˆH]Ú[™ÝË˜™[™]Ø[•[\]T™Y™\™[˜ÙT›Ùš[OËŠ
+KX[ÙÜÎÚ[™ÝË—×Ý[\]SÜ[‘X[ÙÜß×_JHˆˆŠBˆš[
+	ÐQRS—ÕSTUWÓÔS—ÑPQÉË[\]WÛÜ[—ÙXYÊBˆ\ÜÙ\[\]WÛÜ[—ÙXYÖÉØØ[˜\É×K[\]WÛÜ[—ÙXYÂˆ[\]WÙY]Ü—ÜÜ˜ÈHYÙK›ØØ]ÜŠ	ÜØÜš\ÜÜ˜ÊH˜YZ[‹][\]KYY]Ü‹]Œ‹šœÈ—IÊK™Ù]Ø]šX]J	ÜÜ˜ÉÊBˆ\ÜÙ\[\]WÙY]Ü—ÜÜ˜È[™	ÝLŒŒLŽ\Ý[LIÈ[ˆ[\]WÙY]Ü—ÜÜ˜Ë[\]WÙY]Ü—ÜÜ˜Âˆš[
+	ÐQRS—ÑP”’P×ÓV–WÓÒÉÊB‚ˆ[\]WØÛÛ˜XÝHYÙK™]˜[X]Jˆˆ˜\Þ[˜È
+
+HOˆÂˆÛÛœÝÜšYÚ[˜[ÚÜ\ÝXÝ\™YÛÛ™JÚÜ]JKÜšYÚ[˜[[\]\Ï\ÝXÝ\™YÛÛ™J[\]\Ñ]JKÜšYÚ[˜[Ø]™O]Ú[™ÝËœØ]™U[\]\ËÜšYÚ[˜[\ØY]Ú[™ÝË\ØYYZ[’[XYÙNÂˆÛÛœÝ[Ù[^ÚY‰ÙÙ[ÛY]žK[[Ù[	Ë˜[YN‰ùno¹/eyg¢ú&gÉËœ˜[™‰Ð\IËÝ]\ÎYKØ\ÙWÜ›Ùš[\ÎžÂˆÜž\Ý[žÜ™]šY]×ÛX\Ú×Ú[YÎ‰Ùš^\™N‹ËØÜž\Ý[\™]šY]ÉËš[Û[™WÚ[YÎ‰Ùš^\™N‹ËØÜž\Ý[\š[	Ëš[ÝÎÌš[ÚŒMš[ÞŒKš[ÞNŒ‹š[Ø[™ÛNŒKˆZ\œ›ÜŽžÜ™]šY]×ÛX\Ú×Ú[YÎ‰Ùš^\™N‹ËÛZ\œ›Ü‹\™]šY]ÉËš[Û[™WÚ[YÎ‰Ùš^\™N‹ËÛZ\œ›Ü‹\š[	Ëš[ÝÎÍKš[ÚŒMLš[ÞŒËš[ÞNš[Ø[™ÛNŽLBˆ_NÂˆÚÜ]O^Øœ˜[™Î–ÉÐ\I×K[Ù[Î–Û[Ù[KÝ[\Î–ÞÚY‰ØÜž\Ý[	Ë˜[YN‰ù¦m¹ojIËÝ]\ÎY_KÚY‰ÛZ\œ›Ü‰Ë˜[YN‰úcèzgh‰ËÝ]\ÎY_KÚY‰ÛZ\ÜÚ[™ÉË˜[YN‰ù§*ºacyïk‰ËÝ]\ÎY_W_NÂˆÛÛœÝ[Ù[Ù[XÝYØÝ[Y[™Ù][[Y[žRY
+	Ý[[Ù[	ÊKÝ[TÙ[XÝYØÝ[Y[™Ù][[Y[žRY
+	Ý\Ý[IÊNÂˆ[Ù[Ù[XÝš[›™\’SIÏÜ[Ûˆ˜[YOH™Ù[ÛY]žK[[Ù[¹no¹/eyg¢ú&gÏÛÜ[Û‰ÎÛ[Ù[Ù[XÝ˜[YOIÙÙ[ÛY]žK[[Ù[	ÎÂˆÝ[TÙ[XÝš[›™\’SIÏÜ[Ûˆ˜[YOH˜Üž\Ý[¹¦m¹ojOÛÜ[ÛÜ[Ûˆ˜[YOH›Z\œ›ÜˆºcèzghÛÜ[ÛÜ[Ûˆ˜[YOH›Z\ÜÚ[™È¹§*ºacyïkÛÜ[Û‰ÎÂˆÚ[™ÝË—×Ø™‘Y][™Õ[\]O[[ÂˆÝ[TÙ[XÝ˜[YOIØÜž\Ý[	ÎÚ[š]Y]ÜŠ
+NØÛÛœÝÜž\Ý[^ÝÎËNÂˆÝ[TÙ[XÝ˜[YOIÛZ\œ›Ü‰ÎÚ[š]Y]ÜŠ
+NØÛÛœÝZ\œ›Ü^ÝÎËNÂˆÛÛœÝ™Y›Ü™SZ\ÜÚ[™Ï^ÝÎËNÜÝ[TÙ[XÝ˜[YOIÛZ\ÜÚ[™ÉÎØÛÛœÝZ\ÜÚ[™Ô™\Ý[Z[š]Y]ÜŠ
+NØÛÛœÝY\“Z\ÜÚ[™Ï^ÝÎËNÂˆÛÛœÝÛ^ÚY‰ÛYØXÞK\Ý[K][\]IË˜[YN‰ú""¹«¯9«/¹ª(y§oÉËØ]YÛÜžN‰ùá¬ze 	Ë[Ù[ÚY‰Ê‰Ë[š]™\œØ[YKØ\ÙWÜÝ[WÚY‰ØÜž\Ý[	Ë™Y™\™[˜ÙWÛ[Ù[ÚY‰ÙÙ[ÛY]žK[[Ù[	ËÛÝ\˜ÙWÜš[ÝÎÌÛÝ\˜ÙWÜš[ÚŒMÛÝÎ–×KØš™XÝ×ÚœÛÛŽžÝ™\œÚ[ÛŽ‰ÍKŒËŒ	ËØš™XÝÎ–×__NÂˆ[\]\Ñ]O^Ý[\]\Î–ÛÛKØ]YÛÜšY\Î–Éùaj:`ê	Ë	ùá¬ze 	×_NÝÚ[™ÝË—×Ø™‘Y][™Õ[\]O[ÛÂˆØÝ[Y[™Ù][[Y[žRY
+	ÝZY	ÊK˜[YO[ÛšYÙØÝ[Y[™Ù][[Y[žRY
+	Ý[˜[YIÊK˜[YO[Û›˜[YNÙØÝ[Y[™Ù][[Y[žRY
+	ÝXØ]YÛÜžIÊK˜[YO[Û˜Ø]YÛÜžNÜÝ[TÙ[XÝ˜[YOIØÜž\Ý[	ÎÚ[š]Y]ÜŠ×KÛ›Øš™XÝ×ÚœÛÛ‹	ÉÊNÂˆ]Ø\\™Y[[ÝÚ[™ÝË\ØYYZ[’[XYÙOX\Þ[˜Ê
+OO‰ËÜÝ]XËÝ\ØYËÙÙ[ÛY]žK][\]Kœ™ÉÎÝÚ[™ÝËœØ]™U[\]\ÏX\Þ[˜È™^OžØØ\\™Y\ÝXÝ\™YÛÛ™J™^
+NÜ™]\›ˆÝ™\œÚ[ÛŽ‰ÙÙ[ÛY]žK]™\œÚ[Û‰ß_NÂˆ]ØZ]Ø]™U[\]J
+NÂˆÛÛœÝØ]™YXØ\\™Y[\]\Ë™š[™
+›ÝÏOœ›ÝËšYOO[ÛšY
+NÂˆÚ[™ÝËœØ]™U[\]\Ï[ÜšYÚ[˜[Ø]™NÝÚ[™ÝË\ØYYZ[’[XYÙO[ÜšYÚ[˜[\ØYÜÚÜ]O[ÜšYÚ[˜[ÚÜÝ[\]\Ñ]O[ÜšYÚ[˜[[\]\ÎÝÚ[™ÝË—×Ø™‘Y][™Õ[\]O[[Âˆ™]\›ˆØÜž\Ý[Z\œ›Ü‹™Y›Ü™SZ\ÜÚ[™ËY\“Z\ÜÚ[™ËZ\ÜÚ[™Ô™\Ý[Ø]™YžØØ\ÙWÜÝ[WÚYœØ]™Y˜Ø\ÙWÜÝ[WÚY™Y™\™[˜ÙWÜÝ[WÚYœØ]™Yœ™Y™\™[˜ÙWÜÝ[WÚYÛÝ\˜ÙWÜš[ÝÎœØ]™YœÛÝ\˜ÙWÜš[ÝËÛÝ\˜ÙWÜš[ÚœØ]™YœÛÝ\˜ÙWÜš[Ú_NÂˆHˆˆŠBˆ\ÜÙ\[\]WØÛÛ˜XÝOHÂˆ	ØÜž\Ý[	ÎˆÉÝÉÎŒM	Ú	ÎŒŽK	ÛZ\œ›Ü‰ÎˆÉÝÉÎŒML	Ú	ÎŒÌKˆ	Ø™Y›Ü™SZ\ÜÚ[™ÉÎˆÉÝÉÎŒML	Ú	ÎŒÌK	ØY\“Z\ÜÚ[™ÉÎˆÉÝÉÎŒML	Ú	ÎŒÌKˆ	ÛZ\ÜÚ[™Ô™\Ý[	Îˆ˜[ÙKˆ	ÜØ]™Y	ÎˆÉØØ\ÙWÜÝ[WÚY	Î‰ØÜž\Ý[	Ë	Ü™Y™\™[˜ÙWÜÝ[WÚY	Î‰ØÜž\Ý[	Ë	ÜÛÝ\˜ÙWÜš[ÝÉÎÌ	ÜÛÝ\˜ÙWÜš[Ú	ÎŒMKˆK[\]WØÛÛ˜XÝˆ\ÜÙ\[žJ	ù«i9g¢ú&gùæ¡9«i9«¯9«/¹l&¹§*ºacyïk¹å'ùå(º,áù¥¦IÈ[ˆ\ÙÈ›Üˆ\ÙÈ[ˆX[ÙÜÊKX[ÙÜÂˆš[
+	ÐQRS—ÕSTUWÓSÑSÔÕSWÑÑSÓQU–WÓQÐPÖWÔÕSWÓÒÉË[\]WØÛÛ˜XÝ
+B‚ˆYÙK›ØØ]ÜŠ	ÈÝšY]Ë][\]\È]X˜\ˆ˜‰ÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆØÝ[Y[™Ù][[Y[žRY
+	Ý[\]K[[Ù[	ÊOË˜Û\ÜÓ\Ý˜ÛÛZ[œÊ	ÜÚÝÉÊH	‰ˆH]š\ÝX[Ø[˜\È‹[Y[Ý]LÌ
+B‚ˆ[\]WÜÙ\™\—ÛÜšYÚ[˜[HYÙK™]˜[X]JŠ
+HOˆ
+Ù]NœÝXÝ\™YÛÛ™J[\]\Ñ]JK™\œÚ[ÛŽ[\]\Õ™\œÚ[ÛŸJHŠBˆ[\]WÝÚ[›™\ˆHÛÜK™Y\ÛÜJ[\]WÜÙ\™\—ÛÜšYÚ[˜[ÉÙ]I×JBˆ[\]WÝÚ[›™\–ÉÝ[\]\É×K˜\[™
+ÉÚY	Î‰ØØ\Ë][\]KXIË	Û˜[YIÎ‰ÐÐTÈ9ª(y§oÈIË	ØØ]YÛÜžIÎ‰ùá¬ze 	Ë	Û[Ù[ÚY	Î‰Ê‰Ë	Ý[š]™\œØ[	Î•Y_JBˆ[\]WÝÚ[›™\—Ü™\ÜÛœÙHHYÙKœ™\]Y\ÝœÜÝ
+˜\ÙH
+È	ËØ\KØYZ[‹ÜØ]™WÝ[\]\ÉË]O^Âˆ	Ù]IÎˆ[\]WÝÚ[›™\‹	Ù^XÝYÝ™\œÚ[Û‰Îˆ[\]WÜÙ\™\—ÛÜšYÚ[˜[ÉÝ™\œÚ[Û‰×KˆJBˆ\ÜÙ\[\]WÝÚ[›™\—Ü™\ÜÛœÙKœÝ]\ÈOHŒ[\]WÝÚ[›™\—Ü™\ÜÛœÙK^
+
+Bˆ[\]WÝÚ[›™\—Ý™\œÚ[ÛˆH[\]WÝÚ[›™\—Ü™\ÜÛœÙKšœÛÛŠ
+VÉÝ™\œÚ[Û‰×BˆYÙKœ›Ý]J	ÊŠ‹Ø\KØYZ[‹Ý\ØYÚ[XYÙIË[X™H›Ý]Nˆ›Ý]K™[š[
+Ý]\ÏLŒÛÛ[Ý\OIØ\XØ][Û‹ÚœÛÛ‰Ë›ÙOIÞÈœÝ]\ÈŽˆœÝXØÙ\ÜÈ‹\›Žˆ‹ÜÝ]XËÛX]\šX[ËØØ\Ë[Üœ[‹œ™ÈŸIÊJBˆ[\]WÜÝ[WÙX[ÙÈH[ŠX[ÙÜÊBˆYÙK™]˜[X]JˆˆŠ
+HOˆÙØÝ[Y[™Ù][[Y[žRY
+	ÝZY	ÊK˜[YOIÉÎÙØÝ[Y[™Ù][[Y[žRY
+	Ý[˜[YIÊK˜[YOIÐÐTÈ9ª(y§oÈ‰ÎÙØÝ[Y[™Ù][[Y[žRY
+	ÝXØ]YÛÜžIÊK˜[YOIùá¬ze 	ßHˆˆŠBˆYÙK™]˜[X]JŠ
+HOˆØ]™U[\]J
+HŠBˆ[\]WÜÝ[HHYÙK™]˜[X]JˆˆŠ
+HOˆ
+ÂˆÜ[Ž™ØÝ[Y[™Ù][[Y[žRY
+	Ý[\]K[[Ù[	ÊK˜Û\ÜÓ\Ý˜ÛÛZ[œÊ	ÜÚÝÉÊKˆ[œ]™ØÝ[Y[™Ù][[Y[žRY
+	Ý[˜[YIÊK˜[YKˆØØ[[\]\Ñ]K[\]\ËœÛÛYJOž›˜[YOOOIÐÐTÈ9ª(y§oÈ‰ÊKˆ™\œÚ[ÛŽ[\]\Õ™\œÚ[Û‚ˆJHˆˆŠBˆ\ÜÙ\[\]WÜÝ[HOHÉÛÜ[‰Î•YK	Ú[œ]	Î‰ÐÐTÈ9ª(y§oÈ‰Ë	ÛØØ[	Î‘˜[ÙK	Ý™\œÚ[Û‰Î[\]WÜÙ\™\—ÛÜšYÚ[˜[ÉÝ™\œÚ[Û‰×_K[\]WÜÝ[BˆYÙK[œ›Ý]J	ÊŠ‹Ø\KØYZ[‹Ý\ØYÚ[XYÙIÊBˆ[\]WÜÙ\™\—ØY\ˆHYÙKœ™\]Y\Ý™Ù]
+˜\ÙH
+È	ËØ\KÝ[\]\ÉÊKšœÛÛŠ
+Bˆ\ÜÙ\[\]WÜÙ\™\—ØY\–ÉÝ™\œÚ[Û‰×HOH[\]WÝÚ[›™\—Ý™\œÚ[Û‚ˆ\ÜÙ\Ü›ÝÖÉÚY	×H›Üˆ›ÝÈ[ˆ[\]WÜÙ\™\—ØY\–ÉÙ]I×VÉÝ[\]\É×HYˆ›ÝË™Ù]
+	ÚY	ÊH[ˆ
+	ØØ\Ë][\]KXIË	ØØ\Ë][\]KX‰ÊWHOHÉØØ\Ë][\]KXI×Bˆ\ÜÙ\[žJ	ú,áù¥¦ymìº(ªùam¹.å¹b!ºh y¢%º(çyïk¹¦í9¥¬;ï#:*âúaãy¥¬:/"yaiyo£9a£y/ë¹¥.xà ‰È[ˆ\ÙÈ›Üˆ\ÙÈ[ˆX[ÙÜÖÝ[\]WÜÝ[WÙX[ÙÎ—JKX[ÙÜÖÝ[\]WÜÝ[WÙX[ÙÎ—BˆYÙK™]˜[X]JŠ
+HOˆØY[\]\ÊYJHŠBˆ™[ØYYÝ[\]HHYÙK™]˜[X]J™\œÚ[ÛˆOˆ
+Ý™\œÚ[ÛŽ[\]\Õ™\œÚ[Û‹\ÐN[\]\Ñ]K[\]\ËœÛÛYJOžšYOOIØØ\Ë][\]KXIÊK[œ]™ØÝ[Y[™Ù][[Y[žRY
+	Ý[˜[YIÊK˜[Y_JH‹[\]WÝÚ[›™\—Ý™\œÚ[ÛŠBˆ\ÜÙ\™[ØYYÝ[\]HOHÉÝ™\œÚ[Û‰Î[\]WÝÚ[›™\—Ý™\œÚ[Û‹	Ú\ÐIÎ•YK	Ú[œ]	Î‰ÐÐTÈ9ª(y§oÈ‰ßK™[ØYYÝ[\]Bˆ™\ÝÜ™YÝ[\]\ÈHYÙKœ™\]Y\ÝœÜÝ
+˜\ÙH
+È	ËØ\KØYZ[‹ÜØ]™WÝ[\]\ÉË]O^Âˆ	Ù]IÎˆ[\]WÜÙ\™\—ÛÜšYÚ[˜[ÉÙ]I×K	Ù^XÝYÝ™\œÚ[Û‰Îˆ[\]WÝÚ[›™\—Ý™\œÚ[Û‹ˆJBˆ\ÜÙ\™\ÝÜ™YÝ[\]\ËœÝ]\ÈOHŒ™\ÝÜ™YÝ[\]\Ë^
+
+BˆYÙK™]˜[X]JŠ
+HOˆØY[\]\ÊYJHŠBˆš[
+	ÐQRS—ÕSTUWÔÕSWÐÐT×ÓÒÉÊB‚ˆYÙK™]˜[X]JˆˆŠ
+HOˆ™]È›ÛZ\ÙJ
+™\ÛÛ™K™Z™XÝ
+OOžØÛÛœÝÏYØÝ[Y[˜Ü™X]Q[[Y[
+	ØØ[˜\ÉÊNØËÚYLLŽØËšZYÚLLŽØÛÛœÝÏXË™Ù]ÛÛ^
+	Ì™	ÊNÙË™š[Ý[OIÈÙ™™‰ÎÙË™š[™XÝ
+LŽLŽ
+NÙË™š[Ý[OIÈÙMÍIÎÙË™š[™XÝ
+M‹MŠNÙ˜XœšXË’[XYÙK™œ›ÛUT“
+ËÑ]UT“
+	Ú[XYÙKÜ™ÉÊK[YÏOžÝž^Ú[YËœÙ]
+ÛYËÌ‹ÜÌ‹ÜšYÚ[–‰ØÙ[\‰ËÜšYÚ[–N‰ØÙ[\‰ËØØ[V‹ŽØØ[VNŒKŒK[™ÛNŒLËÜšYÚ[˜[˜[YN‰ØYZ[‹]\Ýœ™ÉßJNÝš\ÝX[Ø[˜\Ë˜Y
+[YÊNÝš\ÝX[Ø[˜\ËœÙ]XÝ]™SØš™XÝ
+[YÊNÝš\ÝX[Ø[˜\Ëœ™\]Y\Ý™[™\[
+
+NÜ™\ÛÛ™J
+_XØ]Ú
+J^Ü™Z™XÝ
+J__JNßJHˆˆŠBˆ™Y›Ü™HHYÙK™]˜[X]JˆˆŠ
+HOˆØÛÛœÝÏ]š\ÝX[Ø[˜\Ë™Ù]XÝ]™SØš™XÝ
+
+NÜ™]\›ˆÝÎ›Ë™Ù]ØØ[YÚY
+
+K›Ë™Ù]ØØ[YZYÚ
+
+K›Ë™Ù]Ù[\”Ú[
+
+KžN›Ë™Ù]Ù[\”Ú[
+
+KžKN›Ë˜[™Û_NßHˆˆŠBˆYÙK™]˜[X]JŠ
+HOˆÚ[™ÝË˜™YZ[”™[[Ý™P˜XÚÙÜ›Ý[™
+
+HŠBˆY\ˆHYÙK™]˜[X]JˆˆŠ
+HOˆØÛÛœÝÏ]š\ÝX[Ø[˜\Ë™Ù]XÝ]™SØš™XÝ
+
+NÜ™]\›ˆØZNˆH[ÏË˜ZP˜XÚÙÜ›Ý[™™[[Ý™YÎ›ÏË™Ù]ØØ[YÚY
+
+K›ÏË™Ù]ØØ[YZYÚ
+
+K›ÏË™Ù]Ù[\”Ú[
+
+KžN›ÏË™Ù]Ù[\”Ú[
+
+KžKN›ÏË˜[™ÛKX›XÔÜ˜Î›ÏËœX›XÔÜ˜ß	ÉßNßHˆˆŠBˆ\ÜÙ\Y\–ÉØZI×H\ÈYKY\‚ˆ›ÜˆÈ[ˆ
+	ÝÉË	Ú	Ë	Þ	Ë	ÞIË	ØIÊN‚ˆ\ÜÙ\XœÊY\–Ú×KX™Y›Ü™VÚ×JHÍK
+Ë™Y›Ü™KY\ŠBˆ\ÜÙ\Y\–ÉÜX›XÔÜ˜É×KY\‚‚ˆÈ[[YHØ]™U[\]H\ÈH^žK[ØYYY]Ü‹]ŒˆÝ™\œšYKˆ™\šYžH]ÂˆÈ^\Ý[™ÈØ[™Y]HÝ]KØ\ÞH›Ý[™\žK[ˆÛÝ™\ˆ[]U[\]HÛË‚ˆ[\]WÛÜšYÚ[˜[HYÙK™]˜[X]JŠ
+HOˆÝXÝ\™YÛÛ™J[\]\Ñ]JHŠBˆ[\]WÜØ]™WÜ™\]Y\ÝÈH×Bˆ[\]WÝ\ØYÈH×BˆYÙKœ›Ý]J	ÊŠ‹Ø\KØYZ[‹Ý\ØYÚ[XYÙIË[X™H›Ý]Nˆ
+[\]WÝ\ØYË˜\[™
+›Ý]Kœ™\]Y\Ý\›
+K›Ý]K™[š[
+Ý]\ÏLŒÛÛ[Ý\OIØ\XØ][Û‹ÚœÛÛ‰Ë›ÙOIÞÈœÝ]\ÈŽˆœÝXØÙ\ÜÈ‹\›Žˆ‹ÜÝ]XËÝ\ØYËÚ\ÜÝYLŽK][\]Kœ™ÈŸIÊJJBˆYˆØ]™WÝ[\]WÜ™\ÜÛœÙJ›Ý]JN‚ˆ[\]WÜØ]™WÜ™\]Y\ÝË˜\[™
+›Ý]Kœ™\]Y\ÝœÜÝÙ]WÚœÛÛŠBˆYˆ[Š[\]WÜØ]™WÜ™\]Y\ÝÊHOHN‚ˆ›Ý]K™[š[
+Ý]\ÏMLËÛÛ[Ý\OIØ\XØ][Û‹ÚœÛÛ‰Ë›ÙOIÞÈœÝ]\ÈŽˆ™\œ›ÜˆŸIÊBˆ[ÙN‚ˆ[YKœÛY\
+ŒMJBˆ›Ý]K™[š[
+Ý]\ÏLŒÛÛ[Ý\OIØ\XØ][Û‹ÚœÛÛ‰Ë›ÙOIÞÈœÝ]\ÈŽˆœÝXØÙ\ÜÈ‹™\œÚ[ÛˆŽˆ›[ØÚË][\]K]™\œÚ[ÛˆŸIÊBˆYÙKœ›Ý]J	ÊŠ‹Ø\KØYZ[‹ÜØ]™WÝ[\]\ÉËØ]™WÝ[\]WÜ™\ÜÛœÙJBˆYÙK™]˜[X]JˆˆŠ
+HOˆÙØÝ[Y[™Ù][[Y[žRY
+	ÝZY	ÊK˜[YOIÉÎÙØÝ[Y[™Ù][[Y[žRY
+	Ý[˜[YIÊK˜[YOIÒ\ÜÝYLŽyª(y§oÉÎÙØÝ[Y[™Ù][[Y[žRY
+	ÝXØ]YÛÜžIÊK˜[YOIÒ\ÜÝYLŽyb!ºhg‰ßHˆˆŠBˆ™Y›Ü™WÝ[\]WØÛÝ[HYÙK™]˜[X]JŠ
+HOˆ[\]\Ñ]K[\]\Ë›[™ÝŠBˆ[\]WÙX[Ù×ÜÝ\H[ŠX[ÙÜÊBˆYÙK™]˜[X]JŠ
+HOˆ›ÛZ\ÙK˜[
+ÜØ]™U[\]J
+KØ]™U[\]J
+WJHŠBˆ[\]WÙ˜Z[YHYÙK™]˜[X]JˆˆŠ
+HOˆ
+ÂˆÛÝ[[\]\Ñ]K[\]\Ë™š[\ŠOž›˜[YOOOIÒ\ÜÝYLŽyª(y§oÉÊK›[™ÝˆÜ[Ž™ØÝ[Y[™Ù][[Y[žRY
+	Ý[\]K[[Ù[	ÊK˜Û\ÜÓ\Ý˜ÛÛZ[œÊ	ÜÚÝÉÊKˆ˜[YN™ØÝ[Y[™Ù][[Y[žRY
+	Ý[˜[YIÊK˜[YKˆ\ØX›Y–Ë‹‹™ØÝ[Y[œ]Y\žTÙ[XÝÜ[
+	ÈÝ[\]K[[Ù[›Yˆ˜‰ÊWK™š[™
+O˜‹^ÛÛ[š[˜ÛY\Ê	ùa,¹kf	ÊJOË™\ØX›Y˜[ÙBˆJHˆˆŠBˆ\ÜÙ\[Š[\]WÜØ]™WÜ™\]Y\ÝÊHOHH[™[Š[\]WÝ\ØYÊHOHK
+[\]WÜØ]™WÜ™\]Y\ÝË[\]WÝ\ØYÊBˆ\ÜÙ\[\]WÙ˜Z[YOHÉØÛÝ[	ÎŒ	ÛÜ[‰Î•YK	Ý˜[YIÎ‰Ò\ÜÝYLŽyª(y§oÉË	Ù\ØX›Y	Î‘˜[Ù_K[\]WÙ˜Z[Yˆ\ÜÙ\[žJ	ù§#ybæy¦ªù¦`¹á(y¬åy/oùå*;ï#:*âùê#yo£9a£z*i‰È[ˆ\ÙÈ›Üˆ\ÙÈ[ˆX[ÙÜÖÝ[\]WÙX[Ù×ÜÝ\—JKX[ÙÜÖÝ[\]WÙX[Ù×ÜÝ\—BˆYÙK™]˜[X]JŠ
+HOˆ›ÛZ\ÙK˜[
+ÜØ]™U[\]J
+KØ]™U[\]J
+WJHŠBˆ[\]WÜØ]™YHYÙK™]˜[X]JˆˆŠ
+HOˆ
+ÂˆÝ[[\]\Ñ]K[\]\Ë›[™ÝˆÛÝ[[\]\Ñ]K[\]\Ë™š[\ŠOž›˜[YOOOIÒ\ÜÝYLŽyª(y§oÉÊK›[™ÝˆÜ[Ž™ØÝ[Y[™Ù][[Y[žRY
+	Ý[\]K[[Ù[	ÊK˜Û\ÜÓ\Ý˜ÛÛZ[œÊ	ÜÚÝÉÊBˆJHˆˆŠBˆ\ÜÙ\[Š[\]WÜØ]™WÜ™\]Y\ÝÊHOHˆ[™[Š[\]WÝ\ØYÊHOH‹
+[\]WÜØ]™WÜ™\]Y\ÝË[\]WÝ\ØYÊBˆ\ÜÙ\[\]WÜØ]™YOHÉÝÝ[	Î˜™Y›Ü™WÝ[\]WØÛÝ[
+ÌK	ØÛÝ[	ÎŒK	ÛÜ[‰Î‘˜[Ù_K[\]WÜØ]™YˆYÙK[œ›Ý]J	ÊŠ‹Ø\KØYZ[‹Ý\ØYÚ[XYÙIÊBˆYÙK[œ›Ý]J	ÊŠ‹Ø\KØYZ[‹ÜØ]™WÝ[\]\ÉÊB‚ˆ[]WÜ™\]Y\ÝÈH×BˆYÙK™]˜[X]Jˆˆ™]HOˆÝ[\]\Ñ]O\ÝXÝ\™YÛÛ™J]JNÝ[\]\Ñ]K[\]\Ëœ\Ú
+ÚY‰Ú\ÜÝYLŽKY[]K][\]IË˜[YN‰Ò\ÜÝYLŽyb*ºfi9ª(y§oÉËØ]YÛÜžN‰ùá¬ze 	ßJNÜ™[™\•[\]UXœÊ
+NÜ™[™\•[\]\Ê
+NÝÚ[™ÝË—×Ú\ÜÝYLŽPÛÛ™š\›O]Ú[™ÝË˜ÛÛ™š\›NÝÚ[™ÝË˜ÛÛ™š\›OJ
+OOY_Hˆˆ‹[\]WÛÜšYÚ[˜[
+BˆYˆ[]WÝ[\]WÜ™\ÜÛœÙJ›Ý]JN‚ˆ[]WÜ™\]Y\ÝË˜\[™
+›Ý]Kœ™\]Y\ÝœÜÝÙ]WÚœÛÛŠBˆYˆ[Š[]WÜ™\]Y\ÝÊHOHN‚ˆ›Ý]K™[š[
+Ý]\ÏMLËÛÛ[Ý\OIØ\XØ][Û‹ÚœÛÛ‰Ë›ÙOIÞÈœÝ]\ÈŽˆ™\œ›ÜˆŸIÊBˆ[ÙN‚ˆ[YKœÛY\
+ŒMJBˆ›Ý]K™[š[
+Ý]\ÏLŒÛÛ[Ý\OIØ\XØ][Û‹ÚœÛÛ‰Ë›ÙOIÞÈœÝ]\ÈŽˆœÝXØÙ\ÜÈ‹™\œÚ[ÛˆŽˆ›[ØÚË][\]KY[]K]™\œÚ[ÛˆŸIÊBˆYÙKœ›Ý]J	ÊŠ‹Ø\KØYZ[‹ÜØ]™WÝ[\]\ÉË[]WÝ[\]WÜ™\ÜÛœÙJBˆYÙK™]˜[X]JŠ
+HOˆ›ÛZ\ÙK˜[
+Ù[]U[\]J	Ú\ÜÝYLŽKY[]K][\]IÊK[]U[\]J	Ú\ÜÝYLŽKY[]K][\]IÊWJHŠBˆ[]WÙ˜Z[YHYÙK™]˜[X]JŠ
+HOˆ[\]\Ñ]K[\]\Ë™š[\ŠOžšYOOIÚ\ÜÝYLŽKY[]K][\]IÊK›[™ÝOOLH	‰ˆØÝ[Y[™Ù][[Y[žRY
+	Ý[\]KYÜšY	ÊK^ÛÛ[š[˜ÛY\Ê	Ò\ÜÝYLŽyb*ºfi9ª(y§oÉÊH	‰ˆ][\]Q[]P\ÞHŠBˆ\ÜÙ\[Š[]WÜ™\]Y\ÝÊHOHH[™[]WÙ˜Z[Y
+[]WÜ™\]Y\ÝË[]WÙ˜Z[Y
+Bˆ\ÜÙ\	ù§#ybæy¦ªù¦`¹á(y¬åy/oùå*;ï#:*âùê#yo£9a£z*i‰È[ˆYÙK›ØØ]ÜŠ	ÈØ™‹\›ÙXÝ[Y\ÜØYÙIÊKš[›™\—Ý^
+
+BˆYÙK™]˜[X]JŠ
+HOˆ›ÛZ\ÙK˜[
+Ù[]U[\]J	Ú\ÜÝYLŽKY[]K][\]IÊK[]U[\]J	Ú\ÜÝYLŽKY[]K][\]IÊWJHŠBˆ[]WÜØ]™YHYÙK™]˜[X]JŠ
+HOˆ][\]\Ñ]K[\]\ËœÛÛYJOžšYOOIÚ\ÜÝYLŽKY[]K][\]IÊH	‰ˆ][\]Q[]P\ÞHŠBˆ\ÜÙ\[Š[]WÜ™\]Y\ÝÊHOHˆ[™[]WÜØ]™Y
+[]WÜ™\]Y\ÝË[]WÜØ]™Y
+BˆYÙK[œ›Ý]J	ÊŠ‹Ø\KØYZ[‹ÜØ]™WÝ[\]\ÉÊBˆYÙK™]˜[X]J˜\Þ[˜È
+
+HOˆØ]ØZ]ØY[\]\ÊYJNÝÚ[™ÝË˜ÛÛ™š\›O]Ú[™ÝË—×Ú\ÜÝYLŽPÛÛ™š\›NÙ[]HÚ[™ÝË—×Ú\ÜÝYLŽPÛÛ™š\›_HŠBˆš[
+	ÐQRS—ÕSTUWÐÔ•QÔÕUWÔ‘U–WÑÕP“WÔÕP“RUÓÒÉÊBˆš[
+	ÐQRS—ÕÑP’ÒUÓÒÉÊBˆYÙK˜ÛÜÙJ
+B‚‚™Yˆ\˜X›WÜ™XÙZ\Ý\Ý
+^]ÜšYÚ˜\ÙJN‚ˆˆˆ”\œÚ\ÝH™X[ÛÛ[Z]Y™\]Y\ÝXÜ›ÜÜÈXˆÛÜÙHS‘œ›ÝÜÙ\ˆ™\Ý\ˆˆˆ‚ˆ[™Ú[™HHÙ]]Š^]ÜšYÚÜË™[š\›Û‹™Ù]
+	Ð”“ÕÔÑT—ÑS‘ÒS‘IË	ÝÙXšÚ]	ÊJBˆYˆYZ[ŠÛÛ^
+N‚ˆYÙHHÛÛ^›™]×ÜYÙJ
+BˆYÙK™ÛÝÊ˜\ÙH
+È	ËÛÙÚ[‰ËØZ]Ý[[IÙÛXÛÛ[ØYY	ÊBˆYˆ	ËØYZ[‰È›Ý[ˆYÙK\›‚ˆYˆ›ÝYÙK›ØØ]ÜŠ	ÈÜ\ÜÝÛÜ™Y›Ü›IÊKš\×Ýš\ÚX›J
+N‚ˆYÙK›ØØ]ÜŠ	ÈÜ\ÜÝÛÜ™]ÙÙÛIÊK˜ÛXÚÊ
+BˆYÙK›ØØ]ÜŠ	Ú[œ]Û˜[YOHœ\ÜÝÛÜ™—IÊK™š[
+	Ù˜[ŒLŒÉÊBˆYÙK›ØØ]ÜŠ	Ø]Û–Ý\OHœÝX›Z]—K[œ]Ý\OHœÝX›Z]—IÊK™š\œÝ˜ÛXÚÊ
+BˆYÙKØZ]Ù›Ü—Ý\›
+	ÊŠ‹ØYZ[‰ÊBˆÛ
+YÙKŠ
+HOˆH]Ú[™ÝË™[™]Ø[ÛÛ[Y\˜ÙHŠBˆYÙK›ØØ]ÜŠ	Ë›˜]ˆ]Û–Ù]K]šY]ÏH˜ÛÛ[Y\˜ÙH—IÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆÚ[™ÝË™[™]Ø[ÛÛ[Y\˜ÙKœÝ]KœÚÝ\Ë›[™ÝŒŠBˆYÙK›ØØ]ÜŠ	ÖÙ]K]XHœÝØÚÈ—IÊK˜ÛXÚÊ
+Bˆ™]\›ˆYÙBˆÚ][\š[K•[\Ü˜\žQ\™XÝÜžJ
+H\È›Ùš[N‚ˆ›ÜˆÚ[™[ˆ
+	Ü\˜Ú\ÙIË	Ù^[œÙIÊN‚ˆÛÛ^H[™Ú[™K›][˜ÚÜ\œÚ\Ý[ØÛÛ^
+›Ùš[KXY\ÜÏUYJBˆžN‚ˆYÙHHYZ[ŠÛÛ^
+Bˆ™Y›Ü™HH\Û[Ù[K˜ÛÛ[Y\˜ÙKœ™XY
+
+BˆÚÝHH™Y›Ü™VÉÜÚÝ\É×VÌBˆ\›H	ËØ\KØYZ[‹Ü\˜Ú\ÙWÜ™XÙZ]™Y	ÈYˆÚ[™OH	Ü\˜Ú\ÙIÈ[ÙH	ËØ\KØYZ[‹Ù^[œÙIÂˆÙ[H×BˆYˆÜÙWÜ™\ÜÛœÙJ›Ý]JN‚ˆÙ[˜\[™
+›Ý]Kœ™\]Y\ÝœÜÝÙ]WÚœÛÛŠBˆ\ÜÙ\›Ý]K™™]Ú
+
+KœÝ]\ÈOHŒˆ›Ý]K˜X›Ü
+	Ù˜Z[Y	ÊBˆÛÛ^œ›Ý]J	ÊŠ‰È
+È\›ÜÙWÜ™\ÜÛœÙJBˆYˆÚ[™OH	Ü\˜Ú\ÙIÎ‚ˆYÙK›ØØ]ÜŠ	ÖÙ]K\ÚÝOH‰ÊÜÚÝVÉÚY	×JÉÈ—HÙ]K\™XÙZ]™WIÊK˜ÛXÚÊ
+BˆYÙK›ØØ]ÜŠ	ÈÜÜË\™XÙZ]™K\]IÊK™š[
+	ÌÉÊBˆYÙK›ØØ]ÜŠ	ÈÜÜËYX[ÙË\ÝX›Z]	ÊK˜ÛXÚÊ
+Bˆ[ÙN‚ˆYÙK›ØØ]ÜŠ	ÖÙ]K]XH™^[œÙ\È—IÊK˜ÛXÚÊ
+BˆYÙK›ØØ]ÜŠ	ÈÜÜËY^[œÙKX[[Ý[	ÊK™š[
+	ÌÍËIÊBˆYÙK›ØØ]ÜŠ	ÈÜÜËY^[œÙK[›ÝIÊK™š[
+	Ù\˜X›H™\Ý\™XÙZ\	ÊBˆYÙK›ØØ]ÜŠ	ÈÜÜËY^[œÙK\Ø]™IÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆØÝ[Y[™Ù][[Y[žRY
+	ÜÜË[Y\ÜØYÙIÊK˜Û\ÜÓ\Ý˜ÛÛZ[œÊ	Ù\œ›Ü‰ÊHŠBˆØ]™YHYÙK™]˜[X]JŠ
+HOˆ”ÓÓ‹œ\œÙJØØ[ÝÜ˜YÙK™Ù]][J	Ø™‹\ÜÌ‹\[™[™ÉÊJHŠBˆ\ÜÙ\Ø]™YÉØ›ÙI×HOHÙ[ÌBˆÈ^\Ý[™ËÛ™]ÈXœÈÙYHHØ[YH™XÙZ\[™Ø[››Ý™\XÙH]‚ˆÝ\ˆHYZ[ŠÛÛ^
+Bˆ\ÜÙ\Ý\‹›ØØ]ÜŠ	ÈÜÜË\[™[™ÉÊKš\×Ýš\ÚX›J
+BˆÝ\‹›ØØ]ÜŠ	ÖÙ]K]XH™^[œÙ\È—IÊK˜ÛXÚÊ
+BˆÝ\‹›ØØ]ÜŠ	ÈÜÜËY^[œÙKX[[Ý[	ÊK™š[
+	ÎNNIÊBˆÝ\‹›ØØ]ÜŠ	ÈÜÜËY^[œÙK\Ø]™IÊK˜ÛXÚÊ
+BˆÛ
+Ý\‹Š
+HOˆØÝ[Y[™Ù][[Y[žRY
+	ÜÜË[Y\ÜØYÙIÊK^ÛÛ[š[˜ÛY\Ê	ù§*º` yaî‰ÊHŠBˆ\ÜÙ\Ý\‹™]˜[X]JŠ
+HOˆ”ÓÓ‹œ\œÙJØØ[ÝÜ˜YÙK™Ù]][J	Ø™‹\ÜÌ‹\[™[™ÉÊJHŠHOHØ]™YˆYÙK˜ÛÜÙJ
+BˆÝ\‹˜ÛÜÙJ
+Bˆš[˜[N‚ˆÛÛ^˜ÛÜÙJ
+HÈ^]Èœ›ÝÜÙ\ŽÈ™]Z[ˆÛ›HHÛ‹Y\ÚÈ›Ùš[BˆÛÛ^H[™Ú[™K›][˜ÚÜ\œÚ\Ý[ØÛÛ^
+›Ùš[KXY\ÜÏUYJBˆžN‚ˆYÙHHYZ[ŠÛÛ^
+Bˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÈÜÜË\[™[™ÉÊKš\×Ýš\ÚX›J
+Bˆ\ÜÙ\YÙK™]˜[X]JŠ
+HOˆ”ÓÓ‹œ\œÙJØØ[ÝÜ˜YÙK™Ù]][J	Ø™‹\ÜÌ‹\[™[™ÉÊJHŠHOHØ]™YˆÈ^\™Y]][XØ][Ûˆ]\Ý›Ý\ØØ\™[ˆ[˜Ù\Z[ˆ™XÙZ\‚ˆÛÛ^œ›Ý]J	ÊŠ‰ÊÝ\›[X™H›Ý]Nˆ›Ý]K™[š[
+Ý]\ÏMKÛÛ[Ý\OIØ\XØ][Û‹ÚœÛÛ‰Ë›ÙOIÞÈœÝ]\ÈŽˆ™\œ›Üˆ‹›\ÙÈŽˆ›ÙÚ[ˆ™\]Z\™YŸIÊJBˆYÙK›ØØ]ÜŠ	ÈÜÜË\™]žIÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆØÝ[Y[™Ù][[Y[žRY
+	ÜÜË[Y\ÜØYÙIÊK^ÛÛ[OOIÛÙÚ[ˆ™\]Z\™Y	ÈŠBˆ\ÜÙ\YÙK™]˜[X]JŠ
+HOˆ”ÓÓ‹œ\œÙJØØ[ÝÜ˜YÙK™Ù]][J	Ø™‹\ÜÌ‹\[™[™ÉÊJHŠHOHØ]™YˆÛÛ^[œ›Ý]J	ÊŠ‰ÊÝ\›
+BˆYˆ™]žJ›Ý]JN‚ˆÙ[˜\[™
+›Ý]Kœ™\]Y\ÝœÜÝÙ]WÚœÛÛŠBˆ›Ý]K˜ÛÛ[YWÊ
+BˆÛÛ^œ›Ý]J	ÊŠ‰ÊÝ\›™]žJBˆØœÙ\™\ˆHYZ[ŠÛÛ^
+Bˆ\ÜÙ\ØœÙ\™\‹›ØØ]ÜŠ	ÈÜÜË\[™[™ÉÊKš\×Ýš\ÚX›J
+BˆYÙK›ØØ]ÜŠ	ÈÜÜË\™]žIÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆ[ØØ[ÝÜ˜YÙK™Ù]][J	Ø™‹\ÜÌ‹\[™[™ÉÊHŠBˆÛ
+ØœÙ\™\‹Š
+HOˆØÝ[Y[™Ù][[Y[žRY
+	ÜÜË\[™[™ÉÊKšY[ˆŠBˆ\ÜÙ\[ŠÙ[
+HOHˆ[™Ù[ÌHOHÙ[ÌWKÙ[ˆY\ˆH\Û[Ù[K˜ÛÛ[Y\˜ÙKœ™XY
+
+BˆYˆÚ[™OH	Ü\˜Ú\ÙIÎ‚ˆ\ÜÙ\Y\–ÉÜÚÝ\É×VÌVÉÜÝØÚ×Ü]I×HOHÚÝVÉÜÝØÚ×Ü]I×H
+ÈÂˆ[šY\ÈHÞ›Üˆ[ˆY\–ÉÚ[™[ÜžWÛYÙ\‰×HYˆ™Ù]
+	Ü™XÙZ\ÚY	ÊHOHØ]™YÉØ›ÙI×VÉÚY[\Ý[˜ÞWÚÙ^I×WBˆ\ÜÙ\[Š[šY\ÊHOHBˆ[ÙN‚ˆ\ÜÙ\[ŠY\–ÉÙ^[œÙ\É×JHOH[Š™Y›Ü™VÉÙ^[œÙ\É×JH
+ÈBˆ[šY\ÈHÞ›Üˆ[ˆY\–ÉÙ^[œÙWÛYÙ\‰×HYˆÉÚY	×HOHØ]™YÉØ›ÙI×VÉÚY[\Ý[˜ÞWÚÙ^I×WBˆ\ÜÙ\[Š[šY\ÊHOHBˆš[
+	ÑTP“WÔ‘PÑRTÐ”“ÕÔÑT—Ô‘TÕT•ÓÒÉËÚ[™
+Bˆš[˜[N‚ˆÛÛ^˜ÛÜÙJ
+B‚‚™Yˆ\ÜÚÙ^WÛÙÚ[—Ý\Ý
+œ›ÝÜÙ\‹˜\ÙJN‚ˆ[ØÚÈHˆˆŠ
+
+HOˆÂˆÚ[™ÝË”X›XÒÙ^PÜ™Y[X[Y[˜Ý[ÛŠ
+^ßNÝÚ[™ÝË—×Ü\ÜÚÙ^QÙ]Ø[ÏLÝÚ[™ÝË—×Ü\ÜÚÙ^S[ÙOIÜÝXØÙ\ÜÉÎÂˆØš™XÝ™Yš[™T›Ü\J˜]šYØ]Ü‹	ØÜ™Y[X[ÉËØÛÛ™šYÝ\˜X›NYK˜[YNžÂˆÜ™X]N˜\Þ[˜Ê
+OO›[ˆÙ]˜\Þ[˜Ê
+OOžÝÚ[™ÝË—×Ü\ÜÚÙ^QÙ]Ø[ÊÊÎÚYŠÚ[™ÝË—×Ü\ÜÚÙ^S[ÙOOOIØØ[˜Ù[	Ê]›ÝÈ™]ÈÓQ^Ù\[ÛŠ	ØØ[˜Ù[Y	Ë	Ó›Ý[ÝÙY\œ›Ü‰ÊNÜ™]\›ˆÚY‰Û[ØÚË[ÙÚ[‹XÜ™Y[X[	Ë˜]ÒY›™]ÈZ[\œ˜^JÌ—JK˜Y™™\‹\N‰ÜX›XËZÙ^IË]][XØ]Ü]XÚY[‰Ü]›Ü›IËÙ]ÛY[^[œÚ[Û”™\Ý[ÎŠ
+OOŠßJK™\ÜÛœÙNžØÛY[]R”ÓÓŽ›™]ÈZ[\œ˜^JÌ×JK˜Y™™\‹]][XØ]Ü‘]N›™]ÈZ[\œ˜^JÍJK˜Y™™\‹ÚYÛ˜]\™N›™]ÈZ[\œ˜^JÍWJK˜Y™™\‹\Ù\’[™N›[__Bˆ_JNÂˆJJ
+Hˆˆ‚ˆYÙHHœ›ÝÜÙ\‹›™]×ÜYÙJšY]ÜÜ^ÉÝÚY	ÎˆÎL	ÚZYÚ	ÎˆJBˆYÙK˜YÚ[š]ÜØÜš\
+[ØÚÊBˆ™\šYžHH×BˆYÙKœ›Ý]J	ÊŠ‹Ø\KØ]]Ü\ÜÚÙ^KÜÝ]\ÉË[X™H›Ý]Nˆ›Ý]K™[š[
+Ý]\ÏLŒÛÛ[Ý\OIØ\XØ][Û‹ÚœÛÛ‰Ë›ÙOIÞÈœÝ]\ÈŽˆœÝXØÙ\ÜÈ‹˜ÛÛ™šYÝ\™YŽYKš\×ØÜ™Y[X[ÈŽY_IÊJBˆYÙKœ›Ý]J	ÊŠ‹Ø\KØ]]Ü\ÜÚÙ^KÛÜ[ÛœÉË[X™H›Ý]Nˆ›Ý]K™[š[
+Ý]\ÏLŒÛÛ[Ý\OIØ\XØ][Û‹ÚœÛÛ‰Ë›ÙOIÞÈœÝ]\ÈŽˆœÝXØÙ\ÜÈ‹˜Ù\™[[ÛžWÚYŽˆ›[ØÚË[ÙÚ[ˆ‹œX›XÒÙ^HŽžÈ˜Ú[[™ÙHŽˆTH‹œœYŽˆŒLËŒŒŒH‹˜[ÝÐÜ™Y[X[ÈŽ–ÞÈ\HŽˆœX›XËZÙ^H‹šYŽˆYÈŸWK\Ù\•™\šYšXØ][ÛˆŽˆœ™\]Z\™YŸ_IÊJBˆYˆ™\šYžWÛÙÚ[Š›Ý]JN‚ˆ™\šYžK˜\[™
+›Ý]Kœ™\]Y\ÝœÜÝÙ]WÚœÛÛŠBˆ›Ý]K™[š[
+Ý]\ÏLŒÛÛ[Ý\OIØ\XØ][Û‹ÚœÛÛ‰Ë›ÙOIÞÈœÝ]\ÈŽˆœÝXØÙ\ÜÈ‹œ™Y\™XÝŽˆ‹Ø\KÚX[ŸIÊBˆYÙKœ›Ý]J	ÊŠ‹Ø\KØ]]Ü\ÜÚÙ^KÝ™\šYžIË™\šYžWÛÙÚ[ŠBˆYÙK™ÛÝÊ˜\ÙH
+È	ËÛÙÚ[‰ËØZ]Ý[[IÙÛXÛÛ[ØYY	ÊBˆÛ
+YÙKŠ
+HOˆYØÝ[Y[™Ù][[Y[žRY
+	Ü\ÜÚÙ^K[ÙÚ[‹X]Û‰ÊK˜Û\ÜÓ\Ý˜ÛÛZ[œÊ	ÚY[‰ÊHŠBˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÈÜ\ÜÚÙ^K[ÙÚ[‹X]Û‰ÊKš[›™\—Ý^
+
+HOH	ù/oùå*˜XÙHQ9ænùaiIÂˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÈÜ\ÜÚÙ^K[ÙÚ[‹X]Û‰ÊKš\×Ýš\ÚX›J
+H[™›ÝYÙK›ØØ]ÜŠ	ÈÜ\ÜÝÛÜ™Y›Ü›IÊKš\×Ýš\ÚX›J
+Bˆ\ÜÙ\YÙK™]˜[X]J	Ê
+HOˆÚ[™ÝË—×Ü\ÜÚÙ^QÙ]Ø[ÉÊHOHˆYÙK›ØØ]ÜŠ	ÈÜ\ÜÚÙ^K[ÙÚ[‹X]Û‰ÊK˜ÛXÚÊ
+BˆYÙKØZ]Ù›Ü—Ý\›
+	ÊŠ‹Ø\KÚX[	ÊBˆ\ÜÙ\[Š™\šYžJHOHH[™™\šYžVÌVÉØÙ\™[[ÛžWÚY	×HOH	Û[ØÚË[ÙÚ[‰Âˆ\ÜÙ\™\šYžVÌVÉØÜ™Y[X[	×VÉØ]][XØ]Ü]XÚY[	×HOH	Ü]›Ü›IÂˆYÙK˜ÛÜÙJ
+B‚ˆØ[˜Ù[YHœ›ÝÜÙ\‹›™]×ÜYÙJšY]ÜÜ^ÉÝÚY	ÎˆÎL	ÚZYÚ	ÎˆJBˆØ[˜Ù[Y˜YÚ[š]ÜØÜš\
+[ØÚÊBˆØ[˜Ù[Yœ›Ý]J	ÊŠ‹Ø\KØ]]Ü\ÜÚÙ^KÜÝ]\ÉË[X™H›Ý]Nˆ›Ý]K™[š[
+Ý]\ÏLŒÛÛ[Ý\OIØ\XØ][Û‹ÚœÛÛ‰Ë›ÙOIÞÈœÝ]\ÈŽˆœÝXØÙ\ÜÈ‹˜ÛÛ™šYÝ\™YŽYKš\×ØÜ™Y[X[ÈŽY_IÊJBˆØ[˜Ù[Yœ›Ý]J	ÊŠ‹Ø\KØ]]Ü\ÜÚÙ^KÛÜ[ÛœÉË[X™H›Ý]Nˆ›Ý]K™[š[
+Ý]\ÏLŒÛÛ[Ý\OIØ\XØ][Û‹ÚœÛÛ‰Ë›ÙOIÞÈœÝ]\ÈŽˆœÝXØÙ\ÜÈ‹˜Ù\™[[ÛžWÚYŽˆ›[ØÚËXØ[˜Ù[‹œX›XÒÙ^HŽžÈ˜Ú[[™ÙHŽˆTH‹œœYŽˆŒLËŒŒŒH‹˜[ÝÐÜ™Y[X[ÈŽ–×K\Ù\•™\šYšXØ][ÛˆŽˆœ™\]Z\™YŸ_IÊJBˆØ[˜Ù[Y™ÛÝÊ˜\ÙH
+È	ËÛÙÚ[‰ËØZ]Ý[[IÙÛXÛÛ[ØYY	ÊBˆØ[˜Ù[Y™]˜[X]JŠ
+HOˆÝÚ[™ÝË—×Ü\ÜÚÙ^S[ÙOIØØ[˜Ù[	ßHŠBˆØ[˜Ù[Y›ØØ]ÜŠ	ÈÜ\ÜÚÙ^K[ÙÚ[‹X]Û‰ÊK˜ÛXÚÊ
+BˆÛ
+Ø[˜Ù[YŠ
+HOˆØÝ[Y[™Ù][[Y[žRY
+	ÛÙÚ[‹[Y\ÜØYÙIÊK^ÛÛ[š[˜ÛY\Ê	ùmì¹cå¹­¢˜XÙHQ:jeú+bIÊHŠBˆØ[˜Ù[Y›ØØ]ÜŠ	ÈÜ\ÜÝÛÜ™]ÙÙÛIÊK˜ÛXÚÊ
+Bˆ\ÜÙ\Ø[˜Ù[Y›ØØ]ÜŠ	ÈÜ\ÜÝÛÜ™Y›Ü›IÊKš\×Ýš\ÚX›J
+BˆØ[˜Ù[Y˜ÛÜÙJ
+B‚ˆ[œÝ\ÜYHœ›ÝÜÙ\‹›™]×ÜYÙJšY]ÜÜ^ÉÝÚY	ÎˆÎL	ÚZYÚ	ÎˆJBˆ[œÝ\ÜY˜YÚ[š]ÜØÜš\
+“Øš™XÝ™Yš[™T›Ü\JÚ[™ÝË	ÔX›XÒÙ^PÜ™Y[X[	ËØÛÛ™šYÝ\˜X›NYK˜[YN[™Yš[™YJHŠBˆ[œÝ\ÜY™ÛÝÊ˜\ÙH
+È	ËÛÙÚ[‰ËØZ]Ý[[IÙÛXÛÛ[ØYY	ÊBˆÛ
+[œÝ\ÜYŠ
+HOˆØÝ[Y[™Ù][[Y[žRY
+	Ü\ÜÝÛÜ™Y›Ü›IÊK˜Û\ÜÓ\Ý˜ÛÛZ[œÊ	ÜÚÝÉÊHŠBˆ\ÜÙ\[œÝ\ÜY›ØØ]ÜŠ	ÈÜ\ÜÝÛÜ™Y›Ü›IÊKš\×Ýš\ÚX›J
+Bˆ\ÜÙ\›Ý[œÝ\ÜY›ØØ]ÜŠ	ÈÜ\ÜÚÙ^K[ÙÚ[‹X]Û‰ÊKš\×Ýš\ÚX›J
+Bˆ[œÝ\ÜY˜ÛÜÙJ
+Bˆš[
+	ÔTÔÒÑVWÓÑÒS—ÕÑP’ÒUÓÒÉÊB‚‚™YˆÜ™\—Üš[ÝÛÜšÜÜXÙWÝ\Ý
+œ›ÝÜÙ\‹˜\ÙKÛ
+N‚ˆˆˆ”ˆÍŒˆYÙYÜ™\œË^XÝÜ›ÜÜË[˜]šYØ][Û‹šXYÙH[™ØY™HXÝ[ÛœËˆˆˆ‚ˆœ›ÛH\›X‹œ\œÙH[\Ü\œÙWÜ\Ë\›Ü]ˆYÙHHœ›ÝÜÙ\‹›™]×ÜYÙJšY]ÜÜ^ÉÝÚY	ÎˆLN	ÚZYÚ	ÎˆLJBˆYÙK™ÛÝÊ˜\ÙH
+È	ËÛÙÚ[‰ËØZ]Ý[[IÙÛXÛÛ[ØYY	ÊBˆYˆ›ÝYÙK›ØØ]ÜŠ	ÈÜ\ÜÝÛÜ™Y›Ü›IÊKš\×Ýš\ÚX›J
+N‚ˆYÙK›ØØ]ÜŠ	ÈÜ\ÜÝÛÜ™]ÙÙÛIÊK˜ÛXÚÊ
+BˆYÙK›ØØ]ÜŠ	Ú[œ]Û˜[YOHœ\ÜÝÛÜ™—IÊK™š[
+	Ù˜[ŒLŒÉÊBˆYÙK›ØØ]ÜŠ	Ø]Û–Ý\OHœÝX›Z]—IÊK™š\œÝ˜ÛXÚÊ
+BˆYÙKØZ]Ù›Ü—Ý\›
+	ÊŠ‹ØYZ[‰ÊBˆÝ[\H[
+[YK[YJ
+JBˆÜ™\œÈHÙXÝ
+Ü™\—ÚYY‰ÓÔ‘T‹^ÚNŒÙIËÝ\ÝÛY\—Û˜[YOIú  yk¨¹.®‰ÈYˆHOHŒ[ÙH	ùk¨¹.®‰Ëˆ[Ù[IÚTÛ™HLÉËÝ[OIù¦m¹ojIË^[Y[ÛY]ÙIùãïºaäIËÝ]\ÏIùo¡z&eyä!‰Ëˆ[YO\Ý[\ZK\×Üš[UYK\×Û[ØÚÝ\Q˜[ÙK]X[]OLKÝ[LL
+Bˆ›ÜˆH[ˆ˜[™ÙJŒJWBˆÜ™\œÖÌŒ×VÉÜÝ]\É×HH	ùmì¹k£9¢$	ÂˆYˆÜ™\—Ü›Ý]J›Ý]JN‚ˆH\œÙWÜ\Ê\›Ü]
+›Ý]Kœ™\]Y\Ý\›
+Kœ]Y\žJBˆ›Ý[™HÜ™\œÂˆYˆ	ÛÜ™\—ÚY	È[ˆˆ›Ý[™HÛÈ›ÜˆÈ[ˆ›Ý[™YˆÖÉÛÜ™\—ÚY	×HOHÉÛÜ™\—ÚY	×VÌWBˆYˆ	ÜIÈ[ˆˆ›Ý[™HÛÈ›ÜˆÈ[ˆ›Ý[™YˆÉÜI×VÌK›ÝÙ\Š
+H[ˆ	È	Ëš›Ú[ŠÝŠÖÚ×JH›ÜˆÈ[ˆ
+	ÛÜ™\—ÚY	Ë	ØÝ\ÝÛY\—Û˜[YIË	Û[Ù[	Ë	ÜÝ[IË	Ü^[Y[ÛY]Ù	Ë	ÜÝ]\ÉÊJK›ÝÙ\Š
+WBˆYˆ	ÜÝ]\ÉÈ[ˆˆ›Ý[™HÛÈ›ÜˆÈ[ˆ›Ý[™YˆÖÉÜÝ]\É×HOHÉÜÝ]\É×VÌWBˆÙ™œÙ]H[
+™Ù]
+	ÛÙ™œÙ]	ËÉÌ	×JVÌJNÛ[Z]H[
+™Ù]
+	Û[Z]	ËÉÌŒ	×JVÌJBˆ›Ý]K™[š[
+Ý]\ÏLŒÛÛ[Ý\OIØ\XØ][Û‹ÚœÛÛ‰Ë›ÙOZœÛÛ‹™[\ÊXÝ
+Ý]\ÏIÜÝXØÙ\ÜÉË]OY›Ý[™ÛÙ™œÙ]›Ù™œÙ]
+Û[Z]K\×Û[Ü™O[[Š›Ý[™
+O›Ù™œÙ]
+Û[Z]™^ÛÙ™œÙ][Z[Š[Š›Ý[™
+KÙ™œÙ]
+Û[Z]
+K™Y›Ü™O\Ý[\
+ÌL
+JJBˆš[Ü›ÝÜÏV×Bˆ›ÜˆÝ]H[ˆ
+	ÕS’Ó“ÕÓ‰Ë	ÑRSQ	Ë	ÔÑS‘S‘ÉË	ÐÐSÑSS‘ÉË	ÔÕT•S‘ÉË	Ô‘TT‘Q	Ë	ÔUQUQQ	Ë	Ô’S•S‘ÉË	ÐÓÓTUQ	ÊN‚ˆš[Ü›ÝÜË˜\[™
+XÝ
+Ü™\—ÚYIÔ’S•IÊÜÝ]KÝ\ÝÛY\—Û˜[YOIùk¨¹.®‰Ë[Ù[IÚTÛ™HLÉËÝ[OIù¦m¹ojIËÜ™\—ÜÝ]\ÏIùo¡z&eyä!‰Ë[YO\Ý[\ˆ\×Üš[UYK›Ùš[WØ]˜Z[X›OUYKš[™[™×Ü™\]Z\™YQ˜[ÙKÚÝWÚYIÔÒÕIË›ØYXÝ
+YIÒ“Ð‹IÊÜÝ]KÝ]O\Ý]KÝ]WÛX™[\Ý]K›Ùš[WØÛÛ\]OUYK\ÝÙ\œ›ÜIúb¬ùcl9fç¹h,yi,y¥eÉÈYˆÝ]OOIÑRSQ	È[ÙH	ÉÊJJBˆš[Ü›ÝÜË˜\[™
+XÝ
+Ü™\—ÚYIÔ’S•P’S‘	ËÝ\ÝÛY\—Û˜[YOIùk¨¹.®‰Ë[Ù[IÚTÛ™HLÉËÝ[OIù¦m¹ojIËÜ™\—ÜÝ]\ÏIùo¡z&eyä!‰Ë[YO\Ý[\ˆ\×Üš[UYK›Ùš[WØ]˜Z[X›OQ˜[ÙKš[™[™×Ü™\]Z\™YUYKÚÝWÚYIÉËYØXÞWÛÜ™\UYKÚÝWØØ[™Y]\ÏV×K›ØS›Û™JJBˆYˆš[Ü›Ý]J›Ý]JN‚ˆH\œÙWÜ\Ê\›Ü]
+›Ý]Kœ™\]Y\Ý\›
+Kœ]Y\žJBˆ]HHÙXÝ
+Ü™\—ÚYIÓÔ‘T‹LŒ	ËÝ\ÝÛY\—Û˜[YOIú  yk¨¹.®‰Ë[Ù[IÚTÛ™HLÉËÝ[OIù¦m¹ojIËÜ™\—ÜÝ]\ÏIùo¡z&eyä!‰Ë[YO\Ý[\LŒ\×Üš[UYK›Ùš[WØ]˜Z[X›OUYKš[™[™×Ü™\]Z\™YQ˜[ÙKÚÝWÚYIÔÒÕIË›ØS›Û™JWHYˆ™Ù]
+	ÛÜ™\—ÚY	ÊHOHÉÓÔ‘T‹LŒ	×H[ÙHš[Ü›ÝÜÂˆ›Ý]K™[š[
+Ý]\ÏLŒÛÛ[Ý\OIØ\XØ][Û‹ÚœÛÛ‰Ë›ÙOZœÛÛ‹™[\ÊXÝ
+Ý]\ÏIÜÝXØÙ\ÜÉË›ÝÜÏY]K™[™Ü—Ü™XYOUYK™[™Ü—ØÛÛ›™XÝYUYK]šXÙWÚYIÙš^\™IÊJJBˆ]]][ÛœÏV×BˆYÙK›ÛŠ	Ü™\]Y\Ý	Ë[X™H™\]Y\Ýˆ]]][ÛœË˜\[™
+™\]Y\Ý\›
+HYˆ™\]Y\Ý›Y]ÙOH	ÑÑU	È[™	ËØ\KØYZ[‹Üš[ÉÈ[ˆ™\]Y\Ý\›[ÙH›Û™JBˆYÙKœ›Ý]J	ÊŠ‹Ø\KØYZ[‹ÙÙ]ÛÜ™\œÏÊ‰ËÜ™\—Ü›Ý]JBˆYÙKœ›Ý]J	ÊŠ‹Ø\KØYZ[‹Üš[Ú›ØœÏÊ‰Ëš[Ü›Ý]JBˆYÙK›ØØ]ÜŠ	Ë›˜]ˆ]Û–Ù]K]šY]ÏH›Ü™\œÈ—IÊK˜ÛXÚÊ
+BˆYÙK›ØØ]ÜŠ	ÖÙ]K\˜[™ÙOH˜[—IÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆØÝ[Y[œ]Y\žTÙ[XÝÜ[
+	Ë˜™‹[Ü™\‹XØ\™	ÊK›[™ÝOOLŒ	‰ˆHYØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÖÙ]K[Ü™\‹[[Ü™WIÊHŠBˆYÙK™]˜[X]JŠ
+HOˆÚ[™ÝË—×Ø™”YÙ\]ÛˆHØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÖÙ]K[Ü™\‹[[Ü™WIÊHŠBˆÈ›Ü›X[Ü\š[ÙXÈ™Yœ™\Ú]\Ý™\Ù]YÙHK™]™\ˆ\[™YÙH‹‚ˆYÙK™]˜[X]JŠ
+HOˆÚ[™ÝËœ™Yœ™\ÚÜ™\œÊ
+HŠBˆÛ
+YÙKŠ
+HOˆØÝ[Y[œ]Y\žTÙ[XÝÜ[
+	Ë˜™‹[Ü™\‹XØ\™	ÊK›[™ÝOOLŒ	‰ˆHYØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÖÙ]K[Ü™\‹[[Ü™WIÊHŠBˆYÙK™]˜[X]JŠ
+HOˆÚ[™ÝËœ™Yœ™\ÚÜ™\œÊ
+HŠBˆÛ
+YÙKŠ
+HOˆØÝ[Y[œ]Y\žTÙ[XÝÜ[
+	Ë˜™‹[Ü™\‹XØ\™	ÊK›[™ÝOOLŒ	‰ˆHYØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÖÙ]K[Ü™\‹[[Ü™WIÊHŠBˆ\ÜÙ\YÙK™]˜[X]JŠ
+HOˆÚ[™ÝË—×Ø™”YÙ\]ÛˆOOHØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÖÙ]K[Ü™\‹[[Ü™WIÊHŠBˆYÙK›ØØ]ÜŠ	ÖÙ]K[Ü™\‹[[Ü™WIÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆØÝ[Y[œ]Y\žTÙ[XÝÜ[
+	Ë˜™‹[Ü™\‹XØ\™	ÊK›[™ÝOOLŒHŠBˆYÙK›ØØ]ÜŠ	ÈØ™‹[Ü™\‹\ÙX\˜Ú	ÊK™š[
+	ùmì¹k£9¢$	ÊBˆÛ
+YÙKŠ
+HOˆØÝ[Y[œ]Y\žTÙ[XÝÜ[
+	Ë˜™‹[Ü™\‹XØ\™	ÊK›[™ÝOOLH	‰ˆØÝ[Y[œ]Y\žTÙ[XÝÜŠ	Ë˜™‹[Ü™\‹ZY	ÊK^ÛÛ[š[˜ÛY\Ê	ÓÔ‘T‹LŒÉÊHŠBˆYÙK›ØØ]ÜŠ	ÈØ™‹[Ü™\‹\ÙX\˜Ú	ÊK™š[
+	ú  yk¨¹.®‰ÊBˆÛ
+YÙKŠ
+HOˆØÝ[Y[œ]Y\žTÙ[XÝÜ[
+	Ë˜™‹[Ü™\‹XØ\™	ÊK›[™ÝOOLH	‰ˆØÝ[Y[œ]Y\žTÙ[XÝÜŠ	Ë˜™‹[Ü™\‹ZY	ÊK^ÛÛ[š[˜ÛY\Ê	ÓÔ‘T‹LŒ	ÊHŠBˆYÙK›ØØ]ÜŠ	ÖÙ]K[Ü™\‹XXÝ[ÛHœš[—IÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÈÝšY]Ë\š[XÙ[\‹˜XÝ]™HœËXØ\™	ÊOË^ÛÛ[š[˜ÛY\Ê	ÓÔ‘T‹LŒ	ÊHŠBˆ\ÜÙ\	ÛÜ™\—ÚYSÔ‘T‹LŒ	È[ˆYÙK›ØØ]ÜŠ	ÈÜËY^XÝ	ÊKš[›™\—Ý^
+
+HÜˆ	ÓÔ‘T‹LŒ	È[ˆYÙK›ØØ]ÜŠ	ÈÜËY^XÝ	ÊKš[›™\—Ý^
+
+BˆYÙK›ØØ]ÜŠ	ÖÙ]K\ÏH›Ü™\ˆ—IÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆØÝ[Y[œ]Y\žTÙ[XÝÜŠ	ÈÝšY]Ë[Ü™\œË˜XÝ]™H˜™‹[Ü™\‹XØ\™	ÊOË^ÛÛ[š[˜ÛY\Ê	ÓÔ‘T‹LŒ	ÊHŠBˆYÙK›ØØ]ÜŠ	Ë›˜]ˆ]Û–Ù]K]šY]ÏHœš[XÙ[\ˆ—IÊK˜ÛXÚÊ
+BˆYÙK›ØØ]ÜŠ	ÖÙ]K\ÏH˜ÛX\‹Y^XÝ—IÊK˜ÛXÚÊ
+BˆÛ
+YÙKŠ
+HOˆØÝ[Y[œ]Y\žTÙ[XÝÜ[
+	ÈÜËYÜšYœËXØ\™	ÊK›[™ÝOOLLŠBˆ›ÜˆÙ^KÛÝ[[ˆÊ	Ù^Ù\[Û‰ËJK
+	Ø][[Û‰ËJK
+	Ü™\\™Y	ËJK
+	Ü]Y]YY	ËJK
+	Üš[[™ÉËJK
+	ØÛÛ\]Y	ËJWN‚ˆYÙK›ØØ]ÜŠ‰ÖÙ]K]šXYÙOHžÚÙ^_H—IÊK˜ÛXÚÊ
+Bˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÈÜËYÜšYœËXØ\™	ÊK˜ÛÝ[
+
+OOXÛÝ[
+Ù^KYÙK›ØØ]ÜŠ	ÈÜËYÜšYœËXØ\™	ÊK˜ÛÝ[
+
+JBˆYÙK›ØØ]ÜŠ	ÖÙ]K]šXYÙOH˜[—IÊK˜ÛXÚÊ
+Bˆ›ÜˆÝ]H[ˆ
+	ÕS’Ó“ÕÓ‰Ë	ÔÑS‘S‘ÉË	ÐÐSÑSS‘ÉÊN‚ˆØ\™\YÙK›ØØ]ÜŠ	ËœËXØ\™	ÊK™š[\Š\Ï\YÙK›ØØ]ÜŠ	ËœËZY	Ë\×Ý^IÔ’S•IÊÜÝ]JJBˆ\ÜÙ\Ø\™›ØØ]ÜŠ	ÖÙ]K\ÏHœÙ[™—IÊK˜ÛÝ[
+
+OOLˆ\ÜÙ\Ø\™›ØØ]ÜŠ	ÖÙ]K\ÏHœ™XÛÛ˜Ú[H—IÊK˜ÛÝ[
+
+OOLBˆ\ÜÙ\YÙK›ØØ]ÜŠ	ËœËXØ\™	ÊK™š[\Š\Ï\YÙK›ØØ]ÜŠ	ËœËZY	Ë\×Ý^IÔ’S•T’S•S‘ÉÊJK›ØØ]ÜŠ	ÖÙ]K\ÏH˜Ø[˜Ù[—IÊK˜ÛÝ[
+
+OOLˆ\ÜÙ\YÙK›ØØ]ÜŠ	ËœËXØ\™	ÊK™š[\Š\Ï\YÙK›ØØ]ÜŠ	ËœËZY	Ë\×Ý^IÔ’S•QRSQ	ÊJK›ØØ]ÜŠ	ÖÙ]K\ÏHœÙ[™—IÊK˜ÛÝ[
+
+OOLˆ\ÜÙ\]]][ÛœÏOV×K]]][ÛœÂˆ›ÜˆÚYZYÚ[ˆ
+
+ÎL
+K
+ÍŽL
+K
+LNL
+JN‚ˆYÙKœÙ]ÝšY]ÜÜÜÚ^™JXÝ
+ÚY]ÚYZYÚZZYÚ
+JBˆ\ÜÙ\YÙK™]˜[X]J	ÙØÝ[Y[™ØÝ[Y[[[Y[œØÜ›ÛÚYZ[›™\•ÚY
+Ì‰ÊKÚYˆ\ÜÙ\YÙK›ØØ]ÜŠ	ÈÜË]šXYÙIÊK™]˜[X]J	ÊJOO™KœØÜ›ÛÚYYK˜ÛY[ÚY	ÊBˆYÙK˜ÛÜÙJ
+B‚‚™YˆXZ[Š
+N‚ˆÙ\™\ˆHÙ\™\•™XY
+
+NÜÙ\™\‹œÝ\
+
+NÝ[YKœÛY\
+Ž
+BˆžN‚ˆÚ]Þ[˜×Ü^]ÜšYÚ
+
+H\È‚ˆœ›ÝÜÙ\ˆHÙ]]ŠÜË™[š\›Û‹™Ù]
+	Ð”“ÕÔÑT—ÑS‘ÒS‘IË	ÝÙXšÚ]	ÊJK›][˜Ú
+
+BˆžN‚ˆ˜\ÙOY‰Ú‹ËÌLËŒŒŒNžÐ”“ÕÔÑT—ÕTÕÔÔ•IÎÜ\ÜÚÙ^WÛÙÚ[—Ý\Ý
+œ›ÝÜÙ\‹˜\ÙJNÙœ›ÛÝ\Ý
+œ›ÝÜÙ\‹˜\ÙJNÚÛYWÙ˜YØØ][Ù×Ü˜XÙWÝ\Ý
+œ›ÝÜÙ\‹˜\ÙJNÙ\ÚYÛ—Ù˜YÝ\Ý
+œ›ÝÜÙ\‹˜\ÙJNØÚXÚÛÝ]Ý\Ý
+œ›ÝÜÙ\‹˜\ÙJNØYZ[—Ý\Ý
+œ›ÝÜÙ\‹˜\ÙJNÛÜ™\—Üš[ÝÛÜšÜÜXÙWÝ\Ý
+œ›ÝÜÙ\‹˜\ÙKÛ
+Bˆ[\Ü[œBˆ[œKœ[—Ü]
+ÝŠ“ÓÕÈ	Ë™Ú]X‹Ý\ÝËÝ\ÝÜÜ×Ù\Ú›Ø\™œIÊJVÉÙ\Ú›Ø\™Ý\Ý	×Jœ›ÝÜÙ\‹˜\ÙKÛ
+Bˆ[œKœ[—Ü]
+ÝŠ“ÓÕÈ	Ë™Ú]X‹Ý\ÝËÝ\ÝÛ][˜ÚØXØÙ\[˜ÙKœIÊJVÉÛ][˜ÚØXØÙ\[˜ÙWÝ\Ý	×Jœ›ÝÜÙ\‹˜\ÙKÛ
+Bˆ[œKœ[—Ü]
+ÝŠ“ÓÕÈ	Ë™Ú]X‹Ý\ÝËÝ\ÝÛ[Ù[ØØ]ÚXÛÛ‹œIÊJVÉÛ[Ù[ØØ]ÚXÛÛ—Ý\Ý	×Jœ›ÝÜÙ\‹˜\ÙKÛ
+Bˆ[œKœ[—Ü]
+ÝŠ“ÓÕÈ	Ë™Ú]X‹Ý\ÝËÝ\ÝØZWÜ›ÝšY\—Øœ›ÝÜÙ\‹œIÊJVÉØZWÜ›ÝšY\—Øœ›ÝÜÙ\—Ý\Ý	×Jœ›ÝÜÙ\‹˜\ÙKÛ
+Bˆ[œKœ[—Ü]
+ÝŠ“ÓÕÈ	Ë™Ú]X‹Ý\ÝËÝ\ÝÙY]X›WÜÝXÚÙ\œ×Øœ›ÝÜÙ\‹œIÊJVÉÙY]X›WÜÝXÚÙ\—Ý\Ý	×Jœ›ÝÜÙ\‹˜\ÙKÛ
+Bˆ[œKœ[—Ü]
+ÝŠ“ÓÕÈ	Ë™Ú]X‹Ý\ÝËÝ\ÝÛ][[^Y\—Øœ›ÝÜÙ\‹œIÊJVÉÛ][[^Y\—Øœ›ÝÜÙ\—Ý\Ý	×Jœ›ÝÜÙ\‹˜\ÙKÛ
+Bˆš[˜[Nˆœ›ÝÜÙ\‹˜ÛÜÙJ
+Bˆ\˜X›WÜ™XÙZ\Ý\Ý
+˜\ÙJBˆš[
+	ÐRWÑQUÔ—ÕÑP’ÒUÓÒÉÊBˆš[˜[N‚ˆÙ\™\‹˜ÛÜÙJ
+BˆÈHÛÛ[Y\˜ÙH\Ý[œÈ[ˆØØ[˜[˜XÚÈ[ÙNÈÙY\ÒHÛÜšÜÜXÙ\ÈÛX[‹‚ˆÛÛ[Y\˜ÙHH“ÓÕÈ	ØÛÛ[Y\˜ÙWÙ]KšœÛÛ‰ÂˆYˆÛÛ[Y\˜ÙK™^\ÝÊ
+N‚ˆžNˆÛÛ[Y\˜ÙK[›[šÊ
+Bˆ^Ù\^Ù\[ÛŽˆ\ÜÂ‚‚šYˆ×Û˜[YW×ÈOH	××ÛXZ[—×ÉÎˆXZ[Š
+B

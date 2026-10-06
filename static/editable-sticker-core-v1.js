@@ -149,16 +149,23 @@
     await textFonts(c);
     const data=c.toJSON(PROPS);delete data.clipPath;
     data.objects=data.objects.filter(o=>!['guide','slot-guide'].includes(o.role));
-    const visit=(raw,obj)=>{
+    const visit=async(raw,obj)=>{
       if(raw.type==='image'){
-        const el=obj.getElement();if(typeof el.src==='string'&&el.src.startsWith('data:image/png;base64,')){raw.src=el.src;return;}const source=document.createElement('canvas');source.width=el.naturalWidth||el.width;source.height=el.naturalHeight||el.height;
+        const el=obj.getElement();raw.sourceSize={width:el.naturalWidth||el.width,height:el.naturalHeight||el.height};
+        if(typeof el.src==='string'&&el.src.startsWith('data:image/png;base64,')){raw.src=el.src;return;}
+        if(raw.templateLayerId&&raw.publicSrc){
+          const url=window.benfuwanTemplateProxyUrl?.(raw.publicSrc)||raw.publicSrc;
+          const response=await fetch(url);if(!response.ok)throw Error('模板原始素材無法讀取');const blob=await response.blob();
+          if(blob.type==='image/png'){raw.src=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(blob);});return;}
+        }
+        const source=document.createElement('canvas');source.width=el.naturalWidth||el.width;source.height=el.naturalHeight||el.height;
         if(!source.width||source.width*source.height>32_000_000)throw Error('原始素材尺寸無效');
         source.getContext('2d').drawImage(el,0,0);raw.src=source.toDataURL('image/png');source.width=source.height=1;
       }
-      if(raw.objects)raw.objects.forEach((r,i)=>visit(r,obj._objects[i]));
-      if(raw.clipPath&&obj.clipPath)visit(raw.clipPath,obj.clipPath);
+      if(raw.objects)for(const [i,r] of raw.objects.entries())await visit(r,obj._objects[i]);
+      if(raw.clipPath&&obj.clipPath)await visit(raw.clipPath,obj.clipPath);
     };
-    const objs=c.getObjects().filter(o=>!['guide','slot-guide'].includes(o.role));data.objects.forEach((r,i)=>visit(r,objs[i]));
+    const objs=c.getObjects().filter(o=>!['guide','slot-guide'].includes(o.role));for(const [i,r] of data.objects.entries())await visit(r,objs[i]);
     const coverage=await coveragePromise;
     return {...data,render_contract_version:VERSION,fontHashes:Object.fromEntries(Object.entries(coverage).map(([key,value])=>[key,value.sha256])),logicalCanvas:{width:c.width,height:c.height},production:{printW:context.printW,printH:context.printH},modelId:context.modelId,styleId:context.styleId};
   }
@@ -167,7 +174,8 @@
     try{
       const texts=[];const scan=o=>{if(['text','textbox','i-text'].includes(o.type))texts.push(o);(o.objects||[]).forEach(scan);};data.objects.forEach(scan);
       await Promise.all(texts.map(async o=>{if(o.role==='editable-sticker-text')await font(o.fontFamily,o.text);else o.fontFamily=await ordinaryFont(o.fontFamily,o.text);}));
-      await new Promise(resolve=>c.loadFromJSON({version:data.version,background:data.background,objects:data.objects},resolve));await rehydrate(c);
+      await new Promise(resolve=>c.loadFromJSON({version:data.version,background:data.background,objects:data.objects},resolve));
+      await window.BenfuwanMultilayer?.prepareRender(c,data);await rehydrate(c);
       c.getObjects().forEach(o=>o.set('objectCaching',false));
       const image=await new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=()=>reject(Error('生產遮罩無法載入'));im.src=maskSrc;});
       const mask=BenfuwanPrintMask.normalizeMaskImage(image);
