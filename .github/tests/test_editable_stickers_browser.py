@@ -17,7 +17,7 @@ def editable_sticker_test(browser,base,poll):
         for model in data.get('models',[]):
             model.setdefault('case_profiles',{})[data['styles'][0]['id']]={'preview_mask_img':'/static/test-dialog.png','print_line_img':'/static/test-dialog.png','print_w':71.63,'print_h':149.61,'print_x':12,'print_y':13,'print_angle':90}
         route.fulfill(response=response,json=payload)
-    page.route('**/api/shop_data',catalog)
+    page.route('**/api/shop_data*',catalog)
     page.goto(base+'/')
     poll(page,"() => !!window.BenfuwanEditableSticker && typeof fabric!=='undefined' && typeof shopData!=='undefined' && shopData.models?.length")
     page.evaluate("""()=>{
@@ -121,7 +121,7 @@ def editable_admin_test(browser,base,poll,catalog):
     page=browser.new_page(viewport={'width':1180,'height':900})
     page.on('dialog',lambda dialog:dialog.accept())
     page.route('**/static/test-dialog.png',lambda r:r.fulfill(status=200,body=png(),content_type='image/png'))
-    page.route('**/api/shop_data',catalog)
+    page.route('**/api/shop_data*',catalog)
     assets={'stickers':[],'categories':['全部'],'editable_stickers':[]};writes=[]
     page.route('**/api/assets?*',lambda route:route.fulfill(status=200,json={'status':'success','data':assets,'version':'asset-fixture'}))
     page.route('**/api/admin/upload_image',lambda route:route.fulfill(status=200,json={'status':'success','url':'/static/test-dialog.png'}))
