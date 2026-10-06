@@ -88,6 +88,7 @@
       if(!item&&typeof idbGet==='function')item=await idbGet('cart');
       if(!item)return;
       const before=designBytes(item.designJson);
+      if(item.designJson?.render_contract_version==='editable-text-v1'&&before+(item.printBase64?.length||0)+(item.mockupBase64?.length||0)+16384>96*1024*1024)throw new Error('設計與生產圖總容量過大，請減少圖片；原圖不會被壓縮');
       item.designJson=compactDesign(item.designJson);
       const after=designBytes(item.designJson);
       if(typeof cartItem!=='undefined')cartItem=item;

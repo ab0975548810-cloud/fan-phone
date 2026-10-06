@@ -21,6 +21,7 @@ VERSION = 'editable-text-v1'
 ROOT = Path(__file__).resolve().parent
 FONTS = {'jf-openhuninn': 'static/fonts/jf-openhuninn-2.1.ttf', 'NotoSansTC': 'static/fonts/NotoSansTC.woff2'}
 MAX_BYTES = 70 * 1024 * 1024
+MAX_SOURCE_PIXELS = 64000000
 _RENDER_SLOT = threading.BoundedSemaphore(1)
 
 
@@ -212,14 +213,16 @@ def snapshot(app, design, order_id, model, style_id, upload_paths):
         if abs(float((design.get('production') or {}).get(key,0))-float(profile[source])) > .001:
             raise ValueError('生產尺寸已更新，請重新設計')
     seen={};total=0
+    pixels=0
     for item in nodes(design):
         if item['type'] != 'image':continue
         src=item['src']
         if src not in seen:
             if not isinstance(src,str) or not src.startswith('data:image/png;base64,'):
                 raise ValueError('新版訂單需保留原始 PNG 圖片')
-            raw=base64.b64decode(src.split(',',1)[1],validate=True);size=image_bytes(raw);total+=len(raw)
+            raw=base64.b64decode(src.split(',',1)[1],validate=True);size=image_bytes(raw);total+=len(raw);pixels+=size[0]*size[1]
             if total > MAX_BYTES:raise ValueError('設計原始素材總容量過大')
+            if pixels>MAX_SOURCE_PIXELS:raise ValueError('原始素材總像素過多，請減少圖片')
             digest=hashlib.sha256(raw).hexdigest()
             path=app.upload_private_bytes(f'orders/{order_id}/sources/{digest}.png',raw);upload_paths.append(path)
             seen[src]=(path,size)
@@ -264,10 +267,14 @@ def render(app, order, profile, read):
         if abs(float(profile[field])-float(contract[key]))>.001:raise ValueError('生產尺寸已更新，生產圖無法重建')
     for family,path in FONTS.items():
         if design.get('fontHashes',{}).get(family)!=hashlib.sha256((ROOT/path).read_bytes()).hexdigest():raise ValueError('字型版本不一致，生產圖無法重建')
-    resources={};prefix=f'orders/{order["id"]}/sources/' if app.USE_SUPABASE else f'orders_{order["id"]}_sources_'
+    resources={};source_cache={};pixels=0;prefix=f'orders/{order["id"]}/sources/' if app.USE_SUPABASE else f'orders_{order["id"]}_sources_'
     def resource(path):
+        nonlocal pixels
         if not isinstance(path,str) or not path.startswith(prefix) or '..' in path or '\\' in path:raise ValueError('原始素材不屬於此訂單')
-        raw=read(path);image_bytes(raw);url='/asset/'+hashlib.sha256(raw).hexdigest()+'.png';resources[url]=base64.b64encode(raw).decode();return 'https://renderer.invalid'+url
+        if path in source_cache:return source_cache[path]
+        raw=read(path);w,h=image_bytes(raw);pixels+=w*h
+        if pixels>MAX_SOURCE_PIXELS:raise ValueError('原始素材總像素過多，生產圖無法重建')
+        url='/asset/'+hashlib.sha256(raw).hexdigest()+'.png';resources[url]=base64.b64encode(raw).decode();source_cache[path]='https://renderer.invalid'+url;return source_cache[path]
     for item in nodes(design):
         if item['type']=='image':item['src']=resource(item['src'])
     mask=resource(contract['maskPath'])

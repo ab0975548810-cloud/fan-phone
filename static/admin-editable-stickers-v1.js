@@ -26,7 +26,8 @@
     if(!src)throw Error('請上傳透明 PNG');const style={};for(const k of ['text','fontFamily','fill','stroke','textAlign'])style[k]=form.elements[k].value;
     for(const k of ['fontSize','minFontSize','strokeWidth','charSpacing','lineHeight'])style[k]=Number(form.elements[k].value);
     style.fontWeight=form.elements.fontWeight.checked?'700':'400';style.fontStyle=form.elements.fontStyle.checked?'italic':'normal';
-    await core.font(style.fontFamily,style.text);await save({id:editing?.id,name:form.elements.name.value,imageSrc:src,textArea:core.area(rect),defaultTextStyle:style});dialog.close();
+    const submittedArea=core.area(Object.fromEntries(Object.keys(rect).map(k=>[k,Number(form.elements['area-'+k].value)])));
+    await core.font(style.fontFamily,style.text);await save({id:editing?.id,name:form.elements.name.value,imageSrc:src,textArea:submittedArea,defaultTextStyle:style});dialog.close();
   }catch(e){error.textContent=e.message;if(e.code==='STALE_DATA')await loadAssets(true);}finally{lock(false);}};
   function list(){const target=panel.querySelector('[data-editable-list]');target.innerHTML='';for(const asset of assetsData.editable_stickers||[]){const row=document.createElement('div');const label=document.createElement('b');label.textContent=asset.name;const edit=document.createElement('button');edit.textContent='編輯';edit.onclick=()=>open(asset);const del=document.createElement('button');del.textContent='刪除';del.onclick=async()=>{if(busy||!confirm('確定刪除此文字貼紙？已成立訂單的來源檔會保留。'))return;busy=true;del.disabled=true;try{await save({id:asset.id,action:'delete'});}catch(e){window.BenfuwanAdminProductWorkspace?.notify?.(e.message,'error');}finally{busy=false;del.disabled=false;}};row.append(label,edit,del);target.append(row);}}
   const load=window.loadAssets;window.loadAssets=async function(){const r=await load.apply(this,arguments);list();return r;};list();
