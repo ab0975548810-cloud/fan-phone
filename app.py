@@ -835,7 +835,7 @@ def create_order():
         return no_cache_json({'status':'error','msg':str(exc)}, 400)
     except Exception as exc:
         db_write_uncertain = db_write_started
-        print('create_order error:', repr(exc))
+        app.logger.exception('create_order error')
         return no_cache_json({'status':'error','msg':f'訂單建立失敗：{exc}'}, 500)
     finally:
         if not committed:

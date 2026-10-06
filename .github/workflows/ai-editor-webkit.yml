@@ -22,6 +22,7 @@ jobs:
         run: |
           python test_editable_stickers.py
           python test_multilayer_templates.py
+          python test_order_storage_compatibility.py
           python .github/tests/test_multilayer_browser.py
           python .github/tests/test_ai_editor_webkit.py
       - name: Run Chromium admin/storefront regression test
