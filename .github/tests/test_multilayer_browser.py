@@ -190,8 +190,12 @@ def multilayer_browser_test(browser,base,poll):
             page.evaluate('BenfuwanDesignSources.release(__multiOrder)')
             page.evaluate('openPreview()')
             poll(page,"() => window.BenfuwanProductionHQ?.state().status==='ready'",timeout=60000)
+            page.evaluate("""()=>{window.__cartStore=idbSet;window.idbSet=function(key,value){const result=__cartStore.apply(this,arguments);if(key==='cart'){if(window.__firstPublishedLayerCount===undefined)window.__firstPublishedLayerCount=value.designJson.objects.length;return Promise.all([result,new Promise(resolve=>setTimeout(resolve,200))]);}return result;}}""")
             page.locator('#page-preview button').filter(has_text='加入購物車').click()
             poll(page,"() => cartItem?.designJson?.layer_contract_version==='multilayer-v1'")
+            assert page.evaluate('__firstPublishedLayerCount')==29
+            page.evaluate('() => BenfuwanMultilayerFront.whenCartReady()')
+            page.evaluate('window.idbSet=__cartStore')
             assert page.evaluate('cartItem.designJson.objects.length')==29
             assert page.evaluate('cartItem.productionMeta?.dpi')==720
             # Submit the actual Fabric-generated contract through #71 receipts,
@@ -208,6 +212,8 @@ def multilayer_browser_test(browser,base,poll):
             assert rendered.size==(round(77.6*720/25.4),round(160.7*720/25.4))
             assert abs(rendered.info['dpi'][0]-720)<.05 and job['state']=='PREPARED'
             assert job['artwork_path']!=order['print_path']
+            page.evaluate("""()=>new Promise(resolve=>applyTemplate({id:'legacy-v1',model_id:ctx.modelId,template_version:1,slots:[],objects_json:{version:'5.3.1',objects:[{type:'rect',left:25,top:35,width:40,height:30,fill:'#79bcde',strokeWidth:0,role:'sticker'}]}},resolve))""")
+            assert page.evaluate("!canvas.templateState && !canvas.layer_contract_version && canvas.getObjects().every(o=>!o.templateLayerId)")
             page.close()
             print('MULTILAYER_30_LAYERS_AUTHORING_LOCK_HIT_THROUGH_TOUCH_DUPLICATE_RESET_PHOTO_DRAFT_NORMALIZED_ORDER_RESPONSIVE_OK')
         finally:

@@ -96,7 +96,10 @@ def text_style(value):
 
 
 def configured(design):
-    return isinstance(design, dict) and design.get('render_contract_version') == VERSION
+    if not isinstance(design,dict):return False
+    objects=design.get('objects')
+    tagged=isinstance(objects,list) and any(isinstance(o,dict) and o.get('templateLayerId') for o in objects)
+    return design.get('render_contract_version')==VERSION or bool(design.get('layer_contract_version') or design.get('templateBinding') or tagged)
 
 
 def nodes(design):
@@ -118,7 +121,7 @@ def nodes(design):
 
 
 def validate(design):
-    if not configured(design) or design.get('truncated'):
+    if not configured(design) or design.get('render_contract_version')!=VERSION or design.get('truncated'):
         raise ValueError('新版文字貼紙缺少可重建設計')
     if design.get('background') is not None and not isinstance(design['background'],str):
         raise ValueError('不支援程式化背景')

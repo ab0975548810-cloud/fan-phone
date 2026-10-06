@@ -26,11 +26,17 @@
   const hydrate=window.rehydrateCanvas;window.rehydrateCanvas=function(){const result=hydrate.apply(this,arguments);const c=get();if(enabled(c)){multi.hydrate(c);bindSlots(c);touch(c);}return result;};
   const fontReady=window.ensureCanvasFonts;window.ensureCanvasFonts=async function(){await fontReady.apply(this,arguments);const c=get();if(enabled(c)){await refresh(c);multi.hydrate(c);multi.update(c);}};
   const history=window.recordHistory;window.recordHistory=function(){const c=get();if(enabled(c))multi.update(c);return history.apply(this,arguments);};
-  const oldCart=window.confirmDesignToCart;window.confirmDesignToCart=async function(){const c=get();if(!enabled(c))return oldCart.apply(this,arguments);
-    try{await ensureCanvasFonts();const data=await multi.serialize(c,ctx),before=cartItem;await oldCart.apply(this,arguments);
-      if(cartItem&&cartItem!==before&&cartItem.printBase64===ctx.printBase64&&cartItem.modelId===ctx.modelId&&cartItem.styleId===ctx.styleId){cartItem.designJson=data;await idbSet('cart',cartItem);}
-    }catch(error){say('模板無法保存：'+error.message);}
+  let cartRun=null,pendingCart=null;
+  const storeCart=window.idbSet;window.idbSet=function(key,item){
+    if(key==='cart'&&pendingCart&&get()===pendingCart.canvas&&item?.printBase64===pendingCart.print&&item?.modelId===pendingCart.data.modelId&&item?.styleId===pendingCart.data.styleId)item.designJson=pendingCart.data;
+    return storeCart.apply(this,arguments);
   };
+  const oldCart=window.confirmDesignToCart;window.confirmDesignToCart=function(){const c=get();if(!enabled(c))return oldCart.apply(this,arguments);if(cartRun)return cartRun;const args=arguments;
+    cartRun=(async()=>{try{await ensureCanvasFonts();const data=await multi.serialize(c,ctx),before=cartItem;if(get()!==c||ctx.modelId!==data.modelId||ctx.styleId!==data.styleId)throw Error('設計已切換，請重新確認');pendingCart={canvas:c,data,print:ctx.printBase64};await oldCart.apply(this,args);
+      if(cartItem&&cartItem!==before&&cartItem.printBase64===ctx.printBase64&&cartItem.modelId===ctx.modelId&&cartItem.styleId===ctx.styleId){cartItem.designJson=data;await idbSet('cart',cartItem);}
+    }catch(error){say('模板無法保存：'+error.message);}finally{pendingCart=null;}})().finally(()=>{cartRun=null;});return cartRun;
+  };
+  const submit=window.submitOrder;window.submitOrder=async function(){if(cartRun)await cartRun;if(cartItem?.designJson?.layer_contract_version===multi.VERSION&&cartItem.designJson.render_contract_version!==editable.VERSION){say('模板尚未完成保存，請返回設計重新確認');return;}return submit.apply(this,arguments);};
   function guard(flag){const c=get(),o=active();if(!enabled(c)||!o)return true;if(!multi.allowed(c,o,flag)){say('此模板圖層未開放這項操作');return false;}return true;}
   const operations={nudgeActive:'canMove',centerActive:'canMove',changeAngle:'canRotate',changeOpacity:'canEdit',flipActive:'canEdit',deleteActive:'canDelete',bringForward:'canMove',sendBackward:'canMove',moveToTop:'canMove',moveToBottom:'canMove',applyTextSettings:'canEdit',openTextSheet:'canEdit',removeBackgroundForActive:'canEdit',openAiRemoveTools:'canEdit',openAiOutlineSheet:'canEdit'};
   for(const [name,flag] of Object.entries(operations)){const old=window[name];if(typeof old!=='function')continue;window[name]=function(){if(!guard(flag))return;return old.apply(this,arguments);};}
@@ -100,5 +106,5 @@
     function end(e){if(!blocked)return;stop(e);if(state&&e.touches.length<2){state=null;c._currentTransform=null;recordHistory();renderLayerList();}if(!e.touches.length)blocked=false;}
     el.addEventListener('touchend',end,{capture:true,passive:false});el.addEventListener('touchcancel',end,{capture:true,passive:false});
   }
-  window.BenfuwanMultilayerFront={contract,refresh,resetTemplate};
+  window.BenfuwanMultilayerFront={contract,refresh,resetTemplate,whenCartReady:()=>cartRun||Promise.resolve()};
 })();

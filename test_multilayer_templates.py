@@ -151,6 +151,12 @@ class MultilayerTests(unittest.TestCase):
         data=self.design();data.pop('layer_contract_version')
         with self.assertRaises(ValueError):editable.validate(data)
 
+    def test_missing_render_contract_cannot_use_legacy_print_path(self):
+        for marker in ('layer_contract_version','templateLayerId'):
+            data=self.design();data.pop('render_contract_version')
+            if marker=='templateLayerId':data.pop('layer_contract_version');data.pop('templateBinding')
+            self.assertTrue(editable.configured(data));self.create(data,400)
+
     def test_multilayer_asset_upload_preserves_original_png(self):
         import quality_perf_patch
         maximum=app.app.config['MAX_CONTENT_LENGTH'];quality_perf_patch.install(app);app.app.config['MAX_CONTENT_LENGTH']=maximum

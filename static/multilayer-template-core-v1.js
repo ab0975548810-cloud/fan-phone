@@ -86,6 +86,7 @@
   async function prepareRender(c,data){if(data.layer_contract_version!==VERSION)return;c._objects.sort((a,b)=>(a.zIndex??0)-(b.zIndex??0));for(const o of c.getObjects()){if(o.templateLayerId){map(o,o.normalizedGeometry,c);o.setCoords();}}await core()?.rehydrate(c);}
   function serializer(){if(!window.fabric?.Object||fabric.Object.prototype.__multiSerializer)return;const previous=fabric.Object.prototype.toObject;fabric.Object.prototype.toObject=function(props){return previous.call(this,(this.layerId||this.templateLayerId)?[...(props||[]),...PROPS]:props);};fabric.Object.prototype.__multiSerializer=true;}
   const bound=new WeakSet();function bind(c,admin=false){serializer();if(bound.has(c))return;bound.add(c);
+    if(!admin){const clear=c.clear;c.clear=function(){if(c.layer_contract_version===VERSION){delete c.templateState;delete c.layer_contract_version;c.selection=true;}return clear.apply(this,arguments);};}
     // Existing image effects replace Image objects. Carry layer identity across
     // that synchronous remove/insert, without changing those effects' algorithms.
     const removed=[];let clearing=false;
