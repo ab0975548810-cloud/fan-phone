@@ -283,27 +283,32 @@ def image_tools_regression(page,poll,info):
 
 
 def legacy_image_tools_regression(page,poll):
+    import app as app_module
+    from flask import request
     calls=[]
-    def capture(request):
-        if '/api/admin/upload_image' in request.url:calls.append(request.post_data_buffer)
-    page.on('request',capture)
-    page.evaluate('window.__legacyPreviousCanvas=visualCanvas')
-    page.locator('#view-templates .titlebar button').filter(has_text='建立模板').click()
-    poll(page,"() => visualCanvas!==window.__legacyPreviousCanvas && document.getElementById('multilayer-enable')?.checked")
-    page.locator('#multilayer-enable').uncheck()
-    assert page.evaluate('BenfuwanAdminMultilayer.enabled()') is False
-    page.locator('#bf-tpl-image-file-v3').set_input_files({'name':'legacy.png','mimeType':'image/png','buffer':png()})
-    poll(page,"() => visualCanvas.getObjects().filter(o=>o.type==='image').length===1")
-    assert page.evaluate('visualCanvas.getActiveObject().publicSrc.endsWith(".webp")')
-    assert b'name="source_contract"' not in calls[-1]
-    before=page.evaluate('visualCanvas.getActiveObject().publicSrc')
-    poll(page,"() => document.getElementById('bf-tpl-objectbar').classList.contains('bf-imgtools')")
-    page.locator('[data-bf-imgtool=crop]').click();page.locator('#bf-imgtool-panel [data-ratio="1"]').click()
-    poll(page,f"() => visualCanvas.getActiveObject().publicSrc!=='{before}'")
-    assert page.evaluate('visualCanvas.getActiveObject().publicSrc.endsWith(".webp")')
-    assert b'name="source_contract"' not in calls[-1] and b'content-type: image/webp' in calls[-1].lower()
-    page.remove_listener('request',capture)
-    page.evaluate('closeModal("template-modal")')
+    def capture():
+        # Chromium does not expose file-input multipart bytes via Playwright.
+        # Observe the actual local server input without intercepting responses.
+        if request.path=='/api/admin/upload_image':calls.append({'contract':request.form.get('source_contract'),'mime':request.files['file'].mimetype})
+    hooks=app_module.app.before_request_funcs.setdefault(None,[]);hooks.append(capture)
+    try:
+        page.evaluate('window.__legacyPreviousCanvas=visualCanvas')
+        page.locator('#view-templates .titlebar button').filter(has_text='建立模板').click()
+        poll(page,"() => visualCanvas!==window.__legacyPreviousCanvas && document.getElementById('multilayer-enable')?.checked")
+        page.locator('#multilayer-enable').uncheck()
+        assert page.evaluate('BenfuwanAdminMultilayer.enabled()') is False
+        page.locator('#bf-tpl-image-file-v3').set_input_files({'name':'legacy.png','mimeType':'image/png','buffer':png()})
+        poll(page,"() => visualCanvas.getObjects().filter(o=>o.type==='image').length===1")
+        assert page.evaluate('visualCanvas.getActiveObject().publicSrc.endsWith(".webp")')
+        assert calls and calls[-1]['contract'] is None
+        before=page.evaluate('visualCanvas.getActiveObject().publicSrc')
+        poll(page,"() => document.getElementById('bf-tpl-objectbar').classList.contains('bf-imgtools')")
+        page.locator('[data-bf-imgtool=crop]').click();page.locator('#bf-imgtool-panel [data-ratio="1"]').click()
+        poll(page,f"() => visualCanvas.getActiveObject().publicSrc!=='{before}'")
+        assert page.evaluate('visualCanvas.getActiveObject().publicSrc.endsWith(".webp")')
+        assert len(calls)==2 and calls[-1]['contract'] is None and calls[-1]['mime']=='image/webp'
+        page.evaluate('closeModal("template-modal")')
+    finally:hooks.remove(capture)
 
 
 def gesture_test(page,browser):
