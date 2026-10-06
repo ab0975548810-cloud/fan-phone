@@ -142,8 +142,10 @@ def editable_admin_test(browser,base,poll,catalog):
     poll(page,"() => document.querySelector('.editable-config-stage img').naturalWidth===1024 && !document.querySelector('.editable-config-dialog [type=submit]').disabled")
     box=dialog.locator('.editable-config-area').bounding_box();page.mouse.move(box['x']+15,box['y']+15);page.mouse.down();page.mouse.move(box['x']+35,box['y']+25,steps=6);page.mouse.up()
     assert float(dialog.locator('[name=area-x]').input_value())>.15
+    assert dialog.locator('[name=area-x]').evaluate('(e)=>e.validity.valid')
     dialog.locator('[name=fontSize]').fill('80');dialog.locator('[name=minFontSize]').fill('18')
-    dialog.get_by_role('button',name='儲存',exact=True).click();poll(page,"() => !document.querySelector('.editable-config-dialog').open")
+    dialog.get_by_role('button',name='儲存',exact=True).click();poll(page,"() => !document.querySelector('.editable-config-dialog').open || !!document.querySelector('.editable-config-dialog [data-error]').textContent")
+    assert not dialog.evaluate('(e)=>e.open'),dialog.locator('[data-error]').inner_text()
     assert len(writes)==1 and writes[0]['expected_version']=='asset-fixture'
     assert writes[0]['textArea']['x']>.15 and writes[0]['defaultTextStyle']['fontFamily']=='jf-openhuninn'
     assert assets['stickers']==[]
