@@ -29,6 +29,7 @@
   function permissions(c,o,admin=false){
     if(admin){o.set({selectable:true,evented:true,lockMovementX:false,lockMovementY:false,lockScalingX:false,lockScalingY:false,lockRotation:false,editable:true,hasControls:true});return;}
     const p=policy(c,o);FLAGS.forEach(k=>o[k]=p[k]);
+    if(!p.canRotate)o.set('angle',p.angle||0);
     o.set({selectable:!p.locked,evented:!p.locked,lockMovementX:p.locked||!p.canMove,lockMovementY:p.locked||!p.canMove,lockScalingX:p.locked||!p.canScale,lockScalingY:p.locked||!p.canScale,lockRotation:p.locked||!p.canRotate,editable:!p.locked&&p.canEdit,hasControls:!p.locked&&(p.canScale||p.canRotate)});
     o.setControlsVisibility?.({tl:!!p.canScale,tr:!!p.canScale,bl:!!p.canScale,br:!!p.canScale,mtr:!!p.canRotate,mt:false,mb:false,ml:false,mr:false});
     if(o.role==='slot-guide'){o.selectable=false;o.evented=!p.locked&&p.canEdit;}

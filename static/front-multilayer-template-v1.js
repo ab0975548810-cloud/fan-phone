@@ -32,8 +32,11 @@
     }catch(error){say('模板無法保存：'+error.message);}
   };
   function guard(flag){const c=get(),o=active();if(!enabled(c)||!o)return true;if(!multi.allowed(c,o,flag)){say('此模板圖層未開放這項操作');return false;}return true;}
-  const operations={nudgeActive:'canMove',centerActive:'canMove',changeAngle:'canRotate',changeOpacity:'canEdit',flipActive:'canEdit',deleteActive:'canDelete',bringForward:'canMove',sendBackward:'canMove',moveToTop:'canMove',moveToBottom:'canMove',applyTextSettings:'canEdit'};
+  const operations={nudgeActive:'canMove',centerActive:'canMove',changeAngle:'canRotate',changeOpacity:'canEdit',flipActive:'canEdit',deleteActive:'canDelete',bringForward:'canMove',sendBackward:'canMove',moveToTop:'canMove',moveToBottom:'canMove',applyTextSettings:'canEdit',openTextSheet:'canEdit',removeBackgroundForActive:'canEdit',openAiRemoveTools:'canEdit',openAiOutlineSheet:'canEdit'};
   for(const [name,flag] of Object.entries(operations)){const old=window[name];if(typeof old!=='function')continue;window[name]=function(){if(!guard(flag))return;return old.apply(this,arguments);};}
+  const aiButton=document.getElementById('ai-remove-btn');if(aiButton)aiButton.onclick=window.openAiRemoveTools;
+  const editableSelection=window.bfEditableSelection;
+  window.bfEditableSelection=function(c,o){if(enabled(c)&&o?.templateLayerId&&!multi.allowed(c,o,'canEdit')){const dock=document.getElementById('editable-text-tools');if(dock)dock.hidden=true;return;}return editableSelection?.apply(this,arguments);};
   const duplicate=window.duplicateActive;
   window.duplicateActive=async function(){const c=get(),o=active();if(!enabled(c)||!o?.templateLayerId)return duplicate.apply(this,arguments);if(!guard('canDuplicate'))return;
     try{

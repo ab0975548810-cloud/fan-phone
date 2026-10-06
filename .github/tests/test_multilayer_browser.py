@@ -78,6 +78,11 @@ def multilayer_browser_test(browser,base,poll):
             # Lock an image above another image to test transparent hit-through.
             info=admin.evaluate("""()=>{const images=visualCanvas.getObjects().filter(o=>o.type==='image'&&!o.editableStickerInstanceId);const lower=images[0],upper=images[1];upper.setPositionByOrigin(lower.getCenterPoint(),'center','center');upper.setCoords();return {lower:lower.layerId,upper:upper.layerId,rotated:images[3].layerId}}""")
             admin.locator('#bf-tpl-layers-btn-v3').click()
+            for label,flag in (('Layer 10','canEdit'),('Layer 11','canRotate')):
+                # Resolve the row by the actual editable layer label.
+                layer_id=admin.evaluate("label=>visualCanvas.getObjects().find(o=>o.layerName===label).layerId",label)
+                row=admin.locator(f'.multi-admin-layer[data-layer-id="{layer_id}"]')
+                row.locator('summary').click();row.locator(f'[data-permission={flag}]').uncheck()
             admin.locator(f'.multi-admin-layer[data-layer-id="{info["upper"]}"] [data-locked]').check()
             assert admin.locator(f'.multi-admin-layer[data-layer-id="{info["upper"]}"] [data-permission=canMove]').is_disabled()
             admin.route('**/api/admin/save_templates',lambda route:route.fulfill(status=503,content_type='application/json',body='{"status":"error"}'))
@@ -107,6 +112,10 @@ def multilayer_browser_test(browser,base,poll):
             selected=page.evaluate("""()=>{const out=[];for(const o of canvas.getObjects()){if(!o.locked&&o.role!=='slot-guide'&&o.role!=='editable-sticker-text'){canvas.setActiveObject(o);out.push(canvas.getActiveObject().layerInstanceId)}}return out;}""")
             assert len(selected)>=25 and len(set(selected))==len(selected)
             assert page.evaluate("canvas.getObjects().filter(o=>o.locked).every(o=>!o.selectable&&!o.evented)")
+            page.evaluate("canvas.setActiveObject(canvas.getObjects().find(o=>o.text==='Layer 10'));openTextSheet()")
+            assert not page.locator('#sheet-text').evaluate("e=>e.classList.contains('show')")
+            rotation=page.evaluate("() => {const o=canvas.getObjects().find(o=>o.text==='Layer 11');canvas.setActiveObject(o);changeAngle(90);return o.angle;}")
+            assert rotation==0
             # Real click hits the lower image through the locked foreground image.
             point=page.evaluate("""id=>{canvas.discardActiveObject();const o=canvas.getObjects().find(o=>o.templateLayerId===id),p=o.getCenterPoint(),r=canvas.upperCanvasEl.getBoundingClientRect();return {x:r.x+p.x*r.width/canvas.width,y:r.y+p.y*r.height/canvas.height}}""",info['lower'])
             page.mouse.click(point['x'],point['y']);assert page.evaluate('canvas.getActiveObject()?.templateLayerId')==info['lower']

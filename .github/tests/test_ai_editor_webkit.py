@@ -2457,6 +2457,7 @@ def admin_test(browser, base):
 
     # This block covers the unchanged legacy editor-v2 save/error contract.
     # New multilayer save/toast behavior has its own real authoring regression.
+    poll(page,"() => document.getElementById('multilayer-enable')?.checked === true")
     page.locator('#multilayer-enable').uncheck()
 
     template_server_original = page.evaluate("() => ({data:structuredClone(templatesData),version:templatesVersion})")
