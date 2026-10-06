@@ -9,14 +9,14 @@ def png():
 
 
 def editable_sticker_test(browser,base,poll):
-    page=browser.new_page(viewport={'width':390,'height':844},has_touch=True)
+    page=browser.new_page(viewport={'width':390,'height':844},has_touch=True,is_mobile=True)
     page.on('pageerror',lambda error:print('EDITABLE_PAGE_ERROR',str(error),flush=True))
     page.route('**/static/test-dialog.png',lambda r:r.fulfill(status=200,body=png(),content_type='image/png'))
     def catalog(route):
-        response=route.fetch();data=response.json()
+        response=route.fetch();payload=response.json();data=payload.get('data',payload)
         for model in data.get('models',[]):
             model.setdefault('case_profiles',{})[data['styles'][0]['id']]={'preview_mask_img':'/static/test-dialog.png','print_line_img':'/static/test-dialog.png','print_w':71.63,'print_h':149.61,'print_x':12,'print_y':13,'print_angle':90}
-        route.fulfill(response=response,json=data)
+        route.fulfill(response=response,json=payload)
     page.route('**/api/shop_data',catalog)
     page.goto(base+'/')
     poll(page,"() => !!window.BenfuwanEditableSticker && typeof fabric!=='undefined' && typeof shopData!=='undefined' && shopData.models?.length")
@@ -36,7 +36,7 @@ def editable_sticker_test(browser,base,poll):
     # Actual pointer drag on the frame, then Fabric's real transform event paths.
     point=page.evaluate("""()=>{const r=canvas.upperCanvasEl.getBoundingClientRect(),p=__pair.bg.getCenterPoint();return {x:r.x+p.x*r.width/canvas.width,y:r.y+p.y*r.height/canvas.height}}""")
     before=page.evaluate('({bg:__pair.bg.getCenterPoint(),text:__pair.text.getCenterPoint()})')
-    diagnostic=page.evaluate("""p=>{window.__dragEvents=[];canvas.on('mouse:down',e=>__dragEvents.push({event:'down',role:e.target?.role,pointer:e.pointer}));canvas.on('object:moving',e=>__dragEvents.push({event:'moving',role:e.target?.role}));const r=canvas.upperCanvasEl.getBoundingClientRect();const hit=document.elementFromPoint(p.x,p.y);return {point:p,rect:{x:r.x,y:r.y,width:r.width,height:r.height},hit:hit?.outerHTML.slice(0,300),zoom:canvas.getZoom(),offset:canvas._offset,objects:canvas.getObjects().map(o=>({role:o.role,left:o.left,top:o.top,selectable:o.selectable,evented:o.evented,lockX:o.lockMovementX,lockY:o.lockMovementY}))}}""",point)
+    diagnostic=page.evaluate("""p=>{window.__dragEvents=[];canvas.on('mouse:down',e=>__dragEvents.push({event:'down',role:e.target?.role,pointer:e.pointer}));canvas.on('object:moving',e=>__dragEvents.push({event:'moving',role:e.target?.role}));const r=canvas.upperCanvasEl.getBoundingClientRect();const hit=document.elementFromPoint(p.x,p.y);return {point:p,rect:{x:r.x,y:r.y,width:r.width,height:r.height},hit:hit?.outerHTML.slice(0,300),zoom:canvas.getZoom(),scrollY:window.scrollY,editorTop:document.getElementById('page-editor').getBoundingClientRect().top,dockStyle:{height:document.getElementById('editable-text-tools').getBoundingClientRect().height,max:getComputedStyle(document.getElementById('editable-text-tools')).maxHeight},offset:canvas._offset,objects:canvas.getObjects().map(o=>({role:o.role,left:o.left,top:o.top,selectable:o.selectable,evented:o.evented,lockX:o.lockMovementX,lockY:o.lockMovementY}))}}""",point)
     page.mouse.move(point['x'],point['y']);page.mouse.down();page.mouse.move(point['x']+15,point['y']+10,steps=8);page.mouse.up()
     after=page.evaluate('({bg:__pair.bg.getCenterPoint(),text:__pair.text.getCenterPoint()})')
     assert abs(after['bg']['x']-before['bg']['x'])>2,(after,diagnostic,page.evaluate('__dragEvents'))
