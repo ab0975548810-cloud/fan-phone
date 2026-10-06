@@ -76,6 +76,18 @@ class OrderStorageCompatibilityTests(unittest.TestCase):
             self.assertEqual(marker.size,(1,1));self.assertEqual(marker.format,'PNG')
             self.assertEqual(json.loads(marker.info['benfuwan_cleanup']),{'order_id':'orphan-123'})
 
+    def test_ordinary_retry_keeps_one_order_and_does_not_reupload(self):
+        payload=self.fx.body({'objects':[{'type':'image','role':'photo','src':fixture.PNG}]})
+        before=len(app.commerce.store.local_orders())
+        first=self.fx.client.post('/api/create_order',json=payload)
+        self.assertEqual(first.status_code,200,first.json)
+        uploads=len(self.bucket.uploads)
+        repeat=self.fx.client.post('/api/create_order',json=payload)
+        self.assertEqual(repeat.status_code,200,repeat.json)
+        self.assertEqual(first.json['order_id'],repeat.json['order_id'])
+        self.assertEqual(len(app.commerce.store.local_orders()),before+1)
+        self.assertEqual(len(self.bucket.uploads),uploads)
+
     def test_expired_cleanup_reads_new_png_and_legacy_json(self):
         now=int(time.time())+2*86400
         marker=design_sources.cleanup_plan(app,'orphan-123')
