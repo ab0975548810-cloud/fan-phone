@@ -91,6 +91,14 @@ class MultilayerTests(unittest.TestCase):
                 for index,item in enumerate(data['objects']):item['zIndex']=index
             self.create(data,400)
 
+    def test_locked_skew_and_compositing_cannot_change_artwork(self):
+        for field,value in (('skewX',30),('skewY',30),('globalCompositeOperation','destination-out')):
+            data=self.design();data['objects'][0][field]=value
+            with self.client.session_transaction() as session:identity=session['_bf_client_id']
+            with app.app.test_request_context('/api/create_order'):
+                app.session['_bf_client_id']=identity
+                with self.assertRaisesRegex(ValueError,'固定圖層內容'):multi.verify_design(app,data)
+
     def test_binding_owner_and_updated_template_fail_closed(self):
         uploaded=self.fx.upload(self.design());other=app.app.test_client()
         with mock.patch('editable_stickers.public_image',return_value=fixture.mask()):self.assertEqual(other.post('/api/create_order',json=self.fx.body(uploaded)).status_code,400)

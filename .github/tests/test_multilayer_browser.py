@@ -104,6 +104,7 @@ def multilayer_browser_test(browser,base,poll):
             old=page.evaluate('({left:canvas.getActiveObject().left,top:canvas.getActiveObject().top})')
             page.mouse.move(point['x'],point['y']);page.mouse.down();page.mouse.move(point['x']+12,point['y']+10,steps=8);page.mouse.up()
             assert abs(page.evaluate('canvas.getActiveObject().left')-old['left'])>3
+            single_touch_drag_test(page,browser)
             gesture_test(page,browser)
             # Duplication and deletion operate on the selected layer only.
             before_count=page.evaluate('canvas.getObjects().length');page.evaluate('duplicateActive()')
@@ -115,6 +116,12 @@ def multilayer_browser_test(browser,base,poll):
             assert row.count()==1;row.get_by_role('button',name='顯示／隱藏').click()
             assert page.evaluate("canvas.getObjects().find(o=>o.text==='Layer 0').visible") is False
             row=page.locator('.multi-layer-row').filter(has=page.locator('.layer-name',has_text='Layer 0')).first;row.get_by_role('button',name='顯示／隱藏').click()
+            previous=page.evaluate("canvas.getObjects().indexOf(canvas.getObjects().find(o=>o.text==='Layer 0'))")
+            row.get_by_role('button',name='上移',exact=True).click()
+            assert page.evaluate("canvas.getObjects().indexOf(canvas.getObjects().find(o=>o.text==='Layer 0'))")==previous+1
+            row=page.locator('.multi-layer-row').filter(has=page.locator('.layer-name',has_text='Layer 0')).first
+            row.get_by_role('button',name='下移',exact=True).click()
+            assert page.evaluate("canvas.getObjects().indexOf(canvas.getObjects().find(o=>o.text==='Layer 0'))")==previous
             page.evaluate('closeSheets()')
             page.evaluate("canvas.setActiveObject(canvas.getObjects().find(o=>o.text==='Layer 0'));openTextSheet()")
             page.locator('#text-input').fill('客人可改模板文字')
@@ -171,6 +178,21 @@ def multilayer_browser_test(browser,base,poll):
             asset.unlink(missing_ok=True);mask.unlink(missing_ok=True)
             import security_perf
             security_perf._CACHE.clear()
+
+
+def single_touch_drag_test(page,browser):
+    point=page.evaluate("""()=>{const p=canvas.getActiveObject().getCenterPoint(),r=canvas.upperCanvasEl.getBoundingClientRect();return {x:r.x+p.x*r.width/canvas.width,y:r.y+p.y*r.height/canvas.height,left:canvas.getActiveObject().left}}""")
+    if browser.browser_type.name=='chromium':
+        cdp=page.context.new_cdp_session(page)
+        cdp.send('Input.dispatchTouchEvent',{'type':'touchStart','touchPoints':[{'x':point['x'],'y':point['y'],'id':1}]})
+        for step in range(1,6):cdp.send('Input.dispatchTouchEvent',{'type':'touchMove','touchPoints':[{'x':point['x']+step*3,'y':point['y']+step*2,'id':1}]})
+        cdp.send('Input.dispatchTouchEvent',{'type':'touchEnd','touchPoints':[]});cdp.detach()
+    else:
+        page.evaluate("""p=>{const el=canvas.upperCanvasEl;
+          function emit(type,dx,dy){const touch=new Touch({identifier:1,target:el,clientX:p.x+dx,clientY:p.y+dy,pageX:p.x+dx+scrollX,pageY:p.y+dy+scrollY});const touches=type==='touchend'?[]:[touch];el.dispatchEvent(new TouchEvent(type,{touches,targetTouches:touches,changedTouches:[touch],bubbles:true,cancelable:true}));}
+          emit('touchstart',0,0);for(let i=1;i<=5;i++)emit('touchmove',i*3,i*2);emit('touchend',15,10);
+        }""",point)
+    assert abs(page.evaluate('canvas.getActiveObject().left')-point['left'])>3
 
 
 def gesture_test(page,browser):

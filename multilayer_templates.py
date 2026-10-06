@@ -14,7 +14,7 @@ from PIL import Image
 VERSION='multilayer-v1'
 FLAGS=('locked','canMove','canScale','canRotate','canDelete','canDuplicate','canEdit')
 TEXT_FIELDS=('text','fontFamily','fontSize','fontWeight','fontStyle','fill','stroke','strokeWidth','textAlign','charSpacing','lineHeight','styles','textArea','minFontSize','requestedFontSize')
-CONTENT_FIELDS=TEXT_FIELDS+('width','height','cropX','cropY','clipPath','radius','rx','ry','path','pathOffset','points','x1','y1','x2','y2','strokeUniform','strokeDashArray','shadow','underline','overline','linethrough','backgroundColor','paintFirst')
+CONTENT_FIELDS=TEXT_FIELDS+('width','height','cropX','cropY','clipPath','radius','rx','ry','path','pathOffset','points','x1','y1','x2','y2','strokeUniform','strokeDashArray','strokeLineCap','strokeLineJoin','strokeMiterLimit','shadow','underline','overline','linethrough','backgroundColor','paintFirst','skewX','skewY','globalCompositeOperation','fillRule')
 
 
 def validate_gradient(value):
