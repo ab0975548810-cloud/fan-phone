@@ -6,6 +6,7 @@ replace real Fabric objects through the production code. Never call paid APIs.
 import base64
 import io
 import json
+import tempfile
 from PIL import Image, ImageDraw
 
 
@@ -189,7 +190,20 @@ def ai_provider_browser_test(browser,base,poll):
 
 
 def front_auto_ux_test(browser,base,poll):
-    page=browser.new_page(viewport={'width':390,'height':844},has_touch=True)
+    # WebKit's ephemeral/private contexts cannot persist IndexedDB Blobs.
+    # Use a real temporary browser profile to verify the normal Safari cache
+    # path, without replacing IndexedDB or weakening the cache-hit assertion.
+    with tempfile.TemporaryDirectory() as profile:
+        context=browser.browser_type.launch_persistent_context(profile,
+            viewport={'width':390,'height':844},has_touch=True)
+        try:
+            _front_auto_ux_test(context,base,poll)
+        finally:
+            context.close()
+
+
+def _front_auto_ux_test(context,base,poll):
+    page=context.new_page()
     diagnostics=[]
     page.on('console',lambda msg:diagnostics.append(msg.text) if msg.type in ('warning','error') else None)
     requests=[]
