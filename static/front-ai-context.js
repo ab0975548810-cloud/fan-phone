@@ -24,11 +24,11 @@
       b.innerHTML='<i class="fa-solid fa-border-style"></i>描邊';
       b.onclick=()=>window.openAiOutlineSheet?.();
     }else{
-      b.title='AI 摳圖工具';
-      b.innerHTML='<i class="fa-solid fa-wand-magic-sparkles"></i>AI 摳圖';
+      b.title='✨ AI 自動去背';
+      b.textContent='✨ AI 自動去背';
       b.onclick=async()=>{
         if(typeof window.removeBackgroundForActive!=='function'){
-          if(typeof toast==='function')toast('通用去背功能尚未載入');
+          if(typeof toast==='function')toast('自動去背暫時無法使用，請稍後再試');
           return;
         }
         try{

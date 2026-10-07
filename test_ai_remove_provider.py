@@ -96,6 +96,33 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual([e[0] for e in self.quota.events],['reserve','submitted','finished'])
         self.assertEqual(self.quota.events[1][-1],'koukoutu:42')
 
+    def test_auto_general_success_never_starts_runpod(self):
+        with mock.patch.object(app,'AI_REMOVE_PROVIDER','auto'),mock.patch.object(provider,'submit',return_value='42') as submit,mock.patch.object(provider,'wait',return_value=GOOD),mock.patch.object(app,'_runpod_submit') as fallback:
+            response=self.post('general')
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(response.headers['X-AI-Provider'],'koukoutu')
+        self.assertEqual(submit.call_args.args[3],'general')
+        fallback.assert_not_called()
+        self.assertEqual([e[0] for e in self.quota.events],['reserve','submitted','finished'])
+
+    def test_auto_general_technical_failures_fallback_with_one_reservation(self):
+        for failure in (requests.Timeout(),requests.HTTPError('HTTP 503'),b'invalid PNG',OPAQUE):
+            with self.subTest(failure=type(failure).__name__):
+                self.quota.events.clear()
+                with mock.patch.object(app,'AI_REMOVE_PROVIDER','auto'),mock.patch.object(provider,'submit',return_value='42'),mock.patch.object(provider,'wait',side_effect=failure if isinstance(failure,Exception) else None,return_value=failure),mock.patch.object(app,'_runpod_submit',return_value=('rp-1',{})) as fallback,mock.patch.object(app,'_runpod_wait_for_result',return_value=self.runpod_result()):
+                    response=self.post('general')
+                self.assertEqual(response.status_code,200)
+                self.assertEqual(response.headers['X-AI-Provider'],'runpod')
+                fallback.assert_called_once()
+                self.assertEqual([e[0] for e in self.quota.events],['reserve','submitted','finished'])
+
+    def test_auto_general_both_providers_fail_count_once(self):
+        with mock.patch.object(app,'AI_REMOVE_PROVIDER','auto'),mock.patch.object(provider,'submit',return_value='42'),mock.patch.object(provider,'wait',side_effect=requests.Timeout()),mock.patch.object(app,'_runpod_submit',side_effect=RuntimeError('RunPod unavailable')):
+            response=self.post('general')
+        self.assertGreaterEqual(response.status_code,500)
+        self.assertEqual([e[0] for e in self.quota.events],['reserve','submitted','finished'])
+        self.assertEqual(self.quota.events[-1][-1],'FAILED')
+
     def test_auto_fallback_before_accepted_job_counts_runpod_once(self):
         with mock.patch.object(app,'AI_REMOVE_PROVIDER','auto'),mock.patch.object(provider,'submit',side_effect=requests.Timeout()),mock.patch.object(app,'_runpod_submit',return_value=('rp-1',{})),mock.patch.object(app,'_runpod_wait_for_result',return_value=self.runpod_result()):
             response=self.post()

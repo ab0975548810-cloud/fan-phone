@@ -198,7 +198,7 @@
   <!-- SHEETS -->
   <div class="sheet-overlay" id="sheet-overlay" onclick="closeSheets()"></div>
 
-  <div class="sheet" id="sheet-upload"><div class="sheet-header"><span>上傳圖片</span><button class="sheet-close" onclick="closeSheets()"><i class="fa-solid fa-xmark"></i></button></div><div class="sheet-body"><div class="upload-box" onclick="document.getElementById('photo-input').click()"><i class="fa-regular fa-images"></i><b>從手機相簿選擇圖片</b><small>可一次選擇多張圖片；加入畫布前會自動最佳化，操作更順</small></div><div class="ai-box"><b><i class="fa-solid fa-wand-magic-sparkles"></i> 通用去背</b><div id="ai-status-text" style="margin-top:5px;color:#806e77">保留人物、文字與所有分離小裝飾，只移除外圍背景，輸出原始解析度透明 PNG。</div><button id="ai-remove-btn" class="secondary wide" onclick="removeBackgroundForActive()">通用去背選取圖片</button></div></div></div>
+  <div class="sheet" id="sheet-upload"><div class="sheet-header"><span>上傳圖片</span><button class="sheet-close" onclick="closeSheets()"><i class="fa-solid fa-xmark"></i></button></div><div class="sheet-body"><div class="upload-box" onclick="document.getElementById('photo-input').click()"><i class="fa-regular fa-images"></i><b>從手機相簿選擇圖片</b><small>可一次選擇多張圖片；加入畫布前會自動最佳化，操作更順</small></div><div class="ai-box"><b>✨ AI 自動去背</b><div id="ai-status-text" style="margin-top:5px;color:#806e77">自動辨識人物、寵物與商品，產生透明背景</div><button id="ai-remove-btn" class="secondary wide" onclick="openAiRemoveTools()">✨ AI 自動去背</button></div></div></div>
 
   <div class="sheet" id="sheet-sticker"><div class="sheet-header"><span>貼紙庫</span><button class="sheet-close" onclick="closeSheets()"><i class="fa-solid fa-xmark"></i></button></div><div class="sheet-body"><div class="sticker-tabs" id="sticker-cats"></div><div class="sticker-grid" id="sticker-grid"></div></div></div>
 
@@ -282,8 +282,7 @@ async function checkBackendStatus(){
   try{
     const r=await fetch('/api/health',{cache:'no-store'}),j=await r.json(),el=$('ai-status-text');
     if(!el)return;
-    if(j.ai_background_removal){el.textContent=`本福丸自架 AI 已連線${j.ai_model?'・'+j.ai_model:''}；同一張照片重複去背會優先使用裝置快取。`;}
-    else{el.textContent='本福丸自架 AI 程式已完成，目前尚未連上 AI Worker；設定 Runpod Endpoint 後即可使用。';}
+    el.textContent='自動辨識人物、寵物與商品，產生透明背景';
   }catch(e){}
 }
 function showPage(id){document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));$(id)?.classList.add('active');closeSheets()}
