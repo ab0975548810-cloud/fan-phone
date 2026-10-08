@@ -13,7 +13,7 @@
   </header>
   <main>
     <section class="ab-intro">
-      <p>同一張圖片會依序執行：A Koukoutu，再執行 B RunPod / BiRefNet。這個工具不會改變正式客人的 AI provider。</p>
+      <p>同一張圖片會先套用正式前台的輸入規格，再依序執行 A Koukoutu、B RunPod / BiRefNet；畫面比較的是以原圖重建的最終透明 PNG。這個工具不會改變正式客人的 AI provider。</p>
       <form id="ab-form">
         <label class="ab-file"><span>選擇測試圖片</span><input id="ab-input" name="image" type="file" accept="image/png,image/jpeg,image/webp" required></label>
         <button id="ab-run" type="submit">開始依序比較</button>
@@ -56,6 +56,7 @@
       </div>
     </section>
   </main>
-  <script src="/static/admin-ai-ab-test.js?v=20261008a"></script>
+  <script src="/static/ai-remove-client-v2.js?v=20261004providers1"></script>
+  <script src="/static/admin-ai-ab-test.js?v=20261008b"></script>
 </body>
 </html>
