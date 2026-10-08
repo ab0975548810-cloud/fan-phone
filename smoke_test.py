@@ -81,6 +81,7 @@ for admin_js in (
     "admin-library-workspace-v1.js",
     "admin-asset-categories.js",
     "admin-template-loader.js",
+    "admin-ai-ab-test.js",
     "admin-universal-templates.js",
     "passkey-client.js",
 ):
@@ -146,6 +147,7 @@ if client.post('/api/admin/passkey/register/options', json={}).status_code != 40
 for private_read in (
     '/api/admin/get_orders',
     '/api/admin/ai_remove_diagnose',
+    '/api/admin/ai-ab-test/summary',
     '/api/admin/print/jobs',
 ):
     if client.get(private_read).status_code != 401:
@@ -173,6 +175,11 @@ if b"admin-steward-v1.js" not in admin_resp.data or b"admin-steward-v1.css" not 
     fail("Authenticated /admin did not inject the read-only Benfuwan steward")
 if b"admin-shell-v1.js" not in admin_resp.data or b"admin-shell-v1.css" not in admin_resp.data:
     fail("Authenticated /admin did not inject the responsive navigation shell")
+if b'/admin/ai-ab-test' not in admin_resp.data:
+    fail('Authenticated /admin did not expose the AI A/B test entry')
+ai_ab_page = client.get('/admin/ai-ab-test', follow_redirects=False)
+if ai_ab_page.status_code != 200 or b'admin-ai-ab-test.js' not in ai_ab_page.data:
+    fail('Authenticated AI A/B test page was unavailable')
 if b'data-nav-group="operations"' not in admin_resp.data or b'data-nav-group="catalog"' not in admin_resp.data or b'data-nav-group="system"' not in admin_resp.data:
     fail("Authenticated /admin did not render the grouped navigation shell")
 if b"admin-model-profiles.js" not in admin_resp.data:
@@ -328,6 +335,17 @@ if commerce_file.exists():
         commerce_file.unlink()
     except Exception:
         pass
+
+# 10) The admin A/B suite mocks both paid providers. Running it from the
+# existing smoke entry keeps CI offline without requiring a workflow change.
+ab_test = subprocess.run(
+    [sys.executable, str(ROOT / "test_admin_ai_ab_test.py"), "-q"],
+    cwd=ROOT,
+    capture_output=True,
+    text=True,
+)
+if ab_test.returncode:
+    fail("Admin AI A/B offline regression failed:\n" + ab_test.stdout + ab_test.stderr)
 
 print(
     f"SMOKE OK: {len(refs)} frontend scripts + admin order/POS modules + Python middleware + "
