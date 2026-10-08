@@ -1209,6 +1209,8 @@ from design_sources import install as install_design_sources
 install_design_sources(sys.modules[__name__])
 from multilayer_templates import install as install_multilayer_templates
 install_multilayer_templates(sys.modules[__name__])
+from admin_ai_ab_test import install as install_admin_ai_ab_test
+install_admin_ai_ab_test(sys.modules[__name__])
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))

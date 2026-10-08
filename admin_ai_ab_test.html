@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>本福丸｜AI A/B 測試</title>
+  <link rel="stylesheet" href="/static/admin-ai-ab-test.css?v=20261008a">
+</head>
+<body>
+  <header class="ab-topbar">
+    <div><small>系統工具</small><h1>AI 去背 A/B 測試</h1></div>
+    <a href="/admin">返回後台</a>
+  </header>
+  <main>
+    <section class="ab-intro">
+      <p>同一張圖片會依序執行：A Koukoutu，再執行 B RunPod / BiRefNet。這個工具不會改變正式客人的 AI provider。</p>
+      <form id="ab-form">
+        <label class="ab-file"><span>選擇測試圖片</span><input id="ab-input" name="image" type="file" accept="image/png,image/jpeg,image/webp" required></label>
+        <button id="ab-run" type="submit">開始依序比較</button>
+      </form>
+      <div id="ab-message" role="status" aria-live="polite"></div>
+    </section>
+
+    <section class="ab-grid" aria-label="比較結果">
+      <article class="ab-card" id="original-card">
+        <h2>原圖</h2><div class="ab-preview"><span>尚未選擇圖片</span><img id="original-image" alt="測試原圖" hidden></div>
+        <dl id="original-meta"></dl>
+      </article>
+      <article class="ab-card" id="koukoutu-card">
+        <h2>A・Koukoutu</h2><div class="ab-preview"><span>等待測試</span><img id="koukoutu-image" alt="Koukoutu 去背結果" hidden></div>
+        <dl id="koukoutu-meta"></dl>
+      </article>
+      <article class="ab-card" id="runpod-card">
+        <h2>B・RunPod / BiRefNet</h2><div class="ab-preview"><span>等待 A 完成</span><img id="runpod-image" alt="RunPod 去背結果" hidden></div>
+        <dl id="runpod-meta"></dl>
+      </article>
+    </section>
+
+    <section class="ab-rating" aria-labelledby="rating-title">
+      <div><small>單張人工評分</small><h2 id="rating-title">哪一個結果較好？</h2></div>
+      <div class="ab-rating-buttons">
+        <button type="button" data-choice="koukoutu" disabled>Koukoutu 勝</button>
+        <button type="button" data-choice="runpod" disabled>RunPod 勝</button>
+        <button type="button" data-choice="tie" disabled>平手</button>
+      </div>
+    </section>
+
+    <section class="ab-summary" aria-labelledby="summary-title">
+      <h2 id="summary-title">累積結果</h2>
+      <div class="ab-summary-grid">
+        <div><span>Koukoutu 勝場</span><b id="sum-k-win">—</b></div>
+        <div><span>RunPod 勝場</span><b id="sum-r-win">—</b></div>
+        <div><span>平手</span><b id="sum-tie">—</b></div>
+        <div><span>Koukoutu 平均</span><b id="sum-k-time">—</b></div>
+        <div><span>RunPod 平均</span><b id="sum-r-time">—</b></div>
+      </div>
+    </section>
+  </main>
+  <script src="/static/admin-ai-ab-test.js?v=20261008a"></script>
+</body>
+</html>

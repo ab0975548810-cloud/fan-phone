@@ -1,0 +1,21 @@
+(()=>{'use strict';
+  const $=id=>document.getElementById(id);
+  const form=$('ab-form'),input=$('ab-input'),run=$('ab-run'),message=$('ab-message');
+  const rating=[...document.querySelectorAll('[data-choice]')];
+  let originalUrl='',ratingToken='';
+  const bytes=n=>{n=Number(n||0);return n>=1048576?(n/1048576).toFixed(2)+' MB':Math.round(n/1024)+' KB'};
+  const duration=n=>Number.isFinite(Number(n))?(Number(n)/1000).toFixed(2)+' 秒':'—';
+  function setMessage(text,error=false){message.textContent=text||'';message.classList.toggle('error',error)}
+  function preview(prefix,src,text){const image=$(prefix+'-image'),box=image.parentElement,placeholder=box.querySelector('span');image.hidden=true;image.removeAttribute('src');placeholder.hidden=false;placeholder.textContent=text;if(src){image.onload=()=>{placeholder.hidden=true;image.hidden=false};image.onerror=()=>{image.hidden=true;placeholder.hidden=false;placeholder.textContent='結果圖片無法顯示'};image.src=src}}
+  function meta(prefix,result){const box=$(prefix+'-meta');if(!result){box.innerHTML='';return}if(!result.ok){box.innerHTML=`<dt>狀態</dt><dd>失敗</dd><dt>處理時間</dt><dd>${duration(result.elapsed_ms)}</dd><dt>說明</dt><dd>${escapeHtml(result.error||'測試失敗')}</dd>`;return}box.innerHTML=`<dt>處理時間</dt><dd>${duration(result.elapsed_ms)}</dd><dt>輸出尺寸</dt><dd>${result.width} × ${result.height}</dd><dt>PNG 大小</dt><dd>${bytes(result.bytes)}</dd><dt>有效透明 alpha</dt><dd>${result.valid_alpha?'是':'否'}</dd><dt>實際 provider</dt><dd>${escapeHtml(result.provider)}</dd><dt>模型</dt><dd>${escapeHtml(result.model)}</dd>`}
+  function escapeHtml(value){const div=document.createElement('div');div.textContent=String(value??'');return div.innerHTML}
+  function summary(stats){if(!stats)return;$('sum-k-win').textContent=stats.koukoutu_wins;$('sum-r-win').textContent=stats.runpod_wins;$('sum-tie').textContent=stats.ties;$('sum-k-time').textContent=duration(stats.koukoutu_average_ms);$('sum-r-time').textContent=duration(stats.runpod_average_ms)}
+  async function json(url,options){const response=await fetch(url,{cache:'no-store',...options});let data={};try{data=await response.json()}catch{}if(!response.ok||data.status!=='success')throw new Error(data.msg||`HTTP ${response.status}`);return data}
+  async function loadSummary(){try{summary((await json('/api/admin/ai-ab-test/summary')).stats)}catch(error){setMessage(error.message,true)}}
+  form.addEventListener('submit',async event=>{event.preventDefault();const file=input.files?.[0];if(!file)return;ratingToken='';rating.forEach(button=>button.disabled=true);run.disabled=true;setMessage('正在執行 A：Koukoutu。完成後才會執行 B：RunPod…');
+    if(originalUrl)URL.revokeObjectURL(originalUrl);originalUrl=URL.createObjectURL(file);preview('original',originalUrl,'載入原圖中…');$('original-meta').innerHTML=`<dt>檔案大小</dt><dd>${bytes(file.size)}</dd>`;preview('koukoutu','', 'A 正在處理…');preview('runpod','', '等待 A 完成…');meta('koukoutu',null);meta('runpod',null);
+    try{const body=new FormData();body.append('image',file);const data=await json('/api/admin/ai-ab-test/run',{method:'POST',body});$('original-meta').innerHTML=`<dt>原始尺寸</dt><dd>${data.original.width} × ${data.original.height}</dd><dt>檔案大小</dt><dd>${bytes(data.original.bytes)}</dd>`;const a=data.koukoutu,b=data.runpod;preview('koukoutu',a.ok?'data:image/png;base64,'+a.png_base64:'',a.ok?'載入結果中…':a.error);preview('runpod',b.ok?'data:image/png;base64,'+b.png_base64:'',b.ok?'載入結果中…':b.error);meta('koukoutu',a);meta('runpod',b);ratingToken=data.rating_token||'';rating.forEach(button=>button.disabled=!ratingToken);summary(data.stats);setMessage(data.stats_warning||(ratingToken?'兩個結果都完成，請進行人工評分。':'測試完成；只有兩邊都成功時才能評分。'),false)}catch(error){setMessage(error.message,true);preview('koukoutu','', '測試未完成');preview('runpod','', '測試未完成')}finally{run.disabled=false}}
+  );
+  rating.forEach(button=>button.addEventListener('click',async()=>{if(!ratingToken)return;rating.forEach(item=>item.disabled=true);try{const data=await json('/api/admin/ai-ab-test/rate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({choice:button.dataset.choice,rating_token:ratingToken})});summary(data.stats);ratingToken='';setMessage('評分已記錄。')}catch(error){setMessage(error.message,true);rating.forEach(item=>item.disabled=false)}}));
+  loadSummary();
+})();

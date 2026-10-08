@@ -1390,8 +1390,8 @@ def admin_shell_test(page):
     actions = page.evaluate("""() => [...document.querySelectorAll('#admin-top-actions>a,#admin-top-actions>form')].map(node=>{
       const box=node.getBoundingClientRect();return {visible:box.width>0&&box.height>0,top:box.top,bottom:box.bottom};
     })""")
-    assert len(actions) == 3 and all(row['visible'] for row in actions), actions
-    assert actions[0]['bottom'] <= actions[1]['top'] + 1 and actions[1]['bottom'] <= actions[2]['top'] + 1, actions
+    assert len(actions) == 4 and all(row['visible'] for row in actions), actions
+    assert all(actions[index]['bottom'] <= actions[index + 1]['top'] + 1 for index in range(len(actions) - 1)), actions
     page.keyboard.press('Escape')
     assert not page.evaluate("() => document.querySelector('.top').classList.contains('admin-actions-open')")
 
@@ -2797,6 +2797,7 @@ def main():
                 runpy.run_path(str(ROOT / '.github/tests/test_launch_acceptance.py'))['launch_acceptance_test'](browser,base,poll)
                 runpy.run_path(str(ROOT / '.github/tests/test_model_cat_icon.py'))['model_cat_icon_test'](browser,base,poll)
                 runpy.run_path(str(ROOT / '.github/tests/test_ai_provider_browser.py'))['ai_provider_browser_test'](browser,base,poll)
+                runpy.run_path(str(ROOT / '.github/tests/test_admin_ai_ab_browser.py'))['admin_ai_ab_browser_test'](browser,base,poll)
                 runpy.run_path(str(ROOT / '.github/tests/test_editable_stickers_browser.py'))['editable_sticker_test'](browser,base,poll)
                 runpy.run_path(str(ROOT / '.github/tests/test_multilayer_browser.py'))['multilayer_browser_test'](browser,base,poll)
             finally: browser.close()
