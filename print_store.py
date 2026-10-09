@@ -431,6 +431,12 @@ class PrintStore:
                         "vendor_raw_status": status,
                         "vendor_raw_message": message,
                     })
+                    if status == "1":
+                        fields["started_at"] = job.get("started_at") or now
+                    elif status == "2":
+                        fields["completed_at"] = job.get("completed_at") or now
+                    elif status == "3":
+                        fields["canceled_at"] = job.get("canceled_at") or now
             elif safe_match:
                 fields.update({
                     "vendor_taskid": taskid or None,
@@ -440,6 +446,12 @@ class PrintStore:
                     "ambiguous_operation": None,
                     "last_error": None,
                 })
+                if status == "1":
+                    fields["started_at"] = job.get("started_at") or now
+                elif status == "2":
+                    fields["completed_at"] = job.get("completed_at") or now
+                elif status == "3":
+                    fields["canceled_at"] = job.get("canceled_at") or now
             elif ambiguous:
                 fields.update({
                     "state": "UNKNOWN",

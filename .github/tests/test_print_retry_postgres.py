@@ -90,6 +90,71 @@ assert states == [
     (2, "CANCELED", None, "prior_attempt_activity", False),
 ], states
 
+# Quarantined reconcile may add raw/timestamp audit, but cannot clear the
+# quarantine or restore workflow state.
+with psycopg.connect(DSN) as db:
+    quarantined_reconcile = db.execute(
+        "select public.apply_print_reconcile_safely(%s,true,%s,'1','printing audit',false)",
+        (jobs[1][0], "quarantine-reconcile-task"),
+    ).fetchone()[0]
+assert quarantined_reconcile["code"] == "RECONCILE_REQUIRED", quarantined_reconcile
+assert quarantined_reconcile["quarantined"] is True, quarantined_reconcile
+with psycopg.connect(DSN) as db:
+    quarantined_row = db.execute("""select state,ambiguous_operation,vendor_raw_status,
+                                           started_at is not null
+                                    from public.print_jobs where id=%s""",
+                                 (jobs[1][0],)).fetchone()
+assert quarantined_row == ("CANCELED", "prior_attempt_activity", "1", True), quarantined_row
+
+
+def assert_reconcile_timestamp_sticky(index, first_status, final_status, timestamp_column):
+    order_id = f"reconcile-sticky-timestamp-{index}"
+    job_id = str(uuid.uuid4())
+    taskid = f"reconcile-sticky-task-{index}"
+    with psycopg.connect(DSN) as db:
+        db.execute("delete from public.print_jobs where order_id=%s", (order_id,))
+        db.execute("""insert into public.print_jobs
+            (id,order_id,attempt_no,artwork_path,artwork_token_nonce,state,vendor_taskid)
+            values (%s,%s,1,'fixture.png','sticky','QUEUED',%s)""",
+                   (job_id, order_id, taskid))
+        first = db.execute(
+            "select public.apply_print_reconcile_safely(%s,true,%s,%s,'first audit',false)",
+            (job_id, taskid, first_status),
+        ).fetchone()[0]
+    assert first["job"][timestamp_column] is not None, first
+    timestamp_value = first["job"][timestamp_column]
+    with psycopg.connect(DSN) as db:
+        later = db.execute(
+            "select public.apply_print_reconcile_safely(%s,true,%s,%s,'later terminal',false)",
+            (job_id, taskid, final_status),
+        ).fetchone()[0]
+        blocked = db.execute(
+            "select public.claim_print_send_if_safe(%s,'blocked',now()+interval '1 day','device')",
+            (job_id,),
+        ).fetchone()[0]
+    assert later["job"][timestamp_column] == timestamp_value, later
+    assert later["job"]["state"] == "FAILED", later
+    assert blocked == {"ok": False, "code": "REPRINT_REQUIRED"}, blocked
+
+
+assert_reconcile_timestamp_sticky(1, "1", "4", "started_at")
+assert_reconcile_timestamp_sticky(2, "2", "4", "completed_at")
+
+cancel_order_id = "reconcile-canceled-timestamp"
+cancel_job_id = str(uuid.uuid4())
+with psycopg.connect(DSN) as db:
+    db.execute("delete from public.print_jobs where order_id=%s", (cancel_order_id,))
+    db.execute("""insert into public.print_jobs
+        (id,order_id,attempt_no,artwork_path,artwork_token_nonce,state,vendor_taskid)
+        values (%s,%s,1,'fixture.png','cancel-sticky','QUEUED','cancel-sticky-task')""",
+               (cancel_job_id, cancel_order_id))
+    canceled = db.execute(
+        "select public.apply_print_reconcile_safely(%s,true,'cancel-sticky-task','3','canceled audit',false)",
+        (cancel_job_id,),
+    ).fetchone()[0]
+assert canceled["job"]["state"] == "CANCELED", canceled
+assert canceled["job"]["canceled_at"] is not None, canceled
+
 
 def race_atomic_send_and_callback(index):
     order_id = f"retry-order-lock-{index}"

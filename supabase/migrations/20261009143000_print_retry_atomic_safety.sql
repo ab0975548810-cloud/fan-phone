@@ -204,7 +204,10 @@ begin
            set last_reconciled_at = v_now,
                reconcile_count = coalesce(reconcile_count, 0) + 1,
                vendor_raw_status = case when v_safe_match then coalesce(p_status, '') else vendor_raw_status end,
-               vendor_raw_message = case when v_safe_match then left(coalesce(p_message, ''), 500) else vendor_raw_message end
+               vendor_raw_message = case when v_safe_match then left(coalesce(p_message, ''), 500) else vendor_raw_message end,
+               started_at = case when v_safe_match and p_status = '1' then coalesce(started_at, v_now) else started_at end,
+               completed_at = case when v_safe_match and p_status = '2' then coalesce(completed_at, v_now) else completed_at end,
+               canceled_at = case when v_safe_match and p_status = '3' then coalesce(canceled_at, v_now) else canceled_at end
          where id = p_job_id
          returning * into v_job;
         return jsonb_build_object(
@@ -230,6 +233,9 @@ begin
                last_error = null,
                last_reconciled_at = v_now,
                reconcile_count = coalesce(reconcile_count, 0) + 1,
+               started_at = case when p_status = '1' then coalesce(started_at, v_now) else started_at end,
+               completed_at = case when p_status = '2' then coalesce(completed_at, v_now) else completed_at end,
+               canceled_at = case when p_status = '3' then coalesce(canceled_at, v_now) else canceled_at end,
                updated_at = v_now
          where id = p_job_id
          returning * into v_job;
