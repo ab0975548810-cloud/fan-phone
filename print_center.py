@@ -338,10 +338,21 @@ class PrintService:
         if dispatcher:
             dispatcher.wake()
 
+    def _assert_no_prior_physical_activity(self, order_id):
+        """Ordinary prepare/retry/send cannot cross evidence of physical output."""
+        for attempt in self.store.jobs_for_order(order_id):
+            if (str(attempt.get("state") or "") in ("PRINTING", "COMPLETED")
+                    or str(attempt.get("vendor_raw_status") or "") in ("1", "2")):
+                raise PrintError(
+                    "REPRINT_REQUIRED",
+                    "已有列印中或完成的歷史嘗試；為避免重複打印，只能使用未來獨立的重印流程",
+                )
+
     def _create_prepared_attempt(self, order_id):
         """Run the one canonical preflight/render path and create one attempt."""
         order = self._order(order_id)
         self._assert_order_printable(order)
+        self._assert_no_prior_physical_activity(order_id)
         finance = self._finance(order_id)
         sku_id = str(finance.get("sku_id") or "")
         legacy_binding = None
@@ -547,6 +558,7 @@ class PrintService:
         job = self.store.job(job_id)
         if not job:
             raise PrintError("JOB_NOT_FOUND", "找不到列印任務", 404)
+        self._assert_no_prior_physical_activity(job["order_id"])
         order = self._order(job["order_id"])
         self._assert_order_printable(order)
         if job["state"] == "UNKNOWN":
@@ -796,7 +808,50 @@ class PrintService:
                     str(existing.get("raw_status") or "") != status or
                     str(existing.get("raw_message") or "") != msg):
                 raise PrintError("INVALID_REPLAY", "callback 驗證資料已被重用", 403)
+        latest = self.store.latest_job(job["order_id"])
+        superseded = bool(
+            latest and int(job.get("attempt_no") or 0) < int(latest.get("attempt_no") or 0)
+        )
         fields = {"vendor_raw_status": status, "vendor_raw_message": msg}
+        if status == "1":
+            fields["started_at"] = job.get("started_at") or utcnow()
+        elif status == "2":
+            fields["completed_at"] = job.get("completed_at") or utcnow()
+        elif status == "3":
+            fields["canceled_at"] = job.get("canceled_at") or utcnow()
+
+        if superseded:
+            # The old attempt remains immutable from a workflow perspective.
+            # Raw evidence is still retained because it may prove that physical
+            # output occurred after a retry was prepared or sent.
+            prior_raw_status = str(job.get("vendor_raw_status") or "")
+            if (prior_raw_status == "2"
+                    or (prior_raw_status == "1" and status != "2")):
+                # Keep the strongest durable physical-output evidence in the
+                # job row. Every later raw callback still exists in events.
+                fields["vendor_raw_status"] = prior_raw_status
+                fields["vendor_raw_message"] = str(job.get("vendor_raw_message") or "")[:500]
+            updated = self.store.patch_job(job["id"], fields)
+            if status in ("1", "2") or prior_raw_status in ("1", "2"):
+                warning = ("舊列印嘗試延遲回報列印中/完成，為避免重複打印，"
+                           "本次重推已封鎖")
+                latest_state = str(latest.get("state") or "")
+                if latest_state == "PREPARED":
+                    self.store.patch_job(latest["id"], {
+                        "state": "CANCELED", "canceled_at": utcnow(),
+                        "ambiguous_operation": "prior_attempt_activity",
+                        "last_error": warning,
+                    }, ("PREPARED",))
+                elif latest_state in (
+                        "SENDING", "QUEUED", "STARTING", "PRINTING",
+                        "CANCELING", "UNKNOWN"):
+                    self.store.patch_job(latest["id"], {
+                        "state": "UNKNOWN",
+                        "ambiguous_operation": "prior_attempt_activity",
+                        "last_error": warning + "，請人工查核雲端狀態",
+                    }, (latest_state,))
+            return updated, not inserted
+
         # A delayed callback may update raw audit fields but cannot downgrade a
         # verified terminal outcome. A completed callback may still reveal that
         # a prior cancel did not prevent physical output.
@@ -808,12 +863,6 @@ class PrintService:
             fields["state"] = CALLBACK_STATES[status]
         elif status != "12":
             fields.update({"state": "UNKNOWN", "last_error": "收到未識別的雲打印狀態"})
-        if status == "1":
-            fields["started_at"] = job.get("started_at") or utcnow()
-        elif status == "2":
-            fields["completed_at"] = utcnow()
-        elif status == "3":
-            fields["canceled_at"] = utcnow()
         updated = self.store.patch_job(job["id"], fields)
         self._sync_order(updated)
         return updated, not inserted
@@ -853,8 +902,12 @@ class PrintService:
                     {row["order_id"]: row for row in self.store.bindings()})
         latest = ({order_id: self.store.latest_job(order_id)} if order_id else {})
         if not order_id:
-            for job in self.store.list_jobs():
-                if job["order_id"] not in latest:
+            # updated_at is audit recency, not attempt precedence. A late
+            # callback on attempt #1 must never hide attempt #2.
+            for job in self.store.jobs_for_orders(row["id"] for row in orders):
+                current = latest.get(job["order_id"])
+                if (not current or int(job.get("attempt_no") or 0)
+                        > int(current.get("attempt_no") or 0)):
                     latest[job["order_id"]] = job
         profiles = {row["sku_id"]: row for row in self.store.profiles()}
         result = []
@@ -1063,7 +1116,7 @@ def install(app_module):
         if request.path == "/admin" and response.status_code == 200 and response.mimetype == "text/html":
             response.direct_passthrough = False
             html = response.get_data(as_text=True)
-            src = "/static/admin-print-center.js?v=20261009retry1"
+            src = "/static/admin-print-center.js?v=20261009retry2"
             if src not in html:
                 response.set_data(html.replace("</body>", f'<link rel="stylesheet" href="/static/admin-print-center.css?v=20261002operations1"><script src="{src}"></script></body>'))
             response.headers["Cache-Control"] = "no-store"

@@ -253,6 +253,37 @@ class PrintStore:
         with self.connection() as db:
             return self._decode(db.execute("SELECT * FROM print_jobs WHERE order_id=? ORDER BY attempt_no DESC LIMIT 1", (order_id,)).fetchone())
 
+    def jobs_for_order(self, order_id):
+        """Return every immutable attempt, newest attempt first."""
+        if self.app.USE_SUPABASE:
+            return (self.app.SUPABASE.table("print_jobs").select("*")
+                    .eq("order_id", order_id).order("attempt_no", desc=True)
+                    .execute().data or [])
+        with self.connection() as db:
+            rows = db.execute(
+                "SELECT * FROM print_jobs WHERE order_id=? ORDER BY attempt_no DESC",
+                (order_id,),
+            ).fetchall()
+            return [self._decode(row) for row in rows]
+
+    def jobs_for_orders(self, order_ids):
+        """Batch-load attempts for dashboard rows without updated_at semantics."""
+        ids = [str(value) for value in dict.fromkeys(order_ids) if value]
+        if not ids:
+            return []
+        if self.app.USE_SUPABASE:
+            return (self.app.SUPABASE.table("print_jobs").select("*")
+                    .in_("order_id", ids).order("attempt_no", desc=True)
+                    .execute().data or [])
+        marks = ",".join("?" for _ in ids)
+        with self.connection() as db:
+            rows = db.execute(
+                f"SELECT * FROM print_jobs WHERE order_id IN ({marks}) "
+                "ORDER BY order_id, attempt_no DESC",
+                ids,
+            ).fetchall()
+            return [self._decode(row) for row in rows]
+
     def active_job(self, order_id):
         if self.app.USE_SUPABASE:
             rows = (self.app.SUPABASE.table("print_jobs").select("*").eq("order_id", order_id)

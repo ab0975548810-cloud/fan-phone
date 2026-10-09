@@ -2735,6 +2735,8 @@ def order_print_workspace_test(browser, base, poll):
                                has_print=True,profile_available=True,binding_required=False,sku_id='SKU',job=dict(id='JOB-'+state,state=state,state_label=state,attempt_no=1,profile_complete=True,last_error='銳印回報失敗' if state=='FAILED' else '')))
     print_rows.append(dict(order_id='PRINT-BIND',customer_name='客人',model='iPhone 13',style='晶彩',order_status='待處理',time=stamp,
                            has_print=True,profile_available=False,binding_required=True,sku_id='',legacy_order=True,sku_candidates=[],job=None))
+    print_rows.append(dict(order_id='PRINT-PRIOR-BLOCK',customer_name='客人',model='iPhone 13',style='晶彩',order_status='待處理',time=stamp,
+                           has_print=True,profile_available=True,binding_required=False,sku_id='SKU',job=dict(id='JOB-PRIOR-BLOCK',state='CANCELED',state_label='已取消',attempt_no=2,profile_complete=True,ambiguous_operation='prior_attempt_activity',last_error='舊列印嘗試延遲回報列印中/完成，為避免重複打印，本次重推已封鎖')))
     def print_route(route):
         p = parse_qs(urlsplit(route.request.url).query)
         data = [dict(order_id='ORDER-204',customer_name='老客人',model='iPhone 13',style='晶彩',order_status='待處理',time=stamp-204,has_print=True,profile_available=True,binding_required=False,sku_id='SKU',job=None)] if p.get('order_id') == ['ORDER-204'] else print_rows
@@ -2773,8 +2775,8 @@ def order_print_workspace_test(browser, base, poll):
     poll(page,"() => document.querySelector('#view-orders.active .bf-order-card')?.textContent.includes('ORDER-204')")
     page.locator('.nav button[data-view="print-center"]').click()
     page.locator('[data-pc="clear-exact"]').click()
-    poll(page,"() => document.querySelectorAll('#pc-grid .pc-card').length===11")
-    for key,count in [('exception',5),('attention',1),('prepared',1),('queued',1),('printing',1),('completed',2)]:
+    poll(page,"() => document.querySelectorAll('#pc-grid .pc-card').length===12")
+    for key,count in [('exception',6),('attention',1),('prepared',1),('queued',1),('printing',1),('completed',2)]:
         page.locator(f'[data-triage="{key}"]').click()
         assert page.locator('#pc-grid .pc-card').count()==count,(key,page.locator('#pc-grid .pc-card').count())
     page.locator('[data-triage="all"]').click()
@@ -2790,6 +2792,9 @@ def order_print_workspace_test(browser, base, poll):
         assert card.locator('[data-pc="retry"]').count()==0,state
     assert page.locator('.pc-card').filter(has=page.locator('.pc-id',has_text='PRINT-FAILED')).locator('[data-pc="retry"]').count()==1
     assert page.locator('.pc-card').filter(has=page.locator('.pc-id',has_text='PRINT-CANCELED')).locator('[data-pc="retry"]').count()==1
+    blocked=page.locator('.pc-card').filter(has=page.locator('.pc-id',has_text='PRINT-PRIOR-BLOCK'))
+    assert blocked.locator('[data-pc="retry"]').count()==0
+    assert '舊列印嘗試回報可能已列印' in blocked.inner_text()
     dialogs=[]
     page.on('dialog',lambda dialog:(dialogs.append(dialog.message),dialog.accept()))
     page.locator('.pc-card').filter(has=page.locator('.pc-id',has_text='PRINT-FAILED')).locator('[data-pc="retry"]').click()

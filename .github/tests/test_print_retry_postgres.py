@@ -54,4 +54,29 @@ else:
     raise AssertionError("vendor_taskid unique constraint accepted a cross-attempt collision")
 with psycopg.connect(DSN) as db:
     assert db.execute("select vendor_taskid from public.print_jobs where id=%s", (jobs[1][0],)).fetchone() == (None,)
+
+# Production's partial unique index proves why a superseded callback must be
+# audit-only: reviving attempt #1 while #2 is PREPARED is rejected. The hotfix
+# path records raw evidence on #1 and terminally blocks #2 instead.
+try:
+    with psycopg.connect(DSN) as db:
+        db.execute("update public.print_jobs set state='PRINTING' where id=%s", (jobs[0][0],))
+except UniqueViolation:
+    pass
+else:
+    raise AssertionError("partial unique index accepted two active attempts")
+with psycopg.connect(DSN) as db:
+    db.execute("update public.print_jobs set vendor_raw_status='1', started_at=now() where id=%s",
+               (jobs[0][0],))
+    db.execute("""update public.print_jobs
+                  set state='CANCELED', ambiguous_operation='prior_attempt_activity'
+                  where id=%s and state='PREPARED'""", (jobs[1][0],))
+with psycopg.connect(DSN) as db:
+    states = db.execute("""select attempt_no,state,vendor_raw_status,ambiguous_operation
+                           from public.print_jobs where order_id=%s order by attempt_no""",
+                        (ORDER_ID,)).fetchall()
+assert states == [
+    (1, "FAILED", "1", None),
+    (2, "CANCELED", None, "prior_attempt_activity"),
+], states
 print("PRINT_RETRY_POSTGRES_CONCURRENCY_OK")

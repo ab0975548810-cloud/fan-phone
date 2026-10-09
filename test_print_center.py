@@ -525,6 +525,114 @@ class PrintCenterTests(unittest.TestCase):
         with app.print_center.store.connection() as db:
             self.assertEqual(db.execute("SELECT count(*) FROM print_events WHERE job_id=?", (job["id"],)).fetchone()[0], 3)
 
+    def test_superseded_completed_callback_blocks_prepared_retry_and_all_entrypoints(self):
+        self.save_profile();old = self.prepare()
+        old = app.print_center.store.patch_job(old["id"], {
+            "state": "FAILED", "vendor_taskid": "late-completed-attempt",
+            "vendor_raw_status": "4", "last_error": "first attempt failed",
+        })
+        latest = self.retry(old["id"], "retry-before-late-completed-0001").get_json()["job"]
+        response = self.callback("late-completed-attempt", 2, "late completed")
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        duplicate = self.callback("late-completed-attempt", 2, "late completed")
+        self.assertTrue(duplicate.get_json()["duplicate"])
+
+        preserved = app.print_center.store.job(old["id"])
+        blocked = app.print_center.store.job(latest["id"])
+        self.assertEqual((preserved["state"], preserved["vendor_raw_status"]), ("FAILED", "2"))
+        self.assertTrue(preserved["completed_at"])
+        self.assertEqual((blocked["state"], blocked["ambiguous_operation"]),
+                         ("CANCELED", "prior_attempt_activity"))
+        self.assertIn("重複打印", blocked["last_error"])
+        for response in (
+                self.send(blocked["id"], "send-after-prior-completed-0001"),
+                self.retry(blocked["id"], "retry-after-prior-completed-0001"),
+                self.post("prepare", {"order_id": self.order_id}, "prepare-after-prior-completed-0001")):
+            self.assertEqual((response.status_code, response.get_json()["code"]),
+                             (409, "REPRINT_REQUIRED"))
+        self.assertFalse(any(path == "/api/Device/receiveTask" for path, _ in self.fake.calls))
+
+        # A later audit callback makes attempt #1's updated_at newer. Physical
+        # evidence stays sticky and the dashboard still selects MAX(attempt).
+        self.assertEqual(self.callback("late-completed-attempt", 4, "later failure audit").status_code, 200)
+        self.assertEqual(app.print_center.store.job(old["id"])["vendor_raw_status"], "2")
+        row = next(item for item in self.client.get("/api/admin/print/jobs").get_json()["rows"]
+                   if item["order_id"] == self.order_id)
+        self.assertEqual((row["job"]["id"], row["job"]["attempt_no"]), (latest["id"], 2))
+
+    def test_superseded_printing_callback_is_audit_only_without_active_constraint_error(self):
+        self.save_profile();old = self.prepare()
+        old = app.print_center.store.patch_job(old["id"], {
+            "state": "FAILED", "vendor_taskid": "late-printing-attempt",
+            "vendor_raw_status": "4",
+        })
+        latest = self.retry(old["id"], "retry-before-late-printing-0001").get_json()["job"]
+        response = self.callback("late-printing-attempt", 1, "late printing")
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        preserved = app.print_center.store.job(old["id"])
+        blocked = app.print_center.store.job(latest["id"])
+        self.assertEqual((preserved["state"], preserved["vendor_raw_status"]), ("FAILED", "1"))
+        self.assertTrue(preserved["started_at"])
+        self.assertEqual((blocked["state"], blocked["ambiguous_operation"]),
+                         ("CANCELED", "prior_attempt_activity"))
+        with app.print_center.store.connection() as db:
+            self.assertEqual(db.execute(
+                "SELECT count(*) FROM print_events WHERE job_id=?", (old["id"],)
+            ).fetchone()[0], 1)
+
+    def test_superseded_callback_marks_sent_retry_unknown_without_vendor_cancel(self):
+        self.save_profile();old = self.prepare()
+        old = app.print_center.store.patch_job(old["id"], {
+            "state": "FAILED", "vendor_taskid": "late-after-retry-sent",
+            "vendor_raw_status": "4",
+        })
+        latest = self.retry(old["id"], "retry-before-queued-0001").get_json()["job"]
+        self.assertEqual(self.send(latest["id"], "send-new-attempt-0001", "new-attempt-task").status_code, 200)
+        cancel_count = len([path for path, _ in self.fake.calls if path == "/api/Device/cancelTask"])
+        response = self.callback("late-after-retry-sent", 1, "old attempt printing")
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        latest = app.print_center.store.job(latest["id"])
+        self.assertEqual((latest["state"], latest["ambiguous_operation"]),
+                         ("UNKNOWN", "prior_attempt_activity"))
+        self.assertIn("人工查核", latest["last_error"])
+        self.assertEqual(len([path for path, _ in self.fake.calls if path == "/api/Device/cancelTask"]),
+                         cancel_count)
+        self.assertEqual(app.print_center.store.job(old["id"])["state"], "FAILED")
+
+        # COMPLETED evidence follows the same no-cancel UNKNOWN path.
+        second_order = self.create_order()
+        first = self.post("prepare", {"order_id": second_order}).get_json()["job"]
+        first = app.print_center.store.patch_job(first["id"], {
+            "state": "FAILED", "vendor_taskid": "late-completed-after-retry-sent",
+            "vendor_raw_status": "4",
+        })
+        second = self.retry(first["id"], "retry-before-queued-completed-0001").get_json()["job"]
+        self.assertEqual(self.send(second["id"], "send-new-completed-attempt-0001", "new-completed-task").status_code, 200)
+        response = self.callback("late-completed-after-retry-sent", 2, "old attempt completed")
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        second = app.print_center.store.job(second["id"])
+        self.assertEqual((second["state"], second["ambiguous_operation"]),
+                         ("UNKNOWN", "prior_attempt_activity"))
+        self.assertEqual(len([path for path, _ in self.fake.calls if path == "/api/Device/cancelTask"]),
+                         cancel_count)
+
+    def test_raw_physical_status_blocks_prepare_retry_and_send_even_if_state_failed(self):
+        self.save_profile();job = self.prepare()
+        app.print_center.store.patch_job(job["id"], {
+            "state": "FAILED", "vendor_raw_status": "2",
+        })
+        for response in (
+                self.retry(job["id"], "retry-raw-completed-0001"),
+                self.post("prepare", {"order_id": self.order_id}, "prepare-raw-completed-0001")):
+            self.assertEqual((response.status_code, response.get_json()["code"]),
+                             (409, "REPRINT_REQUIRED"))
+        # Exercise the send gate on a deliberately inconsistent legacy row.
+        app.print_center.store.patch_job(job["id"], {"state": "PREPARED"})
+        response = self.send(job["id"], "send-raw-completed-0001")
+        self.assertEqual((response.status_code, response.get_json()["code"]),
+                         (409, "REPRINT_REQUIRED"))
+        self.assertFalse(any(path == "/api/Device/receiveTask" for path, _ in self.fake.calls))
+
     def test_complete_case_profile_materializes_missing_sku_on_prepare(self):
         dashboard = self.client.get("/api/admin/print/jobs").get_json()
         row = next(item for item in dashboard["rows"] if item["order_id"] == self.order_id)
@@ -951,6 +1059,8 @@ class PrintCenterTests(unittest.TestCase):
         self.assertIn('data-pc="retry"', source)
         self.assertIn("['FAILED','CANCELED']", source)
         self.assertIn('列印嘗試：#', source)
+        self.assertIn("prior_attempt_activity", source)
+        self.assertIn("舊列印嘗試回報可能已列印", source)
         self.assertNotIn("id='pc-modal'", source)
         self.assertNotIn('id="pc-modal"', source)
         self.assertIn("請到「品牌及型號」設定列印參數", source)
