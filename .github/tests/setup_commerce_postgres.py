@@ -17,6 +17,9 @@ with psycopg.connect(os.environ['TEST_POSTGRES_DSN']) as db:
             'public.release_ai_usage(uuid)',
             'public.finish_ai_usage(uuid,text)',
             'public.get_ai_usage_diagnostics()',
+            'public.claim_print_send_if_safe(uuid,text,timestamptz,text)',
+            'public.apply_print_callback_safely(uuid,text,text)',
+            'public.apply_print_reconcile_safely(uuid,boolean,text,text,text,boolean)',
         ):
             assert not db.execute(
                 'SELECT has_function_privilege(%s, %s, \'EXECUTE\')', (role, signature)
@@ -27,6 +30,9 @@ with psycopg.connect(os.environ['TEST_POSTGRES_DSN']) as db:
         'public.release_ai_usage(uuid)',
         'public.finish_ai_usage(uuid,text)',
         'public.get_ai_usage_diagnostics()',
+        'public.claim_print_send_if_safe(uuid,text,timestamptz,text)',
+        'public.apply_print_callback_safely(uuid,text,text)',
+        'public.apply_print_reconcile_safely(uuid,boolean,text,text,text,boolean)',
     ):
         assert db.execute(
             'SELECT has_function_privilege(\'service_role\', %s, \'EXECUTE\')', (signature,)

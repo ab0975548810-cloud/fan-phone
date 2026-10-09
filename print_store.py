@@ -10,6 +10,11 @@ from datetime import datetime, timezone
 
 
 ACTIVE_STATES = ("PREPARED", "SENDING", "QUEUED", "STARTING", "PRINTING", "CANCELING", "UNKNOWN")
+CALLBACK_STATES = {
+    "1": "PRINTING", "2": "COMPLETED", "3": "CANCELED",
+    "4": "FAILED", "5": "FAILED", "6": "FAILED", "7": "FAILED",
+    "8": "FAILED", "11": "FAILED",
+}
 JSON_COLUMNS = {"response_json", "payload_json"}
 BOOL_COLUMNS = {"profile_complete", "active"}
 
@@ -252,6 +257,224 @@ class PrintStore:
             return rows[0] if rows else None
         with self.connection() as db:
             return self._decode(db.execute("SELECT * FROM print_jobs WHERE order_id=? ORDER BY attempt_no DESC LIMIT 1", (order_id,)).fetchone())
+
+    def jobs_for_order(self, order_id):
+        """Return every immutable attempt, newest attempt first."""
+        if self.app.USE_SUPABASE:
+            return (self.app.SUPABASE.table("print_jobs").select("*")
+                    .eq("order_id", order_id).order("attempt_no", desc=True)
+                    .execute().data or [])
+        with self.connection() as db:
+            rows = db.execute(
+                "SELECT * FROM print_jobs WHERE order_id=? ORDER BY attempt_no DESC",
+                (order_id,),
+            ).fetchall()
+            return [self._decode(row) for row in rows]
+
+    def jobs_for_orders(self, order_ids):
+        """Batch-load attempts for dashboard rows without updated_at semantics."""
+        ids = [str(value) for value in dict.fromkeys(order_ids) if value]
+        if not ids:
+            return []
+        if self.app.USE_SUPABASE:
+            return (self.app.SUPABASE.table("print_jobs").select("*")
+                    .in_("order_id", ids).order("attempt_no", desc=True)
+                    .execute().data or [])
+        marks = ",".join("?" for _ in ids)
+        with self.connection() as db:
+            rows = db.execute(
+                f"SELECT * FROM print_jobs WHERE order_id IN ({marks}) "
+                "ORDER BY order_id, attempt_no DESC",
+                ids,
+            ).fetchall()
+            return [self._decode(row) for row in rows]
+
+    @staticmethod
+    def _physical_evidence(job):
+        return bool(
+            str(job.get("state") or "") in ("PRINTING", "COMPLETED")
+            or str(job.get("vendor_raw_status") or "") in ("1", "2")
+            or job.get("started_at")
+            or job.get("completed_at")
+            or str(job.get("ambiguous_operation") or "") == "prior_attempt_activity"
+        )
+
+    def claim_send_if_safe(self, job_id, *, nonce, expires_at, device_id):
+        """Atomically claim PREPARED -> SENDING under the order safety lock."""
+        if self.app.USE_SUPABASE:
+            data = self.app.SUPABASE.rpc("claim_print_send_if_safe", {
+                "p_job_id": job_id,
+                "p_artwork_token_nonce": nonce,
+                "p_artwork_token_expires_at": expires_at,
+                "p_device_id": device_id,
+            }).execute().data
+            return data if isinstance(data, dict) else {"ok": False, "code": "PRINT_UNAVAILABLE"}
+        with self.connection(True) as db:
+            row = self._decode(db.execute("SELECT * FROM print_jobs WHERE id=?", (job_id,)).fetchone())
+            if not row:
+                return {"ok": False, "code": "JOB_NOT_FOUND"}
+            attempts = [self._decode(value) for value in db.execute(
+                "SELECT * FROM print_jobs WHERE order_id=? ORDER BY attempt_no DESC",
+                (row["order_id"],),
+            ).fetchall()]
+            if any(self._physical_evidence(value) for value in attempts):
+                return {"ok": False, "code": "REPRINT_REQUIRED"}
+            if row.get("state") != "PREPARED":
+                return {"ok": False, "code": "CONCURRENT_OPERATION"}
+            now = utcnow()
+            db.execute("""UPDATE print_jobs SET state='SENDING',artwork_token_nonce=?,
+                artwork_token_expires_at=?,device_id=?,last_error=NULL,
+                ambiguous_operation=NULL,updated_at=? WHERE id=? AND state='PREPARED'""",
+                       (nonce, expires_at, device_id, now, job_id))
+            claimed = self._decode(db.execute("SELECT * FROM print_jobs WHERE id=?", (job_id,)).fetchone())
+            return {"ok": claimed.get("state") == "SENDING", "code": "OK", "job": claimed}
+
+    def apply_task_callback(self, job_id, status, message):
+        """Atomically record callback evidence and quarantine a newer attempt."""
+        status, message = str(status or ""), str(message or "")[:500]
+        if self.app.USE_SUPABASE:
+            data = self.app.SUPABASE.rpc("apply_print_callback_safely", {
+                "p_job_id": job_id, "p_status": status, "p_message": message,
+            }).execute().data
+            if not isinstance(data, dict) or not isinstance(data.get("job"), dict):
+                raise RuntimeError("Invalid print callback RPC response")
+            return data
+        with self.connection(True) as db:
+            job = self._decode(db.execute("SELECT * FROM print_jobs WHERE id=?", (job_id,)).fetchone())
+            if not job:
+                raise ValueError("JOB_NOT_FOUND")
+            latest = self._decode(db.execute(
+                "SELECT * FROM print_jobs WHERE order_id=? ORDER BY attempt_no DESC LIMIT 1",
+                (job["order_id"],),
+            ).fetchone())
+            superseded = int(job.get("attempt_no") or 0) < int(latest.get("attempt_no") or 0)
+            now = utcnow()
+            raw_status, raw_message = status, message
+            prior_raw = str(job.get("vendor_raw_status") or "")
+            if superseded and (prior_raw == "2" or (prior_raw == "1" and status != "2")):
+                raw_status = prior_raw
+                raw_message = str(job.get("vendor_raw_message") or "")[:500]
+            fields = {"vendor_raw_status": raw_status, "vendor_raw_message": raw_message,
+                      "updated_at": now}
+            if status == "1":
+                fields["started_at"] = job.get("started_at") or now
+            elif status == "2":
+                fields["completed_at"] = job.get("completed_at") or now
+            elif status == "3":
+                fields["canceled_at"] = job.get("canceled_at") or now
+            if not superseded:
+                if job.get("state") == "COMPLETED":
+                    pass
+                elif job.get("state") == "CANCELED" and status != "2":
+                    pass
+                elif status in CALLBACK_STATES:
+                    fields["state"] = CALLBACK_STATES[status]
+                elif status != "12":
+                    fields.update({"state": "UNKNOWN", "last_error": "收到未識別的雲打印狀態"})
+            sets = ",".join(f"{name}=?" for name in fields)
+            db.execute(f"UPDATE print_jobs SET {sets} WHERE id=?", (*fields.values(), job_id))
+            physical = (status in ("1", "2") or self._physical_evidence(job))
+            if superseded and physical:
+                warning = "舊列印嘗試延遲回報列印中/完成，為避免重複打印，本次重推已封鎖"
+                if latest.get("state") == "PREPARED":
+                    db.execute("""UPDATE print_jobs SET state='CANCELED',canceled_at=?,
+                        ambiguous_operation='prior_attempt_activity',last_error=?,updated_at=?
+                        WHERE id=? AND state='PREPARED'""",
+                               (now, warning, now, latest["id"]))
+                elif latest.get("state") in ACTIVE_STATES:
+                    db.execute("""UPDATE print_jobs SET state='UNKNOWN',
+                        ambiguous_operation='prior_attempt_activity',last_error=?,updated_at=?
+                        WHERE id=?""", (warning + "，請人工查核雲端狀態", now, latest["id"]))
+            updated = self._decode(db.execute("SELECT * FROM print_jobs WHERE id=?", (job_id,)).fetchone())
+            return {"job": updated, "superseded": superseded}
+
+    def apply_reconcile_safely(self, job_id, *, matched, taskid="", status="",
+                               message="", ambiguous=False):
+        """Atomically apply a vendor lookup without clearing retry quarantine."""
+        taskid = str(taskid or "")
+        status = str(status or "")
+        message = str(message or "")[:500]
+        if self.app.USE_SUPABASE:
+            data = self.app.SUPABASE.rpc("apply_print_reconcile_safely", {
+                "p_job_id": job_id,
+                "p_matched": bool(matched),
+                "p_taskid": taskid or None,
+                "p_status": status,
+                "p_message": message,
+                "p_ambiguous": bool(ambiguous),
+            }).execute().data
+            if not isinstance(data, dict) or not isinstance(data.get("job"), dict):
+                raise RuntimeError("Invalid print reconcile RPC response")
+            return data
+        with self.connection(True) as db:
+            job = self._decode(db.execute(
+                "SELECT * FROM print_jobs WHERE id=?", (job_id,)).fetchone())
+            if not job:
+                raise ValueError("JOB_NOT_FOUND")
+            safe_match = bool(matched)
+            if safe_match and taskid:
+                owner = self._decode(db.execute(
+                    "SELECT * FROM print_jobs WHERE vendor_taskid=? LIMIT 1", (taskid,)
+                ).fetchone())
+                if owner and str(owner.get("id") or "") != str(job_id):
+                    safe_match = False
+                    ambiguous = True
+            now = utcnow()
+            fields = {
+                "last_reconciled_at": now,
+                "reconcile_count": int(job.get("reconcile_count") or 0) + 1,
+            }
+            quarantined = str(job.get("ambiguous_operation") or "") == "prior_attempt_activity"
+            if quarantined:
+                if safe_match:
+                    fields.update({
+                        "vendor_raw_status": status,
+                        "vendor_raw_message": message,
+                    })
+                    if status == "1":
+                        fields["started_at"] = job.get("started_at") or now
+                    elif status == "2":
+                        fields["completed_at"] = job.get("completed_at") or now
+                    elif status == "3":
+                        fields["canceled_at"] = job.get("canceled_at") or now
+            elif safe_match:
+                fields.update({
+                    "vendor_taskid": taskid or None,
+                    "vendor_raw_status": status,
+                    "vendor_raw_message": message,
+                    "state": CALLBACK_STATES.get(status, "QUEUED"),
+                    "ambiguous_operation": None,
+                    "last_error": None,
+                })
+                if status == "1":
+                    fields["started_at"] = job.get("started_at") or now
+                elif status == "2":
+                    fields["completed_at"] = job.get("completed_at") or now
+                elif status == "3":
+                    fields["canceled_at"] = job.get("canceled_at") or now
+            elif ambiguous:
+                fields.update({
+                    "state": "UNKNOWN",
+                    "ambiguous_operation": "reconcile",
+                    "last_error": "雲端查核找到多筆可能任務，無法安全判定；請人工確認",
+                })
+            elif str(job.get("state") or "") not in ("COMPLETED", "CANCELED", "FAILED"):
+                fields.update({
+                    "state": "UNKNOWN",
+                    "last_error": "雲端未列印佇列找不到此任務；不可據此判定未建立或已完成",
+                })
+            sets = ",".join(f"{name}=?" for name in fields)
+            db.execute(f"UPDATE print_jobs SET {sets} WHERE id=?", (*fields.values(), job_id))
+            updated = self._decode(db.execute(
+                "SELECT * FROM print_jobs WHERE id=?", (job_id,)).fetchone())
+            return {
+                "ok": True,
+                "code": "RECONCILE_REQUIRED" if quarantined or ambiguous else "OK",
+                "job": updated,
+                "found": safe_match,
+                "ambiguous": bool(ambiguous),
+                "quarantined": quarantined,
+            }
 
     def active_job(self, order_id):
         if self.app.USE_SUPABASE:
