@@ -137,4 +137,56 @@ def race_atomic_send_and_callback(index):
 
 for race_index in range(12):
     race_atomic_send_and_callback(race_index)
+
+
+def race_atomic_reconcile_and_callback(index):
+    order_id = f"reconcile-order-lock-{index}"
+    old_id, latest_id = str(uuid.uuid4()), str(uuid.uuid4())
+    latest_taskid = f"reconcile-new-task-{index}"
+    with psycopg.connect(DSN) as db:
+        db.execute("delete from public.print_jobs where order_id=%s", (order_id,))
+        db.execute("""insert into public.print_jobs
+            (id,order_id,attempt_no,artwork_path,artwork_token_nonce,state,vendor_taskid)
+            values (%s,%s,1,'fixture.png','old','FAILED',%s),
+                   (%s,%s,2,'fixture.png','latest','QUEUED',%s)""",
+                   (old_id, order_id, f"reconcile-old-task-{index}",
+                    latest_id, order_id, latest_taskid))
+    barrier = threading.Barrier(2)
+
+    def reconcile():
+        with psycopg.connect(DSN) as db:
+            barrier.wait()
+            return db.execute(
+                "select public.apply_print_reconcile_safely(%s,true,%s,'0','queued',false)",
+                (latest_id, latest_taskid),
+            ).fetchone()[0]
+
+    def callback():
+        with psycopg.connect(DSN) as db:
+            barrier.wait()
+            return db.execute(
+                "select public.apply_print_callback_safely(%s,'1','late physical during reconcile')",
+                (old_id,),
+            ).fetchone()[0]
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        reconcile_result, callback_result = list(pool.map(
+            lambda fn: fn(), (reconcile, callback)))
+    assert callback_result["superseded"] is True, callback_result
+    with psycopg.connect(DSN) as db:
+        rows = db.execute("""select attempt_no,state,vendor_raw_status,
+                                    ambiguous_operation,last_error,started_at is not null
+                             from public.print_jobs where order_id=%s order by attempt_no""",
+                          (order_id,)).fetchall()
+    assert rows[0][0:4] == (1, "FAILED", "1", None), rows
+    assert rows[0][5] is True, rows
+    assert rows[1][1] == "UNKNOWN", rows
+    assert rows[1][3] == "prior_attempt_activity", rows
+    assert "人工查核" in rows[1][4], rows
+    if reconcile_result.get("quarantined"):
+        assert reconcile_result["code"] == "RECONCILE_REQUIRED", reconcile_result
+
+
+for race_index in range(12):
+    race_atomic_reconcile_and_callback(race_index)
 print("PRINT_RETRY_POSTGRES_CONCURRENCY_OK")

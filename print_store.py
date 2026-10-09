@@ -388,6 +388,82 @@ class PrintStore:
             updated = self._decode(db.execute("SELECT * FROM print_jobs WHERE id=?", (job_id,)).fetchone())
             return {"job": updated, "superseded": superseded}
 
+    def apply_reconcile_safely(self, job_id, *, matched, taskid="", status="",
+                               message="", ambiguous=False):
+        """Atomically apply a vendor lookup without clearing retry quarantine."""
+        taskid = str(taskid or "")
+        status = str(status or "")
+        message = str(message or "")[:500]
+        if self.app.USE_SUPABASE:
+            data = self.app.SUPABASE.rpc("apply_print_reconcile_safely", {
+                "p_job_id": job_id,
+                "p_matched": bool(matched),
+                "p_taskid": taskid or None,
+                "p_status": status,
+                "p_message": message,
+                "p_ambiguous": bool(ambiguous),
+            }).execute().data
+            if not isinstance(data, dict) or not isinstance(data.get("job"), dict):
+                raise RuntimeError("Invalid print reconcile RPC response")
+            return data
+        with self.connection(True) as db:
+            job = self._decode(db.execute(
+                "SELECT * FROM print_jobs WHERE id=?", (job_id,)).fetchone())
+            if not job:
+                raise ValueError("JOB_NOT_FOUND")
+            safe_match = bool(matched)
+            if safe_match and taskid:
+                owner = self._decode(db.execute(
+                    "SELECT * FROM print_jobs WHERE vendor_taskid=? LIMIT 1", (taskid,)
+                ).fetchone())
+                if owner and str(owner.get("id") or "") != str(job_id):
+                    safe_match = False
+                    ambiguous = True
+            now = utcnow()
+            fields = {
+                "last_reconciled_at": now,
+                "reconcile_count": int(job.get("reconcile_count") or 0) + 1,
+            }
+            quarantined = str(job.get("ambiguous_operation") or "") == "prior_attempt_activity"
+            if quarantined:
+                if safe_match:
+                    fields.update({
+                        "vendor_raw_status": status,
+                        "vendor_raw_message": message,
+                    })
+            elif safe_match:
+                fields.update({
+                    "vendor_taskid": taskid or None,
+                    "vendor_raw_status": status,
+                    "vendor_raw_message": message,
+                    "state": CALLBACK_STATES.get(status, "QUEUED"),
+                    "ambiguous_operation": None,
+                    "last_error": None,
+                })
+            elif ambiguous:
+                fields.update({
+                    "state": "UNKNOWN",
+                    "ambiguous_operation": "reconcile",
+                    "last_error": "雲端查核找到多筆可能任務，無法安全判定；請人工確認",
+                })
+            elif str(job.get("state") or "") not in ("COMPLETED", "CANCELED", "FAILED"):
+                fields.update({
+                    "state": "UNKNOWN",
+                    "last_error": "雲端未列印佇列找不到此任務；不可據此判定未建立或已完成",
+                })
+            sets = ",".join(f"{name}=?" for name in fields)
+            db.execute(f"UPDATE print_jobs SET {sets} WHERE id=?", (*fields.values(), job_id))
+            updated = self._decode(db.execute(
+                "SELECT * FROM print_jobs WHERE id=?", (job_id,)).fetchone())
+            return {
+                "ok": True,
+                "code": "RECONCILE_REQUIRED" if quarantined or ambiguous else "OK",
+                "job": updated,
+                "found": safe_match,
+                "ambiguous": bool(ambiguous),
+                "quarantined": quarantined,
+            }
+
     def active_job(self, order_id):
         if self.app.USE_SUPABASE:
             rows = (self.app.SUPABASE.table("print_jobs").select("*").eq("order_id", order_id)

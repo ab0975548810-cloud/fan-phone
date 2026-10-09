@@ -773,28 +773,29 @@ class PrintService:
                           if str(row.get("order_id") or "") == job["order_id"]]
                 match = legacy[0] if len(legacy) == 1 else None
                 ambiguous = len(legacy) > 1
-        fields = {"last_reconciled_at": utcnow(), "reconcile_count": int(job.get("reconcile_count") or 0) + 1}
+        status = ""
+        taskid = ""
+        message = ""
         if match:
             status = str(match.get("status", "0"))
             taskid = str(match.get("taskid") or match.get("task_id") or job.get("vendor_taskid") or "")
+            message = str(match.get("msg") or "")[:500]
             owner = self.store.job_for_task(taskid) if taskid else None
             if owner and str(owner.get("id") or "") != str(job_id):
                 match = None
                 ambiguous = True
-        if str(job.get("ambiguous_operation") or "") == "prior_attempt_activity":
-            fields = {
-                "last_reconciled_at": utcnow(),
-                "reconcile_count": int(job.get("reconcile_count") or 0) + 1,
-            }
-            if match:
-                raw_status = match.get("status")
-                fields.update({
-                    "vendor_raw_status": "" if raw_status is None else str(raw_status),
-                    "vendor_raw_message": str(match.get("msg") or "")[:500],
-                })
-            self.store.patch_job(job_id, fields)
+        result = self.store.apply_reconcile_safely(
+            job_id,
+            matched=bool(match),
+            taskid=taskid,
+            status=status,
+            message=message,
+            ambiguous=ambiguous,
+        )
+        updated = result["job"]
+        if result.get("quarantined"):
             self.store.finish_request(key, "UNKNOWN", {
-                "job_id": job_id, "found": bool(match),
+                "job_id": job_id, "found": bool(result.get("found")),
                 "code": "RECONCILE_REQUIRED", "quarantined": True,
             })
             raise PrintError(
@@ -802,29 +803,14 @@ class PrintService:
                 "舊列印嘗試曾回報實體活動；本次重推維持封鎖，請人工查核",
                 503,
             )
-        if match:
-            fields.update({
-                "vendor_taskid": taskid or None,
-                "vendor_raw_status": status,
-                "vendor_raw_message": str(match.get("msg") or "")[:500],
-                "state": CALLBACK_STATES.get(status, "QUEUED"),
-                "ambiguous_operation": None,
-                "last_error": None,
-            })
-        elif ambiguous:
-            fields.update({
-                "state": "UNKNOWN", "ambiguous_operation": "reconcile",
-                "last_error": "雲端查核找到多筆可能任務，無法安全判定；請人工確認",
-            })
-        elif job["state"] not in TERMINAL:
-            fields.update({"state": "UNKNOWN", "last_error": "雲端未列印佇列找不到此任務；不可據此判定未建立或已完成"})
-        updated = self.store.patch_job(job_id, fields)
-        self.store.finish_request(key, "UNKNOWN" if ambiguous else "COMPLETED", {
-            "job_id": job_id, "found": bool(match), "ambiguous": ambiguous,
+        is_ambiguous = bool(result.get("ambiguous"))
+        self.store.finish_request(key, "UNKNOWN" if is_ambiguous else "COMPLETED", {
+            "job_id": job_id, "found": bool(result.get("found")),
+            "ambiguous": is_ambiguous,
         })
-        if ambiguous:
+        if is_ambiguous:
             raise PrintError("RECONCILE_REQUIRED", "查核結果有多筆候選，任務維持未知狀態，禁止重送", 503)
-        if match:
+        if result.get("found"):
             self._sync_order(updated)
         return updated
 

@@ -697,6 +697,55 @@ class PrintCenterTests(unittest.TestCase):
         self.assertEqual((after["vendor_raw_status"], after["vendor_raw_message"]), ("0", "queued"))
         self.assertTrue(after["last_reconciled_at"])
 
+    def test_reconcile_vendor_query_race_cannot_clear_callback_quarantine(self):
+        self.save_profile();old = self.prepare()
+        old = app.print_center.store.patch_job(old["id"], {
+            "state": "FAILED", "vendor_taskid": "reconcile-race-old-task",
+        })
+        latest = self.retry(old["id"], "retry-reconcile-race-0001").get_json()["job"]
+        self.fake.responses["/api/Device/receiveTask"] = {
+            "code": 0, "data": {"taskid": "reconcile-race-new-task", "status": 0}}
+        app.print_center.send(latest["id"], "send-reconcile-race-0001")
+        query_started = __import__("threading").Event()
+        vendor_may_return = __import__("threading").Event()
+
+        def delayed_vendor_query():
+            query_started.set()
+            self.assertTrue(vendor_may_return.wait(5))
+            return {"code": 0, "data": {"list": [{
+                "order_id": vendor_order_identity(latest),
+                "taskid": "reconcile-race-new-task", "status": 0, "msg": "queued",
+            }]}}
+
+        def invoke_reconcile():
+            try:
+                app.print_center.reconcile(latest["id"], "reconcile-race-0001")
+            except print_center.PrintError as exc:
+                return exc.code
+            return "UNEXPECTED_SUCCESS"
+
+        with mock.patch.object(app.print_center.client, "get_all_tasks",
+                               side_effect=delayed_vendor_query):
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                reconcile_future = pool.submit(invoke_reconcile)
+                self.assertTrue(query_started.wait(5))
+                updated, _ = app.print_center.task_callback({
+                    "device_id": "device-fixture", "once": "reconcile-race-once",
+                    "time": "1700000001", "taskid": "reconcile-race-old-task",
+                    "status": "1", "msg": "late old attempt printing",
+                    "sign": yun_sign("device-fixture", "fake-key-never-production",
+                                     "reconcile-race-once", "1700000001"),
+                })
+                self.assertEqual(updated["state"], "FAILED")
+                vendor_may_return.set()
+                self.assertEqual(reconcile_future.result(timeout=10), "RECONCILE_REQUIRED")
+        final = app.print_center.store.job(latest["id"])
+        self.assertEqual((final["state"], final["ambiguous_operation"]),
+                         ("UNKNOWN", "prior_attempt_activity"))
+        self.assertIn("人工查核", final["last_error"])
+        self.assertEqual((final["vendor_raw_status"], final["vendor_raw_message"]),
+                         ("0", "queued"))
+
     def test_sqlite_order_lock_serializes_send_claim_and_superseded_callback(self):
         self.save_profile()
         for index in range(8):
