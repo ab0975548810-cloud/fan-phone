@@ -39,4 +39,19 @@ with psycopg.connect(DSN) as db:
     rows = db.execute("select attempt_no,state from public.print_jobs where order_id=%s order by attempt_no",
                       (ORDER_ID,)).fetchall()
 assert rows == [(1, "FAILED"), (2, "PREPARED")], rows
+
+# A reconciled retry cannot adopt the old attempt's vendor task id.
+with psycopg.connect(DSN) as db:
+    jobs = db.execute("select id,attempt_no from public.print_jobs where order_id=%s order by attempt_no",
+                      (ORDER_ID,)).fetchall()
+    db.execute("update public.print_jobs set vendor_taskid='old-attempt-task' where id=%s", (jobs[0][0],))
+try:
+    with psycopg.connect(DSN) as db:
+        db.execute("update public.print_jobs set vendor_taskid='old-attempt-task' where id=%s", (jobs[1][0],))
+except UniqueViolation:
+    pass
+else:
+    raise AssertionError("vendor_taskid unique constraint accepted a cross-attempt collision")
+with psycopg.connect(DSN) as db:
+    assert db.execute("select vendor_taskid from public.print_jobs where id=%s", (jobs[1][0],)).fetchone() == (None,)
 print("PRINT_RETRY_POSTGRES_CONCURRENCY_OK")

@@ -30,6 +30,11 @@ def yun_sign(device_id, key, once, timestamp):
     return hashlib.md5(raw.encode("utf-8")).hexdigest()
 
 
+def vendor_order_identity(job):
+    """Stable vendor identity for one immutable customer-order attempt."""
+    return f"{job['order_id']}-p{int(job['attempt_no'])}"
+
+
 class YunPrintClient:
     def __init__(self, *, transport=None, env=None, clock=None, nonce=None):
         cfg = os.environ if env is None else env
@@ -126,7 +131,7 @@ class YunPrintClient:
 
     def receive_task(self, job, file_url, callback_url):
         return self._post("/api/Device/receiveTask", {
-            "order_id": job["order_id"],
+            "order_id": vendor_order_identity(job),
             "name": f"{job['order_id']} #{job['attempt_no']}",
             "file": file_url,
             "copies": job["copies"],
