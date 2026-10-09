@@ -1484,7 +1484,11 @@ def admin_test(browser, base):
     def model_status_response(route):
         model_status_requests.append(route.request.post_data_json)
         route.fulfill(status=200, content_type='application/json', body='{"status":"success","version":"model-status-version"}')
+    def model_status_catalog(route):
+        route.fulfill(status=200, json=dict(status='success',
+            data=model_status_requests[-1]['shop_data'], version='model-status-version'))
     page.route('**/api/admin/print/model-profiles', model_status_response)
+    page.route('**/api/shop_data?*', model_status_catalog)
     model_id = listing_original['data']['models'][0]['id']
     page.evaluate("""id => {
       openModelEditor(id);document.getElementById('model-active').checked=false;
@@ -1497,6 +1501,7 @@ def admin_test(browser, base):
     assert next(row for row in model_status_requests[0]['shop_data']['models'] if row['id'] == model_id)['status'] is False
     assert page.evaluate("id => shopData.models.find(row=>row.id===id).status===false && !document.getElementById('model-modal').classList.contains('show')", model_id)
     page.unroute('**/api/admin/print/model-profiles')
+    page.unroute('**/api/shop_data?*', model_status_catalog)
 
     style_status_requests = []
     def style_status_response(route):
@@ -1642,7 +1647,11 @@ def admin_test(browser, base):
     def workspace_profile_save(route):
         profile_writes.append(route.request.post_data_json)
         route.fulfill(status=200, content_type='application/json', body='{"status":"success","version":"workspace-profile-version"}')
+    def workspace_profile_catalog(route):
+        route.fulfill(status=200, json=dict(status='success',
+            data=profile_writes[-1]['shop_data'], version='workspace-profile-version'))
     page.route('**/api/admin/print/model-profiles', workspace_profile_save)
+    page.route('**/api/shop_data?*', workspace_profile_catalog)
     page.locator('#model-profile-x').fill('13.5')
     page.locator('#model-save').click()
     poll(page, "() => !document.getElementById('model-modal').classList.contains('show')")
@@ -1652,6 +1661,7 @@ def admin_test(browser, base):
     assert saved_model['case_profiles']['style_1789287807818']['print_x'] == 13.5
     assert saved_model['case_profiles']['style-mirror'] == workspace_fixture['models'][0]['case_profiles']['style-mirror']
     page.unroute('**/api/admin/print/model-profiles')
+    page.unroute('**/api/shop_data?*', workspace_profile_catalog)
 
     page.locator('.nav button[data-view="styles"]').click()
     page.locator('#bf-style-search').fill('鏡面')
@@ -1679,9 +1689,9 @@ def admin_test(browser, base):
     model_color_src = page.locator('script[src*="admin-model-colors.js"]').get_attribute('src')
     assert model_color_src and 'v=20260926audit1' in model_color_src, model_color_src
     model_profile_src = page.locator('script[src*="admin-model-profiles.js"]').get_attribute('src')
-    assert model_profile_src and 'v=20260929style1' in model_profile_src, model_profile_src
+    assert model_profile_src and 'v=20261010modelsave1' in model_profile_src, model_profile_src
     product_workspace_src = page.locator('script[src*="admin-product-workspace-v1.js"]').get_attribute('src')
-    assert product_workspace_src and 'v=20261001b' in product_workspace_src, product_workspace_src
+    assert product_workspace_src and 'v=20261010modelsave1' in product_workspace_src, product_workspace_src
     asset_category_src = page.locator('script[src*="admin-asset-categories.js"]').get_attribute('src')
     assert asset_category_src and 'v=20261002a' in asset_category_src, asset_category_src
     template_loader_src = page.locator('script[src*="admin-template-loader.js"]').get_attribute('src')
@@ -1973,7 +1983,8 @@ def admin_test(browser, base):
     }""")
     assert model_failure_layers['messageZ'] > model_failure_layers['modalZ'] and model_failure_layers['visible'], model_failure_layers
     fresh_after_partial = page.request.get(base + '/api/shop_data')
-    assert fresh_after_partial.headers.get('x-benfuwan-cache') == 'MISS', fresh_after_partial.headers
+    # saveModel now verifies persistence by loading the catalog before returning.
+    assert fresh_after_partial.headers.get('x-benfuwan-cache') == 'HIT', fresh_after_partial.headers
     fresh_after_partial_data = fresh_after_partial.json()
     assert fresh_after_partial_data['version'] == server_partial_version
     assert next(row for row in fresh_after_partial_data['data']['models'] if row['id'] == partial_before['model']['id'])['name'] == partial_model_name
@@ -1992,6 +2003,64 @@ def admin_test(browser, base):
     assert partial_restore.status == 200, partial_restore.text()
     page.evaluate("() => loadShop(true)")
     print('ADMIN_MODEL_PROFILE_PARTIAL_SUCCESS_STATE_OK')
+
+    # New models follow the selected brand and reveal themselves even when
+    # search/status would otherwise hide them; persistence is server-verified.
+    saved_catalog = page.evaluate('() => structuredClone(shopData)')
+    new_catalog = copy.deepcopy(saved_catalog)
+    new_catalog['brands'].append('底膜')
+    brand_save = page.request.post(base + '/api/admin/save_shop_data', data={
+        'data': new_catalog, 'expected_version': page.evaluate('() => shopVersion')})
+    assert brand_save.status == 200, brand_save.text()
+    page.evaluate('() => loadShop(true)')
+    page.locator('.nav button[data-view="models"]').click()
+    page.locator('#model-tab-btn').click()
+    page.locator('#bf-model-brand-filter').select_option('底膜')
+    page.locator('#bf-model-search').fill('不可能符合的搜尋')
+    page.locator('#bf-model-status-filter').select_option('inactive')
+    page.evaluate('() => openModelEditor()')
+    assert page.locator('#model-brand').input_value() == '底膜'
+    page.locator('#model-name').fill('底膜新型號')
+    selected_style = page.evaluate('() => BenfuwanModelProfilesAdmin.getActiveStyleId()')
+    source_profile = next((m.get('case_profiles', {}).get(selected_style) or m
+                           for m in saved_catalog['models']
+                           if (m.get('case_profiles', {}).get(selected_style) or m).get('print_line_img')), None)
+    assert source_profile, saved_catalog
+    page.evaluate('''p => {
+      document.getElementById('model-profile-mask-url').value=p.preview_mask_img;
+      document.getElementById('model-profile-line-url').value=p.print_line_img;
+      for(const key of ['x','y','w','h','angle']) document.getElementById('model-profile-'+key).value=p['print_'+key]||0;
+    }''', source_profile)
+    def hide_unverified_model(route):
+        response = route.fetch()
+        body = response.json()
+        body['data']['models'] = [m for m in body['data']['models'] if m.get('name') != '底膜新型號']
+        route.fulfill(response=response, json=body)
+    page.route('**/api/shop_data?*', hide_unverified_model)
+    page.locator('#model-save').click()
+    poll(page, "() => !modelSaveBusy && document.getElementById('bf-product-message').textContent.includes('伺服器尚未確認')")
+    assert 'show' in page.locator('#model-modal').get_attribute('class')
+    unverified_id = page.locator('#model-id').input_value()
+    assert unverified_id
+    page.unroute('**/api/shop_data?*', hide_unverified_model)
+    page.locator('#model-save').click()
+    poll(page, "() => !modelSaveBusy && !document.getElementById('model-modal').classList.contains('show')")
+    created_id = page.locator('#model-id').input_value()
+    assert created_id == unverified_id
+    assert page.locator('#bf-model-brand-filter').input_value() == '底膜'
+    assert page.locator('#bf-model-search').input_value() == ''
+    assert page.locator('#bf-model-status-filter').input_value() == 'all'
+    assert page.locator(f'#models-body tr[data-model-id="{created_id}"]').count() == 1
+    page.evaluate('() => loadShop(true)')
+    assert page.locator(f'#models-body tr[data-model-id="{created_id}"]').count() == 1
+    page.evaluate('id => openModelEditor(id)', created_id)
+    page.evaluate('() => Promise.all([saveModel(),saveModel()])')
+    assert page.evaluate('id => shopData.models.filter(m=>m.id===id).length', created_id) == 1
+    restored_catalog = page.request.post(base + '/api/admin/save_shop_data', data={
+        'data': saved_catalog, 'expected_version': page.evaluate('() => shopVersion')})
+    assert restored_catalog.status == 200, restored_catalog.text()
+    page.evaluate("async () => {await loadShop(true);BenfuwanAdminProductWorkspace.filters.modelBrand='';renderModels()}")
+    print('ADMIN_NEW_MODEL_BRAND_REVEAL_PERSISTENCE_OK')
 
     # A second tab/device wins the catalog CAS. This tab must keep its unsaved
     # inputs and local state across all shop_data write paths until reload.

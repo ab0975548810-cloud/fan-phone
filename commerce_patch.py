@@ -274,6 +274,15 @@ class Commerce:
     def read(self):
         return _normalize_store(self.store.read())
 
+    def sync_skus(self):
+        """Add catalog SKUs through CAS; never rewrite an existing SKU."""
+        for _ in range(12):
+            data = self.read()
+            added = _sync_skus(self.app, data)
+            if not added or self.store.commit(data['revision'], data):
+                return dict(status='success', added=added, total=len(data['skus']))
+        raise CommerceError('BUSY', '商品規格同步忙碌，請重試')
+
     def mutate(self, fn):
         for _ in range(12):
             data = self.read()
@@ -429,10 +438,7 @@ def install(app_module):
     @app.route('/api/admin/commerce_sync_skus', methods=['POST'])
     @guarded
     def admin_commerce_sync_skus():
-        def update(data):
-            added = _sync_skus(app_module, data)
-            return dict(status='success', added=added, total=len(data['skus'])), None, ''
-        return reply(commerce.mutate(update))
+        return reply(commerce.sync_skus())
 
     @app.route('/api/admin/save_commerce_data', methods=['POST'])
     @guarded
