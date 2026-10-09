@@ -633,6 +633,152 @@ class PrintCenterTests(unittest.TestCase):
                          (409, "REPRINT_REQUIRED"))
         self.assertFalse(any(path == "/api/Device/receiveTask" for path, _ in self.fake.calls))
 
+    def test_started_at_is_sticky_evidence_after_later_failed_or_canceled_status(self):
+        self.save_profile()
+        for index, final_status in enumerate((4, 3)):
+            order_id = self.order_id if index == 0 else self.create_order()
+            job = (self.prepare() if index == 0 else
+                   self.post("prepare", {"order_id": order_id}).get_json()["job"])
+            taskid = f"sticky-started-{final_status}"
+            self.assertEqual(self.send(job["id"], f"send-sticky-{final_status}-0001", taskid).status_code, 200)
+            self.assertEqual(self.callback(taskid, 1, "physical start").status_code, 200)
+            self.assertEqual(self.callback(taskid, final_status, "later terminal").status_code, 200)
+            stored = app.print_center.store.job(job["id"])
+            self.assertTrue(stored["started_at"])
+            self.assertEqual(stored["state"], "FAILED" if final_status == 4 else "CANCELED")
+            self.assertEqual(stored["vendor_raw_status"], str(final_status))
+            for response in (
+                    self.retry(job["id"], f"retry-sticky-{final_status}-0001"),
+                    self.post("prepare", {"order_id": order_id}, f"prepare-sticky-{final_status}-0001")):
+                self.assertEqual((response.status_code, response.get_json()["code"]),
+                                 (409, "REPRINT_REQUIRED"))
+            app.print_center.store.patch_job(job["id"], {"state": "PREPARED"})
+            response = self.send(job["id"], f"resend-sticky-{final_status}-0001")
+            self.assertEqual((response.status_code, response.get_json()["code"]),
+                             (409, "REPRINT_REQUIRED"))
+
+    def test_completed_at_is_sticky_evidence_even_when_state_and_raw_are_terminal_failure(self):
+        self.save_profile();job = self.prepare()
+        app.print_center.store.patch_job(job["id"], {
+            "state": "FAILED", "vendor_raw_status": "4",
+            "completed_at": print_center.utcnow(),
+        })
+        for response in (
+                self.retry(job["id"], "retry-sticky-completed-at-0001"),
+                self.post("prepare", {"order_id": self.order_id},
+                          "prepare-sticky-completed-at-0001")):
+            self.assertEqual((response.status_code, response.get_json()["code"]),
+                             (409, "REPRINT_REQUIRED"))
+        app.print_center.store.patch_job(job["id"], {"state": "PREPARED"})
+        response = self.send(job["id"], "send-sticky-completed-at-0001")
+        self.assertEqual((response.status_code, response.get_json()["code"]),
+                         (409, "REPRINT_REQUIRED"))
+        self.assertFalse(any(path == "/api/Device/receiveTask" for path, _ in self.fake.calls))
+
+    def test_prior_activity_quarantine_survives_reconcile(self):
+        self.save_profile();old = self.prepare()
+        old = app.print_center.store.patch_job(old["id"], {
+            "state": "FAILED", "vendor_taskid": "quarantine-old-task",
+        })
+        latest = self.retry(old["id"], "retry-quarantine-0001").get_json()["job"]
+        self.assertEqual(self.callback("quarantine-old-task", 1, "late printing").status_code, 200)
+        quarantined = app.print_center.store.job(latest["id"])
+        original_error = quarantined["last_error"]
+        self.fake.responses["/api/Device/getAllTasks"] = {"code": 0, "data": {"list": [{
+            "order_id": vendor_order_identity(quarantined),
+            "taskid": "quarantine-discovered-task", "status": 0, "msg": "queued",
+        }]}}
+        response = self.post("reconcile", {"job_id": quarantined["id"]}, "reconcile-quarantine-0001")
+        self.assertEqual((response.status_code, response.get_json()["code"]),
+                         (503, "RECONCILE_REQUIRED"))
+        after = app.print_center.store.job(quarantined["id"])
+        self.assertEqual((after["state"], after["ambiguous_operation"], after["last_error"]),
+                         ("CANCELED", "prior_attempt_activity", original_error))
+        self.assertEqual((after["vendor_raw_status"], after["vendor_raw_message"]), ("0", "queued"))
+        self.assertTrue(after["last_reconciled_at"])
+
+    def test_sqlite_order_lock_serializes_send_claim_and_superseded_callback(self):
+        self.save_profile()
+        for index in range(8):
+            order_id = self.order_id if index == 0 else self.create_order()
+            old = (self.prepare() if index == 0 else
+                   self.post("prepare", {"order_id": order_id}).get_json()["job"])
+            old = app.print_center.store.patch_job(old["id"], {
+                "state": "FAILED", "vendor_taskid": f"race-old-{index}",
+            })
+            latest = self.retry(old["id"], f"retry-race-{index:04d}-0001").get_json()["job"]
+            barrier = __import__("threading").Barrier(2)
+            def claim_send():
+                barrier.wait()
+                return app.print_center.store.claim_send_if_safe(
+                    latest["id"], nonce=f"race-nonce-{index}",
+                    expires_at=print_center.utcnow(), device_id="race-device")
+            def old_callback():
+                barrier.wait()
+                return app.print_center.store.apply_task_callback(old["id"], "1", "late physical")
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                claimed, callback = list(pool.map(lambda fn: fn(), (claim_send, old_callback)))
+            self.assertTrue(callback["superseded"])
+            stored_old = app.print_center.store.job(old["id"])
+            stored_latest = app.print_center.store.job(latest["id"])
+            self.assertEqual((stored_old["state"], stored_old["vendor_raw_status"]), ("FAILED", "1"))
+            self.assertTrue(stored_old["started_at"])
+            self.assertIn(stored_latest["state"], ("CANCELED", "UNKNOWN"))
+            self.assertEqual(stored_latest["ambiguous_operation"], "prior_attempt_activity")
+            if not claimed["ok"]:
+                self.assertEqual(claimed["code"], "REPRINT_REQUIRED")
+
+    def test_callback_winning_order_lock_prevents_send_from_calling_vendor(self):
+        self.save_profile();old = self.prepare()
+        old = app.print_center.store.patch_job(old["id"], {
+            "state": "FAILED", "vendor_taskid": "callback-wins-old-task",
+        })
+        latest = self.retry(old["id"], "retry-callback-wins-0001").get_json()["job"]
+        claim_waiting = __import__("threading").Event()
+        callback_committed = __import__("threading").Event()
+        real_claim = app.print_center.store.claim_send_if_safe
+
+        def delayed_claim(*args, **kwargs):
+            claim_waiting.set()
+            self.assertTrue(callback_committed.wait(5))
+            return real_claim(*args, **kwargs)
+
+        payload = {
+            "device_id": "device-fixture", "once": "callback-wins-once",
+            "time": "1700000001", "taskid": "callback-wins-old-task",
+            "status": "1", "msg": "late physical before send claim",
+        }
+        payload["sign"] = yun_sign(
+            payload["device_id"], "fake-key-never-production",
+            payload["once"], payload["time"])
+
+        def invoke_send():
+            try:
+                app.print_center.send(latest["id"], "send-callback-wins-0001")
+            except print_center.PrintError as exc:
+                return exc.code
+            return "UNEXPECTED_SUCCESS"
+
+        def invoke_callback():
+            self.assertTrue(claim_waiting.wait(5))
+            try:
+                updated, _ = app.print_center.task_callback(payload)
+                return updated
+            finally:
+                callback_committed.set()
+
+        with mock.patch.object(app.print_center.store, "claim_send_if_safe",
+                               side_effect=delayed_claim):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                send_future = pool.submit(invoke_send)
+                callback_future = pool.submit(invoke_callback)
+                callback_future.result(timeout=10)
+                self.assertEqual(send_future.result(timeout=10), "REPRINT_REQUIRED")
+        self.assertFalse(any(path == "/api/Device/receiveTask" for path, _ in self.fake.calls))
+        blocked = app.print_center.store.job(latest["id"])
+        self.assertEqual((blocked["state"], blocked["ambiguous_operation"]),
+                         ("CANCELED", "prior_attempt_activity"))
+
     def test_complete_case_profile_materializes_missing_sku_on_prepare(self):
         dashboard = self.client.get("/api/admin/print/jobs").get_json()
         row = next(item for item in dashboard["rows"] if item["order_id"] == self.order_id)

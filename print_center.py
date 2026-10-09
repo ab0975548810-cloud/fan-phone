@@ -342,7 +342,9 @@ class PrintService:
         """Ordinary prepare/retry/send cannot cross evidence of physical output."""
         for attempt in self.store.jobs_for_order(order_id):
             if (str(attempt.get("state") or "") in ("PRINTING", "COMPLETED")
-                    or str(attempt.get("vendor_raw_status") or "") in ("1", "2")):
+                    or str(attempt.get("vendor_raw_status") or "") in ("1", "2")
+                    or attempt.get("started_at") or attempt.get("completed_at")
+                    or str(attempt.get("ambiguous_operation") or "") == "prior_attempt_activity"):
                 raise PrintError(
                     "REPRINT_REQUIRED",
                     "已有列印中或完成的歷史嘗試；為避免重複打印，只能使用未來獨立的重印流程",
@@ -577,14 +579,17 @@ class PrintService:
             return self.store.job(job_id)
         nonce = secrets.token_urlsafe(18)
         expiry = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
-        claimed = self.store.patch_job(job_id, {
-            "state": "SENDING", "artwork_token_nonce": nonce,
-            "artwork_token_expires_at": expiry, "device_id": self.client.device_id,
-            "last_error": None, "ambiguous_operation": None,
-        }, ("PREPARED",))
-        if not claimed:
-            self.store.finish_request(key, "FAILED", {"code": "CONCURRENT_OPERATION"})
+        decision = self.store.claim_send_if_safe(
+            job_id, nonce=nonce, expires_at=expiry, device_id=self.client.device_id)
+        if not decision.get("ok"):
+            code = str(decision.get("code") or "CONCURRENT_OPERATION")
+            self.store.finish_request(key, "FAILED", {"job_id": job_id, "code": code})
+            if code == "REPRINT_REQUIRED":
+                raise PrintError("REPRINT_REQUIRED", "已有實體列印活動，禁止再次送出")
+            if code == "JOB_NOT_FOUND":
+                raise PrintError("JOB_NOT_FOUND", "找不到列印任務", 404)
             raise PrintError("CONCURRENT_OPERATION", "另一個列印操作正在執行")
+        claimed = decision["job"]
         try:
             claimed_order = self._order(claimed["order_id"])
             self._assert_order_printable(claimed_order)
@@ -596,6 +601,13 @@ class PrintService:
         token = self.artwork_token(claimed)
         file_url = f"{base}/api/print/artwork/{claimed['id']}/{token}"
         callback_url = f"{base}/api/print/callback"
+        # The database claim above is the cross-process safety boundary. This
+        # final read additionally avoids a vendor call when a callback acquired
+        # the same order lock immediately after the claim and quarantined it.
+        if (self.store.job(job_id) or {}).get("state") != "SENDING":
+            self.store.finish_request(key, "UNKNOWN", {
+                "job_id": job_id, "code": "RECONCILE_REQUIRED"})
+            raise PrintError("RECONCILE_REQUIRED", "舊列印活動已封鎖本次送出，請人工查核", 503)
         try:
             result = self.client.receive_task(claimed, file_url, callback_url)
             taskid = str((result or {}).get("taskid") or (result or {}).get("task_id") or "").strip()
@@ -620,6 +632,33 @@ class PrintService:
             "vendor_raw_status": raw_status, "vendor_raw_message": str(result.get("msg") or "")[:500],
             "sent_at": utcnow(), "ambiguous_operation": None,
         }, ("SENDING",))
+        if not job:
+            current = self.store.job(job_id) or {}
+            if str(current.get("ambiguous_operation") or "") == "prior_attempt_activity":
+                # The send claim won the database lock, but a superseded
+                # physical callback quarantined this attempt while receiveTask
+                # was in flight. Preserve the vendor audit without allowing the
+                # send response to clear that sticky quarantine.
+                self.store.patch_job(job_id, {
+                    "vendor_taskid": taskid,
+                    "vendor_raw_status": raw_status,
+                    "vendor_raw_message": str(result.get("msg") or "")[:500],
+                    "sent_at": utcnow(),
+                })
+                self.store.finish_request(key, "UNKNOWN", {
+                    "job_id": job_id, "vendor_taskid": taskid,
+                    "code": "RECONCILE_REQUIRED",
+                })
+                raise PrintError(
+                    "RECONCILE_REQUIRED",
+                    "舊列印活動已封鎖本次送出；雲端結果需人工查核",
+                    503,
+                )
+            self.store.finish_request(key, "UNKNOWN", {
+                "job_id": job_id, "vendor_taskid": taskid,
+                "code": "RECONCILE_REQUIRED",
+            })
+            raise PrintError("RECONCILE_REQUIRED", "送出期間任務狀態改變，請人工查核", 503)
         self.store.finish_request(key, "COMPLETED", {"job_id": job_id, "vendor_taskid": taskid})
         return job
 
@@ -742,6 +781,27 @@ class PrintService:
             if owner and str(owner.get("id") or "") != str(job_id):
                 match = None
                 ambiguous = True
+        if str(job.get("ambiguous_operation") or "") == "prior_attempt_activity":
+            fields = {
+                "last_reconciled_at": utcnow(),
+                "reconcile_count": int(job.get("reconcile_count") or 0) + 1,
+            }
+            if match:
+                raw_status = match.get("status")
+                fields.update({
+                    "vendor_raw_status": "" if raw_status is None else str(raw_status),
+                    "vendor_raw_message": str(match.get("msg") or "")[:500],
+                })
+            self.store.patch_job(job_id, fields)
+            self.store.finish_request(key, "UNKNOWN", {
+                "job_id": job_id, "found": bool(match),
+                "code": "RECONCILE_REQUIRED", "quarantined": True,
+            })
+            raise PrintError(
+                "RECONCILE_REQUIRED",
+                "舊列印嘗試曾回報實體活動；本次重推維持封鎖，請人工查核",
+                503,
+            )
         if match:
             fields.update({
                 "vendor_taskid": taskid or None,
@@ -808,63 +868,10 @@ class PrintService:
                     str(existing.get("raw_status") or "") != status or
                     str(existing.get("raw_message") or "") != msg):
                 raise PrintError("INVALID_REPLAY", "callback 驗證資料已被重用", 403)
-        latest = self.store.latest_job(job["order_id"])
-        superseded = bool(
-            latest and int(job.get("attempt_no") or 0) < int(latest.get("attempt_no") or 0)
-        )
-        fields = {"vendor_raw_status": status, "vendor_raw_message": msg}
-        if status == "1":
-            fields["started_at"] = job.get("started_at") or utcnow()
-        elif status == "2":
-            fields["completed_at"] = job.get("completed_at") or utcnow()
-        elif status == "3":
-            fields["canceled_at"] = job.get("canceled_at") or utcnow()
-
-        if superseded:
-            # The old attempt remains immutable from a workflow perspective.
-            # Raw evidence is still retained because it may prove that physical
-            # output occurred after a retry was prepared or sent.
-            prior_raw_status = str(job.get("vendor_raw_status") or "")
-            if (prior_raw_status == "2"
-                    or (prior_raw_status == "1" and status != "2")):
-                # Keep the strongest durable physical-output evidence in the
-                # job row. Every later raw callback still exists in events.
-                fields["vendor_raw_status"] = prior_raw_status
-                fields["vendor_raw_message"] = str(job.get("vendor_raw_message") or "")[:500]
-            updated = self.store.patch_job(job["id"], fields)
-            if status in ("1", "2") or prior_raw_status in ("1", "2"):
-                warning = ("舊列印嘗試延遲回報列印中/完成，為避免重複打印，"
-                           "本次重推已封鎖")
-                latest_state = str(latest.get("state") or "")
-                if latest_state == "PREPARED":
-                    self.store.patch_job(latest["id"], {
-                        "state": "CANCELED", "canceled_at": utcnow(),
-                        "ambiguous_operation": "prior_attempt_activity",
-                        "last_error": warning,
-                    }, ("PREPARED",))
-                elif latest_state in (
-                        "SENDING", "QUEUED", "STARTING", "PRINTING",
-                        "CANCELING", "UNKNOWN"):
-                    self.store.patch_job(latest["id"], {
-                        "state": "UNKNOWN",
-                        "ambiguous_operation": "prior_attempt_activity",
-                        "last_error": warning + "，請人工查核雲端狀態",
-                    }, (latest_state,))
-            return updated, not inserted
-
-        # A delayed callback may update raw audit fields but cannot downgrade a
-        # verified terminal outcome. A completed callback may still reveal that
-        # a prior cancel did not prevent physical output.
-        if job.get("state") == "COMPLETED":
-            pass
-        elif job.get("state") == "CANCELED" and status != "2":
-            pass
-        elif status in CALLBACK_STATES:
-            fields["state"] = CALLBACK_STATES[status]
-        elif status != "12":
-            fields.update({"state": "UNKNOWN", "last_error": "收到未識別的雲打印狀態"})
-        updated = self.store.patch_job(job["id"], fields)
-        self._sync_order(updated)
+        result = self.store.apply_task_callback(job["id"], status, msg)
+        updated = result["job"]
+        if not result.get("superseded"):
+            self._sync_order(updated)
         return updated, not inserted
 
     def printer_callback(self, payload):
