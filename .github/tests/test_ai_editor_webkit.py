@@ -2486,7 +2486,7 @@ def admin_test(browser, base):
     print('ADMIN_TEMPLATE_OPEN_DIAG', template_open_diag)
     assert template_open_diag['canvas'], template_open_diag
     template_editor_src = page.locator('script[src*="admin-template-editor-v2.js"]').get_attribute('src')
-    assert template_editor_src and 'v=20261010modelsave1' in template_editor_src, template_editor_src
+    assert template_editor_src and 'v=20260929style1' in template_editor_src, template_editor_src
     print('ADMIN_FABRIC_LAZY_OK')
 
     template_contract = page.evaluate("""async () => {
