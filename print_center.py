@@ -17,7 +17,8 @@ from urllib.parse import urlsplit
 from flask import Response, request, session, url_for
 
 from print_store import ACTIVE_STATES, PrintConflict, PrintStore, utcnow
-from print_vendor import VendorAmbiguous, VendorDisabled, VendorError, YunPrintClient
+from print_vendor import (VendorAmbiguous, VendorDisabled, VendorError,
+                          YunPrintClient, vendor_order_identity)
 
 
 _INSTALLED = False
@@ -337,15 +338,8 @@ class PrintService:
         if dispatcher:
             dispatcher.wake()
 
-    def prepare(self, order_id, key):
-        fingerprint = _payload_hash("prepare", order_id)
-        prior = self.store.request(key)
-        if prior:
-            if prior["operation"] != "prepare" or prior["request_hash"] != fingerprint:
-                raise PrintConflict("IDEMPOTENCY_CONFLICT", "同一操作識別已用於不同列印操作")
-            job = self.store.job(prior.get("job_id"))
-            if job:
-                return job
+    def _create_prepared_attempt(self, order_id):
+        """Run the one canonical preflight/render path and create one attempt."""
         order = self._order(order_id)
         self._assert_order_printable(order)
         finance = self._finance(order_id)
@@ -374,10 +368,69 @@ class PrintService:
             if isinstance(order.get("design_json"), dict) and order["design_json"].get("render_contract_version"):
                 raise PrintError("PRODUCTION_REBUILD_FAILED", "生產圖無法重建：不支援此生產結構版本", 422)
             raw = self._download_artwork(order["print_path"])
-        job = self.store.create_job(print_order, sku_id, profile, hashlib.sha256(raw).hexdigest(), secrets.token_urlsafe(18))
+        return self.store.create_job(
+            print_order, sku_id, profile, hashlib.sha256(raw).hexdigest(),
+            secrets.token_urlsafe(18),
+        )
+
+    def prepare(self, order_id, key):
+        fingerprint = _payload_hash("prepare", order_id)
+        prior = self.store.request(key)
+        if prior:
+            if prior["operation"] != "prepare" or prior["request_hash"] != fingerprint:
+                raise PrintConflict("IDEMPOTENCY_CONFLICT", "同一操作識別已用於不同列印操作")
+            job = self.store.job(prior.get("job_id"))
+            if job:
+                return job
+        job = self._create_prepared_attempt(order_id)
         owner, _ = self.store.claim_request(key, "prepare", job["id"], fingerprint)
         if owner:
             self.store.finish_request(key, "COMPLETED", {"job_id": job["id"]})
+        return self.store.job(job["id"])
+
+    def retry(self, job_id, key):
+        fingerprint = _payload_hash("retry", job_id)
+        prior_request = self.store.request(key)
+        if prior_request:
+            # print_requests has an existing production CHECK constraint and
+            # this scoped change intentionally has no migration. A retry is a
+            # fresh prepare attempt, with a retry-specific request hash.
+            if (prior_request["operation"] != "prepare"
+                    or prior_request["request_hash"] != fingerprint):
+                raise PrintConflict("IDEMPOTENCY_CONFLICT", "同一操作識別已用於不同列印操作")
+            replay = self.store.job(prior_request.get("job_id"))
+            if replay:
+                return replay
+
+        prior = self.store.job(job_id)
+        if not prior:
+            raise PrintError("JOB_NOT_FOUND", "找不到列印任務", 404)
+        latest = self.store.latest_job(prior["order_id"])
+        if not latest or str(latest.get("id") or "") != str(job_id):
+            raise PrintError("STALE_PRINT_ATTEMPT", "只能重推這筆訂單最新的列印嘗試")
+        state = str(prior.get("state") or "")
+        if state == "UNKNOWN":
+            raise PrintError("RECONCILE_REQUIRED", "結果不明，必須先查核雲端，禁止重推")
+        if state in ("PRINTING", "COMPLETED"):
+            raise PrintError("REPRINT_REQUIRED", "已開始或已完成列印，必須使用未來獨立的重印流程")
+        if state not in ("FAILED", "CANCELED"):
+            raise PrintError("BAD_PRINT_STATE", "只有明確失敗或已取消的最新任務可以重推")
+        order = self._order(prior["order_id"])
+        self._assert_order_printable(order)
+        if self.store.active_job(prior["order_id"]):
+            raise PrintError("ACTIVE_PRINT_JOB", "這筆訂單已有進行中的列印任務")
+
+        job = self._create_prepared_attempt(prior["order_id"])
+        owner, claimed = self.store.claim_request(
+            key, "prepare", job["id"], fingerprint)
+        if not owner:
+            replay = self.store.job(claimed.get("job_id"))
+            if replay:
+                return replay
+        else:
+            self.store.finish_request(key, "COMPLETED", {
+                "job_id": job["id"], "retried_job_id": job_id,
+            })
         return self.store.job(job["id"])
 
     def save_model_profiles(self, payload):
@@ -646,13 +699,38 @@ class PrintService:
         except (VendorAmbiguous, VendorDisabled, VendorError) as exc:
             self.store.finish_request(key, "FAILED", {"job_id": job_id, "code": "RECONCILE_FAILED"})
             raise PrintError("RECONCILE_FAILED", "目前無法完成雲端查核，任務維持原狀", 502) from exc
-        match = next((row for row in rows if str(row.get("taskid") or row.get("task_id") or "") == str(job.get("vendor_taskid") or "")), None)
-        if not match:
-            match = next((row for row in rows if str(row.get("order_id") or "") == job["order_id"]), None)
+        match = None
+        ambiguous = False
+        taskid = str(job.get("vendor_taskid") or "")
+        if taskid:
+            candidates = [row for row in rows
+                          if str(row.get("taskid") or row.get("task_id") or "") == taskid]
+            match = candidates[0] if len(candidates) == 1 else None
+            ambiguous = len(candidates) > 1
+        else:
+            identity = vendor_order_identity(job)
+            candidates = [row for row in rows
+                          if str(row.get("order_id") or "") == identity]
+            if len(candidates) == 1:
+                match = candidates[0]
+            elif len(candidates) > 1:
+                ambiguous = True
+            else:
+                # Pre-attempt-identity tasks used the customer order id. They
+                # are safe to adopt only when the remote candidate is unique.
+                legacy = [row for row in rows
+                          if str(row.get("order_id") or "") == job["order_id"]]
+                match = legacy[0] if len(legacy) == 1 else None
+                ambiguous = len(legacy) > 1
         fields = {"last_reconciled_at": utcnow(), "reconcile_count": int(job.get("reconcile_count") or 0) + 1}
         if match:
             status = str(match.get("status", "0"))
             taskid = str(match.get("taskid") or match.get("task_id") or job.get("vendor_taskid") or "")
+            owner = self.store.job_for_task(taskid) if taskid else None
+            if owner and str(owner.get("id") or "") != str(job_id):
+                match = None
+                ambiguous = True
+        if match:
             fields.update({
                 "vendor_taskid": taskid or None,
                 "vendor_raw_status": status,
@@ -661,10 +739,19 @@ class PrintService:
                 "ambiguous_operation": None,
                 "last_error": None,
             })
+        elif ambiguous:
+            fields.update({
+                "state": "UNKNOWN", "ambiguous_operation": "reconcile",
+                "last_error": "雲端查核找到多筆可能任務，無法安全判定；請人工確認",
+            })
         elif job["state"] not in TERMINAL:
             fields.update({"state": "UNKNOWN", "last_error": "雲端未列印佇列找不到此任務；不可據此判定未建立或已完成"})
         updated = self.store.patch_job(job_id, fields)
-        self.store.finish_request(key, "COMPLETED", {"job_id": job_id, "found": bool(match)})
+        self.store.finish_request(key, "UNKNOWN" if ambiguous else "COMPLETED", {
+            "job_id": job_id, "found": bool(match), "ambiguous": ambiguous,
+        })
+        if ambiguous:
+            raise PrintError("RECONCILE_REQUIRED", "查核結果有多筆候選，任務維持未知狀態，禁止重送", 503)
         if match:
             self._sync_order(updated)
         return updated
@@ -904,6 +991,13 @@ def install(app_module):
         job = service.prepare(str(payload.get("order_id") or ""), key(payload))
         return app_module.no_cache_json({"status": "success", "job": _public_job(job)})
 
+    @app.route("/api/admin/print/retry", methods=["POST"])
+    @guarded
+    def print_retry():
+        payload = body()
+        job = service.retry(str(payload.get("job_id") or ""), key(payload))
+        return app_module.no_cache_json({"status": "success", "job": _public_job(job)})
+
     @app.route("/api/admin/print/profile-snapshot", methods=["POST"])
     @guarded
     def print_profile_snapshot():
@@ -969,7 +1063,7 @@ def install(app_module):
         if request.path == "/admin" and response.status_code == 200 and response.mimetype == "text/html":
             response.direct_passthrough = False
             html = response.get_data(as_text=True)
-            src = "/static/admin-print-center.js?v=20261002operations1"
+            src = "/static/admin-print-center.js?v=20261009retry1"
             if src not in html:
                 response.set_data(html.replace("</body>", f'<link rel="stylesheet" href="/static/admin-print-center.css?v=20261002operations1"><script src="{src}"></script></body>'))
             response.headers["Cache-Control"] = "no-store"

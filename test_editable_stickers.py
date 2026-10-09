@@ -92,6 +92,11 @@ class EditableTests(unittest.TestCase):
         self.assertEqual(app.commerce.store.order(order_id)['print_path'],order['print_path'])
         self.assertEqual(app.print_center.prepare(order_id,'editable-prepare')['id'],job['id'])
         self.assertEqual(self.fixture.fake.calls,[])
+        app.print_center.store.patch_job(job['id'],{'state':'FAILED','last_error':'fixture'})
+        retried=app.print_center.retry(job['id'],'editable-retry-0001')
+        self.assertEqual((retried['attempt_no'],retried['state']),(2,'PREPARED'))
+        rebuilt=Image.open(io.BytesIO(app.print_center._download_artwork(retried['artwork_path'])))
+        self.assertEqual(rebuilt.size,(2030,4241));self.assertEqual(self.fixture.fake.calls,[])
 
     def test_missing_font_and_missing_asset_fail_closed(self):
         order=app.commerce.store.order(self.create());profile=app.print_center.store.profile(self.fixture.sku_id)
