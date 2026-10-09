@@ -1484,7 +1484,11 @@ def admin_test(browser, base):
     def model_status_response(route):
         model_status_requests.append(route.request.post_data_json)
         route.fulfill(status=200, content_type='application/json', body='{"status":"success","version":"model-status-version"}')
+    def model_status_catalog(route):
+        route.fulfill(status=200, json=dict(status='success',
+            data=model_status_requests[-1]['shop_data'], version='model-status-version'))
     page.route('**/api/admin/print/model-profiles', model_status_response)
+    page.route('**/api/shop_data?*', model_status_catalog)
     model_id = listing_original['data']['models'][0]['id']
     page.evaluate("""id => {
       openModelEditor(id);document.getElementById('model-active').checked=false;
@@ -1497,6 +1501,7 @@ def admin_test(browser, base):
     assert next(row for row in model_status_requests[0]['shop_data']['models'] if row['id'] == model_id)['status'] is False
     assert page.evaluate("id => shopData.models.find(row=>row.id===id).status===false && !document.getElementById('model-modal').classList.contains('show')", model_id)
     page.unroute('**/api/admin/print/model-profiles')
+    page.unroute('**/api/shop_data?*', model_status_catalog)
 
     style_status_requests = []
     def style_status_response(route):
@@ -1642,7 +1647,11 @@ def admin_test(browser, base):
     def workspace_profile_save(route):
         profile_writes.append(route.request.post_data_json)
         route.fulfill(status=200, content_type='application/json', body='{"status":"success","version":"workspace-profile-version"}')
+    def workspace_profile_catalog(route):
+        route.fulfill(status=200, json=dict(status='success',
+            data=profile_writes[-1]['shop_data'], version='workspace-profile-version'))
     page.route('**/api/admin/print/model-profiles', workspace_profile_save)
+    page.route('**/api/shop_data?*', workspace_profile_catalog)
     page.locator('#model-profile-x').fill('13.5')
     page.locator('#model-save').click()
     poll(page, "() => !document.getElementById('model-modal').classList.contains('show')")
@@ -1652,6 +1661,7 @@ def admin_test(browser, base):
     assert saved_model['case_profiles']['style_1789287807818']['print_x'] == 13.5
     assert saved_model['case_profiles']['style-mirror'] == workspace_fixture['models'][0]['case_profiles']['style-mirror']
     page.unroute('**/api/admin/print/model-profiles')
+    page.unroute('**/api/shop_data?*', workspace_profile_catalog)
 
     page.locator('.nav button[data-view="styles"]').click()
     page.locator('#bf-style-search').fill('鏡面')
