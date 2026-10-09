@@ -372,7 +372,19 @@
     }
   }
 
+  function revealModel(model) {
+    state.modelBrand = model.brand || '';
+    state.modelQuery = '';
+    state.modelStatus = 'all';
+    ensureChrome();
+    refreshBrandFilter();
+    document.getElementById('bf-model-search').value = '';
+    document.getElementById('bf-model-status-filter').value = 'all';
+    renderModels();
+  }
+
   window.BenfuwanAdminProductWorkspace = Object.freeze({
+    revealModel,
     notify,
     submitBrand,
     filters: state,

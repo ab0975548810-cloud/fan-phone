@@ -982,6 +982,51 @@ class PrintCenterTests(unittest.TestCase):
         self.assertEqual(app.print_center.store.profile(other["id"]), other_before)
         self.assertEqual(app.commerce.read(), commerce_before)
 
+    def test_new_model_save_materializes_skus_profiles_and_allows_checkout(self):
+        shop, version = self.shop_snapshot()
+        style_id = shop['styles'][0]['id']
+        model = dict(id='new-model-save-fixture', name='新型號', brand=shop['brands'][0], status=True,
+                     case_profiles={style_id: dict(preview_mask_img='fixture://preview.png',
+                         print_line_img='fixture://print.png', print_w=70, print_h=140,
+                         print_x=2, print_y=3, print_angle=0)})
+        shop['models'].append(model)
+        before = app.commerce.read()
+        for _ in range(2):
+            response = self.client.post('/api/admin/print/model-profiles', json=dict(
+                model_id=model['id'], style_id=style_id, shop_data=shop, expected_version=version))
+            self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+            version = response.get_json()['version']
+        after = app.commerce.read()
+        self.assertEqual([s for s in after['skus'] if s['model_id'] != model['id']], before['skus'])
+        self.assertEqual(after['inventory_ledger'], before['inventory_ledger'])
+        new_skus = [s for s in after['skus'] if s['model_id'] == model['id'] and s['style_id'] == style_id]
+        self.assertTrue(new_skus)
+        self.assertEqual(len({s['id'] for s in after['skus']}), len(after['skus']))
+        for sku in new_skus:
+            self.assertEqual(app.print_center.store.profile(sku['id'])['width_mm'], 70)
+        persisted = self.client.get('/api/shop_data').get_json()['data']
+        self.assertEqual(sum(m['id'] == model['id'] for m in persisted['models']), 1)
+        order = self.client.post('/api/create_order', json=dict(
+            idempotency_key='new-model-checkout', model_id=model['id'], style_id=style_id,
+            color_name=new_skus[0]['color'], quantity=1, customer_name='新型號測試',
+            payment_method='現金', print_file=PNG, mockup_file=PNG, design_json={}))
+        self.assertEqual(order.status_code, 200, order.get_data(as_text=True))
+
+    def test_model_sku_sync_failure_is_partial_and_retryable(self):
+        shop, version = self.shop_snapshot()
+        model, style = shop['models'][0], shop['styles'][0]
+        model.setdefault('case_profiles', {})[style['id']] = dict(
+            preview_mask_img='fixture://preview.png', print_line_img='fixture://print.png',
+            print_w=70, print_h=140, print_x=2, print_y=3, print_angle=0)
+        with mock.patch.object(app.commerce, 'sync_skus', side_effect=RuntimeError('fixture')):
+            response = self.client.post('/api/admin/print/model-profiles', json=dict(
+                model_id=model['id'], style_id=style['id'], shop_data=shop, expected_version=version))
+        body = response.get_json()
+        self.assertEqual((response.status_code, body['code']), (503, 'PROFILE_SYNC_FAILED'))
+        self.assertIn('SKU同步失敗', body['msg'])
+        self.assertTrue(body['version'])
+        self.assertEqual(self.client.get('/api/shop_data').get_json()['version'], body['version'])
+
     def test_model_profile_sync_failure_is_clear_retryable_and_not_a_silent_success(self):
         shop, version = self.shop_snapshot()
         model = shop["models"][0]

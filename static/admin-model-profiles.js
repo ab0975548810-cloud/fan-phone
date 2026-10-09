@@ -142,7 +142,9 @@
     editingModel = id ? (shopData.models || []).find(row => String(row.id) === String(id)) || null : null;
     document.getElementById('model-id').value = id;
     document.getElementById('model-brand').innerHTML = (shopData.brands || []).map(brand => `<option value="${esc(brand)}">${esc(brand)}</option>`).join('');
-    document.getElementById('model-brand').value = editingModel?.brand || shopData.brands?.[0] || '';
+    const filteredBrand = window.BenfuwanAdminProductWorkspace?.filters?.modelBrand;
+    const defaultBrand = (shopData.brands || []).includes(filteredBrand) ? filteredBrand : shopData.brands?.[0];
+    document.getElementById('model-brand').value = editingModel?.brand || defaultBrand || '';
     document.getElementById('model-name').value = editingModel?.name || '';
     document.getElementById('model-active').checked = editingModel?.status !== false;
     const styles = activeStyles();
@@ -178,6 +180,9 @@
     if (index >= 0) next.models[index] = patch; else next.models.push(patch);
     const button = document.getElementById('model-save');
     modelSaveBusy = true;
+    // Keep the generated identity on uncertain/partial saves so retry cannot
+    // accidentally create another model.
+    document.getElementById('model-id').value = id;
     if (button) button.disabled = true;
     try {
       const result = await apiJson('/api/admin/print/model-profiles', {
@@ -185,20 +190,28 @@
         body: JSON.stringify({model_id: id, style_id: activeStyleId, shop_data: next, expected_version: shopVersion}),
       });
       shopVersion = String(result.version || '');
-      shopData = next;
+      editingModel = patch;
+      await loadShop(true);
+      const persisted = (shopData.models || []).find(row => String(row.id) === String(id));
+      if (!persisted) throw new Error('伺服器尚未確認此型號，請保留視窗並重試');
+      editingModel = persisted;
+      window.BenfuwanAdminProductWorkspace?.revealModel(persisted);
       renderModels();
       closeModal('model-modal');
       notify('型號與目前殼款設定已儲存', 'success');
     } catch (error) {
       if (error.code === 'PROFILE_SYNC_FAILED' && error.version) {
         shopVersion = String(error.version);
-        shopData = next;
-        editingModel = patch;
-        document.getElementById('model-id').value = id;
-        renderModels();
-        renderProfilePanel();
+        try {
+          await loadShop(true);
+          editingModel = (shopData.models || []).find(row => String(row.id) === String(id)) || patch;
+          window.BenfuwanAdminProductWorkspace?.revealModel(editingModel);
+        } catch (reloadError) {
+          console.warn('Model save verification unavailable', reloadError);
+          editingModel = patch;
+        }
       }
-      notify('儲存失敗：' + (error.message || error));
+      notify((error.code === 'PROFILE_SYNC_FAILED' ? '部分儲存：' : '儲存失敗：') + (error.message || error));
     } finally {
       modelSaveBusy = false;
       if (button) button.disabled = false;

@@ -469,40 +469,41 @@ class PrintService:
             "top_mm": _as_decimal(source_profile.get("print_y", 0), "垂直定位 Y"),
             "angle": _as_decimal(source_profile.get("print_angle", 0), "角度"),
         }
-        commerce_before = self.app.commerce.read()
-        active_skus = [row for row in (commerce_before.get("skus") or [])
-                       if row.get("active") is not False
-                       and str(row.get("model_id") or "") == model_id
-                       and str(row.get("style_id") or "") == style_id]
-        current = {row["sku_id"]: row for row in self.store.profiles()}
-        profiles = []
-        for sku in active_skus:
-            sku_id = str(sku.get("id") or "").strip()
-            if not sku_id:
-                continue
-            old = current.get(sku_id) or {}
-            profiles.append({
-                "sku_id": sku_id,
-                **profile_values,
-                "copies": int(old.get("copies") or 1),
-                "spot_color": "",
-                "channel": "1",
-            })
-        # Persist the explicit model edit first. Profile sync is an idempotent
-        # batch upsert, so a clear failure can be retried without guessing or
-        # duplicating print/commerce transactions.
+        # Catalog CAS must succeed before materializing missing commerce SKUs.
         try:
             version = self.app.cloud_compare_and_swap_json(
                 "shop_data", self.app.DATA_FILE, shop, payload.get("expected_version"))
         except self.app.StaleDataError as exc:
             raise PrintError(exc.code, str(exc), exc.status) from exc
+        stage = "商品 SKU"
         try:
+            self.app.commerce.sync_skus()
+            commerce_after = self.app.commerce.read()
+            active_skus = [row for row in (commerce_after.get("skus") or [])
+                       if row.get("active") is not False
+                       and str(row.get("model_id") or "") == model_id
+                       and str(row.get("style_id") or "") == style_id]
+            stage = "正式列印參數"
+            current = {row["sku_id"]: row for row in self.store.profiles()}
+            profiles = []
+            for sku in active_skus:
+                sku_id = str(sku.get("id") or "").strip()
+                if not sku_id:
+                    continue
+                old = current.get(sku_id) or {}
+                profiles.append({
+                    "sku_id": sku_id,
+                    **profile_values,
+                    "copies": int(old.get("copies") or 1),
+                    "spot_color": "",
+                    "channel": "1",
+                })
             saved = self.store.save_profiles(profiles)
         except Exception as exc:
             self.app.app.logger.exception("Model production profile sync failed")
             error = PrintError(
                 "PROFILE_SYNC_FAILED",
-                "型號資料已儲存，但正式列印參數同步失敗；請勿關閉視窗並再次按儲存。",
+                f"型號資料已儲存，但{stage}同步失敗；請勿關閉視窗並再次按儲存。",
                 503,
             )
             error.version = version
