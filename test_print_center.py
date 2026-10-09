@@ -5,6 +5,7 @@ import copy
 import tempfile
 import unittest
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from unittest import mock
 from pathlib import Path
 
@@ -216,6 +217,9 @@ class PrintCenterTests(unittest.TestCase):
         self.fake.responses["/api/Device/receiveTask"] = {"code": 0, "data": {"taskid": taskid, "status": 0}}
         return self.post("send", {"job_id": job_id}, key)
 
+    def retry(self, job_id, key=None):
+        return self.post("retry", {"job_id": job_id}, key)
+
     def callback(self, taskid, status, msg="fixture", valid=True):
         nonce = "cb-" + __import__("hashlib").sha256(f"{taskid}|{status}|{msg}".encode()).hexdigest()[:16]
         payload = {"device_id": "device-fixture", "once": nonce, "time": "1700000001", "taskid": taskid, "status": str(status), "msg": msg}
@@ -234,6 +238,98 @@ class PrintCenterTests(unittest.TestCase):
         self.assertEqual(first["id"], second["id"])
         self.assertEqual(first["id"], third["id"])
         self.assertEqual(len(app.print_center.store.list_jobs()), 1)
+
+    def test_retry_failed_and_canceled_create_new_prepared_attempt(self):
+        self.save_profile()
+        for terminal in ("FAILED", "CANCELED"):
+            order_id = self.order_id if terminal == "FAILED" else self.create_order()
+            old = self.prepare() if order_id == self.order_id else self.post(
+                "prepare", {"order_id": order_id}).get_json()["job"]
+            app.print_center.store.patch_job(old["id"], {
+                "state": terminal, "vendor_taskid": "old-task-" + terminal,
+                "vendor_raw_status": "old-raw", "last_error": "old-error",
+            })
+            response = self.retry(old["id"], "retry-" + terminal.lower() + "-0001")
+            self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+            new = response.get_json()["job"]
+            self.assertNotEqual(new["id"], old["id"])
+            self.assertEqual((new["attempt_no"], new["state"], new["vendor_taskid"]),
+                             (2, "PREPARED", None))
+            stored_new = app.print_center.store.job(new["id"])
+            stored_old = app.print_center.store.job(old["id"])
+            self.assertNotEqual(stored_new["artwork_token_nonce"], stored_old["artwork_token_nonce"])
+            preserved = app.print_center.store.job(old["id"])
+            self.assertEqual((preserved["state"], preserved["vendor_taskid"], preserved["last_error"]),
+                             (terminal, "old-task-" + terminal, "old-error"))
+        self.assertFalse(any(path in ("/api/Device/receiveTask", "/api/Device/startPrint", "/api/Device/pushPrint")
+                             for path, _ in self.fake.calls))
+
+    def test_retry_state_rules_void_and_preflight_fail_closed(self):
+        self.save_profile()
+        expectations = {
+            "UNKNOWN": "RECONCILE_REQUIRED", "QUEUED": "BAD_PRINT_STATE",
+            "SENDING": "BAD_PRINT_STATE", "STARTING": "BAD_PRINT_STATE",
+            "CANCELING": "BAD_PRINT_STATE", "PREPARED": "BAD_PRINT_STATE",
+            "PRINTING": "REPRINT_REQUIRED", "COMPLETED": "REPRINT_REQUIRED",
+        }
+        for state, code in expectations.items():
+            order_id = self.create_order()
+            job = self.post("prepare", {"order_id": order_id}).get_json()["job"]
+            app.print_center.store.patch_job(job["id"], {"state": state})
+            response = self.retry(job["id"])
+            self.assertEqual(response.get_json()["code"], code, state)
+
+        order_id = self.create_order()
+        job = self.post("prepare", {"order_id": order_id}).get_json()["job"]
+        app.print_center.store.patch_job(job["id"], {"state": "FAILED"})
+        self.assertEqual(self.client.post("/api/admin/order_action", json={
+            "order_id": order_id, "action": "void", "idempotency_key": "void-retry-00000001"
+        }).status_code, 200)
+        self.assertEqual(self.retry(job["id"]).get_json()["code"], "VOID_ORDER")
+
+        order_id = self.create_order()
+        job = self.post("prepare", {"order_id": order_id}).get_json()["job"]
+        app.print_center.store.patch_job(job["id"], {"state": "FAILED"})
+        with mock.patch.object(app.print_center, "_materialize_sku_profile", return_value=None):
+            response = self.retry(job["id"])
+        self.assertEqual(response.get_json()["code"], "PROFILE_MISSING")
+
+        _, _, legacy = self.create_legacy_job("FAILED")
+        self.assertEqual(self.retry(legacy["id"]).get_json()["code"], "SKU_BINDING_REQUIRED")
+
+        order_id = self.create_order()
+        job = self.post("prepare", {"order_id": order_id}).get_json()["job"]
+        app.print_center.store.patch_job(job["id"], {"state": "FAILED"})
+        (Path(app.SAVE_DIR) / app.commerce.store.order(order_id)["print_path"]).unlink()
+        self.assertEqual(self.retry(job["id"]).get_json()["code"], "PRINT_FILE_MISSING")
+
+    def test_retry_idempotency_and_concurrency_create_only_one_active_attempt(self):
+        self.save_profile();old = self.prepare()
+        app.print_center.store.patch_job(old["id"], {"state": "FAILED"})
+        key = "retry-same-key-0001"
+        first = self.retry(old["id"], key).get_json()["job"]
+        second = self.retry(old["id"], key).get_json()["job"]
+        self.assertEqual(first["id"], second["id"])
+        self.assertEqual(len([j for j in app.print_center.store.list_jobs() if j["order_id"] == self.order_id]), 2)
+
+        other = self.create_order()
+        prior = self.post("prepare", {"order_id": other}).get_json()["job"]
+        app.print_center.store.patch_job(prior["id"], {"state": "FAILED"})
+        def run(index):
+            try:
+                return app.print_center.retry(prior["id"], f"retry-concurrent-{index:08d}")["id"]
+            except print_center.PrintError as exc:
+                return exc.code
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            ids = list(pool.map(run, range(2)))
+        successful = [value for value in ids if value not in ("ACTIVE_PRINT_JOB", "STALE_PRINT_ATTEMPT")]
+        self.assertEqual(len(set(successful)), 1)
+        self.assertTrue(all(value == successful[0] or value in ("ACTIVE_PRINT_JOB", "STALE_PRINT_ATTEMPT") for value in ids))
+        jobs = [j for j in app.print_center.store.list_jobs() if j["order_id"] == other]
+        self.assertEqual([(j["attempt_no"], j["state"]) for j in sorted(jobs, key=lambda x:x["attempt_no"])],
+                         [(1, "FAILED"), (2, "PREPARED")])
+        self.assertFalse(any(path in ("/api/Device/receiveTask", "/api/Device/startPrint", "/api/Device/pushPrint")
+                             for path, _ in self.fake.calls))
 
     def test_missing_credentials_and_missing_profile_fail_closed(self):
         response = self.post("prepare", {"order_id": self.order_id})
@@ -800,6 +896,9 @@ class PrintCenterTests(unittest.TestCase):
         admin = (Path(__file__).parent / "admin.html").read_text(encoding="utf-8")
         self.assertNotIn('data-pc="start"', source)
         self.assertNotIn('data-pc="profile"', source)
+        self.assertIn('data-pc="retry"', source)
+        self.assertIn("['FAILED','CANCELED']", source)
+        self.assertIn('列印嘗試：#', source)
         self.assertNotIn("id='pc-modal'", source)
         self.assertNotIn('id="pc-modal"', source)
         self.assertIn("請到「品牌及型號」設定列印參數", source)

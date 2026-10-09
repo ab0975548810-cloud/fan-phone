@@ -2730,9 +2730,9 @@ def order_print_workspace_test(browser, base, poll):
         offset = int(p.get('offset', ['0'])[0]);limit = int(p.get('limit', ['200'])[0])
         route.fulfill(status=200, content_type='application/json', body=json.dumps(dict(status='success',data=found[offset:offset+limit],has_more=len(found)>offset+limit,next_offset=min(len(found),offset+limit),before=stamp+10)))
     print_rows=[]
-    for state in ('UNKNOWN','FAILED','SENDING','CANCELING','STARTING','PREPARED','QUEUED','PRINTING','COMPLETED'):
+    for state in ('UNKNOWN','FAILED','CANCELED','SENDING','CANCELING','STARTING','PREPARED','QUEUED','PRINTING','COMPLETED'):
         print_rows.append(dict(order_id='PRINT-'+state,customer_name='客人',model='iPhone 13',style='晶彩',order_status='待處理',time=stamp,
-                               has_print=True,profile_available=True,binding_required=False,sku_id='SKU',job=dict(id='JOB-'+state,state=state,state_label=state,profile_complete=True,last_error='銳印回報失敗' if state=='FAILED' else '')))
+                               has_print=True,profile_available=True,binding_required=False,sku_id='SKU',job=dict(id='JOB-'+state,state=state,state_label=state,attempt_no=1,profile_complete=True,last_error='銳印回報失敗' if state=='FAILED' else '')))
     print_rows.append(dict(order_id='PRINT-BIND',customer_name='客人',model='iPhone 13',style='晶彩',order_status='待處理',time=stamp,
                            has_print=True,profile_available=False,binding_required=True,sku_id='',legacy_order=True,sku_candidates=[],job=None))
     def print_route(route):
@@ -2743,6 +2743,13 @@ def order_print_workspace_test(browser, base, poll):
     page.on('request',lambda request: mutations.append(request.url) if request.method != 'GET' and '/api/admin/print/' in request.url else None)
     page.route('**/api/admin/get_orders?*',order_route)
     page.route('**/api/admin/print/jobs?*',print_route)
+    def retry_route(route):
+        payload = route.request.post_data_json
+        row = next(row for row in print_rows if row.get('job',{}).get('id') == payload.get('job_id'))
+        row['job'] = dict(row['job'], id='JOB-RETRY-2', state='PREPARED', state_label='已準備', attempt_no=2,
+                          vendor_taskid=None, last_error='')
+        route.fulfill(status=200, content_type='application/json', body=json.dumps(dict(status='success',job=row['job'])))
+    page.route('**/api/admin/print/retry',retry_route)
     page.locator('.nav button[data-view="orders"]').click()
     page.locator('[data-range="all"]').click()
     poll(page,"() => document.querySelectorAll('.bf-order-card').length===200 && !!document.querySelector('[data-order-more]')")
@@ -2766,8 +2773,8 @@ def order_print_workspace_test(browser, base, poll):
     poll(page,"() => document.querySelector('#view-orders.active .bf-order-card')?.textContent.includes('ORDER-204')")
     page.locator('.nav button[data-view="print-center"]').click()
     page.locator('[data-pc="clear-exact"]').click()
-    poll(page,"() => document.querySelectorAll('#pc-grid .pc-card').length===10")
-    for key,count in [('exception',5),('attention',1),('prepared',1),('queued',1),('printing',1),('completed',1)]:
+    poll(page,"() => document.querySelectorAll('#pc-grid .pc-card').length===11")
+    for key,count in [('exception',5),('attention',1),('prepared',1),('queued',1),('printing',1),('completed',2)]:
         page.locator(f'[data-triage="{key}"]').click()
         assert page.locator('#pc-grid .pc-card').count()==count,(key,page.locator('#pc-grid .pc-card').count())
     page.locator('[data-triage="all"]').click()
@@ -2778,6 +2785,18 @@ def order_print_workspace_test(browser, base, poll):
     assert page.locator('.pc-card').filter(has=page.locator('.pc-id',has_text='PRINT-PRINTING')).locator('[data-pc="cancel"]').count()==0
     assert page.locator('.pc-card').filter(has=page.locator('.pc-id',has_text='PRINT-FAILED')).locator('[data-pc="send"]').count()==0
     assert mutations==[],mutations
+    for state in ('UNKNOWN','SENDING','QUEUED','STARTING','PRINTING','CANCELING','PREPARED','COMPLETED'):
+        card=page.locator('.pc-card').filter(has=page.locator('.pc-id',has_text='PRINT-'+state))
+        assert card.locator('[data-pc="retry"]').count()==0,state
+    assert page.locator('.pc-card').filter(has=page.locator('.pc-id',has_text='PRINT-FAILED')).locator('[data-pc="retry"]').count()==1
+    assert page.locator('.pc-card').filter(has=page.locator('.pc-id',has_text='PRINT-CANCELED')).locator('[data-pc="retry"]').count()==1
+    dialogs=[]
+    page.on('dialog',lambda dialog:(dialogs.append(dialog.message),dialog.accept()))
+    page.locator('.pc-card').filter(has=page.locator('.pc-id',has_text='PRINT-FAILED')).locator('[data-pc="retry"]').click()
+    poll(page,"() => document.querySelector('.pc-card .pc-id') && [...document.querySelectorAll('.pc-card')].some(c=>c.textContent.includes('PRINT-FAILED')&&c.textContent.includes('列印嘗試：#2')&&c.querySelector('[data-pc=\"send\"]'))")
+    assert dialogs==['確定重新建立這筆訂單的列印任務？舊任務紀錄會保留，新任務不會自動啟動實體打印。']
+    assert len([url for url in mutations if url.endswith('/api/admin/print/retry')])==1
+    assert not any(url.endswith('/send') or 'startPrint' in url or 'pushPrint' in url for url in mutations)
     for width,height in ((390,844),(768,1024),(1180,900)):
         page.set_viewport_size(dict(width=width,height=height))
         assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+2'),width

@@ -127,6 +127,11 @@ class MultilayerTests(unittest.TestCase):
         job=app.print_center.prepare(order_id,'multilayer-render-test');raw=app.print_center._download_artwork(job['artwork_path']);image=Image.open(io.BytesIO(raw))
         self.assertEqual(image.size,(2030,4241));self.assertAlmostEqual(image.info['dpi'][0],720,delta=.05)
         self.assertNotEqual(job['artwork_path'],order['print_path']);self.assertEqual(self.fx.fixture.fake.calls,[])
+        app.print_center.store.patch_job(job['id'],{'state':'FAILED','last_error':'fixture'})
+        retried=app.print_center.retry(job['id'],'multilayer-retry-0001')
+        retry_image=Image.open(io.BytesIO(app.print_center._download_artwork(retried['artwork_path'])))
+        self.assertEqual((retried['attempt_no'],retried['state'],retry_image.size),(2,'PREPARED',(2030,4241)))
+        self.assertEqual(self.fx.fixture.fake.calls,[])
 
     def test_historical_contract_does_not_depend_on_today_template(self):
         order=app.commerce.store.order(self.create().json['order_id']);app.local_save_json(app.TEMPLATES_FILE,{'templates':[],'categories':[]})

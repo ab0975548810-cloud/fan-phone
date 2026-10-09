@@ -143,3 +143,9 @@ assert sum(1 for decision, _ in concurrent if decision['reserved']) == 2, concur
 assert sum(1 for decision, _ in concurrent if decision['code'] == 'AI_BUSY') == 4, concurrent
 
 print('AI_QUOTA_POSTGRES_ATOMIC_LIMITS_AND_RESTART_OK')
+
+# Keep the Print Center retry constraint check in the existing PostgreSQL CI
+# entrypoint so no workflow permission or production migration is required.
+import runpy
+from pathlib import Path
+runpy.run_path(str(Path(__file__).with_name('test_print_retry_postgres.py')))
