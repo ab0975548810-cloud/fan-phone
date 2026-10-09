@@ -2013,6 +2013,8 @@ def admin_test(browser, base):
         'data': new_catalog, 'expected_version': page.evaluate('() => shopVersion')})
     assert brand_save.status == 200, brand_save.text()
     page.evaluate('() => loadShop(true)')
+    page.locator('.nav button[data-view="models"]').click()
+    page.locator('#model-tab-btn').click()
     page.locator('#bf-model-brand-filter').select_option('底膜')
     page.locator('#bf-model-search').fill('不可能符合的搜尋')
     page.locator('#bf-model-status-filter').select_option('inactive')
