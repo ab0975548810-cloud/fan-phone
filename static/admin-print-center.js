@@ -36,6 +36,7 @@
 
   function card(row){
     const j=row.job||null,state=j?.state||'',isVoid=row.order_status==='作廢';
+    const physical=Boolean(row.prior_physical_activity||j?.started_at||j?.completed_at||j?.ambiguous_operation==='prior_attempt_activity'||['PRINTING','COMPLETED'].includes(state));
     const thumb=row.preview_url?`<img class="pc-thumb" loading="lazy" src="${esc(row.preview_url)}" alt="訂單預覽">`:'<div class="pc-thumb pc-thumb-empty">無預覽</div>';
     let actions='';
     if(row.binding_required&&!isVoid&&(!j||state==='PREPARED'))actions+=`<button class="primary" data-pc="binding" data-order="${esc(row.order_id)}">補綁列印 SKU</button>`;
@@ -44,12 +45,12 @@
     if(j?.state==='PREPARED'&&j.profile_complete)actions+=`<button class="primary" data-pc="send" data-job="${esc(j.id)}" ${window.pcVendorReady?'':'disabled title="雲打印未啟用"'}>送到銳印</button>`;
     if(j?.state==='QUEUED')actions+=`<button class="danger" data-pc="cancel" data-job="${esc(j.id)}" ${window.pcVendorConnected?'':'disabled'}>取消等待</button>`;
     if(j?.state==='PREPARED')actions+=`<button class="danger" data-pc="cancel" data-job="${esc(j.id)}">取消任務</button>`;
-    if(j&&['FAILED','CANCELED'].includes(j.state)&&j.ambiguous_operation!=='prior_attempt_activity'&&!isVoid)actions+=`<button class="primary" data-pc="retry" data-job="${esc(j.id)}">↻ 重推任務</button>`;
+    if(j&&['FAILED','CANCELED'].includes(j.state)&&!physical&&!isVoid)actions+=`<button class="primary" data-pc="retry" data-job="${esc(j.id)}">↻ 重推任務</button>`;
     if(j&&['UNKNOWN','SENDING','QUEUED','STARTING','PRINTING','CANCELING'].includes(j.state))actions+=`<button data-pc="reconcile" data-job="${esc(j.id)}" ${window.pcVendorConnected?'':'disabled'}>查核雲端</button>`;
     const profile=row.profile?`${Number(row.profile.width_mm)} × ${Number(row.profile.height_mm)} mm / X ${Number(row.profile.left_mm)} / Y ${Number(row.profile.top_mm)}`:'請到「品牌及型號」設定列印參數';
     return `<article class="pc-card${isVoid?' void':''}">${thumb}<div><div class="pc-id">${esc(row.order_id)}</div><div class="pc-meta"><b>${esc(row.model)}</b>・${esc(row.style)}<br>${esc(row.customer_name)}｜訂單：${esc(row.order_status)}｜列印：${esc(j?.state_label||'尚未建立')}｜${date(row.time)}</div><div class="pc-badges">
       <span class="pc-badge ${row.has_print?'ok':'bad'}">高清生產圖 ${row.has_print?'✓':'✕'}</span><span class="pc-badge ${row.profile_available?'ok':'bad'}">production profile ${row.profile_available?'✓':'✕'}</span><span class="pc-badge ${!row.binding_required?'ok':'bad'}">SKU binding ${!row.binding_required?'✓':'✕'}</span>${j?`<span class="pc-badge">列印嘗試：#${esc(j.attempt_no||1)}</span><span class="pc-badge pc-state ${stateClass(state)}">${esc(j.state_label)}</span>`:''}</div>
-      ${j?.ambiguous_operation==='prior_attempt_activity'?'<div class="pc-warning">舊列印嘗試回報可能已列印；本次重推已封鎖，請人工查核。</div>':(state==='UNKNOWN'?'<div class="pc-warning">結果不明，請先查核，禁止重新送出</div>':'')}${state==='FAILED'?'<div class="pc-warning">銳印回報失敗；請查看下方錯誤與原始狀態</div>':''}
+      ${physical&&['FAILED','CANCELED','PREPARED'].includes(state)?'<div class="pc-warning">歷史嘗試有實體列印紀錄，禁止重推，請人工查核。</div>':(j?.ambiguous_operation==='prior_attempt_activity'?'<div class="pc-warning">舊列印嘗試可能已列印；本次重推已封鎖。</div>':(state==='UNKNOWN'?'<div class="pc-warning">結果不明，請先查核，禁止重新送出</div>':''))}${state==='FAILED'?'<div class="pc-warning">銳印回報失敗；請查看下方錯誤與原始狀態</div>':''}
       ${j?.last_error?`<div class="pc-error">${esc(j.last_error)}</div>`:''}${row.legacy_order?'<div class="pc-legacy-note">此為舊訂單，先選擇列印用 SKU，不會修改營收／成本／庫存資料。</div>':''}
       <div class="pc-raw">列印參數：${esc(profile)}</div><details class="pc-details"><summary>雲端原始資訊</summary>${j?`<div class="pc-raw">taskid：${esc(j.vendor_taskid||'—')}｜raw ${esc(j.vendor_raw_status||'—')} ${esc(j.vendor_raw_message||'')}</div>`:''}</details>
       <div class="pc-actions">${actions}<button data-pc="order" data-order="${esc(row.order_id)}">查看訂單</button></div></div></article>`;
