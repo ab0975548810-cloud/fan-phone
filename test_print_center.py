@@ -1276,6 +1276,26 @@ class PrintCenterTests(unittest.TestCase):
         self.assertTrue(dashboard["rows"][0]["prior_physical_activity"])
         self.assertEqual(dashboard["rows"][0]["job"]["id"], latest["id"])
 
+    def test_auto_prepared_paging_skips_many_manual_jobs(self):
+        self.save_profile()
+        auto_order_id = self.create_order()
+        auto_job = app.print_center.store.latest_job(auto_order_id)
+        fields = list(auto_job)
+        marks = ",".join("?" for _ in fields)
+        with app.print_center.store.connection(True) as db:
+            for index in range(125):
+                row = {**auto_job, "id": str(uuid.uuid4()),
+                       "order_id": f"MANUAL-PREPARED-{index}",
+                       "created_at": "2020-01-01T00:00:00+00:00",
+                       "updated_at": "2020-01-01T00:00:00+00:00",
+                       "prepared_at": "2020-01-01T00:00:00+00:00"}
+                db.execute(f"INSERT INTO print_jobs ({','.join(fields)}) VALUES ({marks})",
+                           [int(value) if key == "profile_complete" else value
+                            for key, value in row.items()])
+        # Without pagination, only the first 100 manual rows would be scanned.
+        candidates = app.print_center.store.auto_prepared_jobs(limit=1)
+        self.assertEqual([row["id"] for row in candidates], [auto_job["id"]])
+
     def test_preclaim_auto_send_crash_recovers_original_attempt_once(self):
         self.save_profile()
         self.fake.responses["/api/Device/receiveTask"] = {
