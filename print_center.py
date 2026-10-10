@@ -1164,7 +1164,7 @@ def install(app_module):
         if request.path == "/admin" and response.status_code == 200 and response.mimetype == "text/html":
             response.direct_passthrough = False
             html = response.get_data(as_text=True)
-            src = "/static/admin-print-center.js?v=20261009retry2"
+            src = "/static/admin-print-center.js?v=20261010safety1"
             if src not in html:
                 response.set_data(html.replace("</body>", f'<link rel="stylesheet" href="/static/admin-print-center.css?v=20261002operations1"><script src="{src}"></script></body>'))
             response.headers["Cache-Control"] = "no-store"
