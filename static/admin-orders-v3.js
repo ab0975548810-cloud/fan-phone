@@ -198,6 +198,17 @@
     if(!response.ok||result.status!=='success'){
       const error=new Error(result.msg||('HTTP '+response.status));
       error.code=result.code||'';
+      // Definitive backend rejections finish their idempotency request as
+      // FAILED. Reusing that key would only replay the stale result, never
+      // re-contact the vendor. Transport/unknown errors must retain the key.
+      const definite=new Set([
+        'VENDOR_REJECTED','RECONCILE_FAILED','BAD_PRINT_STATE',
+        'PROFILE_MISSING','VENDOR_NOT_READY','PRODUCTION_STYLE_NOT_CONFIGURED',
+        'REPRINT_REQUIRED','RECONCILE_REQUIRED_CONFIRMED','STALE_PRINT_ATTEMPT',
+        'CONCURRENT_OPERATION','JOB_NOT_FOUND','VOID_ORDER','PRINT_FILE_REQUIRED',
+        'SKU_BINDING_REQUIRED','BAD_REQUEST','IDEMPOTENCY_CONFLICT',
+      ]);
+      if(slot&&definite.has(error.code))sessionStorage.removeItem(slot);
       throw error;
     }
     if(slot)sessionStorage.removeItem(slot);
