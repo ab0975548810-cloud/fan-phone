@@ -2940,7 +2940,11 @@ def order_print_workspace_test(browser, base, poll):
         assert page.locator(f'[data-order-id="{order_id}"][data-order-action="print-reconcile"]').count()==1
     for order_id in ('CARD-PRINTING','CARD-COMPLETED','CARD-OLD-PHYSICAL'):
         assert page.locator(f'[data-order-id="{order_id}"][data-order-action="print-retry"]').count()==0
-    assert page.locator('[data-order-id="CARD-OLD-PHYSICAL"]').first.locator('xpath=ancestor::article').inner_text().find('禁止重推')>=0
+    physical_card = page.locator('.bf-order-card').filter(has=page.locator('.bf-order-id',has_text='CARD-OLD-PHYSICAL'))
+    poll(page, """() => [...document.querySelectorAll('.bf-order-card')].some(
+      el=>el.querySelector('.bf-order-id')?.textContent.includes('CARD-OLD-PHYSICAL')
+        && el.textContent.includes('禁止重推'))""")
+    assert '禁止重推' in physical_card.inner_text(), physical_card.inner_text()
 
     page.locator('[data-order-action="print-prepare"]').click()
     poll(page, "() => !!document.querySelector('[data-order-action=print-reconcile][data-order-id=\"CARD-NOJOB\"]')")
