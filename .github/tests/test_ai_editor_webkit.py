@@ -2875,6 +2875,86 @@ def order_print_workspace_test(browser, base, poll):
         page.set_viewport_size(dict(width=width,height=height))
         assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+2'),width
         assert page.locator('#pc-triage').evaluate('(e)=>e.scrollWidth>=e.clientWidth')
+
+    # Order-card print operations use a single batch read and existing print
+    # endpoints. All writes below are Playwright-mocked: no vendor calls.
+    statuses = {
+        'CARD-NOJOB': None,
+        'CARD-PREPARED': dict(id='JOB-CARD-PREPARED',state='PREPARED',state_label='待送出',attempt_no=1,profile_complete=True),
+        'CARD-FAILED': dict(id='JOB-CARD-FAILED',state='FAILED',state_label='失敗',attempt_no=1,profile_complete=True),
+        'CARD-UNKNOWN': dict(id='JOB-CARD-UNKNOWN',state='UNKNOWN',state_label='狀態待確認',attempt_no=1,profile_complete=True),
+        'CARD-QUEUED': dict(id='JOB-CARD-QUEUED',state='QUEUED',state_label='等待銳印確認',attempt_no=1,profile_complete=True),
+        'CARD-PRINTING': dict(id='JOB-CARD-PRINTING',state='PRINTING',state_label='列印中',attempt_no=1,profile_complete=True,started_at='2026-10-10T00:00:00+00:00'),
+        'CARD-COMPLETED': dict(id='JOB-CARD-COMPLETED',state='COMPLETED',state_label='完成',attempt_no=1,profile_complete=True,completed_at='2026-10-10T00:00:00+00:00'),
+        'CARD-OLD-PHYSICAL': dict(id='JOB-CARD-OLD-PHYSICAL',state='FAILED',state_label='失敗',attempt_no=2,profile_complete=True),
+    }
+    orders[:] = [dict(order_id=key,customer_name='卡片測試',model='iPhone 13',style='晶彩',
+                     payment_method='現金',status='待處理',time=stamp,has_print=True,
+                     has_mockup=False,quantity=1,total=100) for key in statuses]
+    api_calls = []
+    def card_summary(route):
+        ids = parse_qs(urlsplit(route.request.url).query).get('order_ids', [''])[0].split(',')
+        data = {order_id: dict(job=statuses.get(order_id),
+                               physical_activity=order_id=='CARD-OLD-PHYSICAL'
+                                   or bool((statuses.get(order_id) or {}).get('started_at'))
+                                   or bool((statuses.get(order_id) or {}).get('completed_at')))
+                for order_id in ids if order_id}
+        route.fulfill(status=200, content_type='application/json',
+                      body=json.dumps(dict(status='success',jobs=data,vendor_ready=True,vendor_connected=True)))
+    def card_mutation(route):
+        endpoint = route.request.url.rsplit('/',1)[-1]
+        payload = route.request.post_data_json
+        api_calls.append((endpoint,payload))
+        if endpoint == 'prepare':
+            order_id=payload['order_id']
+            assert statuses[order_id] is None
+            job=dict(id='JOB-'+order_id+'-FIRST',state='PREPARED',state_label='待送出',
+                     attempt_no=1,profile_complete=True)
+            statuses[order_id]=job
+        elif endpoint == 'retry':
+            old = next(value for value in statuses.values() if value and value['id']==payload['job_id'])
+            order_id = next(key for key,val in statuses.items() if val is old)
+            assert old['state'] in ('FAILED','CANCELED')
+            job=dict(id='JOB-'+order_id+'-RETRY',state='PREPARED',state_label='待送出',
+                     attempt_no=2,profile_complete=True)
+            statuses[order_id]=job
+        elif endpoint == 'send':
+            job = next(value for value in statuses.values() if value and value['id']==payload['job_id'])
+            assert job['state']=='PREPARED'
+            job.update(state='QUEUED',state_label='等待銳印確認',vendor_taskid='vendor-'+job['id'])
+        elif endpoint == 'reconcile':
+            job = next(value for value in statuses.values() if value and value['id']==payload['job_id'])
+            assert job['state']=='UNKNOWN'
+            job.update(state='QUEUED',state_label='等待銳印確認',vendor_taskid='vendor-'+job['id'])
+        else:
+            raise AssertionError(endpoint)
+        route.fulfill(status=200,content_type='application/json',body=json.dumps(dict(status='success',job=job)))
+    page.route('**/api/admin/print/order-summaries?*',card_summary)
+    for endpoint in ('prepare','retry','send','reconcile'):
+        page.route('**/api/admin/print/'+endpoint,card_mutation)
+    page.locator('.nav button[data-view="orders"]').click()
+    page.locator('[data-range="all"]').click()
+    poll(page, "() => document.querySelectorAll('.bf-order-card').length===8 && !!document.querySelector('[data-order-action=print-retry]')")
+    assert page.locator('[data-order-action="print-retry"]').count()==1
+    for order_id in ('CARD-UNKNOWN','CARD-QUEUED'):
+        assert page.locator(f'[data-order-id="{order_id}"][data-order-action="print-reconcile"]').count()==1
+    for order_id in ('CARD-PRINTING','CARD-COMPLETED','CARD-OLD-PHYSICAL'):
+        assert page.locator(f'[data-order-id="{order_id}"][data-order-action="print-retry"]').count()==0
+    assert page.locator('[data-order-id="CARD-OLD-PHYSICAL"]').first.locator('xpath=ancestor::article').inner_text().find('禁止重推')>=0
+
+    page.locator('[data-order-action="print-prepare"]').click()
+    poll(page, "() => !!document.querySelector('[data-order-action=print-reconcile][data-order-id=\"CARD-NOJOB\"]')")
+    assert [(op,p.get('order_id') or p.get('job_id')) for op,p in api_calls[-2:]] == [
+        ('prepare','CARD-NOJOB'),('send','JOB-CARD-NOJOB-FIRST')]
+    page.locator('[data-order-action="print-send"]').click()
+    poll(page, "() => !!document.querySelector('[data-order-action=print-reconcile][data-order-id=\"CARD-PREPARED\"]')")
+    assert api_calls[-1][0]=='send' and api_calls[-1][1]['job_id']=='JOB-CARD-PREPARED'
+    page.locator('[data-order-action="print-retry"]').click()
+    poll(page, "() => !!document.querySelector('[data-order-action=print-reconcile][data-order-id=\"CARD-FAILED\"]')")
+    assert [entry[0] for entry in api_calls[-2:]] == ['retry','send']
+    assert statuses['CARD-FAILED']['attempt_no']==2
+    assert all(entry[0]!='start' for entry in api_calls)
+    print('ADMIN_ORDER_CARD_DIRECT_PRINT_RECOVERY_SAFETY_OK')
     page.close()
 
 
