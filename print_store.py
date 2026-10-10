@@ -536,39 +536,48 @@ class PrintStore:
                     return None
             return {**job, "_auto_recovery": True}
 
-        scan = min(1000, max(200, limit * 10))
-        if self.app.USE_SUPABASE:
-            jobs = (self.app.SUPABASE.table("print_jobs").select("*")
-                    .eq("state", "PREPARED").order("prepared_at")
-                    .limit(scan).execute().data or [])
-            if not jobs:
-                return []
-            requests = (self.app.SUPABASE.table("print_requests")
-                        .select("job_id,operation,status,request_key,updated_at")
-                        .in_("job_id", [str(row["id"]) for row in jobs])
-                        .execute().data or [])
-        else:
-            with self.connection() as db:
-                jobs = [self._decode(row) for row in db.execute(
-                    "SELECT * FROM print_jobs WHERE state='PREPARED' "
-                    "ORDER BY prepared_at LIMIT ?", (scan,)).fetchall()]
-                if not jobs:
-                    return []
-                placeholders = ",".join("?" for _ in jobs)
-                requests = [self._decode(row) for row in db.execute(
-                    "SELECT job_id,operation,status,request_key,updated_at "
-                    f"FROM print_requests WHERE job_id IN ({placeholders})",
-                    [row["id"] for row in jobs]).fetchall()]
-        by_job = {}
-        for row in requests:
-            by_job.setdefault(str(row.get("job_id") or ""), []).append(row)
+        page_size = max(100, min(200, limit * 2))
+        offset = 0
         result = []
-        for job in jobs:
-            candidate = ready(job, by_job.get(str(job["id"]), []))
-            if candidate:
-                result.append(candidate)
-                if len(result) >= limit:
+        # Continue past manual and terminal-failed PREPARED jobs: a fixed first
+        # page can permanently starve newly created automatic orders.
+        while len(result) < limit:
+            if self.app.USE_SUPABASE:
+                jobs = (self.app.SUPABASE.table("print_jobs").select("*")
+                        .eq("state", "PREPARED")
+                        .order("prepared_at").order("id")
+                        .range(offset, offset + page_size - 1).execute().data or [])
+                if not jobs:
                     break
+                requests = (self.app.SUPABASE.table("print_requests")
+                            .select("job_id,operation,status,request_key,updated_at")
+                            .in_("job_id", [str(row["id"]) for row in jobs])
+                            .execute().data or [])
+            else:
+                with self.connection() as db:
+                    jobs = [self._decode(row) for row in db.execute(
+                        "SELECT * FROM print_jobs WHERE state='PREPARED' "
+                        "ORDER BY prepared_at,id LIMIT ? OFFSET ?",
+                        (page_size, offset)).fetchall()]
+                    if not jobs:
+                        break
+                    placeholders = ",".join("?" for _ in jobs)
+                    requests = [self._decode(row) for row in db.execute(
+                        "SELECT job_id,operation,status,request_key,updated_at "
+                        f"FROM print_requests WHERE job_id IN ({placeholders})",
+                        [row["id"] for row in jobs]).fetchall()]
+            by_job = {}
+            for row in requests:
+                by_job.setdefault(str(row.get("job_id") or ""), []).append(row)
+            for job in jobs:
+                candidate = ready(job, by_job.get(str(job["id"]), []))
+                if candidate:
+                    result.append(candidate)
+                    if len(result) >= limit:
+                        break
+            if len(jobs) < page_size:
+                break
+            offset += page_size
         return result
 
     def create_job(self, order, sku_id, profile, artwork_sha256, token_nonce):
