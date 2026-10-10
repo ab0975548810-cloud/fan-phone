@@ -504,6 +504,10 @@ class PrintStore:
         """
         limit = max(1, min(int(limit), 200))
         cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
+        # Deploying code alone must never cause previously stranded customer
+        # orders to be handed to the vendor. Explicit operator opt-in is needed.
+        recovery_enabled = os.environ.get(
+            "PRINT_AUTO_RECOVER_STALE_SENDS", "").strip().lower() in ("1", "true", "yes")
 
         def ready(job, requests):
             if job.get("state") != "PREPARED" or any(job.get(field) for field in (
@@ -519,6 +523,8 @@ class PrintStore:
             sends = [row for row in requests if row.get("operation") == "send"]
             if not sends:
                 return job
+            if not recovery_enabled:
+                return None
             if (not any(str(row.get("request_key") or "").startswith("auto-send-")
                         and not str(row.get("request_key") or "").startswith("auto-send-recovery-")
                         for row in sends)
