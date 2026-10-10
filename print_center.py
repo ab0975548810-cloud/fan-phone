@@ -325,7 +325,8 @@ class PrintService:
         results = []
         for job in self.store.auto_prepared_jobs():
             try:
-                results.append(self.send(job["id"], self._auto_key("send", job["id"])))
+                send_type = "send-recovery" if job.get("_auto_recovery") else "send"
+                results.append(self.send(job["id"], self._auto_key(send_type, job["id"])))
             except (PrintError, PrintConflict) as exc:
                 self.app.app.logger.warning(
                     "Automatic receiveTask did not complete for %s: %s", job["id"], exc)
@@ -878,6 +879,43 @@ class PrintService:
                 raise PrintError("INVALID_REPLAY", "printer callback 驗證資料已被重用", 403)
         return inserted
 
+    def order_summaries(self, order_ids):
+        """Read-only batch overview for the order cards; no vendor requests."""
+        ids = list(dict.fromkeys(str(value) for value in order_ids))
+        attempts = self.store.jobs_for_orders(ids)
+        latest = {}
+        physical = set()
+        for job in attempts:
+            order_id = str(job.get("order_id") or "")
+            if self.store._physical_evidence(job):
+                physical.add(order_id)
+            prior = latest.get(order_id)
+            if not prior or int(job.get("attempt_no") or 0) > int(prior.get("attempt_no") or 0):
+                latest[order_id] = job
+        result = {}
+        for order_id in ids:
+            job = latest.get(order_id)
+            result[order_id] = {
+                "job": ({
+                    "id": job["id"], "attempt_no": job.get("attempt_no"),
+                    "state": job.get("state"),
+                    "state_label": STATE_LABELS.get(job.get("state"), "未知"),
+                    "profile_complete": bool(job.get("profile_complete")),
+                    "vendor_taskid": job.get("vendor_taskid"),
+                    "vendor_raw_status": job.get("vendor_raw_status"),
+                    "ambiguous_operation": job.get("ambiguous_operation"),
+                    "started_at": job.get("started_at"),
+                    "completed_at": job.get("completed_at"),
+                    "last_error": job.get("last_error"),
+                } if job else None),
+                "physical_activity": order_id in physical,
+            }
+        return {
+            "jobs": result,
+            "vendor_ready": bool(self.vendor_ready),
+            "vendor_connected": bool(self.client.ready),
+        }
+
     def dashboard(self, order_id=None):
         if order_id:
             order = self.app.commerce.store.order(order_id)
@@ -894,15 +932,17 @@ class PrintService:
         shop = self.app.cloud_get_json("shop_data", self.app.DATA_FILE, self.app.DEFAULT_SHOP_DATA)
         bindings = ({order_id: self.store.binding(order_id)} if order_id else
                     {row["order_id"]: row for row in self.store.bindings()})
-        latest = ({order_id: self.store.latest_job(order_id)} if order_id else {})
-        if not order_id:
-            # updated_at is audit recency, not attempt precedence. A late
-            # callback on attempt #1 must never hide attempt #2.
-            for job in self.store.jobs_for_orders(row["id"] for row in orders):
-                current = latest.get(job["order_id"])
-                if (not current or int(job.get("attempt_no") or 0)
-                        > int(current.get("attempt_no") or 0)):
-                    latest[job["order_id"]] = job
+        latest = {}
+        physical = set()
+        # Attempt number, never updated_at, determines which attempt is current.
+        for job in self.store.jobs_for_orders(row["id"] for row in orders):
+            order_key = str(job["order_id"])
+            if self.store._physical_evidence(job):
+                physical.add(order_key)
+            current = latest.get(order_key)
+            if (not current or int(job.get("attempt_no") or 0)
+                    > int(current.get("attempt_no") or 0)):
+                latest[order_key] = job
         profiles = {row["sku_id"]: row for row in self.store.profiles()}
         result = []
         for order in orders:
@@ -931,6 +971,7 @@ class PrintService:
                     if sku_id in profiles else None),
                 "preview_url": url_for("admin_order_file", order_id=order_id, kind="preview") if order.get("mockup_path") else "",
                 "job": _public_job(latest.get(order_id)),
+                "prior_physical_activity": order_id in physical,
             })
         return {
             "rows": result,
@@ -1018,6 +1059,19 @@ def install(app_module):
         if order_id and not re.fullmatch(r'[A-Za-z0-9-]{1,100}', order_id):
             raise PrintError('BAD_REQUEST', '訂單編號格式錯誤', 400)
         return app_module.no_cache_json({"status": "success", **service.dashboard(order_id or None)})
+
+    @app.route("/api/admin/print/order-summaries")
+    @guarded
+    def print_order_summaries():
+        raw = request.args.get("order_ids")
+        if not raw or len(raw) > 21000:
+            raise PrintError("BAD_REQUEST", "請提供最多 200 個訂單編號", 400)
+        ids = raw.split(",")
+        if len(ids) > 200 or any(
+                not re.fullmatch(r"[A-Za-z0-9-]{1,100}", value) for value in ids):
+            raise PrintError("BAD_REQUEST", "訂單編號格式錯誤或超過 200 個", 400)
+        return app_module.no_cache_json({
+            "status": "success", **service.order_summaries(ids)})
 
     @app.route("/api/admin/print/model-profiles", methods=["POST"])
     @guarded
