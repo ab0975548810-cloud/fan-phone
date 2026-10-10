@@ -1236,6 +1236,116 @@ class PrintCenterTests(unittest.TestCase):
                 self.assertEqual(app.print_center.store.job(job_before["id"]), job_before)
                 self.assertEqual(app.commerce.read(), commerce_before)
 
+    def test_order_print_summaries_auth_validation_and_latest_attempt(self):
+        self.save_profile()
+        old = self.prepare()
+        missing = self.client.get("/api/admin/print/order-summaries?order_ids=NO-SUCH-ORDER")
+        self.assertEqual(missing.status_code, 200)
+        self.assertIsNone(missing.get_json()["jobs"]["NO-SUCH-ORDER"]["job"])
+        for bad in ("", "BAD!", ",".join(["ORDER-1"] * 201), "ORDER-1,"):
+            response = self.client.get("/api/admin/print/order-summaries", query_string={"order_ids": bad})
+            self.assertEqual(response.status_code, 400, bad)
+
+        with self.client.session_transaction() as session:
+            session.pop("logged_in", None)
+        self.assertEqual(self.client.get("/api/admin/print/order-summaries?order_ids=" + self.order_id).status_code, 401)
+        with self.client.session_transaction() as session:
+            session["logged_in"] = True
+
+        app.print_center.store.patch_job(old["id"], {"state": "FAILED"})
+        retry = self.retry(old["id"], "summary-new-attempt-0001")
+        self.assertEqual(retry.status_code, 200, retry.get_data(as_text=True))
+        latest = retry.get_json()["job"]
+        app.print_center.store.patch_job(old["id"], {"last_error": "late old update"})
+        summary = self.client.get("/api/admin/print/order-summaries?order_ids=" + self.order_id)
+        self.assertEqual(summary.status_code, 200)
+        row = summary.get_json()["jobs"][self.order_id]
+        self.assertEqual((row["job"]["id"], row["job"]["attempt_no"]),
+                         (latest["id"], 2))
+        self.assertFalse(row["physical_activity"])
+
+        # Latest state may look failed, but older physical evidence wins.
+        app.print_center.store.patch_job(old["id"], {
+            "started_at": print_center.utcnow(), "vendor_raw_status": "1",
+            "state": "FAILED",
+        })
+        app.print_center.store.patch_job(latest["id"], {"state": "FAILED"})
+        updated = self.client.get("/api/admin/print/order-summaries?order_ids=" + self.order_id)
+        self.assertTrue(updated.get_json()["jobs"][self.order_id]["physical_activity"])
+        dashboard = self.client.get("/api/admin/print/jobs?order_id=" + self.order_id).get_json()
+        self.assertTrue(dashboard["rows"][0]["prior_physical_activity"])
+        self.assertEqual(dashboard["rows"][0]["job"]["id"], latest["id"])
+
+    def test_preclaim_auto_send_crash_recovers_original_attempt_once(self):
+        self.save_profile()
+        self.fake.responses["/api/Device/receiveTask"] = {
+            "code": 0, "data": {"taskid": "recovered-stale-auto", "status": 0}}
+        order_id = self.create_order()
+        job = app.print_center.store.latest_job(order_id)
+        with mock.patch.object(app.print_center.store, "claim_send_if_safe",
+                               side_effect=RuntimeError("missing preclaim RPC")):
+            app.print_center.dispatch_auto_once()
+        self.assertEqual(app.print_center.store.job(job["id"])["state"], "PREPARED")
+        self.assertFalse(any(path == "/api/Device/receiveTask" for path, _ in self.fake.calls))
+        key = app.print_center._auto_key("send", job["id"])
+        self.assertEqual(app.print_center.store.request(key)["status"], "IN_PROGRESS")
+        self.assertEqual(app.print_center.store.auto_prepared_jobs(), [])
+
+        # Stale means no in-flight handler remains; do not depend on real clock.
+        with app.print_center.store.connection(True) as db:
+            db.execute("UPDATE print_requests SET updated_at='2020-01-01T00:00:00+00:00' "
+                       "WHERE request_key=?", (key,))
+        candidates = [x for x in app.print_center.store.auto_prepared_jobs()
+                      if x["id"] == job["id"]]
+        self.assertEqual(len(candidates), 1)
+        self.assertTrue(candidates[0]["_auto_recovery"])
+        app.print_center.dispatch_auto_once()
+        app.print_center.dispatch_auto_once()
+        latest = app.print_center.store.latest_job(order_id)
+        self.assertEqual((latest["id"], latest["state"], latest["vendor_taskid"]),
+                         (job["id"], "QUEUED", "recovered-stale-auto"))
+        self.assertEqual(len([path for path, _ in self.fake.calls
+                              if path == "/api/Device/receiveTask"]), 1)
+        self.assertEqual(app.print_center.store.request(
+            app.print_center._auto_key("send-recovery", job["id"]))["status"], "COMPLETED")
+
+    def test_auto_recovery_never_retries_claimed_or_ambiguous_vendor_work(self):
+        self.save_profile()
+        order_id = self.create_order()
+        job = app.print_center.store.latest_job(order_id)
+        with mock.patch.object(app.print_center.store, "claim_send_if_safe",
+                               side_effect=RuntimeError("missing preclaim RPC")):
+            app.print_center.dispatch_auto_once()
+        key = app.print_center._auto_key("send", job["id"])
+        with app.print_center.store.connection(True) as db:
+            db.execute("UPDATE print_requests SET updated_at='2020-01-01T00:00:00+00:00' "
+                       "WHERE request_key=?", (key,))
+        self.assertEqual(len(app.print_center.store.auto_prepared_jobs()), 1)
+
+        # Any claim token means the vendor *might* have been reached.
+        app.print_center.store.patch_job(job["id"], {
+            "artwork_token_expires_at": "2035-01-01T00:00:00+00:00",
+        })
+        self.assertEqual(app.print_center.store.auto_prepared_jobs(), [])
+        app.print_center.store.patch_job(job["id"], {
+            "artwork_token_expires_at": None,
+            "ambiguous_operation": "receiveTask",
+        })
+        self.assertEqual(app.print_center.store.auto_prepared_jobs(), [])
+        app.print_center.store.patch_job(job["id"], {
+            "ambiguous_operation": None,
+            "vendor_raw_status": "0",
+        })
+        self.assertEqual(app.print_center.store.auto_prepared_jobs(), [])
+        app.print_center.store.patch_job(job["id"], {"vendor_raw_status": None})
+        self.assertEqual(len(app.print_center.store.auto_prepared_jobs()), 1)
+
+        # Even if a recovery request itself crashes pre-claim, never loop.
+        recovery_key = app.print_center._auto_key("send-recovery", job["id"])
+        app.print_center.store.claim_request(
+            recovery_key, "send", job["id"], print_center._payload_hash("send", job["id"]))
+        self.assertEqual(app.print_center.store.auto_prepared_jobs(), [])
+
     def test_new_order_is_durably_prepared_then_received_once_in_background(self):
         self.save_profile()
         self.fake.responses["/api/Device/receiveTask"] = {
