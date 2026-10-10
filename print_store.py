@@ -6,7 +6,7 @@ import os
 import sqlite3
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 
 ACTIVE_STATES = ("PREPARED", "SENDING", "QUEUED", "STARTING", "PRINTING", "CANCELING", "UNKNOWN")
@@ -494,43 +494,82 @@ class PrintStore:
             return [self._decode(row) for row in db.execute("SELECT * FROM print_jobs ORDER BY updated_at DESC LIMIT ?", (limit,))]
 
     def auto_prepared_jobs(self, limit=50):
-        """Return only jobs carrying the durable Phase 3.3 auto marker."""
+        """Pending auto jobs, plus one bounded recovery for a crashed pre-claim send.
+
+        A PREPARED job with an old IN_PROGRESS send request is recoverable only
+        when there is *no* claim token, vendor identity, timestamp, raw status,
+        quarantine, or other send outcome. A claim token means the vendor might
+        have been contacted; that case always requires manual reconciliation.
+        Recovery uses a different, durable idempotency key exactly once.
+        """
+        limit = max(1, min(int(limit), 200))
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
+
+        def ready(job, requests):
+            if job.get("state") != "PREPARED" or any(job.get(field) for field in (
+                    "vendor_taskid", "sent_at", "started_at", "completed_at",
+                    "artwork_token_expires_at", "vendor_raw_status",
+                    "ambiguous_operation")):
+                return None
+            if not any(row.get("operation") == "prepare"
+                       and row.get("status") == "COMPLETED"
+                       and str(row.get("request_key") or "").startswith("auto-prepare-")
+                       for row in requests):
+                return None
+            sends = [row for row in requests if row.get("operation") == "send"]
+            if not sends:
+                return job
+            if (not any(str(row.get("request_key") or "").startswith("auto-send-")
+                        and not str(row.get("request_key") or "").startswith("auto-send-recovery-")
+                        for row in sends)
+                    or any(row.get("status") != "IN_PROGRESS" for row in sends)
+                    or any(str(row.get("request_key") or "").startswith("auto-send-recovery-")
+                           for row in sends)):
+                return None
+            for row in sends:
+                try:
+                    stamp = datetime.fromisoformat(
+                        str(row.get("updated_at") or "").replace("Z", "+00:00"))
+                    if stamp.tzinfo is None or stamp.astimezone(timezone.utc) > cutoff:
+                        return None
+                except (ValueError, TypeError):
+                    return None
+            return {**job, "_auto_recovery": True}
+
+        scan = min(1000, max(200, limit * 10))
         if self.app.USE_SUPABASE:
-            result = []
-            offset = 0
-            page_size = 100
-            while len(result) < limit:
-                jobs = (self.app.SUPABASE.table("print_jobs").select("*")
-                        .eq("state", "PREPARED").order("prepared_at")
-                        .range(offset, offset + page_size - 1).execute().data or [])
+            jobs = (self.app.SUPABASE.table("print_jobs").select("*")
+                    .eq("state", "PREPARED").order("prepared_at")
+                    .limit(scan).execute().data or [])
+            if not jobs:
+                return []
+            requests = (self.app.SUPABASE.table("print_requests")
+                        .select("job_id,operation,status,request_key,updated_at")
+                        .in_("job_id", [str(row["id"]) for row in jobs])
+                        .execute().data or [])
+        else:
+            with self.connection() as db:
+                jobs = [self._decode(row) for row in db.execute(
+                    "SELECT * FROM print_jobs WHERE state='PREPARED' "
+                    "ORDER BY prepared_at LIMIT ?", (scan,)).fetchall()]
                 if not jobs:
+                    return []
+                placeholders = ",".join("?" for _ in jobs)
+                requests = [self._decode(row) for row in db.execute(
+                    "SELECT job_id,operation,status,request_key,updated_at "
+                    f"FROM print_requests WHERE job_id IN ({placeholders})",
+                    [row["id"] for row in jobs]).fetchall()]
+        by_job = {}
+        for row in requests:
+            by_job.setdefault(str(row.get("job_id") or ""), []).append(row)
+        result = []
+        for job in jobs:
+            candidate = ready(job, by_job.get(str(job["id"]), []))
+            if candidate:
+                result.append(candidate)
+                if len(result) >= limit:
                     break
-                job_ids = [str(job["id"]) for job in jobs]
-                requests = (self.app.SUPABASE.table("print_requests")
-                            .select("job_id,operation,status,request_key")
-                            .in_("job_id", job_ids).like("request_key", "auto-%")
-                            .execute().data or [])
-                prepared = {str(row.get("job_id") or "") for row in requests
-                            if row.get("operation") == "prepare" and row.get("status") == "COMPLETED"
-                            and str(row.get("request_key") or "").startswith("auto-prepare-")}
-                sent = {str(row.get("job_id") or "") for row in requests
-                        if row.get("operation") == "send"
-                        and str(row.get("request_key") or "").startswith("auto-send-")}
-                result.extend(job for job in jobs if str(job["id"]) in prepared - sent)
-                if len(jobs) < page_size:
-                    break
-                offset += page_size
-            return result[:limit]
-        with self.connection() as db:
-            rows = db.execute("""SELECT j.* FROM print_jobs AS j
-                JOIN print_requests AS r ON r.job_id=j.id
-                WHERE r.operation='prepare' AND r.status='COMPLETED'
-                  AND r.request_key LIKE 'auto-prepare-%' AND j.state='PREPARED'
-                  AND NOT EXISTS (SELECT 1 FROM print_requests AS sent
-                    WHERE sent.job_id=j.id AND sent.operation='send'
-                      AND sent.request_key LIKE 'auto-send-%')
-                ORDER BY j.prepared_at LIMIT ?""", (limit,)).fetchall()
-            return [self._decode(row) for row in rows]
+        return result
 
     def create_job(self, order, sku_id, profile, artwork_sha256, token_nonce):
         now = utcnow()
