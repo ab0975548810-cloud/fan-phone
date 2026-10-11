@@ -12,6 +12,8 @@
   let exactDate='';
   let query='';
   let statusFilter='全部';
+  let printSummaries=new Map(),printStatusLoaded=false,printVendorReady=false,printVendorConnected=false;
+  const printActionsBusy=new Set();
 
   const e=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const fmtParts=(ts)=>{
@@ -42,6 +44,10 @@
       .bf-order-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:10px;padding:8px 12px 14px}.bf-order-card{border:1px solid #f0e3e7;border-radius:16px;padding:11px;background:#fffafb;display:grid;grid-template-columns:94px minmax(0,1fr);gap:11px}.bf-order-card.void{opacity:.64;background:#f6f3f4}.bf-order-thumb{width:94px;height:122px;object-fit:contain;border:1px solid #efe1e6;border-radius:12px;background:#f8f6f7}.bf-order-thumb.empty{display:grid;place-items:center;color:#aaa;font-size:11px}.bf-order-id{font-size:11px;font-weight:950;word-break:break-all}.bf-order-time{font-size:11px;color:#9a8e93;margin-top:2px}.bf-order-meta{font-size:12px;line-height:1.55;color:#51484c;margin-top:5px}.bf-order-price{font-size:14px;font-weight:950;color:#332c30}.bf-order-ready{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}.bf-ready-badge{font-size:10px;font-weight:900;padding:3px 7px;border-radius:999px;border:1px solid #e8dce0;background:#fff}.bf-ready-badge.ok{color:#22845a;border-color:#bfe4d1;background:#f3fff8}.bf-ready-badge.bad{color:#c24f62;border-color:#f0c5cd;background:#fff7f8}
       .bf-order-status-row{display:flex;gap:6px;align-items:center;margin-top:7px}.bf-order-status-row select{min-width:112px;max-width:150px;border:1px solid #eadce1;border-radius:10px;padding:6px 8px;background:#fff;font-size:11px;font-weight:850}.bf-order-status{display:inline-flex;border-radius:999px;padding:3px 7px;font-weight:900;font-size:10px}.bf-order-status.pending{background:#fff0f4;color:#d95580}.bf-order-status.making{background:#fff7e8;color:#a66a12}.bf-order-status.ready{background:#eef8ff;color:#337aa5}.bf-order-status.printing{background:#f0efff;color:#6458b6}.bf-order-status.done{background:#edf9f2;color:#278158}.bf-order-status.void{background:#f1eeee;color:#85797e}
       .bf-order-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.bf-order-actions a,.bf-order-actions button{border:1px solid #edc4d0;background:#fff;color:#d95580;border-radius:999px;padding:6px 9px;font-size:11px;font-weight:850;text-decoration:none;cursor:pointer}.bf-order-actions button:disabled,.bf-order-status-row select:disabled{opacity:.5;cursor:not-allowed}.bf-order-actions .danger{color:#d94d61;border-color:#efc0c9}.bf-order-actions .voidbtn{color:#8a6c35;border-color:#ead8b7}.bf-order-empty{padding:50px 20px;text-align:center;color:#aaa;background:#fff;border:1px solid var(--line);border-radius:18px}
+      .bf-order-printstate{font-size:10px;color:#796b72;margin-top:6px;line-height:1.5}
+      .bf-order-printstate.warn{color:#bd4b60;font-weight:850}
+      .bf-order-actions .print-primary{background:#fff1f6;border-color:#eaa4bd;color:#ad3f67}
+      .bf-order-actions .print-blocked{font-size:11px;color:#bf4d62;font-weight:850}
       .bf-order-page{position:relative;z-index:1;display:flex;justify-content:center;align-items:center;gap:10px;padding:12px;color:#82757a;font-size:12px}.bf-order-page button{min-height:44px;border:1px solid #edc4d0;background:#fff;color:#d95580;border-radius:999px;padding:8px 18px;font-weight:850}
       @media(max-width:800px){.bf-order-summary{grid-template-columns:repeat(3,minmax(0,1fr))}}
       @media(max-width:700px){.bf-order-tools{position:static}.bf-order-grid{grid-template-columns:1fr}.bf-order-card{grid-template-columns:82px minmax(0,1fr)}.bf-order-thumb{width:82px;height:108px}.bf-order-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
@@ -78,6 +84,7 @@
     document.getElementById('bf-order-manager').addEventListener('click',ev=>{
       const btn=ev.target.closest('[data-order-action]');if(!btn)return;
       if(btn.dataset.orderAction==='print')return window.BenfuwanPrintCenter?.openOrder(btn.dataset.orderId);
+      if(btn.dataset.orderAction.startsWith('print-'))return runPrintAction(btn.dataset.orderId,btn.dataset.orderAction);
       window.bfOrderAction(btn.dataset.orderId,btn.dataset.orderAction);
     });
     return document.getElementById('bf-order-manager');
@@ -136,6 +143,26 @@
   function cardHtml(o){
     const total=Number(o.total||((o.price||0)*(o.quantity||1)))||0;
     const current=o.status||'待處理',isVoid=current==='作廢';
+    const summary=printStatusLoaded?printSummaries.get(o.order_id):null;
+    const job=summary?.job||null,printState=job?.state||'';
+    const physical=Boolean(summary?.physical_activity||job?.started_at||job?.completed_at||job?.ambiguous_operation==='prior_attempt_activity');
+    const printBusy=printActionsBusy.has(o.order_id);
+    const disabled=printBusy?' disabled':'';
+    let printAction='';
+    if(!isVoid&&o.has_print&&printStatusLoaded&&summary){
+      if(physical && ['PREPARED','FAILED','CANCELED'].includes(printState)){
+        printAction='<span class="print-blocked">曾有實體列印紀錄，禁止重推</span>';
+      }else if(!job&&printVendorReady){
+        printAction=`<button class="print-primary" data-order-action="print-prepare" data-order-id="${e(o.order_id)}"${disabled}>推送到銳印</button>`;
+      }else if(printState==='PREPARED'&&job.profile_complete&&printVendorReady){
+        printAction=`<button class="print-primary" data-order-action="print-send" data-order-id="${e(o.order_id)}"${disabled}>送到銳印</button>`;
+      }else if(['FAILED','CANCELED'].includes(printState)&&!physical&&printVendorReady){
+        printAction=`<button class="print-primary" data-order-action="print-retry" data-order-id="${e(o.order_id)}"${disabled}>↻ 重新推送任務</button>`;
+      }else if(['UNKNOWN','SENDING','QUEUED','STARTING','CANCELING'].includes(printState)){
+        printAction=printVendorConnected?`<button data-order-action="print-reconcile" data-order-id="${e(o.order_id)}"${disabled}>查核銳印狀態</button>`:'<span class="print-blocked">銳印尚未連線，請人工查核</span>';
+      }
+    }
+    const printLabel=!printStatusLoaded?'列印狀態暫時無法確認，請前往列印中心查核':!summary?'列印資料缺失，請前往列印中心查核':job?`列印嘗試 #${Number(job.attempt_no||1)}｜${e(job.state_label||printState)}${job.vendor_taskid?'｜銳印已回傳 Task ID':''}`:'尚未建立列印任務';
     const preview=o.mockup_url?`<a href="${e(o.mockup_url)}" target="_blank" rel="noopener"><img class="bf-order-thumb" loading="lazy" decoding="async" src="${e(o.mockup_url)}" onerror="this.style.opacity=.15"></a>`:'<div class="bf-order-thumb empty">無預覽</div>';
     return `<article class="bf-order-card${isVoid?' void':''}">
       <div>${preview}</div>
@@ -144,15 +171,105 @@
         <div class="bf-order-time">${e(o._fmt?.time||fmtParts(o.time).time)}</div>
         <div class="bf-order-meta"><b>${e(o.model||'')}</b>・${e(o.style||'')}<br>${e(o.customer_name||'')}｜${e(o.payment_method||'')}｜${Number(o.quantity||1)} 件<br><span class="bf-order-price">NT$ ${total.toLocaleString()}</span></div>
         <div class="bf-order-ready"><span class="bf-ready-badge ${o.has_mockup?'ok':'bad'}">${o.has_mockup?'✓ 預覽圖':'✕ 缺預覽圖'}</span><span class="bf-ready-badge ${o.has_print?'ok':'bad'}">${o.has_print?'✓ 高清生產圖':'✕ 缺生產圖'}</span></div>
+        <div class="bf-order-printstate${(!printStatusLoaded||physical)?' warn':''}">${printLabel}</div>
         ${isVoid?'':`<div class="bf-order-status-row"><span style="font-size:10px;color:#887a80">生產狀態</span><select data-order-status="${e(o.order_id)}" data-current-status="${e(current)}">${statusOptions(o)}</select></div>`}
         <div class="bf-order-actions">
           ${o.print_url?`<a href="${e(o.print_url)}" target="_blank" rel="noopener"><i class="fa-solid fa-file-arrow-down"></i> 生產圖</a>`:''}
           ${!isVoid&&o.has_print?`<button data-order-action="print" data-order-id="${e(o.order_id)}">前往列印中心</button>`:''}
+          ${printAction}
           ${isVoid?`<button data-order-action="restore" data-order-id="${e(o.order_id)}">恢復</button>`:`<button class="voidbtn" data-order-action="void" data-order-id="${e(o.order_id)}">作廢</button>`}
           <button class="danger" data-order-action="delete" data-order-id="${e(o.order_id)}">刪除</button>
         </div>
       </div>
     </article>`;
+  }
+
+  async function printApi(url,payload=null,operation='',identity=''){
+    const slot=operation?`bf-print:${operation}:${identity}`:'';
+    let key='';
+    if(slot){
+      key=sessionStorage.getItem(slot)||crypto.randomUUID();
+      sessionStorage.setItem(slot,key);
+    }
+    const opts=payload?{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':key},body:JSON.stringify({...payload,idempotency_key:key})}:{cache:'no-store'};
+    const response=await fetch(url,opts);
+    let result={};
+    try{result=await response.json()}catch(ignore){}
+    if(!response.ok||result.status!=='success'){
+      const error=new Error(result.msg||('HTTP '+response.status));
+      error.code=result.code||'';
+      // Definitive backend rejections finish their idempotency request as
+      // FAILED. Reusing that key would only replay the stale result, never
+      // re-contact the vendor. Transport/unknown errors must retain the key.
+      const definite=new Set([
+        'VENDOR_REJECTED','RECONCILE_FAILED','BAD_PRINT_STATE',
+        'PROFILE_MISSING','VENDOR_NOT_READY','PRODUCTION_STYLE_NOT_CONFIGURED',
+        'REPRINT_REQUIRED','RECONCILE_REQUIRED_CONFIRMED','STALE_PRINT_ATTEMPT',
+        'CONCURRENT_OPERATION','JOB_NOT_FOUND','VOID_ORDER','PRINT_FILE_REQUIRED',
+        'SKU_BINDING_REQUIRED','BAD_REQUEST','IDEMPOTENCY_CONFLICT',
+      ]);
+      if(slot&&definite.has(error.code))sessionStorage.removeItem(slot);
+      throw error;
+    }
+    if(slot)sessionStorage.removeItem(slot);
+    return result;
+  }
+
+  async function latestPrintSummary(orderId){
+    const url='/api/admin/print/order-summaries?'+new URLSearchParams({order_ids:orderId});
+    const result=await printApi(url);
+    const summary=result.jobs?.[orderId];
+    if(!summary||typeof summary!=='object')throw new Error('無法確認這筆訂單最新列印任務，請到列印中心查核');
+    return summary;
+  }
+
+  async function runPrintAction(orderId,action){
+    if(printActionsBusy.has(orderId))return;
+    const prompts={
+      'print-prepare':'確定將原訂單已儲存的生產圖推送到銳印？不會重新建立訂單或啟動實體打印。',
+      'print-send':'確定把這筆已準備的任務送到銳印？仍須在銳印軟體人工確認。',
+      'print-retry':'確定重新推送？會沿用客人的原始排版與生產資料，不需重新設計；僅在前次任務明確失敗或取消後才允許。',
+      'print-reconcile':'查核銳印目前的任務狀態？查核不會建立新任務或開始打印。',
+    };
+    if(!Object.hasOwn(prompts,action)||!confirm(prompts[action]))return;
+    printActionsBusy.add(orderId);render();
+    try{
+      const summary=await latestPrintSummary(orderId),job=summary.job;
+      if(summary.physical_activity&&action!=='print-reconcile')
+        throw new Error('歷史任務已出現實體列印紀錄，禁止重推，請人工確認');
+      if(action==='print-reconcile'){
+        if(!job||!['UNKNOWN','SENDING','QUEUED','STARTING','CANCELING'].includes(job.state))
+          throw new Error('最新列印任務目前不需要雲端查核，請重新整理');
+        await printApi('/api/admin/print/reconcile',{job_id:job.id},'reconcile',job.id);
+      }else{
+        let sendJob=job;
+        if(action==='print-prepare'){
+          if(job)throw new Error('列印任務已被建立，請重新整理狀態後操作');
+          sendJob=(await printApi('/api/admin/print/prepare',{order_id:orderId},'prepare',orderId)).job;
+        }else if(action==='print-retry'){
+          if(!job||!['FAILED','CANCELED'].includes(job.state))
+            throw new Error('最新列印任務已變更，只有明確失敗／取消的任務可重新推送');
+          sendJob=(await printApi('/api/admin/print/retry',{job_id:job.id},'retry',job.id)).job;
+        }else if(action==='print-send'){
+          if(!job||job.state!=='PREPARED'||!job.profile_complete)
+            throw new Error('最新任務不是可送出的待送狀態');
+        }
+        if(sendJob?.state==='PREPARED'){
+          const sent=(await printApi('/api/admin/print/send',{job_id:sendJob.id},'send',sendJob.id)).job;
+          if(!sent?.vendor_taskid)
+            throw new Error('已提交列印任務，但尚未確認銳印 Task ID，請查核最新狀態');
+        }else if(!['SENDING','QUEUED','PRINTING','COMPLETED'].includes(sendJob?.state)){
+          throw new Error('新任務狀態未確認，請查核列印中心');
+        }
+      }
+      await refreshOrders(true);
+    }catch(err){
+      try{await refreshOrders(true)}catch(ignore){}
+      alert((err.code==='REPRINT_REQUIRED'?'禁止重複列印：':'列印操作未完成：')+(err.message||'請前往列印中心查核最新狀態，勿連續重送'));
+    }finally{
+      printActionsBusy.delete(orderId);
+      render();
+    }
   }
 
   async function requestAction(orderId,action,newStatus=''){
@@ -186,7 +303,29 @@
       const r=await fetch('/api/admin/get_orders?'+filters(),{cache:'no-store'});let j={};try{j=await r.json()}catch(e){}
       if(!r.ok||j.status!=='success')throw new Error(j.msg||('HTTP '+r.status));if(version!==requestVersion)return;
       const incoming=Array.isArray(j.data)?j.data:[];
-      rows=append?rows.concat(incoming):incoming;before=Number(j.before)||before;nextOffset=Number(j.next_offset)||rows.length;hasMore=!!j.has_more;render();
+      rows=append?rows.concat(incoming):incoming;before=Number(j.before)||before;nextOffset=Number(j.next_offset)||rows.length;hasMore=!!j.has_more;
+      if(!append)printSummaries=new Map();
+      printStatusLoaded=false;
+      render();
+      try{
+        const ids=[...new Set(incoming.map(o=>String(o.order_id||'')).filter(Boolean))];
+        if(ids.length){
+          const endpoint='/api/admin/print/order-summaries?'+new URLSearchParams({order_ids:ids.join(',')});
+          const response=await printApi(endpoint);
+          if(version!==requestVersion)return;
+          printVendorReady=!!response.vendor_ready;
+          printVendorConnected=!!response.vendor_connected;
+          for(const id of ids){
+            if(!response.jobs?.[id])throw new Error('部分列印任務狀態缺失');
+            printSummaries.set(id,response.jobs[id]);
+          }
+        }
+        printStatusLoaded=rows.every(o=>printSummaries.has(o.order_id));
+      }catch(err){
+        if(version!==requestVersion)return;
+        printStatusLoaded=false;console.warn('[ORDERS] print summary unavailable',err);
+      }
+      render();
     }catch(err){if(version===requestVersion&&list)list.innerHTML=`<div class="bf-order-empty" style="color:#d94d61">${e(err.message||'讀取失敗')}</div>`}
     finally{if(version===requestVersion)loading=false}
   }
