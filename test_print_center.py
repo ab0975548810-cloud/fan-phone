@@ -1296,7 +1296,32 @@ class PrintCenterTests(unittest.TestCase):
         candidates = app.print_center.store.auto_prepared_jobs(limit=1)
         self.assertEqual([row["id"] for row in candidates], [auto_job["id"]])
 
+    def test_stale_auto_recovery_is_disabled_without_operator_opt_in(self):
+        self.save_profile()
+        order_id = self.create_order()
+        job = app.print_center.store.latest_job(order_id)
+        with mock.patch.object(app.print_center.store, "claim_send_if_safe",
+                               side_effect=RuntimeError("missing preclaim RPC")):
+            app.print_center.dispatch_auto_once()
+        old_key = app.print_center._auto_key("send", job["id"])
+        with app.print_center.store.connection(True) as db:
+            db.execute("UPDATE print_requests SET updated_at='2020-01-01T00:00:00+00:00' "
+                       "WHERE request_key=?", (old_key,))
+        with mock.patch.dict(os.environ, {"PRINT_AUTO_RECOVER_STALE_SENDS": "false"}):
+            self.assertFalse(any(x["id"] == job["id"] for x in app.print_center.store.auto_prepared_jobs()))
+            before_calls = len(self.fake.calls)
+            app.print_center.dispatch_auto_once()
+            self.assertEqual(len(self.fake.calls), before_calls)
+            self.assertEqual(app.print_center.store.job(job["id"])["state"], "PREPARED")
+            self.assertIsNone(app.print_center.store.request(
+                app.print_center._auto_key("send-recovery", job["id"])))
+        with mock.patch.dict(os.environ, {"PRINT_AUTO_RECOVER_STALE_SENDS": "1"}):
+            candidates = [x for x in app.print_center.store.auto_prepared_jobs() if x["id"] == job["id"]]
+            self.assertEqual(len(candidates), 1)
+            self.assertTrue(candidates[0]["_auto_recovery"])
+
     def test_preclaim_auto_send_crash_recovers_original_attempt_once(self):
+        self.enterContext(mock.patch.dict(os.environ, {"PRINT_AUTO_RECOVER_STALE_SENDS": "1"}))
         self.save_profile()
         self.fake.responses["/api/Device/receiveTask"] = {
             "code": 0, "data": {"taskid": "recovered-stale-auto", "status": 0}}
@@ -1330,6 +1355,7 @@ class PrintCenterTests(unittest.TestCase):
             app.print_center._auto_key("send-recovery", job["id"]))["status"], "COMPLETED")
 
     def test_auto_recovery_never_retries_claimed_or_ambiguous_vendor_work(self):
+        self.enterContext(mock.patch.dict(os.environ, {"PRINT_AUTO_RECOVER_STALE_SENDS": "1"}))
         self.save_profile()
         order_id = self.create_order()
         job = app.print_center.store.latest_job(order_id)
