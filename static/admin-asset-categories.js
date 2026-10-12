@@ -538,25 +538,29 @@
           });
         }
         const media = document.createElement('div');
-        media.className = 'bf-card-media is-broken';
+        const imageUrl = clean(sticker.url);
+        // A native lazy image must remain displayable while loading. Starting
+        // with is-broken hides it via display:none and prevents a lazy fetch.
+        media.className = 'bf-card-media ' + (imageUrl ? 'is-loading' : 'is-broken');
         const placeholder = document.createElement('div');
         placeholder.className = 'bf-image-placeholder';
-        placeholder.innerHTML = '<i class="fa-regular fa-image"></i><span>圖片無法顯示</span>';
+        placeholder.innerHTML = '<i class="fa-regular fa-image"></i><span></span>';
+        const placeholderText = placeholder.querySelector('span');
+        placeholderText.textContent = imageUrl ? '圖片載入中…' : '圖片無法顯示';
         const image = document.createElement('img');
         image.loading = 'lazy';
         image.decoding = 'async';
         image.fetchPriority = 'low';
         image.alt = clean(sticker.name) || '素材預覽';
-        image.style.visibility = 'hidden';
         image.addEventListener('load', () => {
-          media.classList.remove('is-broken');
-          image.style.visibility = 'visible';
+          media.classList.remove('is-loading', 'is-broken');
         });
         image.addEventListener('error', () => {
-          image.style.visibility = 'hidden';
+          media.classList.remove('is-loading');
           media.classList.add('is-broken');
+          placeholderText.textContent = '圖片無法顯示';
         });
-        if (sticker.url) image.src = sticker.url;
+        if (imageUrl) image.src = imageUrl;
         media.append(image, placeholder);
         const meta = document.createElement('div');
         meta.className = 'bf-card-meta';

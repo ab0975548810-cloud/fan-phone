@@ -1693,11 +1693,11 @@ def admin_test(browser, base):
     product_workspace_src = page.locator('script[src*="admin-product-workspace-v1.js"]').get_attribute('src')
     assert product_workspace_src and 'v=20261010modelsave1' in product_workspace_src, product_workspace_src
     asset_category_src = page.locator('script[src*="admin-asset-categories.js"]').get_attribute('src')
-    assert asset_category_src and 'v=20261002a' in asset_category_src, asset_category_src
+    assert asset_category_src and 'v=20261012lazyfix1' in asset_category_src, asset_category_src
     template_loader_src = page.locator('script[src*="admin-template-loader.js"]').get_attribute('src')
     assert template_loader_src and 'v=20261006review1' in template_loader_src, template_loader_src
     library_workspace_src = page.locator('script[src*="admin-library-workspace-v1.js"]').get_attribute('src')
-    assert library_workspace_src and 'v=20261002a' in library_workspace_src, library_workspace_src
+    assert library_workspace_src and 'v=20261012lazyfix1' in library_workspace_src, library_workspace_src
     commerce_src = page.locator('script[src*="admin-commerce-v1.js"]').get_attribute('src')
     assert commerce_src and 'v=20261003launch1' in commerce_src, commerce_src
     def ux_error(route):
@@ -2191,35 +2191,36 @@ def admin_test(browser, base):
     pending_asset_image = []
     page.route('**/issue59-delayed-asset.png', lambda route: pending_asset_image.append(route))
     with page.expect_request('**/issue59-delayed-asset.png'):
-        page.evaluate("() => {assetsData.stickers.find(x=>x.id==='asset-cat-a').url='/issue59-delayed-asset.png';renderAssets();document.querySelector('[data-id=\"asset-cat-a\"] img').loading='eager'}")
+        page.evaluate("() => {assetsData.stickers.find(x=>x.id==='asset-cat-a').url='/issue59-delayed-asset.png';renderAssets();document.querySelector('[data-id=\"asset-cat-a\"] img').scrollIntoView({block:'center'})}")
     asset_pending = page.evaluate("""() => {
       const media=document.querySelector('[data-id="asset-cat-a"] .bf-card-media');
-      return {image:getComputedStyle(media.querySelector('img')).visibility,placeholder:getComputedStyle(media.querySelector('.bf-image-placeholder')).display};
+      return {imageDisplayed:getComputedStyle(media.querySelector('img')).display!=='none',placeholder:getComputedStyle(media.querySelector('.bf-image-placeholder')).display,loading:media.classList.contains('is-loading')};
     }""")
-    assert asset_pending == {'image': 'hidden', 'placeholder': 'grid'}, asset_pending
+    assert asset_pending == {'imageDisplayed': True, 'placeholder': 'grid', 'loading': True}, asset_pending
     assert len(pending_asset_image) == 1
     page.locator('[data-id="asset-cat-a"] .bf-card-media img').evaluate("img => img.addEventListener('error', () => img.dataset.testError = '1')")
     pending_asset_image.pop().fulfill(status=404, body='missing')
     poll(page, "() => document.querySelector('[data-id=\"asset-cat-a\"] .bf-card-media img')?.dataset.testError==='1'")
     asset_failed = page.evaluate("""() => {
       const media=document.querySelector('[data-id="asset-cat-a"] .bf-card-media');
-      return {image:getComputedStyle(media.querySelector('img')).visibility,placeholder:getComputedStyle(media.querySelector('.bf-image-placeholder')).display};
+      return {imageDisplayed:getComputedStyle(media.querySelector('img')).display!=='none',placeholder:getComputedStyle(media.querySelector('.bf-image-placeholder')).display,loading:media.classList.contains('is-loading')};
     }""")
-    assert asset_failed == {'image': 'hidden', 'placeholder': 'grid'}, asset_failed
+    assert asset_failed == {'imageDisplayed': False, 'placeholder': 'grid', 'loading': False}, asset_failed
     page.unroute('**/issue59-delayed-asset.png')
     pending_asset_success = []
     page.route('**/issue59-ok-asset.png', lambda route: pending_asset_success.append(route))
     with page.expect_request('**/issue59-ok-asset.png'):
-        page.evaluate("() => {assetsData.stickers.find(x=>x.id==='asset-cat-a').url='/issue59-ok-asset.png';renderAssets();document.querySelector('[data-id=\"asset-cat-a\"] img').loading='eager'}")
-    assert page.locator('[data-id="asset-cat-a"] .bf-card-media img').evaluate("img => getComputedStyle(img).visibility") == 'hidden'
+        page.evaluate("() => {assetsData.stickers.find(x=>x.id==='asset-cat-a').url='/issue59-ok-asset.png';renderAssets();document.querySelector('[data-id=\"asset-cat-a\"] img').scrollIntoView({block:'center'})}")
+    assert page.locator('[data-id="asset-cat-a"] .bf-card-media img').evaluate("img => img.loading") == 'lazy'
+    assert page.locator('[data-id="asset-cat-a"] .bf-image-placeholder').evaluate("el => getComputedStyle(el).position") == 'absolute'
     assert len(pending_asset_success) == 1
     pending_asset_success.pop().fulfill(status=200, body=GOOD, content_type='image/png')
-    poll(page, "() => getComputedStyle(document.querySelector('[data-id=\"asset-cat-a\"] .bf-card-media img')).visibility==='visible'")
+    poll(page, "() => !!document.querySelector('[data-id=\"asset-cat-a\"] .bf-card-media:not(.is-loading):not(.is-broken) img')?.naturalWidth")
     asset_loaded = page.evaluate("""() => {
       const media=document.querySelector('[data-id="asset-cat-a"] .bf-card-media');
-      return {image:getComputedStyle(media.querySelector('img')).visibility,placeholder:getComputedStyle(media.querySelector('.bf-image-placeholder')).display};
+      return {imageDisplayed:getComputedStyle(media.querySelector('img')).display!=='none',placeholder:getComputedStyle(media.querySelector('.bf-image-placeholder')).display,loading:media.classList.contains('is-loading')};
     }""")
-    assert asset_loaded == {'image': 'visible', 'placeholder': 'none'}, asset_loaded
+    assert asset_loaded == {'imageDisplayed': True, 'placeholder': 'none', 'loading': False}, asset_loaded
     page.unroute('**/issue59-ok-asset.png')
     page.evaluate("() => {assetsData.stickers.find(x=>x.id==='asset-cat-a').url='/static/missing-issue59-asset.png';renderAssets()}")
     print('ADMIN_ASSET_THUMB_NO_FLASH_OK')
@@ -2388,35 +2389,36 @@ def admin_test(browser, base):
     pending_template_image = []
     page.route('**/issue59-delayed-template.png', lambda route: pending_template_image.append(route))
     with page.expect_request('**/issue59-delayed-template.png'):
-        page.evaluate("() => {templatesData.templates.find(x=>x.id==='issue59-universal').thumb_url='/issue59-delayed-template.png';renderTemplates();document.querySelector('[data-template-id=\"issue59-universal\"] img').loading='eager'}")
+        page.evaluate("() => {templatesData.templates.find(x=>x.id==='issue59-universal').thumb_url='/issue59-delayed-template.png';renderTemplates();document.querySelector('[data-template-id=\"issue59-universal\"] img').scrollIntoView({block:'center'})}")
     template_pending = page.evaluate("""() => {
       const media=document.querySelector('[data-template-id="issue59-universal"] .bf-card-media');
-      return {image:getComputedStyle(media.querySelector('img')).visibility,placeholder:getComputedStyle(media.querySelector('.bf-image-placeholder')).display};
+      return {imageDisplayed:getComputedStyle(media.querySelector('img')).display!=='none',placeholder:getComputedStyle(media.querySelector('.bf-image-placeholder')).display,loading:media.classList.contains('is-loading')};
     }""")
-    assert template_pending == {'image': 'hidden', 'placeholder': 'grid'}, template_pending
+    assert template_pending == {'imageDisplayed': True, 'placeholder': 'grid', 'loading': True}, template_pending
     assert len(pending_template_image) == 1
     page.locator('[data-template-id="issue59-universal"] .bf-card-media img').evaluate("img => img.addEventListener('error', () => img.dataset.testError = '1')")
     pending_template_image.pop().fulfill(status=404, body='missing')
     poll(page, "() => document.querySelector('[data-template-id=\"issue59-universal\"] .bf-card-media img')?.dataset.testError==='1'")
     template_failed = page.evaluate("""() => {
       const media=document.querySelector('[data-template-id="issue59-universal"] .bf-card-media');
-      return {image:getComputedStyle(media.querySelector('img')).visibility,placeholder:getComputedStyle(media.querySelector('.bf-image-placeholder')).display};
+      return {imageDisplayed:getComputedStyle(media.querySelector('img')).display!=='none',placeholder:getComputedStyle(media.querySelector('.bf-image-placeholder')).display,loading:media.classList.contains('is-loading')};
     }""")
-    assert template_failed == {'image': 'hidden', 'placeholder': 'grid'}, template_failed
+    assert template_failed == {'imageDisplayed': False, 'placeholder': 'grid', 'loading': False}, template_failed
     page.unroute('**/issue59-delayed-template.png')
     pending_template_success = []
     page.route('**/issue59-ok-template.png', lambda route: pending_template_success.append(route))
     with page.expect_request('**/issue59-ok-template.png'):
-        page.evaluate("() => {templatesData.templates.find(x=>x.id==='issue59-universal').thumb_url='/issue59-ok-template.png';renderTemplates();document.querySelector('[data-template-id=\"issue59-universal\"] img').loading='eager'}")
-    assert page.locator('[data-template-id="issue59-universal"] .bf-card-media img').evaluate("img => getComputedStyle(img).visibility") == 'hidden'
+        page.evaluate("() => {templatesData.templates.find(x=>x.id==='issue59-universal').thumb_url='/issue59-ok-template.png';renderTemplates();document.querySelector('[data-template-id=\"issue59-universal\"] img').scrollIntoView({block:'center'})}")
+    assert page.locator('[data-template-id="issue59-universal"] .bf-card-media img').evaluate("img => img.loading") == 'lazy'
+    assert page.locator('[data-template-id="issue59-universal"] .bf-image-placeholder').evaluate("el => getComputedStyle(el).position") == 'absolute'
     assert len(pending_template_success) == 1
     pending_template_success.pop().fulfill(status=200, body=GOOD, content_type='image/png')
-    poll(page, "() => getComputedStyle(document.querySelector('[data-template-id=\"issue59-universal\"] .bf-card-media img')).visibility==='visible'")
+    poll(page, "() => !!document.querySelector('[data-template-id=\"issue59-universal\"] .bf-card-media:not(.is-loading):not(.is-broken) img')?.naturalWidth")
     template_loaded = page.evaluate("""() => {
       const media=document.querySelector('[data-template-id="issue59-universal"] .bf-card-media');
-      return {image:getComputedStyle(media.querySelector('img')).visibility,placeholder:getComputedStyle(media.querySelector('.bf-image-placeholder')).display};
+      return {imageDisplayed:getComputedStyle(media.querySelector('img')).display!=='none',placeholder:getComputedStyle(media.querySelector('.bf-image-placeholder')).display,loading:media.classList.contains('is-loading')};
     }""")
-    assert template_loaded == {'image': 'visible', 'placeholder': 'none'}, template_loaded
+    assert template_loaded == {'imageDisplayed': True, 'placeholder': 'none', 'loading': False}, template_loaded
     page.unroute('**/issue59-ok-template.png')
     page.evaluate("() => {templatesData.templates.find(x=>x.id==='issue59-universal').thumb_url='/static/missing-issue59-template.png';renderTemplates()}")
     print('ADMIN_TEMPLATE_THUMB_NO_FLASH_OK')
