@@ -119,24 +119,28 @@
     card.dataset.templateId = clean(template.id);
 
     const media = document.createElement('div');
-    media.className = 'bf-card-media bf-template-media is-broken';
+    const imageUrl = clean(template.thumb_url);
+    // Hide the pending image with an overlay, not display:none: otherwise
+    // native loading=lazy never fires load and the placeholder stays forever.
+    media.className = 'bf-card-media bf-template-media ' + (imageUrl ? 'is-loading' : 'is-broken');
     const image = document.createElement('img');
     image.loading = 'lazy';
     image.decoding = 'async';
     image.alt = clean(template.name) ? `${template.name} 縮圖` : '模板縮圖';
     const placeholder = document.createElement('div');
     placeholder.className = 'bf-image-placeholder';
-    placeholder.innerHTML = '<i class="fa-regular fa-image"></i><span>尚無模板縮圖</span>';
-    image.style.visibility = 'hidden';
+    placeholder.innerHTML = '<i class="fa-regular fa-image"></i><span></span>';
+    const placeholderText = placeholder.querySelector('span');
+    placeholderText.textContent = imageUrl ? '模板縮圖載入中…' : '尚無模板縮圖';
     image.addEventListener('load', () => {
-      media.classList.remove('is-broken');
-      image.style.visibility = 'visible';
+      media.classList.remove('is-loading', 'is-broken');
     });
     image.addEventListener('error', () => {
-      image.style.visibility = 'hidden';
+      media.classList.remove('is-loading');
       media.classList.add('is-broken');
+      placeholderText.textContent = '模板縮圖無法顯示';
     });
-    if (template.thumb_url) image.src = template.thumb_url;
+    if (imageUrl) image.src = imageUrl;
     media.append(image, placeholder);
 
     const body = document.createElement('div');
