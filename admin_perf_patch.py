@@ -25,13 +25,13 @@ def install(app_module):
                     '/static/admin-perf.js?v=20261003pager2',
                     '/static/admin-model-colors.js?v=20260926audit1',
                     '/static/admin-model-profiles.js?v=20261010modelsave1',
-                    '/static/admin-asset-categories.js?v=20261002a',
+                    '/static/admin-asset-categories.js?v=20261012lazyfix1',
                     '/static/admin-template-loader.js?v=20261006review1',
                     '/static/admin-orders-v3.js?v=20261010printops1',
                     '/static/admin-steward-v1.js?v=20261001a',
                     '/static/admin-shell-v1.js?v=20261001a',
                     '/static/admin-product-workspace-v1.js?v=20261010modelsave1',
-                    '/static/admin-library-workspace-v1.js?v=20261002a',
+                    '/static/admin-library-workspace-v1.js?v=20261012lazyfix1',
                     '/static/editable-sticker-core-v1.js?v=20261006multi1',
                     '/static/admin-editable-stickers-v1.js?v=20261006a',
                     '/static/multilayer-template-core-v1.js?v=20261006review1',
@@ -52,7 +52,7 @@ def install(app_module):
                 product_css = '/static/admin-product-workspace-v1.css?v=20261001b'
                 if product_css not in html and '</head>' in html:
                     html = html.replace('</head>', f'<link rel="stylesheet" href="{product_css}"></head>')
-                library_css = '/static/admin-library-workspace-v1.css?v=20261002a'
+                library_css = '/static/admin-library-workspace-v1.css?v=20261012lazyfix1'
                 if library_css not in html and '</head>' in html:
                     html = html.replace('</head>', f'<link rel="stylesheet" href="{library_css}"></head>')
                 resp.set_data(html)
