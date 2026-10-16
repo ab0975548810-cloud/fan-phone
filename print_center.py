@@ -476,6 +476,28 @@ class PrintService:
             return None
         return None
 
+    def _assert_vendor_tasks_absent(self, attempts):
+        """A fresh, structurally valid vendor pending-list check, never historical proof."""
+        if not self.client.ready:
+            raise PrintError("VENDOR_DISABLED", "銳印目前未連線，禁止重送", 503)
+        try:
+            vendor_data = self.client.get_all_tasks()
+        except (VendorDisabled, VendorError, VendorAmbiguous) as exc:
+            raise PrintError("RECONCILE_FAILED", "銳印即時查核失敗，為避免重複列印，本次沒有解鎖", 503) from exc
+        verified_rows = self._strict_vendor_task_rows(vendor_data)
+        if verified_rows is None:
+            raise PrintError("RECONCILE_FAILED", "銳印清單格式無法驗證，禁止重新推送", 503)
+        for attempt in attempts:
+            taskid = str(attempt.get("vendor_taskid") or "")
+            identity = vendor_order_identity(attempt)
+            for row in verified_rows:
+                remote_task = str(row.get("taskid") or row.get("task_id") or "")
+                remote_order = str(row.get("order_id") or "")
+                if (taskid and remote_task == taskid) or remote_order in (
+                        identity, str(attempt["order_id"])):
+                    raise PrintError("VENDOR_TASK_STILL_EXISTS",
+                                     "銳印雲端仍找到舊任務，禁止重送；請先處理舊 Task ID")
+
     def manual_retry_missing(self, job_id, key, vendor_taskid, confirmation, actor):
         """Operator-attested UNKNOWN recovery; never auto-approved by vendor queue absence.
 
@@ -511,24 +533,7 @@ class PrintService:
                 raise PrintError("RECONCILE_REQUIRED", "只能對已查核、沒有其他歧義的 UNKNOWN 任務進行人工確認")
             if not prior.get("sent_at") or not prior.get("last_reconciled_at"):
                 raise PrintError("RECONCILE_REQUIRED", "請先執行一次銳印查核，再人工確認")
-            if not self.client.ready:
-                raise PrintError("VENDOR_DISABLED", "銳印目前未連線，不能完成送出前查核", 503)
-            try:
-                vendor_data = self.client.get_all_tasks()
-            except (VendorDisabled, VendorError, VendorAmbiguous) as exc:
-                raise PrintError("RECONCILE_FAILED", "銳印即時查核失敗，為避免重複列印，本次沒有解鎖", 503) from exc
-            verified_rows = self._strict_vendor_task_rows(vendor_data)
-            if verified_rows is None:
-                raise PrintError("RECONCILE_FAILED", "銳印清單格式無法驗證，禁止人工解鎖", 503)
-            matches = [
-                row for row in verified_rows
-                if (str(row.get("taskid") or row.get("task_id") or "") == vendor_taskid
-                    or str(row.get("order_id") or "") in (
-                        vendor_order_identity(prior), str(prior["order_id"])))
-            ]
-            if matches:
-                raise PrintError("VENDOR_TASK_STILL_EXISTS",
-                                 "銳印雲端仍找到原任務，禁止重送；請先到銳印處理舊 Task ID")
+            self._assert_vendor_tasks_absent([prior])
 
         decision = self.store.attest_unknown_missing(
             job_id, key, vendor_taskid, actor, confirmation)
@@ -680,6 +685,16 @@ class PrintService:
         self._assert_style_configured(order)
         if not self.vendor_ready:
             raise PrintError("VENDOR_NOT_READY", "雲打印憑證、HTTPS public URL 或生產圖密鑰尚未完整設定", 503)
+        # For operator-confirmed missing attempts, perform one more vendor
+        # presence check just before the new vendor submission. An old task
+        # can reappear after the operator's earlier check.
+        older_confirmed = [
+            attempt for attempt in self.store.jobs_for_order(job["order_id"])
+            if int(attempt.get("attempt_no") or 0) < int(job.get("attempt_no") or 0)
+            and attempt.get("ambiguous_operation") == "operator_confirmed_missing"
+        ]
+        if older_confirmed:
+            self._assert_vendor_tasks_absent(older_confirmed)
         base = self._base_url()
         self._token_secret()
         owner, prior = self.store.claim_request(key, "send", job_id, fingerprint)
