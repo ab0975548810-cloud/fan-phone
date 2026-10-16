@@ -374,6 +374,36 @@ class PrintCenterTests(unittest.TestCase):
         self.assertEqual(app.print_center.store.job(old["id"])["state"],"UNKNOWN")
         self.assertIsNone(app.print_center.store.event("print_events","operator-missing:do-not-exist"))
 
+    def test_manual_missing_new_send_checks_old_vendor_task_again(self):
+        old=self._unknown_accepted_job(taskid="operator-task-reappears")
+        payload={"job_id":old["id"],"vendor_taskid":old["vendor_taskid"],
+                 "operator_confirmation":"VERIFIED_RUIYIN_HISTORY_AND_NO_PHYSICAL_OUTPUT"}
+        prepared=self.post("manual-missing-retry",payload,key="operator-verify-again-0001")
+        self.assertEqual(prepared.status_code,200,prepared.get_data(as_text=True))
+        new=prepared.get_json()["job"]
+        before=len([path for path,_ in self.fake.calls if path=="/api/Device/receiveTask"])
+        # Even if the operator's first lookup was empty, the old task may
+        # reappear before the fresh send. Fail closed without vendor receive.
+        self.fake.responses["/api/Device/getAllTasks"]={
+            "code":0,"data":{"list":[{"taskid":old["vendor_taskid"],"status":0}]}}
+        blocked=self.send(new["id"],key="operator-reappear-send-0001")
+        self.assertEqual((blocked.status_code,blocked.get_json()["code"]),
+                         (409,"VENDOR_TASK_STILL_EXISTS"))
+        self.assertEqual(len([path for path,_ in self.fake.calls if path=="/api/Device/receiveTask"]),before)
+        self.assertEqual(app.print_center.store.job(new["id"])["state"],"PREPARED")
+        self.fake.responses["/api/Device/getAllTasks"]={
+            "code":0,"data":{"list":[{"strange":"unparseable"}]}}
+        malformed=self.send(new["id"],key="operator-reappear-malformed-0001")
+        self.assertEqual((malformed.status_code,malformed.get_json()["code"]),
+                         (503,"RECONCILE_FAILED"))
+        self.assertEqual(len([path for path,_ in self.fake.calls if path=="/api/Device/receiveTask"]),before)
+        # Once the operator rechecks and the cloud list is definitively empty,
+        # the existing send safety RPC still decides whether dispatch is safe.
+        self.fake.responses["/api/Device/getAllTasks"]={"code":0,"data":{"list":[]}}
+        delivered=self.send(new["id"],key="operator-reappear-send-0002",taskid="operator-new-task")
+        self.assertEqual(delivered.status_code,200,delivered.get_data(as_text=True))
+        self.assertEqual(len([path for path,_ in self.fake.calls if path=="/api/Device/receiveTask"]),before+1)
+
     def test_manual_missing_unknown_late_physical_callback_blocks_new_send(self):
         old=self._unknown_accepted_job(taskid="manual-late-physical")
         payload={"job_id":old["id"],"vendor_taskid":old["vendor_taskid"],
