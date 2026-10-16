@@ -2986,7 +2986,12 @@ def order_print_workspace_test(browser, base, poll):
     assert all(entry[0]!='start' for entry in api_calls)
     dialogs.clear()
     page.locator('[data-order-id="CARD-UNKNOWN-ACK"][data-order-action="print-manual-retry"]').click()
-    poll(page, "() => !!document.querySelector('[data-order-action=print-reconcile][data-order-id=\"CARD-UNKNOWN-ACK\"]')")
+    # UNKNOWN already had a reconcile button; wait for the *second* attempt
+    # instead of mistaking the old card for a completed asynchronous send.
+    poll(page, """() => [...document.querySelectorAll('.bf-order-card')].some(card =>
+      card.querySelector('.bf-order-id')?.textContent.includes('CARD-UNKNOWN-ACK')
+      && card.querySelector('.bf-order-printstate')?.textContent.includes('列印嘗試 #2')
+      && card.querySelector('.bf-order-printstate')?.textContent.includes('銳印已回傳 Task ID'))""")
     assert [entry[0] for entry in api_calls[-2:]] == ['manual-missing-retry','send'],api_calls[-2:]
     assert statuses['CARD-UNKNOWN-ACK']['attempt_no']==2,statuses['CARD-UNKNOWN-ACK']
     assert statuses['CARD-UNKNOWN-ACK']['vendor_taskid']=='vendor-JOB-CARD-UNKNOWN-ACK-RETRY'
