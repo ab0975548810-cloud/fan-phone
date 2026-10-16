@@ -159,12 +159,11 @@
       }else if(['FAILED','CANCELED'].includes(printState)&&!physical&&printVendorReady){
         printAction=`<button class="print-primary" data-order-action="print-retry" data-order-id="${e(o.order_id)}"${disabled}>↻ 重新推送任務</button>`;
       }else if(['UNKNOWN','SENDING','QUEUED','STARTING','CANCELING'].includes(printState)){
-        printAction=printVendorConnected?`<button data-order-action="print-reconcile" data-order-id="${e(o.order_id)}"${disabled}>查核銳印狀態</button>`:'<span class="print-blocked">銳印尚未連線，請人工查核</span>';
-        // An UNKNOWN task with a confirmed old vendor ID cannot use ordinary
-        // retry. The operator must explicitly attest to the missing task.
-        if(printState==='UNKNOWN'&&!physical&&!job.ambiguous_operation&&job.vendor_taskid&&job.sent_at&&job.last_reconciled_at&&printVendorReady&&printVendorConnected){
-          printAction+=`<button class="print-primary" data-order-action="print-manual-retry" data-order-id="${e(o.order_id)}"${disabled}>↻ 人工確認後重新推送</button>`;
-        }
+        // Keep the order card simple: one resend entry point, never a blind
+        // force-print. The handler reconciles or requires operator attestation.
+        printAction=printVendorReady&&printVendorConnected
+          ?`<button class="print-primary" data-order-action="print-resend" data-order-id="${e(o.order_id)}"${disabled}>↻ 重新送任務</button>`
+          :'<span class="print-blocked">銳印尚未連線，禁止重送</span>';
       }
     }
     const printLabel=!printStatusLoaded?'列印狀態暫時無法確認，請前往列印中心查核':!summary?'列印資料缺失，請前往列印中心查核':job?`列印嘗試 #${Number(job.attempt_no||1)}｜${e(job.state_label||printState)}${job.vendor_taskid?'｜銳印已回傳 Task ID':''}`:'尚未建立列印任務';
@@ -237,13 +236,37 @@
       'print-retry':'確定重新推送？會沿用客人的原始排版與生產資料，不需重新設計；僅在前次任務明確失敗或取消後才允許。',
       'print-manual-retry':'這筆任務的銳印接收結果尚不明確。只有你親自確認銳印待列印、歷史、完成及實體輸出都沒有原任務，才能繼續；仍存在重複列印風險。要核對嗎？',
       'print-reconcile':'查核銳印目前的任務狀態？查核不會建立新任務或開始打印。',
+      'print-resend':null, // One click starts a guarded recovery, not an unconditional second print.
     };
-    if(!Object.hasOwn(prompts,action)||!confirm(prompts[action]))return;
+    if(!Object.hasOwn(prompts,action))return;
+    if(prompts[action]&&!confirm(prompts[action]))return;
     printActionsBusy.add(orderId);render();
     try{
-      const summary=await latestPrintSummary(orderId),job=summary.job;
+      let summary=await latestPrintSummary(orderId),job=summary.job;
       if(summary.physical_activity&&action!=='print-reconcile')
         throw new Error('歷史任務已出現實體列印紀錄，禁止重推，請人工確認');
+      if(action==='print-resend'){
+        if(!job||!['UNKNOWN','SENDING','QUEUED','STARTING','CANCELING'].includes(job.state))
+          throw new Error('任務狀態已變更，請重新整理後操作');
+        // An acknowledged UNKNOWN task is already reconciled: the missing
+        // history/physical-output fact still requires a human, not queue lookup.
+        // Other in-flight states must first reconcile and become definitively
+        // FAILED/CANCELED before any automatic resend is allowed.
+        if(!(job.state==='UNKNOWN'&&job.vendor_taskid&&job.last_reconciled_at&&!job.ambiguous_operation)){
+          await printApi('/api/admin/print/reconcile',{job_id:job.id},'reconcile',job.id);
+          summary=await latestPrintSummary(orderId);
+          job=summary.job;
+        }
+        if(summary.physical_activity)
+          throw new Error('發現歷史列印活動，禁止重送；請到列印中心確認');
+        if(job&&['FAILED','CANCELED'].includes(job.state)){
+          action='print-retry';
+        }else if(job?.state==='UNKNOWN'&&!job.ambiguous_operation&&job.vendor_taskid&&job.sent_at&&job.last_reconciled_at){
+          action='print-manual-retry';
+        }else{
+          throw new Error('舊任務仍可能存在於銳印，無法安全重新送出；請到列印中心核對。系統沒有建立新任務');
+        }
+      }
       if(action==='print-reconcile'){
         if(!job||!['UNKNOWN','SENDING','QUEUED','STARTING','CANCELING'].includes(job.state))
           throw new Error('最新列印任務目前不需要雲端查核，請重新整理');
