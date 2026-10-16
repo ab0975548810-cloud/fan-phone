@@ -447,6 +447,35 @@ class PrintService:
             })
         return self.store.job(job["id"])
 
+    @staticmethod
+    def _strict_vendor_task_rows(value):
+        """Fail closed for malformed getAllTasks data, unlike display-only parsing.
+
+        The vendor can return list/tasks/rows/data wrappers or a single task.
+        Empty lists are allowed; unknown/malformed rows are *not* evidence that
+        the old task is absent.
+        """
+        for _depth in range(5):
+            if isinstance(value, list):
+                if any(not isinstance(row, dict) or not any(
+                        str(row.get(field) or "").strip()
+                        for field in ("taskid", "task_id", "order_id"))
+                        for row in value):
+                    return None
+                return value
+            if not isinstance(value, dict):
+                return None
+            wrapped = next((field for field in ("list", "tasks", "rows", "data")
+                            if field in value), None)
+            if wrapped:
+                value = value[wrapped]
+                continue
+            if any(str(value.get(field) or "").strip()
+                   for field in ("taskid", "task_id", "order_id")):
+                return [value]
+            return None
+        return None
+
     def manual_retry_missing(self, job_id, key, vendor_taskid, confirmation, actor):
         """Operator-attested UNKNOWN recovery; never auto-approved by vendor queue absence.
 
@@ -488,12 +517,11 @@ class PrintService:
                 vendor_data = self.client.get_all_tasks()
             except (VendorDisabled, VendorError, VendorAmbiguous) as exc:
                 raise PrintError("RECONCILE_FAILED", "銳印即時查核失敗，為避免重複列印，本次沒有解鎖", 503) from exc
-            if not (isinstance(vendor_data, list) or
-                    (isinstance(vendor_data, dict) and
-                     any(name in vendor_data for name in ("list", "tasks", "rows", "data", "taskid", "order_id")))):
+            verified_rows = self._strict_vendor_task_rows(vendor_data)
+            if verified_rows is None:
                 raise PrintError("RECONCILE_FAILED", "銳印清單格式無法驗證，禁止人工解鎖", 503)
             matches = [
-                row for row in self._task_rows(vendor_data)
+                row for row in verified_rows
                 if (str(row.get("taskid") or row.get("task_id") or "") == vendor_taskid
                     or str(row.get("order_id") or "") in (
                         vendor_order_identity(prior), str(prior["order_id"])))
