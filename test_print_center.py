@@ -322,6 +322,30 @@ class PrintCenterTests(unittest.TestCase):
         self.assertEqual(len([p for p,_ in self.fake.calls if p=="/api/Device/receiveTask"]), 2)
         self.assertEqual(app.commerce.read(), before_commerce)
 
+    def test_manual_missing_retry_crash_after_audit_is_resumable_by_same_key(self):
+        old=self._unknown_accepted_job(taskid="operator-crash-resume-old")
+        payload={"job_id":old["id"],"vendor_taskid":old["vendor_taskid"],
+                 "operator_confirmation":"VERIFIED_RUIYIN_HISTORY_AND_NO_PHYSICAL_OUTPUT"}
+        key="operator-crash-resume-key-0001"
+        with mock.patch.object(app.print_center,"_create_prepared_attempt",
+                               side_effect=RuntimeError("fixture crash after operator audit")):
+            first=self.post("manual-missing-retry",payload,key=key)
+        self.assertEqual((first.status_code,first.get_json()["code"]),(503,"PRINT_UNAVAILABLE"))
+        self.assertEqual(app.print_center.store.job(old["id"])["state"],"CANCELED")
+        event=app.print_center.store.event("print_events","operator-missing:"+key)
+        self.assertEqual(event["payload_json"]["vendor_taskid"],old["vendor_taskid"])
+        self.assertEqual(len(app.print_center.store.jobs_for_order(self.order_id)),1)
+        # A same-key replay uses persisted audit rather than requiring another
+        # vendor decision or creating multiple attempts.
+        self.fake.responses["/api/Device/getAllTasks"]={"code":0,"data":{"list":[]}}
+        again=self.post("manual-missing-retry",payload,key=key)
+        self.assertEqual(again.status_code,200,again.get_data(as_text=True))
+        latest=again.get_json()["job"]
+        self.assertEqual((latest["attempt_no"],latest["state"]),(2,"PREPARED"))
+        self.assertEqual(len(app.print_center.store.jobs_for_order(self.order_id)),2)
+        replay=self.post("manual-missing-retry",payload,key=key)
+        self.assertEqual(replay.get_json()["job"]["id"],latest["id"])
+
     def test_manual_missing_unknown_requires_auth_attestation_and_exact_taskid(self):
         old = self._unknown_accepted_job()
         payload={"job_id":old["id"],"vendor_taskid":old["vendor_taskid"],
