@@ -2958,12 +2958,14 @@ def order_print_workspace_test(browser, base, poll):
     page.evaluate("async () => await window.refreshOrders(true)")
     poll(page, "() => document.querySelectorAll('.bf-order-card').length===9 && !!document.querySelector('[data-order-action=print-retry]')")
     assert page.locator('[data-order-action="print-retry"]').count()==1
-    assert page.locator('[data-order-action="print-manual-retry"]').count()==1
-    assert page.locator('[data-order-id="CARD-UNKNOWN-ACK"][data-order-action="print-manual-retry"]').count()==1
-    assert page.locator('[data-order-id="CARD-UNKNOWN"][data-order-action="print-manual-retry"]').count()==0
-    for order_id in ('CARD-UNKNOWN','CARD-QUEUED'):
-        assert page.locator(f'[data-order-id="{order_id}"][data-order-action="print-reconcile"]').count()==1
+    assert page.locator('[data-order-action="print-resend"]').count()==3
+    assert page.locator('[data-order-action="print-reconcile"]').count()==0
+    assert page.locator('[data-order-action="print-manual-retry"]').count()==0
+    for order_id in ('CARD-UNKNOWN','CARD-UNKNOWN-ACK','CARD-QUEUED'):
+        target=page.locator(f'[data-order-id="{order_id}"][data-order-action="print-resend"]')
+        assert target.count()==1 and '重新送任務' in target.inner_text(), order_id
     for order_id in ('CARD-PRINTING','CARD-COMPLETED','CARD-OLD-PHYSICAL'):
+        assert page.locator(f'[data-order-id="{order_id}"][data-order-action="print-resend"]').count()==0
         assert page.locator(f'[data-order-id="{order_id}"][data-order-action="print-retry"]').count()==0
     physical_snapshot = page.evaluate("""() => {
       const cards=[...document.querySelectorAll('.bf-order-card')];
@@ -2973,20 +2975,20 @@ def order_print_workspace_test(browser, base, poll):
     assert physical_snapshot['blocked'] and not physical_snapshot['busy'], physical_snapshot
 
     page.locator('[data-order-action="print-prepare"]').click()
-    poll(page, "() => !!document.querySelector('[data-order-action=print-reconcile][data-order-id=\"CARD-NOJOB\"]')")
+    poll(page, "() => !!document.querySelector('[data-order-action=print-resend][data-order-id=\"CARD-NOJOB\"]')")
     assert [(op,p.get('order_id') or p.get('job_id')) for op,p in api_calls[-2:]] == [
         ('prepare','CARD-NOJOB'),('send','JOB-CARD-NOJOB-FIRST')]
     page.locator('[data-order-action="print-send"]').click()
-    poll(page, "() => !!document.querySelector('[data-order-action=print-reconcile][data-order-id=\"CARD-PREPARED\"]')")
+    poll(page, "() => !!document.querySelector('[data-order-action=print-resend][data-order-id=\"CARD-PREPARED\"]')")
     assert api_calls[-1][0]=='send' and api_calls[-1][1]['job_id']=='JOB-CARD-PREPARED'
     page.locator('[data-order-action="print-retry"]').click()
-    poll(page, "() => !!document.querySelector('[data-order-action=print-reconcile][data-order-id=\"CARD-FAILED\"]')")
+    poll(page, "() => !!document.querySelector('[data-order-action=print-resend][data-order-id=\"CARD-FAILED\"]')")
     assert [entry[0] for entry in api_calls[-2:]] == ['retry','send']
     assert statuses['CARD-FAILED']['attempt_no']==2
     assert all(entry[0]!='start' for entry in api_calls)
     dialogs.clear()
-    page.locator('[data-order-id="CARD-UNKNOWN-ACK"][data-order-action="print-manual-retry"]').click()
-    # UNKNOWN already had a reconcile button; wait for the *second* attempt
+    page.locator('[data-order-id="CARD-UNKNOWN-ACK"][data-order-action="print-resend"]').click()
+    # UNKNOWN had a vendor Task ID; wait for the second attempt (after manual attestation)
     # instead of mistaking the old card for a completed asynchronous send.
     poll(page, """() => [...document.querySelectorAll('.bf-order-card')].some(card =>
       card.querySelector('.bf-order-id')?.textContent.includes('CARD-UNKNOWN-ACK')
@@ -2995,10 +2997,22 @@ def order_print_workspace_test(browser, base, poll):
     assert [entry[0] for entry in api_calls[-2:]] == ['manual-missing-retry','send'],api_calls[-2:]
     assert statuses['CARD-UNKNOWN-ACK']['attempt_no']==2,statuses['CARD-UNKNOWN-ACK']
     assert statuses['CARD-UNKNOWN-ACK']['vendor_taskid']=='vendor-JOB-CARD-UNKNOWN-ACK-RETRY'
-    assert len(dialogs)==3 and any('old-task-for-check' in text for text in dialogs),dialogs
+    # One order-card click starts the same guarded manual attestation;
+    # there is no extra preliminary confirmation, but the old Task ID must be typed.
+    assert len(dialogs)==2 and any('old-task-for-check' in text for text in dialogs),dialogs
+    dialogs.clear()
+    before=len(api_calls)
+    page.locator('[data-order-id="CARD-UNKNOWN"][data-order-action="print-resend"]').click()
+    poll(page, """() => [...document.querySelectorAll('.bf-order-card')].some(card =>
+      card.querySelector('.bf-order-id')?.textContent.includes('CARD-UNKNOWN')
+      && card.querySelector('.bf-order-printstate')?.textContent.includes('等待銳印確認'))""")
+    # Reconcile finding an existing/in-flight task must never auto-create
+    # a second attempt or invoke receiveTask/send.
+    assert [entry[0] for entry in api_calls[before:]]==['reconcile'],api_calls[before:]
+    assert any('無法安全重新送出' in msg for msg in dialogs),dialogs
     assert all(entry[0] not in ('start','pushPrint') for entry in api_calls)
-    print('ADMIN_ORDER_CARD_MANUAL_UNKNOWN_RETRY_WITH_TYPED_TASKID_OK')
-    print('ADMIN_ORDER_CARD_DIRECT_PRINT_RECOVERY_SAFETY_OK')
+    print('ADMIN_ORDER_CARD_SINGLE_ENTRY_MANUAL_UNKNOWN_WITH_TYPED_TASKID_OK')
+    print('ADMIN_ORDER_CARD_RECONCILE_STILL_ACTIVE_NO_DUPLICATE_SEND_OK')
     page.close()
 
 
