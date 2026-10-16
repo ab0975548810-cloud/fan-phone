@@ -2963,7 +2963,7 @@ def order_print_workspace_test(browser, base, poll):
     assert page.locator('[data-order-action="print-manual-retry"]').count()==0
     for order_id in ('CARD-UNKNOWN','CARD-UNKNOWN-ACK','CARD-QUEUED'):
         target=page.locator(f'[data-order-id="{order_id}"][data-order-action="print-resend"]')
-        assert target.count()==1 and '重新送任務' in target.inner_text(), order_id
+        assert target.count()==1 and '重新送任務' in target.inner_text(), (order_id,target.count(),target.all_inner_texts(),[(el.get_attribute('data-order-id'),el.inner_text()) for el in page.locator('[data-order-action="print-resend"]').all()])
     for order_id in ('CARD-PRINTING','CARD-COMPLETED','CARD-OLD-PHYSICAL'):
         assert page.locator(f'[data-order-id="{order_id}"][data-order-action="print-resend"]').count()==0
         assert page.locator(f'[data-order-id="{order_id}"][data-order-action="print-retry"]').count()==0
