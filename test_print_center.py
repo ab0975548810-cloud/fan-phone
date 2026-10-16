@@ -355,10 +355,18 @@ class PrintCenterTests(unittest.TestCase):
             result=self.post("manual-missing-retry",payload)
             self.assertEqual((result.status_code,result.get_json()["code"]),
                              (409,"VENDOR_TASK_STILL_EXISTS"))
-        self.fake.responses["/api/Device/getAllTasks"]={"code":0,"data":{"status":0}}
-        malformed=self.post("manual-missing-retry",payload)
-        self.assertEqual((malformed.status_code,malformed.get_json()["code"]),
-                         (503,"RECONCILE_FAILED"))
+        for malformed_data in (
+            {"status":0},
+            {"list":"invalid"},
+            {"list":[None]},
+            {"list":[{}]},
+            {"list":[{"unexpected":"value"}]},
+            {"data":{"rows":[None]}},
+        ):
+            self.fake.responses["/api/Device/getAllTasks"]={"code":0,"data":malformed_data}
+            malformed=self.post("manual-missing-retry",payload)
+            self.assertEqual((malformed.status_code,malformed.get_json()["code"]),
+                             (503,"RECONCILE_FAILED"),malformed_data)
         self.fake.responses["/api/Device/getAllTasks"]={"code":3}
         rejected=self.post("manual-missing-retry",payload)
         self.assertEqual((rejected.status_code,rejected.get_json()["code"]),
