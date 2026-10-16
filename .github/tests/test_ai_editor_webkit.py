@@ -3003,9 +3003,8 @@ def order_print_workspace_test(browser, base, poll):
     dialogs.clear()
     before=len(api_calls)
     page.locator('[data-order-id="CARD-UNKNOWN"][data-order-action="print-resend"]').click()
-    poll(page, """() => [...document.querySelectorAll('.bf-order-card')].some(card =>
-      card.querySelector('.bf-order-id')?.textContent.includes('CARD-UNKNOWN')
-      && card.querySelector('.bf-order-printstate')?.textContent.includes('等待銳印確認'))""")
+    poll(page, """() => document.querySelector('[data-order-id="CARD-UNKNOWN"][data-order-action="print-resend"]')
+      ?.closest('.bf-order-card')?.querySelector('.bf-order-printstate')?.textContent.includes('等待銳印確認')""")
     # Reconcile finding an existing/in-flight task must never auto-create
     # a second attempt or invoke receiveTask/send.
     assert [entry[0] for entry in api_calls[before:]]==['reconcile'],api_calls[before:]
