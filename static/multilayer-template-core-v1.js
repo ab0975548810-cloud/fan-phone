@@ -25,14 +25,19 @@
     return o;
   }
   function policy(c,o){return c.templateState?.initial?.find(r=>r.templateLayerId===o.templateLayerId)||o;}
-  function allowed(c,o,flag){if(!o?.templateLayerId)return true;const p=policy(c,o);return !p.locked&&p[flag]!==false;}
+  function allowed(c,o,flag){if(!o?.templateLayerId)return true;const p=policy(c,o);
+    // A photo placeholder is intended for the customer to fill, even when
+    // the author has locked the frame's geometry against dragging/resizing.
+    if(flag==='canEdit'&&o.templateSlot&&['slot-guide','slot-photo'].includes(o.role))return true;
+    return !p.locked&&p[flag]!==false;}
   function permissions(c,o,admin=false){
     if(admin){o.set({selectable:true,evented:true,lockMovementX:false,lockMovementY:false,lockScalingX:false,lockScalingY:false,lockRotation:false,editable:true,hasControls:true});return;}
     const p=policy(c,o);FLAGS.forEach(k=>o[k]=p[k]);
     if(!p.canRotate)o.set('angle',p.angle||0);
-    o.set({selectable:!p.locked,evented:!p.locked,lockMovementX:p.locked||!p.canMove,lockMovementY:p.locked||!p.canMove,lockScalingX:p.locked||!p.canScale,lockScalingY:p.locked||!p.canScale,lockRotation:p.locked||!p.canRotate,editable:!p.locked&&p.canEdit,hasControls:!p.locked&&(p.canScale||p.canRotate)});
+    const photoSlot=!!o.templateSlot&&['slot-guide','slot-photo'].includes(o.role);
+    o.set({selectable:photoSlot&&o.role==='slot-photo'?true:!p.locked,evented:photoSlot||!p.locked,lockMovementX:p.locked||!p.canMove,lockMovementY:p.locked||!p.canMove,lockScalingX:p.locked||!p.canScale,lockScalingY:p.locked||!p.canScale,lockRotation:p.locked||!p.canRotate,editable:photoSlot||(!p.locked&&p.canEdit),hasControls:!p.locked&&(p.canScale||p.canRotate)});
     o.setControlsVisibility?.({tl:!!p.canScale,tr:!!p.canScale,bl:!!p.canScale,br:!!p.canScale,mtr:!!p.canRotate,mt:false,mb:false,ml:false,mr:false});
-    if(o.role==='slot-guide'){o.selectable=false;o.evented=!p.locked&&p.canEdit;}
+    if(o.role==='slot-guide'){o.selectable=false;o.evented=true;}
     if(o.role==='editable-sticker-text'){o.lockMovementX=o.lockMovementY=o.lockScalingX=o.lockScalingY=o.lockRotation=true;o.hasControls=false;}
   }
   function update(c){if(c.layer_contract_version!==VERSION)return;core()?.syncAll(c);
