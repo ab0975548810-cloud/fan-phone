@@ -447,6 +447,117 @@ class PrintService:
             })
         return self.store.job(job["id"])
 
+    @staticmethod
+    def _strict_vendor_task_rows(value):
+        """Fail closed for malformed getAllTasks data, unlike display-only parsing.
+
+        The vendor can return list/tasks/rows/data wrappers or a single task.
+        Empty lists are allowed; unknown/malformed rows are *not* evidence that
+        the old task is absent.
+        """
+        for _depth in range(5):
+            if isinstance(value, list):
+                if any(not isinstance(row, dict) or not any(
+                        str(row.get(field) or "").strip()
+                        for field in ("taskid", "task_id", "order_id"))
+                        for row in value):
+                    return None
+                return value
+            if not isinstance(value, dict):
+                return None
+            wrapped = next((field for field in ("list", "tasks", "rows", "data")
+                            if field in value), None)
+            if wrapped:
+                value = value[wrapped]
+                continue
+            if any(str(value.get(field) or "").strip()
+                   for field in ("taskid", "task_id", "order_id")):
+                return [value]
+            return None
+        return None
+
+    def _assert_vendor_tasks_absent(self, attempts):
+        """A fresh, structurally valid vendor pending-list check, never historical proof."""
+        if not self.client.ready:
+            raise PrintError("VENDOR_DISABLED", "銳印目前未連線，禁止重送", 503)
+        try:
+            vendor_data = self.client.get_all_tasks()
+        except (VendorDisabled, VendorError, VendorAmbiguous) as exc:
+            raise PrintError("RECONCILE_FAILED", "銳印即時查核失敗，為避免重複列印，本次沒有解鎖", 503) from exc
+        verified_rows = self._strict_vendor_task_rows(vendor_data)
+        if verified_rows is None:
+            raise PrintError("RECONCILE_FAILED", "銳印清單格式無法驗證，禁止重新推送", 503)
+        for attempt in attempts:
+            taskid = str(attempt.get("vendor_taskid") or "")
+            identity = vendor_order_identity(attempt)
+            for row in verified_rows:
+                remote_task = str(row.get("taskid") or row.get("task_id") or "")
+                remote_order = str(row.get("order_id") or "")
+                if (taskid and remote_task == taskid) or remote_order in (
+                        identity, str(attempt["order_id"])):
+                    raise PrintError("VENDOR_TASK_STILL_EXISTS",
+                                     "銳印雲端仍找到舊任務，禁止重送；請先處理舊 Task ID")
+
+    def manual_retry_missing(self, job_id, key, vendor_taskid, confirmation, actor):
+        """Operator-attested UNKNOWN recovery; never auto-approved by vendor queue absence.
+
+        The vendor only exposes *pending* tasks: an empty list is insufficient
+        without an operator's explicit check of Ruiyin history and output.
+        The SQL/SQLite transition takes the per-order callback/send lock and
+        preserves the accepted old task ID, its raw status and an audit event.
+        The new attempt then uses the existing production-artwork retry path.
+        """
+        if (confirmation != "VERIFIED_RUIYIN_HISTORY_AND_NO_PHYSICAL_OUTPUT"
+                or not str(vendor_taskid or "").strip()):
+            raise PrintError("BAD_CONFIRMATION", "請輸入舊 Task ID 並確認已核對銳印歷史與實體輸出", 400)
+        vendor_taskid = str(vendor_taskid).strip()
+        actor = str(actor or "authenticated_admin")[:100].strip() or "authenticated_admin"
+        prior = self.store.job(job_id)
+        if not prior:
+            raise PrintError("JOB_NOT_FOUND", "找不到原列印嘗試", 404)
+        if str(prior.get("vendor_taskid") or "") != vendor_taskid:
+            raise PrintError("BAD_CONFIRMATION", "輸入的 Task ID 與原列印任務不相符", 400)
+        self._assert_no_prior_physical_activity(prior["order_id"])
+        order = self._order(prior["order_id"])
+        self._assert_order_printable(order)
+
+        # Same key may be retried after a network disconnect or after audit
+        # committed but building a new PREPARED artwork attempt failed.
+        audit_key = "operator-missing:" + key
+        existing = self.store.event("print_events", audit_key)
+        if not existing:
+            latest = self.store.latest_job(prior["order_id"])
+            if not latest or str(latest.get("id") or "") != str(job_id):
+                raise PrintError("STALE_PRINT_ATTEMPT", "列印嘗試已變更，請重新整理", 409)
+            if prior.get("state") != "UNKNOWN" or prior.get("ambiguous_operation"):
+                raise PrintError("RECONCILE_REQUIRED", "只能對已查核、沒有其他歧義的 UNKNOWN 任務進行人工確認")
+            if not prior.get("sent_at") or not prior.get("last_reconciled_at"):
+                raise PrintError("RECONCILE_REQUIRED", "請先執行一次銳印查核，再人工確認")
+            self._assert_vendor_tasks_absent([prior])
+
+        decision = self.store.attest_unknown_missing(
+            job_id, key, vendor_taskid, actor, confirmation)
+        if not decision.get("ok"):
+            code = str(decision.get("code") or "PRINT_UNAVAILABLE")
+            messages = {
+                "REPRINT_REQUIRED": "已發現列印中／完成的證據，禁止重送",
+                "STALE_PRINT_ATTEMPT": "任務已更新，請重新整理",
+                "RECONCILE_REQUIRED": "任務有未釐清狀態，請先查核",
+                "BAD_CONFIRMATION": "人工確認資料不符，請重新核對 Task ID",
+                "IDEMPOTENCY_CONFLICT": "這次操作識別已用於其他確認",
+                "JOB_NOT_FOUND": "找不到原列印任務",
+            }
+            raise PrintError(code, messages.get(code, "人工確認未完成，任務未解鎖"),
+                             503 if code == "PRINT_UNAVAILABLE" else 409)
+
+        self._assert_no_prior_physical_activity(prior["order_id"])
+        latest = self.store.latest_job(prior["order_id"])
+        if (latest and latest["id"] != job_id):
+            if int(latest.get("attempt_no") or 0) == int(prior.get("attempt_no") or 0) + 1:
+                return latest
+            raise PrintError("STALE_PRINT_ATTEMPT", "這筆訂單已有其他較新的列印任務")
+        return self._create_prepared_attempt(prior["order_id"])
+
     def save_model_profiles(self, payload):
         shop = payload.get("shop_data")
         model_id = str(payload.get("model_id") or "").strip()
@@ -574,6 +685,16 @@ class PrintService:
         self._assert_style_configured(order)
         if not self.vendor_ready:
             raise PrintError("VENDOR_NOT_READY", "雲打印憑證、HTTPS public URL 或生產圖密鑰尚未完整設定", 503)
+        # For operator-confirmed missing attempts, perform one more vendor
+        # presence check just before the new vendor submission. An old task
+        # can reappear after the operator's earlier check.
+        older_confirmed = [
+            attempt for attempt in self.store.jobs_for_order(job["order_id"])
+            if int(attempt.get("attempt_no") or 0) < int(job.get("attempt_no") or 0)
+            and attempt.get("ambiguous_operation") == "operator_confirmed_missing"
+        ]
+        if older_confirmed:
+            self._assert_vendor_tasks_absent(older_confirmed)
         base = self._base_url()
         self._token_secret()
         owner, prior = self.store.claim_request(key, "send", job_id, fingerprint)
@@ -903,6 +1024,9 @@ class PrintService:
                     "profile_complete": bool(job.get("profile_complete")),
                     "vendor_taskid": job.get("vendor_taskid"),
                     "vendor_raw_status": job.get("vendor_raw_status"),
+                    "sent_at": job.get("sent_at"),
+                    "last_reconciled_at": job.get("last_reconciled_at"),
+                    "reconcile_count": job.get("reconcile_count"),
                     "ambiguous_operation": job.get("ambiguous_operation"),
                     "started_at": job.get("started_at"),
                     "completed_at": job.get("completed_at"),
@@ -1097,6 +1221,20 @@ def install(app_module):
     def print_retry():
         payload = body()
         job = service.retry(str(payload.get("job_id") or ""), key(payload))
+        return app_module.no_cache_json({"status": "success", "job": _public_job(job)})
+
+    @app.route("/api/admin/print/manual-missing-retry", methods=["POST"])
+    @guarded
+    def print_manual_missing_retry():
+        payload = body()
+        actor = (session.get("admin_user") or session.get("username")
+                 or session.get("employee_name") or "authenticated_admin")
+        job = service.manual_retry_missing(
+            str(payload.get("job_id") or ""), key(payload),
+            str(payload.get("vendor_taskid") or ""),
+            str(payload.get("operator_confirmation") or ""),
+            str(actor),
+        )
         return app_module.no_cache_json({"status": "success", "job": _public_job(job)})
 
     @app.route("/api/admin/print/profile-snapshot", methods=["POST"])

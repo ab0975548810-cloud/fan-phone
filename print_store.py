@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import uuid
 from contextlib import contextmanager
@@ -298,6 +299,82 @@ class PrintStore:
             or job.get("completed_at")
             or str(job.get("ambiguous_operation") or "") == "prior_attempt_activity"
         )
+
+    def attest_unknown_missing(self, job_id, request_key, vendor_taskid, operator, confirmation):
+        """Atomically persist operator attestation and release UNKNOWN, never send.
+
+        Supabase uses the same per-order advisory lock as callback/send/reconcile.
+        SQLite uses one BEGIN IMMEDIATE transaction. Both leave old vendor identity
+        and raw status untouched; the next attempt uses the normal retry pipeline.
+        """
+        if (not re.fullmatch(r"[A-Za-z0-9_-]{16,100}", str(request_key or ""))
+                or confirmation != "VERIFIED_RUIYIN_HISTORY_AND_NO_PHYSICAL_OUTPUT"
+                or not vendor_taskid or not (1 <= len(str(operator or "")) <= 100)):
+            return {"ok": False, "code": "BAD_CONFIRMATION"}
+        if self.app.USE_SUPABASE:
+            data = self.app.SUPABASE.rpc("attest_print_unknown_missing", {
+                "p_job_id": job_id, "p_request_key": request_key,
+                "p_vendor_taskid": vendor_taskid, "p_operator": operator,
+                "p_confirmation": confirmation,
+            }).execute().data
+            return data if isinstance(data, dict) else {"ok": False, "code": "PRINT_UNAVAILABLE"}
+
+        event_key = "operator-missing:" + request_key
+        with self.connection(True) as db:
+            job = self._decode(db.execute(
+                "SELECT * FROM print_jobs WHERE id=?", (job_id,)).fetchone())
+            if not job:
+                return {"ok": False, "code": "JOB_NOT_FOUND"}
+            latest = self._decode(db.execute(
+                "SELECT * FROM print_jobs WHERE order_id=? ORDER BY attempt_no DESC LIMIT 1",
+                (job["order_id"],)).fetchone())
+            existing = self._decode(db.execute(
+                "SELECT * FROM print_events WHERE event_key=?", (event_key,)).fetchone())
+            if existing:
+                payload = existing.get("payload_json") or {}
+                if (existing.get("job_id") != job_id
+                        or existing.get("event_type") != "OPERATOR_CONFIRMED_MISSING"
+                        or payload.get("vendor_taskid") != vendor_taskid
+                        or payload.get("operator") != operator):
+                    return {"ok": False, "code": "IDEMPOTENCY_CONFLICT"}
+                return {"ok": True, "code": "OK", "replay": True,
+                        "job": job, "latest": latest}
+            if latest["id"] != job_id:
+                return {"ok": False, "code": "STALE_PRINT_ATTEMPT"}
+            if job["state"] != "UNKNOWN" or job.get("ambiguous_operation"):
+                return {"ok": False, "code": "RECONCILE_REQUIRED"}
+            if job.get("vendor_taskid") != vendor_taskid or not job.get("sent_at"):
+                return {"ok": False, "code": "BAD_CONFIRMATION"}
+            if not job.get("last_reconciled_at") or not int(job.get("reconcile_count") or 0):
+                return {"ok": False, "code": "RECONCILE_REQUIRED"}
+            attempts = [self._decode(row) for row in db.execute(
+                "SELECT * FROM print_jobs WHERE order_id=?", (job["order_id"],))]
+            if any(self._physical_evidence(attempt) for attempt in attempts):
+                return {"ok": False, "code": "REPRINT_REQUIRED"}
+            now = utcnow()
+            warning = ("操作員已核對銳印待列印、歷史、完成及實體輸出，確認找不到原 Task ID；"
+                       "此操作有重複出墨風險，原銳印 Task ID 與證據均保留")
+            payload = {
+                "vendor_taskid": vendor_taskid, "operator": operator,
+                "confirmation": confirmation, "reconciled_at": job.get("last_reconciled_at"),
+                "reconcile_count": job.get("reconcile_count"),
+                "vendor_lookup": "no_matching_pending_tasks",
+                "original_state": job["state"], "original_attempt_no": job["attempt_no"],
+                "warning": "Operator attestation is not evidence that vendor never accepted a task",
+            }
+            db.execute("""INSERT INTO print_events
+                (id,job_id,event_key,event_type,raw_status,raw_message,payload_json,created_at)
+                VALUES (?,?,?,?,?,?,?,?)""",
+                (str(uuid.uuid4()), job_id, event_key, "OPERATOR_CONFIRMED_MISSING",
+                 job.get("vendor_raw_status"), warning[:500],
+                 json.dumps(payload, ensure_ascii=False), now))
+            db.execute("""UPDATE print_jobs SET state='CANCELED',canceled_at=?,
+                ambiguous_operation='operator_confirmed_missing',last_error=?,updated_at=?
+                WHERE id=? AND state='UNKNOWN'""", (now, warning[:500], now, job_id))
+            updated = self._decode(db.execute(
+                "SELECT * FROM print_jobs WHERE id=?", (job_id,)).fetchone())
+            return {"ok": True, "code": "OK", "replay": False,
+                    "job": updated, "latest": updated}
 
     def claim_send_if_safe(self, job_id, *, nonce, expires_at, device_id):
         """Atomically claim PREPARED -> SENDING under the order safety lock."""

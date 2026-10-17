@@ -264,6 +264,189 @@ class PrintCenterTests(unittest.TestCase):
         self.assertFalse(any(path in ("/api/Device/receiveTask", "/api/Device/startPrint", "/api/Device/pushPrint")
                              for path, _ in self.fake.calls))
 
+    def _unknown_accepted_job(self, *, taskid="operator-old-task"):
+        """An accepted vendor task disappears from pending queue, without callback."""
+        self.save_profile()
+        job = self.prepare()
+        sent = self.send(job["id"], taskid=taskid)
+        self.assertEqual(sent.status_code, 200, sent.get_data(as_text=True))
+        self.fake.responses["/api/Device/getAllTasks"] = {
+            "code": 0, "data": {"list": []}}
+        reconciled = self.post("reconcile", {"job_id": job["id"]})
+        self.assertEqual(reconciled.status_code, 200, reconciled.get_data(as_text=True))
+        current = app.print_center.store.job(job["id"])
+        self.assertEqual((current["state"], current["vendor_taskid"]), ("UNKNOWN", taskid))
+        self.assertEqual(current["reconcile_count"], 1)
+        return current
+
+    def test_manual_missing_unknown_creates_one_audited_retry_without_new_order(self):
+        old = self._unknown_accepted_job()
+        before_order = copy.deepcopy(app.commerce.store.order(self.order_id))
+        before_commerce = copy.deepcopy(app.commerce.read())
+        confirms = {
+            "job_id": old["id"],
+            "vendor_taskid": old["vendor_taskid"],
+            "operator_confirmation": "VERIFIED_RUIYIN_HISTORY_AND_NO_PHYSICAL_OUTPUT",
+        }
+        # Ordinary retry cannot be used as a shortcut through UNKNOWN.
+        blocked = self.retry(old["id"])
+        self.assertEqual(blocked.get_json()["code"], "RECONCILE_REQUIRED")
+        key = "operator-missing-confirm-0001"
+        result = self.post("manual-missing-retry", confirms, key=key)
+        self.assertEqual(result.status_code, 200, result.get_data(as_text=True))
+        new = result.get_json()["job"]
+        self.assertEqual((new["attempt_no"], new["state"], new["vendor_taskid"]),
+                         (2, "PREPARED", None))
+        stored_old = app.print_center.store.job(old["id"])
+        self.assertEqual((stored_old["state"],stored_old["vendor_taskid"],stored_old["ambiguous_operation"]),
+                         ("CANCELED", old["vendor_taskid"], "operator_confirmed_missing"))
+        event = app.print_center.store.event("print_events", "operator-missing:"+key)
+        self.assertEqual((event["event_type"], event["payload_json"]["vendor_taskid"]),
+                         ("OPERATOR_CONFIRMED_MISSING", old["vendor_taskid"]))
+        self.assertEqual(app.commerce.store.order(self.order_id), before_order)
+        self.assertEqual(app.commerce.read(), before_commerce)
+        self.assertEqual([x["id"] for x in app.print_center.store.jobs_for_order(self.order_id)],
+                         [new["id"], old["id"]])
+
+        # The confirmation endpoint never calls receiveTask or startPrint.
+        remote_calls = [path for path, _ in self.fake.calls if path=="/api/Device/receiveTask"]
+        self.assertEqual(len(remote_calls), 1)
+        self.assertFalse(any(path in ("/api/Device/startPrint","/api/Device/pushPrint") for path,_ in self.fake.calls))
+        replay = self.post("manual-missing-retry", confirms, key=key)
+        self.assertEqual(replay.get_json()["job"]["id"], new["id"])
+        self.assertEqual(len(app.print_center.store.jobs_for_order(self.order_id)), 2)
+
+        sent = self.send(new["id"],key="operator-second-send-0001",taskid="operator-new-task")
+        self.assertEqual(sent.status_code, 200, sent.get_data(as_text=True))
+        self.assertEqual(sent.get_json()["job"]["vendor_taskid"],"operator-new-task")
+        self.assertEqual(len([p for p,_ in self.fake.calls if p=="/api/Device/receiveTask"]), 2)
+        self.assertEqual(app.commerce.read(), before_commerce)
+
+    def test_manual_missing_retry_crash_after_audit_is_resumable_by_same_key(self):
+        old=self._unknown_accepted_job(taskid="operator-crash-resume-old")
+        payload={"job_id":old["id"],"vendor_taskid":old["vendor_taskid"],
+                 "operator_confirmation":"VERIFIED_RUIYIN_HISTORY_AND_NO_PHYSICAL_OUTPUT"}
+        key="operator-crash-resume-key-0001"
+        with mock.patch.object(app.print_center,"_create_prepared_attempt",
+                               side_effect=RuntimeError("fixture crash after operator audit")):
+            first=self.post("manual-missing-retry",payload,key=key)
+        self.assertEqual((first.status_code,first.get_json()["code"]),(503,"PRINT_UNAVAILABLE"))
+        self.assertEqual(app.print_center.store.job(old["id"])["state"],"CANCELED")
+        event=app.print_center.store.event("print_events","operator-missing:"+key)
+        self.assertEqual(event["payload_json"]["vendor_taskid"],old["vendor_taskid"])
+        self.assertEqual(len(app.print_center.store.jobs_for_order(self.order_id)),1)
+        # A same-key replay uses persisted audit rather than requiring another
+        # vendor decision or creating multiple attempts.
+        self.fake.responses["/api/Device/getAllTasks"]={"code":0,"data":{"list":[]}}
+        again=self.post("manual-missing-retry",payload,key=key)
+        self.assertEqual(again.status_code,200,again.get_data(as_text=True))
+        latest=again.get_json()["job"]
+        self.assertEqual((latest["attempt_no"],latest["state"]),(2,"PREPARED"))
+        self.assertEqual(len(app.print_center.store.jobs_for_order(self.order_id)),2)
+        replay=self.post("manual-missing-retry",payload,key=key)
+        self.assertEqual(replay.get_json()["job"]["id"],latest["id"])
+
+    def test_manual_missing_unknown_requires_auth_attestation_and_exact_taskid(self):
+        old = self._unknown_accepted_job()
+        payload={"job_id":old["id"],"vendor_taskid":old["vendor_taskid"],
+                 "operator_confirmation":"VERIFIED_RUIYIN_HISTORY_AND_NO_PHYSICAL_OUTPUT"}
+        with self.client.session_transaction() as session:
+            session.pop("logged_in",None)
+        forbidden = self.post("manual-missing-retry",payload)
+        self.assertEqual(forbidden.status_code,401)
+        with self.client.session_transaction() as session:
+            session["logged_in"]=True
+
+        for details in (
+            {**payload,"vendor_taskid":"not-the-old-task"},
+            {**payload,"operator_confirmation":""},
+            {**payload,"operator_confirmation":"YES"},
+        ):
+            result=self.post("manual-missing-retry",details)
+            self.assertIn(result.status_code,(400,409),result.get_data(as_text=True))
+        self.assertEqual(app.print_center.store.job(old["id"])["state"],"UNKNOWN")
+        self.assertIsNone(app.print_center.store.latest_job(self.order_id)["completed_at"])
+
+    def test_manual_missing_unknown_refuses_vendor_match_and_malformed_or_failed_lookup(self):
+        old=self._unknown_accepted_job()
+        payload={"job_id":old["id"],"vendor_taskid":old["vendor_taskid"],
+                 "operator_confirmation":"VERIFIED_RUIYIN_HISTORY_AND_NO_PHYSICAL_OUTPUT"}
+        for response in (
+            {"code":0,"data":{"list":[{"taskid":old["vendor_taskid"],"status":0}]}},
+            {"code":0,"data":{"list":[{"order_id":vendor_order_identity(old),"status":0}]}},
+        ):
+            self.fake.responses["/api/Device/getAllTasks"]=response
+            result=self.post("manual-missing-retry",payload)
+            self.assertEqual((result.status_code,result.get_json()["code"]),
+                             (409,"VENDOR_TASK_STILL_EXISTS"))
+        for malformed_data in (
+            {"status":0},
+            {"list":"invalid"},
+            {"list":[None]},
+            {"list":[{}]},
+            {"list":[{"unexpected":"value"}]},
+            {"data":{"rows":[None]}},
+        ):
+            self.fake.responses["/api/Device/getAllTasks"]={"code":0,"data":malformed_data}
+            malformed=self.post("manual-missing-retry",payload)
+            self.assertEqual((malformed.status_code,malformed.get_json()["code"]),
+                             (503,"RECONCILE_FAILED"),malformed_data)
+        self.fake.responses["/api/Device/getAllTasks"]={"code":3}
+        rejected=self.post("manual-missing-retry",payload)
+        self.assertEqual((rejected.status_code,rejected.get_json()["code"]),
+                         (503,"RECONCILE_FAILED"))
+        self.assertEqual(app.print_center.store.job(old["id"])["state"],"UNKNOWN")
+        self.assertIsNone(app.print_center.store.event("print_events","operator-missing:do-not-exist"))
+
+    def test_manual_missing_new_send_checks_old_vendor_task_again(self):
+        old=self._unknown_accepted_job(taskid="operator-task-reappears")
+        payload={"job_id":old["id"],"vendor_taskid":old["vendor_taskid"],
+                 "operator_confirmation":"VERIFIED_RUIYIN_HISTORY_AND_NO_PHYSICAL_OUTPUT"}
+        prepared=self.post("manual-missing-retry",payload,key="operator-verify-again-0001")
+        self.assertEqual(prepared.status_code,200,prepared.get_data(as_text=True))
+        new=prepared.get_json()["job"]
+        before=len([path for path,_ in self.fake.calls if path=="/api/Device/receiveTask"])
+        # Even if the operator's first lookup was empty, the old task may
+        # reappear before the fresh send. Fail closed without vendor receive.
+        self.fake.responses["/api/Device/getAllTasks"]={
+            "code":0,"data":{"list":[{"taskid":old["vendor_taskid"],"status":0}]}}
+        blocked=self.send(new["id"],key="operator-reappear-send-0001")
+        self.assertEqual((blocked.status_code,blocked.get_json()["code"]),
+                         (409,"VENDOR_TASK_STILL_EXISTS"))
+        self.assertEqual(len([path for path,_ in self.fake.calls if path=="/api/Device/receiveTask"]),before)
+        self.assertEqual(app.print_center.store.job(new["id"])["state"],"PREPARED")
+        self.fake.responses["/api/Device/getAllTasks"]={
+            "code":0,"data":{"list":[{"strange":"unparseable"}]}}
+        malformed=self.send(new["id"],key="operator-reappear-malformed-0001")
+        self.assertEqual((malformed.status_code,malformed.get_json()["code"]),
+                         (503,"RECONCILE_FAILED"))
+        self.assertEqual(len([path for path,_ in self.fake.calls if path=="/api/Device/receiveTask"]),before)
+        # Once the operator rechecks and the cloud list is definitively empty,
+        # the existing send safety RPC still decides whether dispatch is safe.
+        self.fake.responses["/api/Device/getAllTasks"]={"code":0,"data":{"list":[]}}
+        delivered=self.send(new["id"],key="operator-reappear-send-0002",taskid="operator-new-task")
+        self.assertEqual(delivered.status_code,200,delivered.get_data(as_text=True))
+        self.assertEqual(len([path for path,_ in self.fake.calls if path=="/api/Device/receiveTask"]),before+1)
+
+    def test_manual_missing_unknown_late_physical_callback_blocks_new_send(self):
+        old=self._unknown_accepted_job(taskid="manual-late-physical")
+        payload={"job_id":old["id"],"vendor_taskid":old["vendor_taskid"],
+                 "operator_confirmation":"VERIFIED_RUIYIN_HISTORY_AND_NO_PHYSICAL_OUTPUT"}
+        result=self.post("manual-missing-retry",payload,key="late-physical-confirm-0001")
+        self.assertEqual(result.status_code,200,result.get_data(as_text=True))
+        new=result.get_json()["job"]
+        callback=self.callback(old["vendor_taskid"],1,"old task actually printing")
+        self.assertEqual(callback.status_code,200,callback.get_data(as_text=True))
+        old_updated=app.print_center.store.job(old["id"])
+        latest=app.print_center.store.job(new["id"])
+        self.assertTrue(old_updated["started_at"])
+        self.assertEqual(latest["ambiguous_operation"],"prior_attempt_activity")
+        before=len([p for p,_ in self.fake.calls if p=="/api/Device/receiveTask"])
+        blocked=self.send(new["id"],key="late-blocked-send-0001")
+        self.assertEqual((blocked.status_code,blocked.get_json()["code"]),
+                         (409,"REPRINT_REQUIRED"))
+        self.assertEqual(len([p for p,_ in self.fake.calls if p=="/api/Device/receiveTask"]),before)
+
     def test_retry_state_rules_void_and_preflight_fail_closed(self):
         self.save_profile()
         expectations = {

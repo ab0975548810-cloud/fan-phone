@@ -268,6 +268,114 @@ for race_index in range(12):
     race_atomic_reconcile_and_callback(race_index)
 
 
+
+# Unknown vendor task accepted by API, missing in Ruiyin pending queue. An
+# operator confirmation transitions UNKNOWN -> CANCELED atomically, without
+# deleting the prior vendor ID, and only a distinct new attempt may be sent.
+CONFIRMATION = "VERIFIED_RUIYIN_HISTORY_AND_NO_PHYSICAL_OUTPUT"
+ACK_RPC = "select public.attest_print_unknown_missing(%s,%s,%s,%s,%s)"
+
+
+def operator_unknown_fixture(label):
+    order_id = "operator-unknown-" + label
+    job_id = str(uuid.uuid4())
+    taskid = "old-operator-task-" + label
+    with psycopg.connect(DSN) as db:
+        db.execute("""insert into public.print_jobs
+          (id,order_id,attempt_no,artwork_path,artwork_token_nonce,state,
+           vendor_taskid,sent_at,reconcile_count,last_reconciled_at,vendor_raw_status)
+          values (%s,%s,1,'fixture.png','old-token','UNKNOWN',%s,now(),2,now(),'0')""",
+                   (job_id,order_id,taskid))
+    return order_id,job_id,taskid
+
+
+operator_order,operator_id,operator_task=operator_unknown_fixture("audit")
+with psycopg.connect(DSN) as db:
+    first = db.execute(ACK_RPC,(
+        operator_id,"manual-operator-retry-0001",operator_task,
+        "authenticated_admin",CONFIRMATION)).fetchone()[0]
+    second = db.execute(ACK_RPC,(
+        operator_id,"manual-operator-retry-0001",operator_task,
+        "authenticated_admin",CONFIRMATION)).fetchone()[0]
+    bad_key = db.execute(ACK_RPC,(
+        operator_id,"manual-operator-retry-0001","wrong-task",
+        "authenticated_admin",CONFIRMATION)).fetchone()[0]
+    rows = db.execute("""select event_type,payload_json->>'vendor_taskid',created_at
+        from public.print_events where job_id=%s""",(operator_id,)).fetchall()
+    old = db.execute("""select state,vendor_taskid,vendor_raw_status,
+        ambiguous_operation, canceled_at is not null from public.print_jobs where id=%s""",
+        (operator_id,)).fetchone()
+assert first["ok"] is True and first["replay"] is False, first
+assert second["ok"] is True and second["replay"] is True, second
+assert bad_key == {"ok":False,"code":"IDEMPOTENCY_CONFLICT"},bad_key
+assert len(rows)==1 and rows[0][0:2]==("OPERATOR_CONFIRMED_MISSING",operator_task),rows
+assert old==("CANCELED",operator_task,"0","operator_confirmed_missing",True),old
+
+# A late callback from the old confirmed-missing vendor task still quarantines
+# the new attempt under the existing callback/claim advisory lock contract.
+new_id=str(uuid.uuid4())
+with psycopg.connect(DSN) as db:
+    db.execute("""insert into public.print_jobs
+        (id,order_id,attempt_no,artwork_path,artwork_token_nonce,state)
+        values (%s,%s,2,'fixture.png','retry-token','PREPARED')""",
+       (new_id,operator_order))
+    callback=db.execute("select public.apply_print_callback_safely(%s,'1','unexpected printing')",
+                        (operator_id,)).fetchone()[0]
+    denied=db.execute("select public.claim_print_send_if_safe(%s,'new-token',now()+interval '1 day','device')",
+                      (new_id,)).fetchone()[0]
+    recent=db.execute("""select state,ambiguous_operation from public.print_jobs where id=%s""",
+                      (new_id,)).fetchone()
+assert callback["superseded"] is True,callback
+assert denied=={"ok":False,"code":"REPRINT_REQUIRED"},denied
+assert recent==("CANCELED","prior_attempt_activity"),recent
+
+
+def race_operator_attestation_vs_physical_callback(idx):
+    order_id,job_id,taskid=operator_unknown_fixture("race-"+str(idx))
+    barrier=threading.Barrier(2)
+    def manual_ack():
+        barrier.wait()
+        with psycopg.connect(DSN) as db:
+            return db.execute(ACK_RPC,(
+                job_id, "race-operator-"+str(idx)+"-00000000",
+                taskid,"authenticated_admin",CONFIRMATION)).fetchone()[0]
+    def late_callback():
+        barrier.wait()
+        with psycopg.connect(DSN) as db:
+            return db.execute(
+                "select public.apply_print_callback_safely(%s,'1','printing')",
+                (job_id,)).fetchone()[0]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        ack,callback=list(pool.map(lambda fn: fn(),(manual_ack,late_callback)))
+    assert callback["ok"] is True,callback
+    with psycopg.connect(DSN) as db:
+        old=db.execute("""select state,started_at is not null,vendor_taskid,
+            vendor_raw_status from public.print_jobs where id=%s""",(job_id,)).fetchone()
+        count=db.execute("""select count(*) from public.print_events
+            where job_id=%s and event_type='OPERATOR_CONFIRMED_MISSING'""",
+            (job_id,)).fetchone()[0]
+    assert old[1] is True and old[2] == taskid and old[3] == "1",old
+    if ack["ok"]:
+        assert old[0]=="CANCELED" and count==1,(ack,old,count)
+    else:
+        assert ack["code"] in ("REPRINT_REQUIRED","RECONCILE_REQUIRED"),ack
+        assert count==0,(ack,count)
+
+
+for race_index in range(8):
+    race_operator_attestation_vs_physical_callback(race_index)
+
+# No exact Task ID, no reconciliation or any physical activity means no ack.
+no_reconcile_order,no_reconcile_id,no_reconcile_task=operator_unknown_fixture("no-reconcile")
+with psycopg.connect(DSN) as db:
+    db.execute("update public.print_jobs set last_reconciled_at=null,reconcile_count=0 where id=%s",
+               (no_reconcile_id,))
+    rejected=db.execute(ACK_RPC,(
+        no_reconcile_id,"operator-reconcile-required",no_reconcile_task,
+        "authenticated_admin",CONFIRMATION)).fetchone()[0]
+assert rejected=={"ok":False,"code":"RECONCILE_REQUIRED"},rejected
+print("PRINT_OPERATOR_UNKNOWN_ATTESTATION_ATOMIC_OK")
+
 class _Result:
     def __init__(self, data):
         self.data = data
