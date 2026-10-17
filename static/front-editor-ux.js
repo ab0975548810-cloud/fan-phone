@@ -7,7 +7,7 @@
   function activeObject(){
     try{return (typeof canvas!=='undefined'&&canvas)?canvas.getActiveObject():null}catch(e){return null}
   }
-  function isAiImage(o){return !!(o&&o.type==='image'&&o.aiBackgroundRemoved)}
+  function isAiImage(o){return !!(o&&((o.type==='image'&&(o.aiBackgroundRemoved||['sticker','template-sticker'].includes(o.role)||o.stickerId))||(['text','textbox','i-text'].includes(o.type)&&o.role==='sticker')))}
 
   function ensureStyles(){
     if(document.getElementById('bf-editor-ux-style'))return;
@@ -50,7 +50,7 @@
     bar.classList.add('bf-docked-object-bar');
     if(!document.getElementById('bf-ai-outline-btn')){
       const b=document.createElement('button');
-      b.id='bf-ai-outline-btn';b.type='button';b.title='AI 去背描邊';
+      b.id='bf-ai-outline-btn';b.type='button';b.title='圖片／貼紙描邊';
       b.innerHTML='<i class="fa-solid fa-border-style"></i>描邊';
       b.onclick=()=>window.openAiOutlineSheet?.();
       const del=[...bar.querySelectorAll('button')].find(x=>/deleteActive/.test(x.getAttribute('onclick')||''));
@@ -84,7 +84,7 @@
 
   window.openAiOutlineSheet=function(){
     const o=activeObject();
-    if(!isAiImage(o)){if(typeof toast==='function')toast('請先選取 AI 去背後的圖片');return}
+    if(!isAiImage(o)){if(typeof toast==='function')toast('請先選取圖片或貼紙');return}
     ensureOutlineSheet();updateOutlineSheet();
     if(typeof openSheet==='function')openSheet('sheet-outline');
   };
@@ -135,7 +135,7 @@
   }
 
   async function applyOutline(strength){
-    const o=activeObject();if(!isAiImage(o)){if(typeof toast==='function')toast('請先選取 AI 去背後的圖片');return}
+    const o=activeObject();if(!isAiImage(o)){if(typeof toast==='function')toast('請先選取圖片或貼紙');return}
     const color=document.getElementById('bf-outline-color')?.value||o.aiOutlineColor||'#ffffff';
     const current=o.getSrc?.()||o._element?.src||'';if(!current)return;
     const source=o.aiOutlineSource||current;
