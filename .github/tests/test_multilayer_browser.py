@@ -56,9 +56,32 @@ def multilayer_browser_test(browser,base,poll):
             files=[{'name':f'layer-{i}.png','mimeType':'image/png','buffer':png('#f47ea8' if i%2 else '#9ac8e5')} for i in range(14)]
             admin.locator('#multilayer-files').set_input_files(files)
             poll(admin,'() => visualCanvas.getObjects().filter(o=>o.type===\'image\').length===14',timeout=60000)
+            directional=admin.evaluate("""()=>{
+              const c=visualCanvas,o=c.getObjects().find(x=>x.type==='image');c.setActiveObject(o);
+              const start={center:o.getCenterPoint(),width:o.getScaledWidth(),height:o.getScaledHeight(),scaleX:o.scaleX,scaleY:o.scaleY};
+              const right=BenfuwanAdminTemplateControls.nudge('right');
+              const down=BenfuwanAdminTemplateControls.nudge('down');
+              const stop=o.getCenterPoint();
+              BenfuwanAdminTemplateControls.nudge('left');BenfuwanAdminTemplateControls.nudge('up');
+              return {right,down,dx:stop.x-start.center.x,dy:stop.y-start.center.y,
+                width:o.getScaledWidth(),height:o.getScaledHeight(),scaleX:o.scaleX,scaleY:o.scaleY,
+                before:start,moveCorner:o.controls.br?.actionName,
+                directionButtons:document.querySelectorAll('#bf-tpl-nudge [data-bf-nudge]').length};
+            }""")
+            assert directional['right'] and directional['down'] and directional['dx']==2 and directional['dy']==2,directional
+            assert directional['width']==directional['before']['width'] and directional['height']==directional['before']['height'],directional
+            assert directional['scaleX']==directional['before']['scaleX'] and directional['scaleY']==directional['before']['scaleY'],directional
+            assert directional['moveCorner']=='drag' and directional['directionButtons']==4,directional
+            print('ADMIN_NUDGE_NO_RESIZE_AND_BOTTOM_RIGHT_DRAG_OK')
             for _ in range(12):admin.locator('#bf-tpl-text-v3').click()
             poll(admin,"() => visualCanvas.getObjects().filter(o=>o.type==='textbox').length===12")
             admin.locator('#bf-tpl-slot-v3').click()
+            # A locked placeholder must still permit customer upload,
+            # without allowing the customer to change its dimensions.
+            admin.evaluate("""()=>{const s=visualCanvas.getObjects().find(o=>o.isSlot);
+              s.locked=true;BenfuwanMultilayer.decorate(s,visualCanvas);
+              BenfuwanMultilayer.permissions(visualCanvas,s,true);s.setCoords();
+            }""")
             admin.get_by_role('button',name='加入文字貼紙',exact=True).click();admin.get_by_role('button',name='圖層對話框',exact=True).click()
             poll(admin,'() => visualCanvas.getObjects().length===30')
             # Source authoring layout is deliberately spread across the canvas.
@@ -123,7 +146,15 @@ def multilayer_browser_test(browser,base,poll):
             assert page.evaluate('canvas.getObjects().length')==30
             selected=page.evaluate("""()=>{const out=[];for(const o of canvas.getObjects()){if(!o.locked&&o.role!=='slot-guide'&&o.role!=='editable-sticker-text'){canvas.setActiveObject(o);out.push(canvas.getActiveObject().layerInstanceId)}}return out;}""")
             assert len(selected)>=25 and len(set(selected))==len(selected)
-            assert page.evaluate("canvas.getObjects().filter(o=>o.locked).every(o=>!o.selectable&&!o.evented)")
+            assert page.evaluate("canvas.getObjects().filter(o=>o.locked && o.role!=='slot-guide' && o.role!=='slot-photo').every(o=>!o.selectable&&!o.evented)")
+            photo_slot=page.evaluate("""()=>{
+              const s=canvas.getObjects().find(o=>o.role==='slot-guide'),btn=document.querySelector('#bf-front-slot-actions button');
+              return {exists:!!s,locked:s?.locked,evented:s?.evented,canEdit:s?BenfuwanMultilayer.allowed(canvas,s,'canEdit'):false,
+                button:btn?.textContent,disabled:btn?.disabled};
+            }""")
+            assert photo_slot['exists'] and photo_slot['locked'] and photo_slot['evented'] and photo_slot['canEdit'],photo_slot
+            assert '上傳照片' in photo_slot['button'] and not photo_slot['disabled'],photo_slot
+            print('FRONT_LOCKED_TEMPLATE_SLOT_STILL_HAS_UPLOAD_BUTTON_OK')
             page.evaluate("canvas.setActiveObject(canvas.getObjects().find(o=>o.text==='Layer 10'));openTextSheet()")
             assert not page.locator('#sheet-text').evaluate("e=>e.classList.contains('show')")
             rotation=page.evaluate("() => {const o=canvas.getObjects().find(o=>o.text==='Layer 11');canvas.setActiveObject(o);changeAngle(90);return o.angle;}")
@@ -164,10 +195,13 @@ def multilayer_browser_test(browser,base,poll):
             # A customer-owned upload survives reset; filled slot returns to its placeholder.
             page.locator('#photo-input').set_input_files({'name':'customer.png','mimeType':'image/png','buffer':png('#92d0a4')})
             poll(page,"() => canvas.getObjects().some(o=>o.originalName==='customer.png')")
-            page.evaluate("() => {activeSlotGuide=canvas.getObjects().find(o=>o.role==='slot-guide');}")
-            page.locator('#slot-input').set_input_files({'name':'slot.png','mimeType':'image/png','buffer':png('#79bcde')})
+            with page.expect_file_chooser() as chooser:
+                page.locator('#bf-front-slot-actions button').first.click()
+            chooser.value.set_files({'name':'slot.png','mimeType':'image/png','buffer':png('#79bcde')})
             poll(page,"() => canvas.getObjects().some(o=>o.role==='slot-photo')")
             assert page.evaluate("canvas.getObjects().find(o=>o.role==='slot-photo').sourceSize.width")==512
+            assert page.evaluate("canvas.getObjects().find(o=>o.role==='slot-photo').lockMovementX") is True
+            print('FRONT_TEMPLATE_PHOTO_UPLOAD_CLICK_FILECHOOSER_OK')
             page.evaluate("() => BenfuwanMultilayerFront.resetTemplate()")
             poll(page,"() => canvas.getObjects().some(o=>o.role==='slot-guide') && !canvas.getObjects().some(o=>o.role==='slot-photo')")
             assert page.evaluate("canvas.getObjects().filter(o=>o.originalName==='customer.png').length")==1
