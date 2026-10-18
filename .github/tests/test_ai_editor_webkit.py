@@ -3042,4 +3042,9 @@ def main():
             except Exception: pass
 
 
-if __name__ == '__main__': main()
+if __name__ == '__main__':
+    # A separate process keeps checkout fixtures/credentials isolated from the
+    # broad editor suite. Any failure blocks this existing browser CI job.
+    import subprocess
+    subprocess.run([sys.executable, str(ROOT / '.github/tests/test_checkout_safety_browser.py')], check=True)
+    main()

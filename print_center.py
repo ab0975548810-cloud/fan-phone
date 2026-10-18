@@ -1130,9 +1130,10 @@ def install(app_module):
         if response.status_code < 300:
             payload = response.get_json(silent=True)
             order_id = str((payload or {}).get("order_id") or "") if isinstance(payload, dict) else ""
-            if order_id and service.checkout_auto_eligible(order_id, checkout_key):
+            if order_id:
                 try:
-                    service.enqueue_auto(order_id)
+                    if service.checkout_auto_eligible(order_id, checkout_key):
+                        service.enqueue_auto(order_id)
                 except Exception:
                     app.logger.exception("Post-commit automatic print preparation failed for %s", order_id)
         return response
