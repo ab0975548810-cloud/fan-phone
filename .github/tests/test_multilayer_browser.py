@@ -325,7 +325,6 @@ def legacy_lock_and_proxy_test(page,browser,poll,asset_url,model,style):
     page.locator('#bf-object-lock').click();gesture_test(page,browser)
     page.evaluate('recordHistory(true)')
     page.locator('#bf-object-lock').click()
-    page.evaluate('recordHistory(true)')
     page.locator('#page-editor button[onclick*=undoCanvas]').click()
     poll(page,"() => canvas.getObjects().filter(o=>o.role==='sticker').every(o=>!o.bfUserLocked)")
     page.locator('#page-editor button[onclick*=redoCanvas]').click()
