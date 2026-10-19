@@ -368,6 +368,7 @@ def legacy_lock_and_proxy_test(page,browser,poll,asset_url,model,style):
     assert page.evaluate("canvas.getActiveObject().stroke")=='#ff6f9a'
     page.evaluate("()=>new Promise(resolve=>{const j=canvas.toDatalessJSON(CUSTOM_PROPS);canvas.loadFromJSON(j,()=>{rehydrateCanvas();resolve();});})")
     assert page.evaluate("canvas.getObjects().some(o=>o.type==='text'&&o.stroke==='#ff6f9a')")
+    assert page.evaluate("canvas.getObjects().some(o=>o.stickerId==='outline-fixture'&&o.originalPublicSrc==='/old-source.png')")
     print('PNG_EMOJI_OUTLINE_RELOAD_OK')
     print('LEGACY_USER_LOCK_AND_SAME_MODEL_PROXY_EXPORT_OK')
 

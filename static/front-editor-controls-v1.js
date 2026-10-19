@@ -8,7 +8,7 @@
   const allowed=o=>!!o&&o.role!=='guide'&&o.role!=='slot-guide'&&o.role!=='template-bg'&&o.role!=='editable-sticker-text';
   const multi=()=>window.BenfuwanMultilayer;
   const bound=new WeakSet();
-  if(typeof CUSTOM_PROPS!=='undefined'&&!CUSTOM_PROPS.includes('bfUserLocked'))CUSTOM_PROPS.push('bfUserLocked');
+  if(typeof CUSTOM_PROPS!=='undefined')for(const key of ['bfUserLocked','stickerId','originalPublicSrc'])if(!CUSTOM_PROPS.includes(key))CUSTOM_PROPS.push(key);
 
   function styles(){
     if(by('bf-editor-lock-css'))return;
