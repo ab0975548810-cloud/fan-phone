@@ -88,6 +88,71 @@ class OrderStorageCompatibilityTests(unittest.TestCase):
         self.assertEqual(len(app.commerce.store.local_orders()),before+1)
         self.assertEqual(len(self.bucket.uploads),uploads)
 
+    def test_image_upload_failure_then_same_key_retry_keeps_one_order(self):
+        payload=self.fx.body({'objects':[{'type':'image','role':'photo','src':fixture.PNG}]})
+        before=app.commerce.read()
+        original=self.bucket.upload
+        def fail_preview(path,raw,file_options):
+            if path.endswith('/preview.png'):raise TimeoutError('fixture preview storage failure')
+            return original(path,raw,file_options)
+        with mock.patch.object(self.bucket,'upload',side_effect=fail_preview):
+            failed=self.fx.client.post('/api/create_order',json=payload)
+        self.assertEqual(failed.status_code,500)
+        self.assertEqual(app.commerce.read(),before)
+        self.assertEqual(self.bucket.files,{})
+        success=self.fx.client.post('/api/create_order',json=payload)
+        replay=self.fx.client.post('/api/create_order',json=payload)
+        self.assertEqual(success.status_code,200,success.json)
+        self.assertEqual(replay.json['order_id'],success.json['order_id'])
+        self.assertEqual(len(app.commerce.read()['order_finance']),len(before['order_finance'])+1)
+
+    def test_print_upload_failure_does_not_commit_or_dispatch(self):
+        payload=self.fx.body({})
+        before=app.commerce.read()
+        original=self.bucket.upload
+        def fail_print(path,raw,file_options):
+            if path.endswith('/print.png'):raise TimeoutError('fixture print storage failure')
+            return original(path,raw,file_options)
+        with mock.patch.object(self.bucket,'upload',side_effect=fail_print):
+            failed=self.fx.client.post('/api/create_order',json=payload)
+        self.assertEqual(failed.status_code,500)
+        self.assertEqual(app.commerce.read(),before)
+        self.assertEqual(self.bucket.files,{})
+        self.handoff.assert_not_called()
+        success=self.fx.client.post('/api/create_order',json=payload)
+        self.assertEqual(success.status_code,200,success.json)
+        replay=self.fx.client.post('/api/create_order',json=payload)
+        self.assertEqual(replay.json['order_id'],success.json['order_id'])
+
+    def test_commit_response_lost_keeps_artwork_and_replays_without_duplicate(self):
+        payload=self.fx.body({'objects':[{'type':'image','role':'photo','src':fixture.PNG}]})
+        before=app.commerce.read()
+        original=app.commerce.store.commit
+        def lost_response(*args,**kwargs):
+            original(*args,**kwargs)
+            raise TimeoutError('fixture response lost after commit')
+        with mock.patch.object(app.commerce.store,'commit',side_effect=lost_response):
+            failed=self.fx.client.post('/api/create_order',json=payload)
+        self.assertEqual(failed.status_code,500)
+        committed=app.commerce.read()
+        self.assertEqual(len(committed['order_finance']),len(before['order_finance'])+1)
+        replay=self.fx.client.post('/api/create_order',json=payload)
+        self.assertEqual(replay.status_code,200,replay.json)
+        self.assertEqual(app.commerce.read(),committed)
+        order=app.commerce.store.order(replay.json['order_id'])
+        self.assertIn(order['print_path'],self.bucket.files)
+        self.assertIn(order['mockup_path'],self.bucket.files)
+
+    def test_post_commit_print_read_failure_preserves_successful_storage(self):
+        payload=self.fx.body({})
+        with mock.patch.object(app.print_center,'checkout_auto_eligible',side_effect=TimeoutError('fixture lookup')):
+            response=self.fx.client.post('/api/create_order',json=payload)
+        self.assertEqual(response.status_code,200,response.json)
+        order=app.commerce.store.order(response.json['order_id'])
+        self.assertIn(order['print_path'],self.bucket.files)
+        self.assertIn(order['mockup_path'],self.bucket.files)
+        self.handoff.assert_not_called()
+
     def test_expired_cleanup_reads_new_png_and_legacy_json(self):
         now=int(time.time())+2*86400
         marker=design_sources.cleanup_plan(app,'orphan-123')

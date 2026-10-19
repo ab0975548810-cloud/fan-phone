@@ -1648,6 +1648,28 @@ class PrintCenterTests(unittest.TestCase):
         self.assertEqual((job["state"], job["vendor_taskid"]), ("QUEUED", "recovered-auto-task"))
         self.assertEqual(len([path for path, _ in self.fake.calls if path == "/api/Device/receiveTask"]), 1)
 
+    def test_committed_checkout_survives_auto_eligibility_read_failure(self):
+        self.save_profile()
+        key = 'post-commit-eligibility-outage-0001'
+        before = app.commerce.read()
+        with mock.patch.object(app.print_center, 'checkout_auto_eligible',
+                               side_effect=TimeoutError('post-commit fixture read timeout')):
+            order_id = self.create_order(key=key)
+        committed = app.commerce.read()
+        self.assertEqual(len(committed['order_finance']), len(before['order_finance']) + 1)
+        sku = next(s for s in committed['skus'] if s['id'] == self.sku_id)
+        self.assertEqual(sku['stock_qty'], next(s for s in before['skus'] if s['id'] == self.sku_id)['stock_qty'] - 1)
+        self.assertEqual(self.create_order(key=key), order_id)
+        self.assertEqual(app.commerce.read(), committed)
+        self.assertEqual(self.fake.calls, [])
+        self.fake.responses['/api/Device/receiveTask'] = {
+            'code': 0, 'data': {'taskid': 'eligibility-recovery-task', 'status': 0}}
+        app.print_center.dispatch_auto_once()
+        app.print_center.dispatch_auto_once()
+        self.assertEqual(app.print_center.store.latest_job(order_id)['state'], 'QUEUED')
+        self.assertEqual(len([path for path, _ in self.fake.calls
+                              if path == '/api/Device/receiveTask']), 1)
+
     def test_historical_replay_never_retries_terminal_failed_or_completed_job(self):
         self.save_profile()
         for index, state in enumerate(("FAILED", "COMPLETED"), start=1):
