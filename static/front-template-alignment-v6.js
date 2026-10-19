@@ -33,7 +33,6 @@
     const g=geometry(t),out=clone(t);
     // The base renderer understands already-adapted legacy templates.
     out.universal=false;out.model_id=ctx.modelId;out.template_version=0;
-    if(sameModel)return out; // Identity: no mask heuristic should shift an author's design.
     let raw=typeof out.objects_json==='string'?JSON.parse(out.objects_json):out.objects_json;
     if(raw&&Array.isArray(raw.objects)){
       raw.objects=raw.objects.map(o=>{
@@ -44,6 +43,7 @@
           n.src=window.benfuwanTemplateProxyUrl?.(source)||source;
           delete n.crossOrigin;
         }
+        if(sameModel)return n; // Keep identity geometry, but never bypass safe image sources.
         if(n.isTplBg){
           const ow=Math.max(1,positive(n.width)),oh=Math.max(1,positive(n.height));
           const cover=Math.max(g.dstW/ow,g.dstH/oh);
@@ -59,6 +59,7 @@
       });
       out.objects_json=raw;
     }
+    if(sameModel)return out;
     const fitMm=Math.min(g.tw/g.sw,g.th/g.sh);
     out.slots=(out.slots||[]).map(s=>{
       const w=positive(s.w??s.width),h=positive(s.h??s.height);

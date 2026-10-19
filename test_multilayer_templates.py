@@ -145,6 +145,18 @@ class MultilayerTests(unittest.TestCase):
         data=self.design();image=Image.new('RGBA',(512,256),'blue');out=io.BytesIO();image.save(out,'PNG');data['objects'][3]['src']='data:image/png;base64,'+base64.b64encode(out.getvalue()).decode()
         self.create(data,400)
 
+    def test_locked_photo_slot_only_explicit_content_permission_can_fill(self):
+        for can_edit in (False,True):
+            slot=layer(30);slot.update(role='template-photo-slot',templateSlot=True,isSlot=True,slotId='fixed-slot',locked=True,**{k:False for k in multi.FLAGS[1:]})
+            slot['canEdit']=can_edit
+            self.tpl['objects_json']['objects']=self.tpl['objects_json']['objects'][:30]+[slot]
+            with mock.patch('editable_stickers.public_image',return_value=fixture.image()):multi.prepare_template(app,self.tpl)
+            app.local_save_json(app.TEMPLATES_FILE,{'templates':[self.tpl],'categories':[]})
+            self.contract=self.client.get('/api/template_contract/'+self.tpl['id'],query_string={'model_id':self.model,'style_id':self.style}).json
+            data=self.design();photo=data['objects'][-1]
+            photo.update(type='image',role='slot-photo',isSlot=False,src='data:image/png;base64,'+base64.b64encode(fixture.image()).decode(),sourceSize={'width':512,'height':256})
+            self.create(data,200 if can_edit else 400)
+
     def test_photo_slot_native_crop_preserves_intrinsic_source(self):
         slot=layer(30);slot.update(role='template-photo-slot',templateSlot=True,isSlot=True,slotId='slot-a');self.tpl['objects_json']['objects'].append(slot)
         app.local_save_json(app.TEMPLATES_FILE,{'templates':[self.tpl],'categories':[]});self.contract=self.client.get('/api/template_contract/'+self.tpl['id'],query_string={'model_id':self.model,'style_id':self.style}).json

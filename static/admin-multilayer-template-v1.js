@@ -59,7 +59,7 @@
       render();notify('原始 PNG 已加入獨立圖層');
     }catch(error){notify(error.message,true);}
   }
-  function pairedFlags(c,o,patch){const pair=editable.isMember(o)?editable.pair(c,o):null;const objects=pair?[pair.bg,pair.text]:[o];for(const item of objects){if(!item)continue;Object.assign(item,patch);if(item.locked)multi.FLAGS.filter(k=>k!=='locked').forEach(k=>item[k]=false);multi.permissions(c,item,true);}render();}
+  function pairedFlags(c,o,patch){const pair=editable.isMember(o)?editable.pair(c,o):null;const objects=pair?[pair.bg,pair.text]:[o];for(const item of objects){if(!item)continue;Object.assign(item,patch);if(item.locked)multi.FLAGS.filter(k=>k!=='locked'&&!(k==='canEdit'&&item.templateSlot)).forEach(k=>item[k]=false);multi.permissions(c,item,true);}render();}
   function render(){controls();const c=canvas(),box=by('bf-tpl-layer-list');if(!box||!c||!mode)return;
     if(observed!==box){observed=box;new MutationObserver(()=>{if(mode&&box.children.length&&!box.firstElementChild?.classList.contains('multi-admin-layer')&&!box.firstElementChild?.classList.contains('multi-admin-empty'))render();}).observe(box,{childList:true});}
     const fragment=document.createDocumentFragment();
@@ -68,13 +68,13 @@
       const top=document.createElement('div');top.className='multi-row-top';const field=document.createElement('input');field.type='text';field.dataset.name='';field.value=multi.name(o);field.maxLength=100;field.onchange=()=>{o.layerName=field.value.trim()||multi.name(o);};
       const type=document.createElement('span');type.dataset.type='';type.textContent=o.templateSlot?'照片框':o.isTplBg?'背景':o.type==='image'?'PNG':o.type==='textbox'?'文字':o.type;
       top.append(field,type);
-      const locked=document.createElement('label');const checkbox=document.createElement('input');checkbox.type='checkbox';checkbox.checked=o.locked;checkbox.dataset.locked='';locked.append(checkbox,document.createTextNode('鎖定'));checkbox.onchange=()=>pairedFlags(c,o,Object.fromEntries(multi.FLAGS.map(flag=>[flag,flag==='locked'?checkbox.checked:!checkbox.checked])));top.append(locked);
+      const locked=document.createElement('label');const checkbox=document.createElement('input');checkbox.type='checkbox';checkbox.checked=o.locked;checkbox.dataset.locked='';locked.append(checkbox,document.createTextNode('鎖定'));checkbox.onchange=()=>pairedFlags(c,o,Object.fromEntries(multi.FLAGS.map(flag=>[flag,flag==='locked'?checkbox.checked:flag==='canEdit'&&o.templateSlot?o.canEdit:!checkbox.checked])));top.append(locked);
       for(const [title,fn] of [['顯示／隱藏',()=>o.set('visible',o.visible===false)],['上移',()=>c.bringForward(o)],['下移',()=>c.sendBackwards(o)]]){
         const button=document.createElement('button');button.type='button';button.title=title;button.setAttribute('aria-label',title);button.textContent=title==='上移'?'↑':title==='下移'?'↓':o.visible===false?'顯示':'隱藏';button.onclick=()=>{fn();c.requestRenderAll();c.fire('object:modified',{target:o});render();};top.append(button);
       }
       row.append(top);const details=document.createElement('details');const summary=document.createElement('summary');summary.textContent='客人可編輯權限';const flags=document.createElement('div');
       for(const [key,label] of [['canMove','移動／圖層順序'],['canScale','縮放'],['canRotate','旋轉'],['canDelete','刪除'],['canDuplicate','複製'],['canEdit','文字／內容／翻轉']]){
-        const labelEl=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.checked=o[key];input.disabled=o.locked;input.dataset.permission=key;input.onchange=()=>pairedFlags(c,o,{[key]:input.checked});labelEl.append(input,document.createTextNode(label));flags.append(labelEl);
+        const labelEl=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.checked=o[key];input.disabled=o.locked&&!(key==='canEdit'&&o.templateSlot);input.dataset.permission=key;input.onchange=()=>pairedFlags(c,o,{[key]:input.checked});labelEl.append(input,document.createTextNode(label));flags.append(labelEl);
       }
       details.append(summary,flags);row.append(details);row.onclick=e=>{if(e.target.closest('button,input,label,details'))return;c.setActiveObject(o);c.requestRenderAll();};fragment.append(row);
     }

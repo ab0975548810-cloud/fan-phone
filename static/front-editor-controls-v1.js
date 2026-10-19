@@ -128,6 +128,11 @@
     if(r&&typeof r.finally==='function')r.finally(()=>slots());
     return r;
   };
+  // Fabric locks do not guard toolbar methods that assign coordinates directly.
+  for(const name of ['nudgeActive','centerActive','changeAngle']){
+    const previous=window[name];if(typeof previous!=='function')continue;
+    window[name]=function(){if(current()?.getActiveObject()?.bfUserLocked)return;return previous.apply(this,arguments);};
+  }
   function boot(){styles();lockUi();bind(current());slots();}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
   window.BenfuwanEditorControls={bind,applyUserLock,refreshSlotActions:slots,openSlot};

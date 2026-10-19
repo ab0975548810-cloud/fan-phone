@@ -6,7 +6,7 @@
 
   const STACK=[
     '/static/admin-universal-templates.js?v=20260929style1',
-    '/static/admin-template-editor-v2.js?v=20261017picker1',
+    '/static/admin-template-editor-v2.js?v=20261019picker1',
     '/static/admin-template-editor-v3.js?v=20260914h',
     '/static/admin-template-editor-v4.js?v=20261006review1',
     '/static/admin-template-editor-v4-fix.js?v=20261006review1',
@@ -22,7 +22,7 @@
     '/static/admin-ai-v5.js?v=20261006review1',
     '/static/admin-template-history-v1.js?v=20260915b',
     '/static/admin-template-upload-fix-v1.js?v=20261006review1',
-    '/static/admin-template-controls-v1.js?v=20261017a'
+    '/static/admin-template-controls-v1.js?v=20261019a'
   ];
   let loading=null,loaded=false;
 

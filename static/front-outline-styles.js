@@ -149,8 +149,9 @@
           const props={left:center.x,top:center.y,originX:'center',originY:'center',angle:oldObj.angle||0,scaleX:oldObj.scaleX||1,scaleY:oldObj.scaleY||1,flipX:!!oldObj.flipX,flipY:!!oldObj.flipY,opacity:oldObj.opacity??1,visible:oldObj.visible!==false,selectable:oldObj.selectable!==false,evented:oldObj.evented!==false,role:oldObj.role,slotId:oldObj.slotId,slotMeta:oldObj.slotMeta,aiBackgroundRemoved:!!oldObj.aiBackgroundRemoved,originalName:oldObj.originalName,materialType:oldObj.materialType,clipPath:oldObj.clipPath||undefined,aiOutlineSource:meta.source,aiOutlineStrength:meta.style==='none'?'0':'custom',aiOutlineStyle:meta.style,aiOutlineWidth:meta.width,aiOutlineColor:meta.color};
           // Replacing a raster must not lose sticker identity, author layer
           // permissions, a user position lock or the original asset metadata.
-          for(const key of ['stickerId','publicSrc','assetId','layerId','templateLayerId','layerInstanceId','templateApplicationId','layerName','zIndex','normalizedGeometry','locked','canMove','canScale','canRotate','canDelete','canDuplicate','canEdit','templateSlot','sourceSize','bfUserLocked'])
+          for(const key of ['stickerId','assetId','layerId','templateLayerId','layerInstanceId','templateApplicationId','layerName','zIndex','normalizedGeometry','locked','canMove','canScale','canRotate','canDelete','canDuplicate','canEdit','templateSlot','sourceSize','bfUserLocked'])
             if(oldObj[key]!==undefined)props[key]=oldObj[key];
+          props.originalPublicSrc=oldObj.originalPublicSrc||oldObj.publicSrc;
           newObj.set(props);if(typeof styleEditableObject==='function')styleEditableObject(newObj);
           canvas.remove(oldObj);canvas.insertAt(newObj,Math.max(0,idx),false);canvas.setActiveObject(newObj);newObj.setCoords();canvas.renderAll();
           if(typeof recordHistory==='function')recordHistory();if(typeof renderLayerList==='function')renderLayerList();syncSheet();resolve(newObj);

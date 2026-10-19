@@ -95,10 +95,10 @@
   function touch(c){if(!c||touchBound.has(c))return;touchBound.add(c);const el=c.upperCanvasEl;let state=null,blocked=false;
     function stop(e){e.preventDefault();e.stopImmediatePropagation();}
     function pair(e){const [a,b]=e.touches;return {distance:Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY),angle:Math.atan2(b.clientY-a.clientY,b.clientX-a.clientX)*180/Math.PI};}
-    el.addEventListener('touchstart',e=>{if(!enabled(c)||e.touches.length!==2)return;stop(e);blocked=true;const o=c.getActiveObject()||c.findTarget(e);if(!o||o.locked)return;const target=o.role==='editable-sticker-text'?editable.pair(c,o).bg:o;
+    el.addEventListener('touchstart',e=>{if(!enabled(c)||e.touches.length!==2)return;stop(e);blocked=true;const o=c.getActiveObject()||c.findTarget(e);if(!o||o.locked||o.bfUserLocked)return;const target=o.role==='editable-sticker-text'?editable.pair(c,o).bg:o;
       c.setActiveObject(target);c._currentTransform=null;state={object:target,...pair(e),scaleX:target.scaleX,scaleY:target.scaleY,objectAngle:target.angle||0};
     },{capture:true,passive:false});
-    el.addEventListener('touchmove',e=>{if(!enabled(c)||!blocked)return;stop(e);if(!state||e.touches.length!==2)return;const now=pair(e),o=state.object,ratio=now.distance/Math.max(1,state.distance);
+    el.addEventListener('touchmove',e=>{if(!enabled(c)||!blocked)return;stop(e);if(!state||state.object.bfUserLocked||e.touches.length!==2)return;const now=pair(e),o=state.object,ratio=now.distance/Math.max(1,state.distance);
       if(multi.allowed(c,o,'canScale'))o.set({scaleX:state.scaleX*ratio,scaleY:state.scaleY*ratio});
       if(multi.allowed(c,o,'canRotate'))o.set('angle',state.objectAngle+now.angle-state.angle);
       multi.constrain(o,c);editable.syncAll(c);o.setCoords();c.requestRenderAll();

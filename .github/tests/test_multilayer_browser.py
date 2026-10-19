@@ -33,7 +33,7 @@ def multilayer_browser_test(browser,base,poll):
                 m.update(id=identity,name=name,status=True,case_profiles={style_id:{'preview_mask_img':mask_url,'print_line_img':mask_url,'print_w':w,'print_h':h,'print_x':12,'print_y':13,'print_angle':90}})
             shop['styles']=[style];app_module.local_save_json(app_module.DATA_FILE,shop)
             app_module.local_save_json(app_module.TEMPLATES_FILE,{'templates':[],'categories':['全部','熱門']})
-            assets=copy.deepcopy(app_module.DEFAULT_ASSETS);assets['editable_stickers']=[{'id':'multilayer-dialog','name':'圖層對話框','imageSrc':asset_url,'textArea':{'x':.15,'y':.2,'width':.7,'height':.45},'defaultTextStyle':{'text':'模板文字','fontFamily':'jf-openhuninn','fontSize':80,'minFontSize':18,'fontWeight':'400','fontStyle':'normal','fill':'#603c48','stroke':None,'strokeWidth':0,'textAlign':'center','charSpacing':0,'lineHeight':1.2}}]
+            assets=copy.deepcopy(app_module.DEFAULT_ASSETS);assets['stickers']=[{'id':'fixture-sticker','url':asset_url,'category':'測試'}];assets['categories']=['全部','測試'];assets['editable_stickers']=[{'id':'multilayer-dialog','name':'圖層對話框','imageSrc':asset_url,'textArea':{'x':.15,'y':.2,'width':.7,'height':.45},'defaultTextStyle':{'text':'模板文字','fontFamily':'jf-openhuninn','fontSize':80,'minFontSize':18,'fontWeight':'400','fontStyle':'normal','fill':'#603c48','stroke':None,'strokeWidth':0,'textAlign':'center','charSpacing':0,'lineHeight':1.2}}]
             app_module.local_save_json(app_module.ASSETS_FILE,assets)
             # Public caches must follow fixture data, not the preceding test workspace.
             import security_perf
@@ -56,6 +56,18 @@ def multilayer_browser_test(browser,base,poll):
             files=[{'name':f'layer-{i}.png','mimeType':'image/png','buffer':png('#f47ea8' if i%2 else '#9ac8e5')} for i in range(14)]
             admin.locator('#multilayer-files').set_input_files(files)
             poll(admin,'() => visualCanvas.getObjects().filter(o=>o.type===\'image\').length===14',timeout=60000)
+            move_handle_test(admin,admin=True)
+            # Two actual picker clicks must keep the panel open.
+            admin.evaluate('() => pickSticker()')
+            poll(admin,"() => document.querySelectorAll('#bf-tpl-sticker-grid .bf-tpl-sticker').length===1")
+            for count in (15,16):
+                admin.locator('#bf-tpl-sticker-grid .bf-tpl-sticker').first.click()
+                poll(admin,f"() => visualCanvas.getObjects().filter(o=>o.type==='image').length==={count}")
+                assert admin.locator('#bf-tpl-sticker-panel').is_visible()
+            admin.locator('#bf-tpl-sticker-close').click()
+            assert not admin.locator('#bf-tpl-sticker-panel').is_visible()
+            admin.evaluate("()=>{const c=visualCanvas;c.getObjects().filter(o=>o.stickerId==='fixture-sticker').forEach(o=>c.remove(o));}")
+            print('ADMIN_CONTINUOUS_STICKER_PICKER_OK')
             directional=admin.evaluate("""()=>{
               const c=visualCanvas,o=c.getObjects().find(x=>x.type==='image');c.setActiveObject(o);
               const start={center:o.getCenterPoint(),width:o.getScaledWidth(),height:o.getScaledHeight(),scaleX:o.scaleX,scaleY:o.scaleY};
@@ -167,6 +179,14 @@ def multilayer_browser_test(browser,base,poll):
             old=page.evaluate('({left:canvas.getActiveObject().left,top:canvas.getActiveObject().top})')
             page.mouse.move(point['x'],point['y']);page.mouse.down();page.mouse.move(point['x']+12,point['y']+10,steps=8);page.mouse.up()
             assert abs(page.evaluate('canvas.getActiveObject().left')-old['left'])>3
+            move_handle_test(page)
+            page.locator('#bf-object-lock').click()
+            locked=page.evaluate("({left:canvas.getActiveObject().left,top:canvas.getActiveObject().top,angle:canvas.getActiveObject().angle,scale:canvas.getActiveObject().scaleX})")
+            gesture_test(page,browser,locked=True)
+            page.evaluate("nudgeActive(10,10);centerActive('both');changeAngle(90)")
+            assert page.evaluate("({left:canvas.getActiveObject().left,top:canvas.getActiveObject().top,angle:canvas.getActiveObject().angle,scale:canvas.getActiveObject().scaleX})")==locked
+            page.locator('#bf-object-lock').click()
+            print('USER_LOCK_MULTILAYER_TOUCH_AND_NUMERIC_GUARD_OK')
             single_touch_drag_test(page,browser)
             gesture_test(page,browser)
             # Duplication and deletion operate on the selected layer only.
@@ -201,6 +221,13 @@ def multilayer_browser_test(browser,base,poll):
             poll(page,"() => canvas.getObjects().some(o=>o.role==='slot-photo')")
             assert page.evaluate("canvas.getObjects().find(o=>o.role==='slot-photo').sourceSize.width")==512
             assert page.evaluate("canvas.getObjects().find(o=>o.role==='slot-photo').lockMovementX") is True
+            # Validate the FILLED slot, not only the reset/empty placeholder.
+            filled=page.evaluate("async()=>BenfuwanDesignSources.prepare(await BenfuwanMultilayer.serialize(canvas,ctx))")
+            probe=page.evaluate("()=>({model_id:ctx.modelId,style_id:ctx.styleId,color_name:'透明',quantity:1,payment_method:'現金',customer_name:'filled slot fixture',print_file:canvas.toDataURL({format:'png'}),mockup_file:canvas.toDataURL({format:'png'})})")
+            probe.update(design_json=filled,idempotency_key='filled-slot-'+uuid.uuid4().hex)
+            accepted=page.request.post(base+'/api/create_order',data=probe)
+            assert accepted.status==200,accepted.text()
+            print('FRONT_TEMPLATE_FILLED_PHOTO_SLOT_SERVER_ORDER_OK')
             print('FRONT_TEMPLATE_PHOTO_UPLOAD_CLICK_FILECHOOSER_OK')
             page.evaluate("() => BenfuwanMultilayerFront.resetTemplate()")
             poll(page,"() => canvas.getObjects().some(o=>o.role==='slot-guide') && !canvas.getObjects().some(o=>o.role==='slot-photo')")
@@ -256,6 +283,7 @@ def multilayer_browser_test(browser,base,poll):
             assert job['artwork_path']!=order['print_path']
             page.evaluate("""()=>new Promise(resolve=>applyTemplate({id:'legacy-v1',model_id:ctx.modelId,template_version:1,slots:[],objects_json:{version:'5.3.1',objects:[{type:'rect',left:25,top:35,width:40,height:30,fill:'#79bcde',strokeWidth:0,role:'sticker'}]}},resolve))""")
             assert page.evaluate("!canvas.templateState && !canvas.layer_contract_version && canvas.getObjects().every(o=>!o.templateLayerId)")
+            legacy_lock_and_proxy_test(page,browser,poll,asset_url,ids[0],style_id)
             page.close()
             print('MULTILAYER_30_LAYERS_AUTHORING_LOCK_HIT_THROUGH_TOUCH_DUPLICATE_RESET_PHOTO_DRAFT_NORMALIZED_ORDER_RESPONSIVE_OK')
         finally:
@@ -264,6 +292,69 @@ def multilayer_browser_test(browser,base,poll):
             asset.unlink(missing_ok=True);mask.unlink(missing_ok=True)
             import security_perf
             security_perf._CACHE.clear()
+
+
+def move_handle_test(page,admin=False):
+    symbol='visualCanvas' if admin else 'canvas'
+    start=page.evaluate("""name=>{const c=window[name]||canvas,o=c.getActiveObject();o.setCoords();c.requestRenderAll();const p=o.oCoords.br,r=c.upperCanvasEl.getBoundingClientRect();return {x:r.x+p.x*r.width/c.width,y:r.y+p.y*r.height/c.height,left:o.left,top:o.top,width:o.width,height:o.height,sx:o.scaleX,sy:o.scaleY};}""",symbol)
+    page.mouse.move(start['x'],start['y']);page.mouse.down();page.mouse.move(start['x']-12,start['y']-10,steps=8);page.mouse.up()
+    end=page.evaluate("name=>{const o=(window[name]||canvas).getActiveObject();return {left:o.left,top:o.top,width:o.width,height:o.height,sx:o.scaleX,sy:o.scaleY}}",symbol)
+    assert abs(end['left']-start['left'])>3,(start,end)
+    assert all(end[k]==start[k] for k in ('width','height','sx','sy')),(start,end)
+    print('REAL_MOVE_CORNER_NO_RESIZE_OK',symbol)
+
+
+def legacy_lock_and_proxy_test(page,browser,poll,asset_url,model,style):
+    # Same-model geometry stays identical while an external source uses the
+    # same-origin proxy. Export is the actual taint detector.
+    page.route('**/api/public/asset_proxy*',lambda route:route.fulfill(status=200,content_type='image/png',body=png()))
+    result=page.evaluate("""async a=>{
+      ctx.modelId=a.model;ctx.styleId=a.style;ctx.printW=70;ctx.printH=140;initCanvas();
+      const raw={type:'image',src:'https://fixtures.invalid/sticker.png',publicSrc:'https://fixtures.invalid/sticker.png',width:512,height:256,left:30,top:40,scaleX:.1,scaleY:.1,angle:17};
+      const t={template_version:2,universal:true,reference_model_id:a.model,reference_style_id:a.style,source_canvas_w:ctx.printW*2,source_canvas_h:ctx.printH*2,objects_json:{objects:[raw]},slots:[]};
+      const adapted=BenfuwanTemplateAlignment.adapt(t),o=adapted.objects_json.objects[0];
+      const image=await new Promise(resolve=>fabric.Image.fromURL(o.src,resolve));
+      const c=new fabric.StaticCanvas(null,{width:100,height:100});c.add(image);const exported=c.toDataURL({format:'png'});c.dispose();
+      return {src:o.src,left:o.left,top:o.top,scale:o.scaleX,angle:o.angle,exported:exported.startsWith('data:image/png')};
+    }""",dict(model=model,style=style))
+    assert result['src'].startswith('/api/public/asset_proxy') and result['exported'],result
+    assert (result['left'],result['top'],result['scale'],result['angle'])==(30,40,.1,17)
+    page.evaluate("""()=>{canvas.clear();const o=new fabric.Rect({width:30,height:30,left:40,top:60,role:'sticker'});canvas.add(o);canvas.setActiveObject(o);syncSelection();}""")
+    page.evaluate("navigate('page-editor')")
+    page.locator('#bf-object-lock').click();gesture_test(page,browser,locked=True)
+    page.locator('#bf-object-lock').click();gesture_test(page,browser)
+    page.evaluate('recordHistory(true)')
+    page.locator('#bf-object-lock').click()
+    page.evaluate('recordHistory(true)')
+    page.locator('#page-editor button[onclick*=undoCanvas]').click()
+    poll(page,"() => canvas.getObjects().filter(o=>o.role==='sticker').every(o=>!o.bfUserLocked)")
+    page.locator('#page-editor button[onclick*=redoCanvas]').click()
+    poll(page,"() => canvas.getObjects().some(o=>o.bfUserLocked && o.lockScalingX && o.lockRotation)")
+    page.evaluate('async()=>{await BenfuwanDesignDraft.saveNow()}')
+    print('USER_LOCK_UNDO_REDO_OK')
+    page.reload();poll(page,"() => window.BenfuwanDesignDraft?.state().prompt==='ready'")
+    page.locator('#home-design-card').click()
+    poll(page,"() => document.getElementById('page-editor').classList.contains('active') && canvas?.getObjects().some(o=>o.bfUserLocked)")
+    assert page.evaluate("canvas.getObjects().filter(o=>o.bfUserLocked).every(o=>o.lockMovementX&&o.lockScalingX&&o.lockRotation)")
+    print('USER_LOCK_DRAFT_RELOAD_OK')
+    # PNG and emoji outlines stay editable and survive JSON rehydration.
+    page.locator('#photo-input').set_input_files({'name':'outline.png','mimeType':'image/png','buffer':png()})
+    poll(page,"() => canvas.getActiveObject()?.originalName==='outline.png'")
+    page.evaluate("()=>{const o=canvas.getActiveObject();o.role='sticker';o.stickerId='outline-fixture';o.publicSrc='/old-source.png';}")
+    for style in ('white','pink','none'):
+        page.evaluate('openAiOutlineSheet()')
+        page.locator(f'#sheet-outline-v2 [data-style={style}]').click()
+        poll(page,f"() => canvas.getActiveObject()?.aiOutlineStyle==='{style}' && !document.getElementById('busy-overlay').classList.contains('show')")
+        assert page.evaluate("canvas.getActiveObject().stickerId")=='outline-fixture'
+        assert page.evaluate("!canvas.getActiveObject().publicSrc")
+        page.evaluate('closeSheets()')
+    page.evaluate("()=>{const o=new fabric.Text('♡',{left:50,top:70,fontSize:30,role:'sticker'});canvas.add(o);canvas.setActiveObject(o);syncSelection();openAiOutlineSheet();}")
+    page.locator('#sheet-outline-v2 [data-style=pink]').click()
+    assert page.evaluate("canvas.getActiveObject().stroke")=='#ff6f9a'
+    page.evaluate("()=>new Promise(resolve=>{const j=canvas.toDatalessJSON(CUSTOM_PROPS);canvas.loadFromJSON(j,()=>{rehydrateCanvas();resolve();});})")
+    assert page.evaluate("canvas.getObjects().some(o=>o.type==='text'&&o.stroke==='#ff6f9a')")
+    print('PNG_EMOJI_OUTLINE_RELOAD_OK')
+    print('LEGACY_USER_LOCK_AND_SAME_MODEL_PROXY_EXPORT_OK')
 
 
 def single_touch_drag_test(page,browser):
@@ -345,14 +436,17 @@ def legacy_image_tools_regression(page,poll):
     finally:hooks.remove(capture)
 
 
-def gesture_test(page,browser):
-    before=page.evaluate('({scale:canvas.getActiveObject().scaleX,angle:canvas.getActiveObject().angle})')
+def gesture_test(page,browser,locked=False):
+    before=page.evaluate('()=>{window.__gestureTarget=canvas.getActiveObject();return {scale:__gestureTarget.scaleX,angle:__gestureTarget.angle}}')
     if browser.browser_type.name=='chromium':
         cdp=page.context.new_cdp_session(page)
-        box=page.locator('#main-canvas').bounding_box();x=box['x']+box['width']*.3;y=box['y']+box['height']*.3
+        anchor=page.evaluate('()=>{const p=__gestureTarget.getCenterPoint(),r=canvas.upperCanvasEl.getBoundingClientRect();return {x:r.x+p.x*r.width/canvas.width,y:r.y+p.y*r.height/canvas.height}}')
+        x=anchor['x']+15;y=anchor['y']
         points=lambda d,dy:[{'x':x-d,'y':y-dy,'id':1},{'x':x+d,'y':y+dy,'id':2}]
         cdp.send('Input.dispatchTouchEvent',{'type':'touchStart','touchPoints':points(15,0)})
+        page.evaluate('() => new Promise(requestAnimationFrame)')
         cdp.send('Input.dispatchTouchEvent',{'type':'touchMove','touchPoints':points(24,12)})
+        page.evaluate('() => new Promise(requestAnimationFrame)')
         cdp.send('Input.dispatchTouchEvent',{'type':'touchEnd','touchPoints':[]});cdp.detach()
     else:
         # WebKit Playwright has no CDP multi-touch transport. Dispatch native DOM
@@ -362,7 +456,11 @@ def gesture_test(page,browser):
           function emit(type,d,dy){const points=d?[{identifier:1,target:el,clientX:x-d,clientY:y-dy,pageX:x-d+scrollX,pageY:y-dy+scrollY},{identifier:2,target:el,clientX:x+d,clientY:y+dy,pageX:x+d+scrollX,pageY:y+dy+scrollY}]:[],event=new Event(type,{bubbles:true,cancelable:true});Object.defineProperties(event,{touches:{value:points},targetTouches:{value:points},changedTouches:{value:points}});el.dispatchEvent(event);}
           emit('touchstart',15,0);emit('touchmove',24,12);emit('touchend',0,0);
         }""")
-    after=page.evaluate('({scale:canvas.getActiveObject().scaleX,angle:canvas.getActiveObject().angle})')
+    after=page.evaluate('({scale:__gestureTarget.scaleX,angle:__gestureTarget.angle})')
+    page.evaluate('canvas.setActiveObject(__gestureTarget);syncSelection()')
+    if locked:
+        assert after==before,(before,after)
+        return
     assert after['scale']>before['scale']*1.3 and abs(after['angle']-before['angle'])>20,(before,after)
 
 

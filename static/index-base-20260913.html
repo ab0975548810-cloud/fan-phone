@@ -379,7 +379,26 @@ function redoCanvas(){if(!canvas||historyIndex>=historyStack.length-1){toast('æ²
 function restoreHistory(json){restoringHistory=true;canvas.loadFromJSON(json,()=>{rehydrateCanvas();canvas.renderAll();restoringHistory=false;renderLayerList()})}
 function rehydrateCanvas(){baseClip=new fabric.Rect({left:0,top:0,width:canvas.width,height:canvas.height,absolutePositioned:true});applyCaseBoundaryClip();canvas.getObjects().forEach(o=>{if(o.role==='slot-guide'){o.selectable=false;o.evented=true;bindSlotGuide(o)}else if(o.role==='guide'||o.role==='template-bg'){o.selectable=false;o.evented=false}else{styleEditableObject(o)}})}
 function applyCaseBoundaryClip(){if(!canvas)return;const w=canvas.width||1,h=canvas.height||1;const inset=Math.max(2,Math.round(Math.min(w,h)*0.025));const radius=Math.max(12,Math.round(Math.min(w,h)*0.09));canvas.clipPath=new fabric.Rect({left:inset,top:inset,width:Math.max(1,w-inset*2),height:Math.max(1,h-inset*2),rx:radius,ry:radius,absolutePositioned:true});canvas.renderAll()}
-function attachTouchGestures(){const el=canvas.upperCanvasEl;el.addEventListener('touchstart',e=>{if(e.touches.length!==2)return;const o=canvas.getActiveObject();if(!o)return;e.preventDefault();const [a,b]=e.touches;gestureState={obj:o,dist:distance(a,b),angle:touchAngle(a,b),scaleX:o.scaleX||1,scaleY:o.scaleY||1,objAngle:o.angle||0}}, {passive:false});el.addEventListener('touchmove',e=>{if(e.touches.length!==2||!gestureState)return;e.preventDefault();const [a,b]=e.touches,ratio=distance(a,b)/Math.max(1,gestureState.dist),o=gestureState.obj;o.set({scaleX:Math.max(.08,gestureState.scaleX*ratio),scaleY:Math.max(.08,gestureState.scaleY*ratio),angle:gestureState.objAngle+(touchAngle(a,b)-gestureState.angle)});o.setCoords();canvas.renderAll()}, {passive:false});el.addEventListener('touchend',e=>{if(gestureState&&e.touches.length<2){gestureState=null;recordHistory()}},{passive:false})}
+function attachTouchGestures(){
+  const el=canvas.upperCanvasEl;
+  const stop=e=>{e.preventDefault();e.stopImmediatePropagation()};
+  el.addEventListener('touchstart',e=>{
+    if(canvas.layer_contract_version==='multilayer-v1'||e.touches.length!==2)return;
+    stop(e);const o=canvas.getActiveObject();gestureState=null;
+    if(!o||o.bfUserLocked)return;
+    const [a,b]=e.touches;canvas._currentTransform=null;
+    gestureState={obj:o,dist:distance(a,b),angle:touchAngle(a,b),scaleX:o.scaleX||1,scaleY:o.scaleY||1,objAngle:o.angle||0};
+  },{capture:true,passive:false});
+  el.addEventListener('touchmove',e=>{
+    if(canvas.layer_contract_version==='multilayer-v1'||e.touches.length!==2)return;
+    stop(e);if(!gestureState||gestureState.obj.bfUserLocked)return;
+    const [a,b]=e.touches,ratio=distance(a,b)/Math.max(1,gestureState.dist),o=gestureState.obj;
+    o.set({scaleX:Math.max(.08,gestureState.scaleX*ratio),scaleY:Math.max(.08,gestureState.scaleY*ratio),angle:gestureState.objAngle+(touchAngle(a,b)-gestureState.angle)});
+    o.setCoords();canvas.renderAll();
+  },{capture:true,passive:false});
+  const end=e=>{if(gestureState&&e.touches.length<2){stop(e);gestureState=null;canvas._currentTransform=null;recordHistory()}};
+  el.addEventListener('touchend',end,{capture:true,passive:false});el.addEventListener('touchcancel',end,{capture:true,passive:false});
+}
 function distance(a,b){return Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY)}function touchAngle(a,b){return Math.atan2(b.clientY-a.clientY,b.clientX-a.clientX)*180/Math.PI}
 
 function applyTemplate(tpl,done){
