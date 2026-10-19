@@ -2972,6 +2972,7 @@ def order_print_workspace_test(browser, base, poll):
         page.keyboard.press('Escape')
         page.locator('[data-order-action="print-resend"]').first.scroll_into_view_if_needed()
         assert page.locator('[data-order-action="print-resend"]').count()==9
+        assert page.locator('.bf-order-card').first.evaluate("e=>getComputedStyle(e).contentVisibility")=="visible"
         assert page.locator('[data-order-action="print-resend"]').first.bounding_box()['height']>=44
         assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+2')
         Path('artifacts').mkdir(exist_ok=True)

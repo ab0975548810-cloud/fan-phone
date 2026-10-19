@@ -560,7 +560,8 @@ def order_resend_postgres_test():
             db.execute("""insert into public.print_jobs
                 (id,order_id,attempt_no,artwork_path,artwork_token_nonce,state)
                 values (%s,%s,1,'fixture.png','resend-test','FAILED')""", (job_id,order_id))
-        assert service.check_order_resend(order_id) == {"action": "retry", "job_id": job_id}
+        checked = service.check_order_resend(order_id)
+        assert checked["action"] == "retry" and str(checked["job_id"]) == job_id, checked
         for column, value, expected in (
             ("vendor_taskid", "old-vendor-task", "VENDOR_TASK_STILL_EXISTS"),
             ("started_at", "2026-01-01T00:00:00Z", "REPRINT_REQUIRED"),

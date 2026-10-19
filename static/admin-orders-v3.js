@@ -52,6 +52,10 @@
       .bf-order-page{position:relative;z-index:1;display:flex;justify-content:center;align-items:center;gap:10px;padding:12px;color:#82757a;font-size:12px}.bf-order-page button{min-height:44px;border:1px solid #edc4d0;background:#fff;color:#d95580;border-radius:999px;padding:8px 18px;font-weight:850}
       @media(max-width:800px){.bf-order-summary{grid-template-columns:repeat(3,minmax(0,1fr))}}
       @media(max-width:700px){.bf-order-tools{position:static}.bf-order-grid{grid-template-columns:1fr}.bf-order-card{grid-template-columns:82px minmax(0,1fr)}.bf-order-thumb{width:82px;height:108px}.bf-order-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
+      /* Interactive order actions must be hit-testable after scrolling in Safari.
+         Generic card content-visibility deferral can swallow a real click while
+         WebKit replaces its estimated offscreen layout with the actual card. */
+      #bf-order-manager .bf-order-card{content-visibility:visible}
     `;document.head.appendChild(s);
   }
 
