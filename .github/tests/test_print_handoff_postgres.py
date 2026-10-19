@@ -39,9 +39,21 @@ order = {
 }
 
 with psycopg.connect(DSN) as db:
-    db.execute("delete from public.print_handoffs")
-    db.execute("delete from public.print_jobs")
-    db.execute("delete from public.orders")
+    fixture_orders = (ORDER_ID, "handoff-legacy-review")
+    db.execute("""delete from public.print_events where job_id in
+        (select id from public.print_jobs where order_id = any(%s))""",
+               (list(fixture_orders),))
+    db.execute("""delete from public.print_requests where job_id in
+        (select id from public.print_jobs where order_id = any(%s))""",
+               (list(fixture_orders),))
+    db.execute("delete from public.print_handoffs where order_id = any(%s)",
+               (list(fixture_orders),))
+    db.execute("delete from public.print_jobs where order_id = any(%s)",
+               (list(fixture_orders),))
+    db.execute("delete from public.print_order_bindings where order_id = any(%s)",
+               (list(fixture_orders),))
+    db.execute("delete from public.orders where id = any(%s)",
+               (list(fixture_orders),))
     db.execute("delete from public.app_store where key='commerce_data'")
     db.execute("insert into public.app_store(key,value) values ('commerce_data',%s)",
                (psycopg.types.json.Jsonb(base),))
