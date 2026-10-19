@@ -106,6 +106,24 @@ class OrderStorageCompatibilityTests(unittest.TestCase):
         self.assertEqual(replay.json['order_id'],success.json['order_id'])
         self.assertEqual(len(app.commerce.read()['order_finance']),len(before['order_finance'])+1)
 
+    def test_print_upload_failure_does_not_commit_or_dispatch(self):
+        payload=self.fx.body({})
+        before=app.commerce.read()
+        original=self.bucket.upload
+        def fail_print(path,raw,file_options):
+            if path.endswith('/print.png'):raise TimeoutError('fixture print storage failure')
+            return original(path,raw,file_options)
+        with mock.patch.object(self.bucket,'upload',side_effect=fail_print):
+            failed=self.fx.client.post('/api/create_order',json=payload)
+        self.assertEqual(failed.status_code,500)
+        self.assertEqual(app.commerce.read(),before)
+        self.assertEqual(self.bucket.files,{})
+        self.handoff.assert_not_called()
+        success=self.fx.client.post('/api/create_order',json=payload)
+        self.assertEqual(success.status_code,200,success.json)
+        replay=self.fx.client.post('/api/create_order',json=payload)
+        self.assertEqual(replay.json['order_id'],success.json['order_id'])
+
     def test_commit_response_lost_keeps_artwork_and_replays_without_duplicate(self):
         payload=self.fx.body({'objects':[{'type':'image','role':'photo','src':fixture.PNG}]})
         before=app.commerce.read()
