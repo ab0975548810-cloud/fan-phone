@@ -1777,7 +1777,7 @@ def admin_test(browser, base):
         for tab in ('stock','restock','reports','expenses'):
             page.locator('[data-tab="'+tab+'"]').click()
             if tab == 'reports':
-                poll(page, "() => document.querySelectorAll('#pos-metrics .pos-metric').length===9")
+                poll(page, "() => document.querySelectorAll('#pos-metrics .pos-metric').length===10")
             metrics = page.evaluate("""() => ({width:innerWidth,scroll:document.documentElement.scrollWidth,view:document.getElementById('view-commerce').getBoundingClientRect().width})""")
             assert metrics['scroll'] <= width + 2 and metrics['view'] > 200, (tab,metrics)
             if os.environ.get('POS_SCREENSHOT_DIR'):
@@ -2908,6 +2908,7 @@ def order_print_workspace_test(browser, base, poll):
     # Order-card print operations use a single batch read and existing print
     # endpoints. All writes below are Playwright-mocked: no vendor calls.
     statuses = {
+        'CARD-REVIEW': None,
         'CARD-NOJOB': None,
         'CARD-PREPARED': dict(id='JOB-CARD-PREPARED',state='PREPARED',state_label='待送出',attempt_no=1,profile_complete=True),
         'CARD-FAILED': dict(id='JOB-CARD-FAILED',state='FAILED',state_label='失敗',attempt_no=1,profile_complete=True),
@@ -2972,6 +2973,9 @@ def order_print_workspace_test(browser, base, poll):
         order_id=parse_qs(urlsplit(route.request.url).query)['order_id'][0]
         job=statuses.get(order_id)
         api_calls.append(('resend-check',dict(order_id=order_id)))
+        if order_id=='CARD-REVIEW':
+            route.fulfill(status=409,content_type='application/json',body=json.dumps(dict(status='error',code='HANDOFF_REVIEW_REQUIRED',msg='歷史漏單需人工核對，禁止直接補送')))
+            return
         if job and (job.get('vendor_taskid') or job['state'] not in ('PREPARED','FAILED','CANCELED')):
             route.fulfill(status=409,content_type='application/json',body=json.dumps(dict(status='error',code='RECONCILE_REQUIRED',msg='已有 Task ID 或任務狀態不明，禁止重新送出')))
             return
@@ -2987,12 +2991,12 @@ def order_print_workspace_test(browser, base, poll):
     # Checking while another in-flight order refresh repaints the cards gives
     # false failures unrelated to the retry visibility contract.
     page.evaluate("async () => await window.refreshOrders(true)")
-    poll(page, "() => document.querySelectorAll('[data-order-action=print-resend]').length===9")
+    poll(page, "() => document.querySelectorAll('[data-order-action=print-resend]').length===10")
     for width,height in ((390,844),(768,1024),(1180,900)):
         page.set_viewport_size(dict(width=width,height=height))
         page.keyboard.press('Escape')
         page.locator('[data-order-action="print-resend"]').first.scroll_into_view_if_needed()
-        assert page.locator('[data-order-action="print-resend"]').count()==9
+        assert page.locator('[data-order-action="print-resend"]').count()==10
         assert page.locator('.bf-order-card').first.evaluate("e=>getComputedStyle(e).contentVisibility")=="visible"
         assert page.locator('[data-order-action="print-resend"]').first.bounding_box()['height']>=44
         assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+2')
@@ -3012,7 +3016,7 @@ def order_print_workspace_test(browser, base, poll):
         poll(page, f"() => document.querySelector('[data-order-id=\"{order_id}\"][data-order-action=print-resend]')?.closest('.bf-order-card')?.querySelector('.bf-print-message')?.textContent.includes('任務已送到銳印')")
         poll(page, "() => !document.querySelector('[data-order-action=print-resend]:disabled')")
         assert [op for op,_ in api_calls[before:]]==['resend-check','resend-check']+operations,api_calls[before:]
-    for order_id in ('CARD-UNKNOWN','CARD-UNKNOWN-ACK','CARD-QUEUED','CARD-PRINTING','CARD-COMPLETED','CARD-OLD-PHYSICAL'):
+    for order_id in ('CARD-REVIEW','CARD-UNKNOWN','CARD-UNKNOWN-ACK','CARD-QUEUED','CARD-PRINTING','CARD-COMPLETED','CARD-OLD-PHYSICAL'):
         before=len(api_calls)
         page.locator(f'[data-order-id="{order_id}"][data-order-action="print-resend"]').click()
         poll(page, f"() => document.querySelector('[data-order-id=\"{order_id}\"][data-order-action=print-resend]')?.closest('.bf-order-card')?.querySelector('.bf-print-message')?.textContent.includes('操作未完成')")
