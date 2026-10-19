@@ -28,7 +28,7 @@ def multilayer_browser_test(browser,base,poll):
         try:
             for name,file in (('DATA_FILE','shop.json'),('TEMPLATES_FILE','templates.json'),('ASSETS_FILE','assets.json')):setattr(app_module,name,str(Path(directory)/file))
             shop=copy.deepcopy(app_module.DEFAULT_SHOP_DATA);model=shop['models'][0];style=shop['styles'][0];style_id=style['id']
-            model['name']='iPhone 13';ids=[model['id'],'multilayer-17-pro','multilayer-17-pro-max'];shop['models']=[copy.deepcopy(model) for _ in ids]
+            model['name']='iPhone 13';ids=['multilayer-13','multilayer-17-pro','multilayer-17-pro-max'];shop['models']=[copy.deepcopy(model) for _ in ids]
             for m,identity,name,w,h in zip(shop['models'],ids,['iPhone 13','iPhone 17 Pro','iPhone 17 Pro Max'],[70,71.63,77.6],[140,149.61,160.7]):
                 m.update(id=identity,name=name,status=True,case_profiles={style_id:{'preview_mask_img':mask_url,'print_line_img':mask_url,'print_w':w,'print_h':h,'print_x':12,'print_y':13,'print_angle':90}})
             shop['styles']=[style];app_module.local_save_json(app_module.DATA_FILE,shop)
