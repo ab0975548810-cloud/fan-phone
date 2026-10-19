@@ -2483,7 +2483,7 @@ def admin_test(browser, base):
     }""")
     assert template_fixture_profile, template_fixture_profile
     page.locator('#view-templates .titlebar .btn').click()
-    poll(page, "() => document.getElementById('template-modal')?.classList.contains('show')", timeout=30000)
+    poll(page, "() => document.getElementById('template-modal')?.classList.contains('show') && !!visualCanvas", timeout=30000)
     template_open_diag = page.evaluate("""() => ({canvas:!!visualCanvas,model:document.getElementById('tpl-model')?.value,style:document.getElementById('tpl-style')?.value,profile:!!window.benfuwanTemplateReferenceProfile?.(),dialogs:window.__templateOpenDialogs||[]})""")
     print('ADMIN_TEMPLATE_OPEN_DIAG', template_open_diag)
     assert template_open_diag['canvas'], template_open_diag
