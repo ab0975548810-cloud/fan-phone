@@ -1137,6 +1137,37 @@ class PrintService:
                 raise PrintError("INVALID_REPLAY", "printer callback 驗證資料已被重用", 403)
         return inserted
 
+    def check_order_resend(self, order_id):
+        """Read-only vendor check; queue absence never clears uncertain history."""
+        order = self._order(order_id)
+        self._assert_order_printable(order)
+        if order.get("status") in ("列印中", "已完成"):
+            raise PrintError("REPRINT_REQUIRED", "訂單已列印中或已完成，不能直接重推，請人工查核")
+        if not self.vendor_ready:
+            raise PrintError("VENDOR_NOT_READY", "銳印尚未啟用或連線設定不完整，不能重新送任務", 503)
+        try:
+            remote = self._strict_vendor_task_rows(self.client.get_all_tasks())
+        except (VendorAmbiguous, VendorDisabled, VendorError) as exc:
+            raise PrintError("RECONCILE_FAILED", "銳印查核失敗，未重新送出；請稍後再試", 502) from exc
+        if remote is None:
+            raise PrintError("RECONCILE_FAILED", "銳印清單格式無法確認，禁止重新送出", 503)
+        # Read again after the network request. Send still uses the existing
+        # DB-atomic claim, including sticky physical evidence/quarantine checks.
+        self._assert_no_prior_physical_activity(order_id)
+        attempts = self.store.jobs_for_order(order_id)
+        if any(j.get("vendor_taskid") for j in attempts):
+            raise PrintError("VENDOR_TASK_STILL_EXISTS", "此訂單已有銳印 Task ID，不能直接重推；請到列印中心人工查核")
+        identities = {order_id} | {vendor_order_identity(j) for j in attempts}
+        if any(str(row.get("order_id") or "") in identities
+               or re.fullmatch(re.escape(order_id) + r"-p\d+", str(row.get("order_id") or ""))
+               for row in remote):
+            raise PrintError("VENDOR_TASK_STILL_EXISTS", "銳印仍有此訂單的任務，禁止重複推送")
+        latest = max(attempts, key=lambda j: int(j.get("attempt_no") or 0), default=None)
+        if latest and (latest.get("ambiguous_operation") or latest["state"] not in ("PREPARED", "FAILED", "CANCELED")):
+            raise PrintError("RECONCILE_REQUIRED", "任務仍在處理中或結果不明；待列印清單查無資料不代表從未列印，請人工查核")
+        return {"action": "prepare" if not latest else ("send" if latest["state"] == "PREPARED" else "retry"),
+                "job_id": latest["id"] if latest else None}
+
     def order_summaries(self, order_ids):
         """Read-only batch overview for the order cards; no vendor requests."""
         ids = list(dict.fromkeys(str(value) for value in order_ids))
@@ -1345,6 +1376,14 @@ def install(app_module):
         if order_id and not re.fullmatch(r'[A-Za-z0-9-]{1,100}', order_id):
             raise PrintError('BAD_REQUEST', '訂單編號格式錯誤', 400)
         return app_module.no_cache_json({"status": "success", **service.dashboard(order_id or None)})
+
+    @app.route("/api/admin/print/resend-check")
+    @guarded
+    def print_resend_check():
+        order_id = str(request.args.get("order_id") or "")
+        if not re.fullmatch(r"[A-Za-z0-9-]{1,100}", order_id):
+            raise PrintError("BAD_REQUEST", "訂單編號格式錯誤", 400)
+        return app_module.no_cache_json({"status": "success", **service.check_order_resend(order_id)})
 
     @app.route("/api/admin/print/order-summaries")
     @guarded

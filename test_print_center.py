@@ -131,6 +131,42 @@ class PrintCenterTests(unittest.TestCase):
             job = app.print_center.store.patch_job(job["id"], {"state": state})
         return order_id, finance["sku_id"], job
 
+    def test_order_resend_check_is_read_only_and_fails_closed(self):
+        self.fake.responses["/api/Device/getAllTasks"] = {"code": 0, "data": {"list": []}}
+        before = copy.deepcopy(app.commerce.read())
+        endpoint = "/api/admin/print/resend-check?order_id=" + self.order_id
+        self.assertEqual(self.client.get(endpoint).get_json()["action"], "prepare")
+        self.save_profile()
+        job = self.prepare()
+        self.assertEqual(self.client.get(endpoint).get_json()["action"], "send")
+        for state in ("FAILED", "CANCELED"):
+            app.print_center.store.patch_job(job["id"], {"state": state})
+            self.assertEqual(self.client.get(endpoint).get_json()["action"], "retry")
+        for state in ("UNKNOWN", "QUEUED", "SENDING", "STARTING", "CANCELING"):
+            app.print_center.store.patch_job(job["id"], {"state": state})
+            self.assertEqual(self.client.get(endpoint).get_json()["code"], "RECONCILE_REQUIRED")
+        app.print_center.store.patch_job(job["id"], {"state": "FAILED", "vendor_taskid": "existing-task"})
+        self.assertEqual(self.client.get(endpoint).get_json()["code"], "VENDOR_TASK_STILL_EXISTS")
+        app.print_center.store.patch_job(job["id"], {"vendor_taskid": None, "started_at": "2026-10-19T00:00:00+00:00"})
+        self.assertEqual(self.client.get(endpoint).get_json()["code"], "REPRINT_REQUIRED")
+        self.assertEqual(app.commerce.read(), before)
+        self.assertFalse(any(path.endswith("receiveTask") for path, _ in self.fake.calls))
+        with self.client.session_transaction() as session:
+            session.pop("logged_in", None)
+        self.assertEqual(self.client.get(endpoint).status_code, 401)
+
+    def test_order_resend_check_vendor_failure_or_existing_task_blocks(self):
+        endpoint = "/api/admin/print/resend-check?order_id=" + self.order_id
+        for data, code in (({"list": [{"order_id": self.order_id, "taskid": "existing"}]}, "VENDOR_TASK_STILL_EXISTS"),
+                           ({"list": [{"order_id": self.order_id + "-p1", "taskid": "orphan"}]}, "VENDOR_TASK_STILL_EXISTS"),
+                           ({"unexpected": True}, "RECONCILE_FAILED")):
+            self.fake.responses["/api/Device/getAllTasks"] = {"code": 0, "data": data}
+            self.assertEqual(self.client.get(endpoint).get_json()["code"], code)
+        self.fake.timeout_paths.add("/api/Device/getAllTasks")
+        self.assertEqual(self.client.get(endpoint).get_json()["code"], "RECONCILE_FAILED")
+        self.assertIsNone(app.print_center.store.latest_job(self.order_id))
+        self.assertFalse(any(path.endswith("receiveTask") for path, _ in self.fake.calls))
+
     def test_order_history_filters_pagination_and_exact_print_lookup(self):
         # Rows beyond the recent 200 must remain reachable without changing commerce state.
         with app.commerce.store.connection() as db:
@@ -1949,8 +1985,11 @@ class PrintCenterTests(unittest.TestCase):
         self.assertTrue(exact["handoffs"]["truncated"])
         page2 = self.client.get("/api/admin/print/handoffs?offset=20").get_json()
         self.assertIn(self.order_id, [a["order_id"] for a in page2["handoffs"]["alerts"]])
+        self.fake.responses["/api/Device/getAllTasks"] = {"code": 0, "data": {"list": []}}
+        checked = self.client.get("/api/admin/print/resend-check?order_id=" + self.order_id)
+        self.assertEqual(checked.get_json()["code"], "HANDOFF_REVIEW_REQUIRED")
         self.assertEqual(app.commerce.read(), before)
-        self.assertEqual(self.fake.calls, [])
+        self.assertFalse(any(path.endswith("receiveTask") for path, _ in self.fake.calls))
         self.assertEqual(len(app.print_center.store.jobs_for_order(self.order_id)), 1)
 
     def test_legacy_cutoff_candidate_is_alert_only_and_never_auto_sent(self):

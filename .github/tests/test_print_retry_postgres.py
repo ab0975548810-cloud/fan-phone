@@ -543,23 +543,60 @@ for race_index in range(20):
 print("PRINT_RETRY_POSTGRES_CONCURRENCY_OK")
 
 
-# Exercise the production service guard against authoritative PostgreSQL rows.
+
+# Read-only order-card gate uses the production service and real PG attempt rows.
+from unittest.mock import patch
 from print_center import PrintService, PrintError
-review_id = "review-backend-guard"
-with psycopg.connect(DSN) as db:
-    db.execute("delete from public.print_handoffs where order_id=%s", (review_id,))
-    db.execute("""insert into public.print_handoffs
-        (order_id,request_key,marker_version,state)
-        values (%s,'review-backend-key','legacy-auto-print-v1','REVIEW')""", (review_id,))
-module = SimpleNamespace(USE_SUPABASE=True, SUPABASE=_PostgresSupabaseAdapter())
-service = PrintService(module, client=SimpleNamespace())
-assert service.store.handoffs_for_orders([review_id])[review_id]["state"] == "REVIEW"
-for operation in (lambda: service.prepare(review_id, "review-prepare-key"),
-                  lambda: service._assert_no_prior_physical_activity(review_id)):
+
+def order_resend_postgres_test():
+    order_id = "order-card-resend-pg"
+    job_id = str(uuid.uuid4())
+    module = SimpleNamespace(USE_SUPABASE=True, SUPABASE=_PostgresSupabaseAdapter(),
+        commerce=SimpleNamespace(store=SimpleNamespace(order=lambda oid: {
+            "id": oid, "status": "待處理", "print_path": "fixture.png"})))
+    vendor = SimpleNamespace(ready=True, get_all_tasks=lambda: {"data": []})
+    service = PrintService(module, client=vendor)
+    with psycopg.connect(DSN) as db:
+        db.execute("delete from public.print_jobs where order_id=%s", (order_id,))
+    with patch.dict(os.environ, {"PRINT_ARTWORK_TOKEN_SECRET": "test" * 16,
+                               "PRINT_PUBLIC_BASE_URL": "https://isolated.invalid"}):
+        assert service.check_order_resend(order_id)["action"] == "prepare"
+        with psycopg.connect(DSN) as db:
+            db.execute("""insert into public.print_jobs
+                (id,order_id,attempt_no,artwork_path,artwork_token_nonce,state)
+                values (%s,%s,1,'fixture.png','resend-test','FAILED')""", (job_id,order_id))
+        checked = service.check_order_resend(order_id)
+        assert checked["action"] == "retry" and str(checked["job_id"]) == job_id, checked
+        for column, value, expected in (
+            ("vendor_taskid", "old-vendor-task", "VENDOR_TASK_STILL_EXISTS"),
+            ("started_at", "2026-01-01T00:00:00Z", "REPRINT_REQUIRED"),
+            ("completed_at", "2026-01-01T00:00:00Z", "REPRINT_REQUIRED"),
+        ):
+            with psycopg.connect(DSN) as db:
+                db.execute(sql.SQL("update public.print_jobs set {}=%s where id=%s").format(sql.Identifier(column)), (value, job_id))
+            try:
+                service.check_order_resend(order_id)
+                raise AssertionError("unsafe resend allowed")
+            except PrintError as exc:
+                assert exc.code == expected, exc.code
+            with psycopg.connect(DSN) as db:
+                db.execute(sql.SQL("update public.print_jobs set {}=NULL where id=%s").format(sql.Identifier(column)), (job_id,))
+        with psycopg.connect(DSN) as db:
+            rows=db.execute("select state from public.print_jobs where order_id=%s", (order_id,)).fetchall()
+            assert rows == [("FAILED",)], rows
+    print("ORDER_RESEND_POSTGRES_SERVICE_READ_ONLY_SAFETY_OK")
+
+order_resend_postgres_test()
+
+# Integrated #89 resend-check must inherit #88's DB guard, even with empty vendor queue.
+with patch.dict(os.environ, {"PRINT_ARTWORK_TOKEN_SECRET": "test" * 16,
+                           "PRINT_PUBLIC_BASE_URL": "https://isolated.invalid"}):
+    module.commerce = SimpleNamespace(store=SimpleNamespace(order=lambda oid: {
+        "id": oid, "status": "待處理", "print_path": "fixture.png"}))
+    service.client = SimpleNamespace(ready=True, get_all_tasks=lambda: {"data": []})
     try:
-        operation()
-        raise AssertionError("historical REVIEW bypassed")
+        service.check_order_resend(review_id)
+        raise AssertionError("resend-check bypassed historical review")
     except PrintError as exc:
         assert exc.code == "HANDOFF_REVIEW_REQUIRED", exc.code
-assert service.store.jobs_for_order(review_id) == []
-print("HISTORICAL_REVIEW_POSTGRES_SERVICE_GUARD_OK")
+print("INTEGRATED_88_89_POSTGRES_RESEND_REVIEW_BLOCKED_OK")
