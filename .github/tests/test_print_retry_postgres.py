@@ -537,3 +537,47 @@ def race_real_create_job_and_callback(index):
 for race_index in range(20):
     race_real_create_job_and_callback(race_index)
 print("PRINT_RETRY_POSTGRES_CONCURRENCY_OK")
+
+
+# Read-only order-card gate uses the production service and real PG attempt rows.
+from unittest.mock import patch
+from print_center import PrintService, PrintError
+
+def order_resend_postgres_test():
+    order_id = "order-card-resend-pg"
+    job_id = str(uuid.uuid4())
+    module = SimpleNamespace(USE_SUPABASE=True, SUPABASE=_PostgresSupabaseAdapter(),
+        commerce=SimpleNamespace(store=SimpleNamespace(order=lambda oid: {
+            "id": oid, "status": "待處理", "print_path": "fixture.png"})))
+    vendor = SimpleNamespace(ready=True, get_all_tasks=lambda: {"data": []})
+    service = PrintService(module, client=vendor)
+    with psycopg.connect(DSN) as db:
+        db.execute("delete from public.print_jobs where order_id=%s", (order_id,))
+    with patch.dict(os.environ, {"PRINT_ARTWORK_TOKEN_SECRET": "test" * 16,
+                               "PRINT_PUBLIC_BASE_URL": "https://isolated.invalid"}):
+        assert service.check_order_resend(order_id)["action"] == "prepare"
+        with psycopg.connect(DSN) as db:
+            db.execute("""insert into public.print_jobs
+                (id,order_id,attempt_no,artwork_path,artwork_token_nonce,state)
+                values (%s,%s,1,'fixture.png','resend-test','FAILED')""", (job_id,order_id))
+        assert service.check_order_resend(order_id) == {"action": "retry", "job_id": job_id}
+        for column, value, expected in (
+            ("vendor_taskid", "old-vendor-task", "VENDOR_TASK_STILL_EXISTS"),
+            ("started_at", "2026-01-01T00:00:00Z", "REPRINT_REQUIRED"),
+            ("completed_at", "2026-01-01T00:00:00Z", "REPRINT_REQUIRED"),
+        ):
+            with psycopg.connect(DSN) as db:
+                db.execute(sql.SQL("update public.print_jobs set {}=%s where id=%s").format(sql.Identifier(column)), (value, job_id))
+            try:
+                service.check_order_resend(order_id)
+                raise AssertionError("unsafe resend allowed")
+            except PrintError as exc:
+                assert exc.code == expected, exc.code
+            with psycopg.connect(DSN) as db:
+                db.execute(sql.SQL("update public.print_jobs set {}=NULL where id=%s").format(sql.Identifier(column)), (job_id,))
+        with psycopg.connect(DSN) as db:
+            rows=db.execute("select state from public.print_jobs where order_id=%s", (order_id,)).fetchall()
+            assert rows == [("FAILED",)], rows
+    print("ORDER_RESEND_POSTGRES_SERVICE_READ_ONLY_SAFETY_OK")
+
+order_resend_postgres_test()
