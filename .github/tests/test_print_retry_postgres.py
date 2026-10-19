@@ -548,6 +548,11 @@ from print_center import PrintService, PrintError
 review_id = "review-backend-guard"
 with psycopg.connect(DSN) as db:
     db.execute("delete from public.print_handoffs where order_id=%s", (review_id,))
+    db.execute("""insert into public.orders
+        (id,customer_name,payment_method,model_id,model_name,style_id,style_name,
+         unit_price,quantity,total,status,created_at_unix)
+        values (%s,'fixture','cash','m','m','s','s',100,1,100,'待處理',1)
+        on conflict (id) do nothing""", (review_id,))
     db.execute("""insert into public.print_handoffs
         (order_id,request_key,marker_version,state)
         values (%s,'review-backend-key','legacy-auto-print-v1','REVIEW')""", (review_id,))
