@@ -27,6 +27,11 @@ preflight, and then drains the existing deterministic `auto-prepare-*` /
 process restart, or competing worker therefore cannot lose the handoff or create
 a second job/vendor request.
 
+`YUN_PRINT_ENABLED=false` is a durable operational pause. New eligible orders
+remain `PENDING` with `attempt_count=0`; workers do not claim, age out, or mark
+them `REVIEW`. After a later process starts with complete vendor configuration,
+the same outbox rows resume through normal claim/preflight exactly once.
+
 The migration records a `release_cutoff`. Existing `auto_print_v1` receipts that
 predate the release and have no job are written as `legacy-auto-print-v1 /
 REVIEW`. Claim RPCs structurally exclude those rows. They appear only in the
@@ -112,7 +117,7 @@ Printer status code `6` remains raw-only until the vendor gives one consistent d
 2. Confirm the existing Print migrations are present. Apply `20261019193000_print_handoff_outbox.sql`; never run it from an application boot hook.
 3. Verify `print_handoff_control.release_cutoff`, `print_handoffs`, and both RPCs exist. Confirm RLS is enabled; `public`, `anon`, and `authenticated` have no table or function access; only `service_role` can select/write and execute. Run Supabase security/performance advisors.
 4. Verify pre-cutoff marker/no-job candidates are `REVIEW` and that `claim_print_handoffs(20,60)` never returns them. Do not change those rows to `PENDING` during deployment.
-5. Deploy the application with `YUN_PRINT_ENABLED=false`. Create one isolated post-cutoff order in a non-production environment and verify exactly one outbox row and one PREPARED job survive a worker restart. Confirm no `receiveTask`, `startPrint`, or `pushPrint` call occurs while disabled.
+5. Deploy the application with `YUN_PRINT_ENABLED=false`. Create one isolated post-cutoff order in a non-production environment and verify exactly one `PENDING` outbox row with zero attempts survives a worker restart and no job is created. Confirm no `receiveTask`, `startPrint`, or `pushPrint` call occurs while disabled. In the isolated environment only, enable the vendor fixture and verify that same row becomes one linked PREPARED job and is submitted at most once.
 6. Resume checkout only after every worker runs the new release. Confirm the reverse proxy redacts `/api/print/artwork/*`; the repository Gunicorn config already omits request paths.
 7. If rollback is required, disable the dispatcher/vendor first and roll the application back. Keep the new tables and RPCs in place so committed outbox evidence is not destroyed. Do not drop or rewrite handoff rows. Re-deploy the fixed release to resume; review any `PENDING/RETRY/CLAIMED` rows before re-enabling vendor handoff.
 8. Calibrate one model in **品牌及型號**, then explicitly save it and verify every active SKU for that model shows the same read-only profile in Print Center. Do not accept guessed values without physical measurement.

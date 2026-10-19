@@ -718,6 +718,19 @@ class PrintStore:
         next_attempt = ((now + timedelta(seconds=int(retry_seconds))).isoformat()
                         if state == "RETRY" else None)
         with self.connection(write=True) as db:
+            handoff = db.execute("""SELECT order_id FROM print_handoffs
+                WHERE id=? AND state='CLAIMED' AND lease_token=?""",
+                (handoff_id, lease_token)).fetchone()
+            if not handoff:
+                return {"ok": False, "code": "LEASE_LOST"}
+            if state == "PREPARED":
+                if not prepared_job_id:
+                    return {"ok": False, "code": "PREPARED_JOB_REQUIRED"}
+                job = db.execute(
+                    "SELECT order_id FROM print_jobs WHERE id=?",
+                    (prepared_job_id,)).fetchone()
+                if not job or str(job["order_id"]) != str(handoff["order_id"]):
+                    return {"ok": False, "code": "PREPARED_JOB_MISMATCH"}
             changed = db.execute("""UPDATE print_handoffs SET
                 state=?,prepared_job_id=CASE WHEN ?='PREPARED' THEN ? ELSE prepared_job_id END,
                 last_error_code=?,last_error_at=CASE WHEN ? IS NULL THEN last_error_at ELSE ? END,
@@ -729,33 +742,37 @@ class PrintStore:
         return {"ok": bool(changed), "state": state if changed else None,
                 "code": None if changed else "LEASE_LOST"}
 
-    def handoff_summary(self, limit=200):
-        """Bounded read-only alerts. Raw order and checkout IDs never leave server."""
+    def handoff_summary(self, limit=200, *, include_order_ids=False):
+        """Bounded alerts; raw order IDs are opt-in for authenticated admin UI."""
         limit = max(1, min(int(limit), 200))
         alert_states = ("REVIEW", "FAILED", "RETRY", "CLAIMED", "PENDING")
         if self.app.USE_SUPABASE:
             rows = (self.app.SUPABASE.table("print_handoffs")
-                    .select("order_id,state,attempt_count,last_error_code,created_at,updated_at")
+                    .select("order_id,marker_version,state,attempt_count,last_error_code,created_at,updated_at")
                     .in_("state", list(alert_states))
                     .order("updated_at", desc=True).limit(limit).execute().data or [])
         else:
             with self.connection() as db:
                 rows = [self._decode(row) for row in db.execute("""SELECT
-                    order_id,state,attempt_count,last_error_code,created_at,updated_at
+                    order_id,marker_version,state,attempt_count,last_error_code,created_at,updated_at
                     FROM print_handoffs WHERE state IN ('REVIEW','FAILED','RETRY','CLAIMED','PENDING')
                     ORDER BY updated_at DESC LIMIT ?""", (limit,)).fetchall()]
         counts, alerts = {}, []
         for row in rows:
             state = str(row.get("state") or "")
             counts[state] = counts.get(state, 0) + 1
-            alerts.append({
+            alert = {
                 "order_ref": hashlib.sha256(
                     str(row.get("order_id") or "").encode()).hexdigest()[:12],
+                "marker_version": str(row.get("marker_version") or ""),
                 "state": state,
                 "attempt_count": int(row.get("attempt_count") or 0),
                 "error_code": str(row.get("last_error_code") or "")[:100],
                 "updated_at": row.get("updated_at"),
-            })
+            }
+            if include_order_ids:
+                alert["order_id"] = str(row.get("order_id") or "")
+            alerts.append(alert)
         return {"counts": counts, "alerts": alerts[:20],
                 "bounded_limit": limit, "truncated": len(rows) >= limit}
 

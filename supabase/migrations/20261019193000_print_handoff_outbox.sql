@@ -27,7 +27,8 @@ create table if not exists public.print_handoffs (
     last_error_code text,
     last_error_at timestamptz,
     created_at timestamptz not null default now(),
-    updated_at timestamptz not null default now()
+    updated_at timestamptz not null default now(),
+    check (state <> 'PREPARED' or prepared_job_id is not null)
 );
 
 create index if not exists idx_print_handoffs_due
@@ -111,12 +112,32 @@ language plpgsql security invoker set search_path = ''
 as $$
 declare
     changed public.print_handoffs;
+    current_handoff public.print_handoffs;
 begin
     if p_state not in ('RETRY','PREPARED','REVIEW','FAILED') then
         raise exception 'Invalid print handoff finish state';
     end if;
     if p_state = 'RETRY' and (p_retry_seconds is null or p_retry_seconds < 1 or p_retry_seconds > 3600) then
         raise exception 'Invalid print handoff retry delay';
+    end if;
+    select * into current_handoff
+      from public.print_handoffs
+     where id = p_id and state = 'CLAIMED' and lease_token = p_lease_token
+     for update;
+    if current_handoff.id is null then
+        return jsonb_build_object('ok', false, 'code', 'LEASE_LOST');
+    end if;
+    if p_state = 'PREPARED' then
+        if p_prepared_job_id is null then
+            return jsonb_build_object('ok', false, 'code', 'PREPARED_JOB_REQUIRED');
+        end if;
+        if not exists (
+            select 1 from public.print_jobs job
+             where job.id = p_prepared_job_id
+               and job.order_id = current_handoff.order_id
+        ) then
+            return jsonb_build_object('ok', false, 'code', 'PREPARED_JOB_MISMATCH');
+        end if;
     end if;
     update public.print_handoffs
        set state = p_state,
@@ -129,7 +150,7 @@ begin
            lease_token = null,
            lease_expires_at = null,
            updated_at = now()
-     where id = p_id and state = 'CLAIMED' and lease_token = p_lease_token
+     where id = current_handoff.id and state = 'CLAIMED' and lease_token = p_lease_token
     returning * into changed;
     if changed.id is null then
         return jsonb_build_object('ok', false, 'code', 'LEASE_LOST');

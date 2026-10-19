@@ -10,6 +10,7 @@ import psycopg
 
 DSN = os.environ["TEST_POSTGRES_DSN"]
 ORDER_ID = "handoff-atomic-order"
+WRONG_ORDER_ID = "handoff-wrong-job-order"
 REQUEST_KEY = "handoff-postgres-request-0001"
 MARKER = "auto-print-handoff-v1"
 
@@ -39,7 +40,7 @@ order = {
 }
 
 with psycopg.connect(DSN) as db:
-    fixture_orders = (ORDER_ID, "handoff-legacy-review")
+    fixture_orders = (ORDER_ID, WRONG_ORDER_ID, "handoff-legacy-review")
     db.execute("""delete from public.print_events where job_id in
         (select id from public.print_jobs where order_id = any(%s))""",
                (list(fixture_orders),))
@@ -68,6 +69,15 @@ with psycopg.connect(DSN) as db:
     outbox = db.execute("""select order_id,request_key,marker_version,state,attempt_count
         from public.print_handoffs where order_id=%s""", (ORDER_ID,)).fetchone()
 assert outbox == (ORDER_ID, REQUEST_KEY, MARKER, "PENDING", 0), outbox
+
+# A vendor-disabled application deliberately does not call the claim RPC.
+# The database row survives reconnect/restart-like process boundaries without
+# consuming attempts, ready for a later enabled worker.
+for _ in range(5):
+    with psycopg.connect(DSN) as db:
+        paused = db.execute("""select state,attempt_count,prepared_job_id
+            from public.print_handoffs where order_id=%s""", (ORDER_ID,)).fetchone()
+    assert paused == ("PENDING", 0, None), paused
 
 # An idempotent receipt replay advances commerce CAS but cannot create another
 # order, stock mutation, or outbox row.
@@ -129,11 +139,42 @@ assert len(flat) == 1, flat
 handoff_id, lease_token = flat[0]
 
 with psycopg.connect(DSN) as db:
-    finished = db.execute(
+    missing_job = db.execute(
         "select public.finish_print_handoff(%s,%s,'PREPARED',null,null,null)",
         (handoff_id, lease_token),
     ).fetchone()[0]
+    assert missing_job == {"ok": False, "code": "PREPARED_JOB_REQUIRED"}, missing_job
+    db.execute("""insert into public.orders
+      (id,customer_name,payment_method,model_id,model_name,style_id,style_name,
+       unit_price,quantity,total,status,created_at_unix)
+      values (%s,'fixture','cash','m','m','s','s',100,1,100,'待處理',1)""",
+               (WRONG_ORDER_ID,))
+    wrong_job_id = str(uuid.uuid4())
+    db.execute("""insert into public.print_jobs
+      (id,order_id,attempt_no,artwork_path,artwork_token_nonce,state)
+      values (%s,%s,1,'wrong.png','wrong-token','PREPARED')""",
+               (wrong_job_id, WRONG_ORDER_ID))
+    wrong_order = db.execute(
+        "select public.finish_print_handoff(%s,%s,'PREPARED',%s,null,null)",
+        (handoff_id, lease_token, wrong_job_id),
+    ).fetchone()[0]
+    assert wrong_order == {"ok": False, "code": "PREPARED_JOB_MISMATCH"}, wrong_order
+    still_claimed = db.execute("""select state,prepared_job_id,lease_token
+        from public.print_handoffs where id=%s""", (handoff_id,)).fetchone()
+    assert still_claimed == ("CLAIMED", None, lease_token), still_claimed
+    correct_job_id = str(uuid.uuid4())
+    db.execute("""insert into public.print_jobs
+      (id,order_id,attempt_no,artwork_path,artwork_token_nonce,state)
+      values (%s,%s,1,'fixture.png','fixture-token','PREPARED')""",
+               (correct_job_id, ORDER_ID))
+    finished = db.execute(
+        "select public.finish_print_handoff(%s,%s,'PREPARED',%s,null,null)",
+        (handoff_id, lease_token, correct_job_id),
+    ).fetchone()[0]
     assert finished["ok"] is True, finished
+    linked = db.execute("""select state,prepared_job_id from public.print_handoffs
+        where id=%s""", (handoff_id,)).fetchone()
+    assert linked == ("PREPARED", uuid.UUID(correct_job_id)), linked
     assert db.execute("select count(*) from public.claim_print_handoffs(20,60)").fetchone()[0] == 0
 
 # Pre-release/legacy candidates remain visible but are structurally unclaimable.

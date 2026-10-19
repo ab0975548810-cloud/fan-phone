@@ -2808,10 +2808,19 @@ def order_print_workspace_test(browser, base, poll):
                            has_print=True,profile_available=False,binding_required=True,sku_id='',legacy_order=True,sku_candidates=[],job=None))
     print_rows.append(dict(order_id='PRINT-PRIOR-BLOCK',customer_name='客人',model='iPhone 13',style='晶彩',order_status='待處理',time=stamp,
                            has_print=True,profile_available=True,binding_required=False,sku_id='SKU',job=dict(id='JOB-PRIOR-BLOCK',state='CANCELED',state_label='已取消',attempt_no=2,profile_complete=True,ambiguous_operation='prior_attempt_activity',last_error='舊列印嘗試延遲回報列印中/完成，為避免重複打印，本次重推已封鎖')))
+    review_row=dict(order_id='PRINT-LEGACY-REVIEW',customer_name='舊客人',model='iPhone 13',style='晶彩',order_status='待處理',time=stamp-300,
+                    has_print=True,profile_available=True,binding_required=False,sku_id='SKU',job=None,
+                    handoff_alert=dict(state='REVIEW',error_code='LEGACY_CUTOFF_REVIEW',marker_version='legacy-auto-print-v1'))
+    handoffs=dict(counts=dict(REVIEW=1),alerts=[dict(order_id='PRINT-LEGACY-REVIEW',order_ref='fixture-ref',marker_version='legacy-auto-print-v1',state='REVIEW',attempt_count=0,error_code='LEGACY_CUTOFF_REVIEW')],bounded_limit=200,truncated=False)
     def print_route(route):
         p = parse_qs(urlsplit(route.request.url).query)
-        data = [dict(order_id='ORDER-204',customer_name='老客人',model='iPhone 13',style='晶彩',order_status='待處理',time=stamp-204,has_print=True,profile_available=True,binding_required=False,sku_id='SKU',job=None)] if p.get('order_id') == ['ORDER-204'] else print_rows
-        route.fulfill(status=200,content_type='application/json',body=json.dumps(dict(status='success',rows=data,vendor_ready=True,vendor_connected=True,device_id='fixture')))
+        if p.get('order_id') == ['ORDER-204']:
+            data = [dict(order_id='ORDER-204',customer_name='老客人',model='iPhone 13',style='晶彩',order_status='待處理',time=stamp-204,has_print=True,profile_available=True,binding_required=False,sku_id='SKU',job=None)]
+        elif p.get('order_id') == ['PRINT-LEGACY-REVIEW']:
+            data = [review_row]
+        else:
+            data = print_rows
+        route.fulfill(status=200,content_type='application/json',body=json.dumps(dict(status='success',rows=data,handoffs=handoffs,vendor_ready=True,vendor_connected=True,device_id='fixture')))
     mutations=[]
     page.on('request',lambda request: mutations.append(request.url) if request.method != 'GET' and '/api/admin/print/' in request.url else None)
     page.route('**/api/admin/get_orders?*',order_route)
@@ -2845,6 +2854,14 @@ def order_print_workspace_test(browser, base, poll):
     page.locator('[data-pc="order"]').click()
     poll(page,"() => document.querySelector('#view-orders.active .bf-order-card')?.textContent.includes('ORDER-204')")
     page.locator('.nav button[data-view="print-center"]').click()
+    page.locator('[data-pc="clear-exact"]').click()
+    poll(page,"() => document.querySelectorAll('#pc-grid .pc-card').length===12")
+    assert page.locator('[data-pc="handoff-order"]').count()==1
+    page.locator('[data-pc="handoff-order"]').click()
+    poll(page,"() => document.querySelector('#view-print-center.active .pc-card')?.textContent.includes('PRINT-LEGACY-REVIEW')")
+    review_card=page.locator('.pc-card').filter(has=page.locator('.pc-id',has_text='PRINT-LEGACY-REVIEW'))
+    assert review_card.locator('[data-pc="prepare"]').count()==0
+    assert '只能人工查核' in review_card.inner_text()
     page.locator('[data-pc="clear-exact"]').click()
     poll(page,"() => document.querySelectorAll('#pc-grid .pc-card').length===12")
     for key,count in [('exception',6),('attention',1),('prepared',1),('queued',1),('printing',1),('completed',2)]:

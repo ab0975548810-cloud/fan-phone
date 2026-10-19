@@ -329,6 +329,11 @@ class PrintService:
         Only the exact release marker is claimable. Legacy rows are REVIEW-only
         and never enter this method, including after restarts or redeploys.
         """
+        # A disabled or incompletely configured vendor is an operator pause,
+        # not a failed preflight. Leave the durable row PENDING so a later
+        # process with valid settings can claim it without consuming attempts.
+        if not self.vendor_ready:
+            return []
         handoffs = self.store.claim_handoffs(limit=limit, lease_seconds=90)
         if not handoffs:
             return []
@@ -444,9 +449,9 @@ class PrintService:
 
     def dispatch_auto_once(self):
         """Drain durable auto markers once; safe across retries and processes."""
-        self.recover_auto_handoffs_once()
         if not self.vendor_ready:
             return []
+        self.recover_auto_handoffs_once()
         results = []
         for job in self.store.auto_prepared_jobs():
             try:
@@ -1222,9 +1227,23 @@ class PrintService:
                 "job": _public_job(latest.get(order_id)),
                 "prior_physical_activity": order_id in physical,
             })
+        handoffs = self.store.handoff_summary(include_order_ids=True)
+        handoff_by_order = {
+            str(item.get("order_id") or ""): item
+            for item in handoffs.get("alerts") or []
+            if item.get("order_id")
+        }
+        for row in result:
+            alert = handoff_by_order.get(str(row.get("order_id") or ""))
+            if alert:
+                row["handoff_alert"] = {
+                    "state": alert.get("state"),
+                    "error_code": alert.get("error_code"),
+                    "marker_version": alert.get("marker_version"),
+                }
         return {
             "rows": result,
-            "handoffs": self.store.handoff_summary(),
+            "handoffs": handoffs,
             "vendor_ready": self.vendor_ready,
             "vendor_connected": self.client.ready,
             "vendor_enabled": self.client.enabled,
@@ -1431,9 +1450,9 @@ def install(app_module):
         if request.path == "/admin" and response.status_code == 200 and response.mimetype == "text/html":
             response.direct_passthrough = False
             html = response.get_data(as_text=True)
-            src = "/static/admin-print-center.js?v=20261019handoff1"
+            src = "/static/admin-print-center.js?v=20261019handoff2"
             if src not in html:
-                response.set_data(html.replace("</body>", f'<link rel="stylesheet" href="/static/admin-print-center.css?v=20261019handoff1"><script src="{src}"></script></body>'))
+                response.set_data(html.replace("</body>", f'<link rel="stylesheet" href="/static/admin-print-center.css?v=20261019handoff2"><script src="{src}"></script></body>'))
             response.headers["Cache-Control"] = "no-store"
         return response
 
