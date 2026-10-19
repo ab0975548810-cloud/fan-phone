@@ -310,15 +310,31 @@ def legacy_lock_and_proxy_test(page,browser,poll,asset_url,model,style):
     page.route('**/api/public/asset_proxy*',lambda route:route.fulfill(status=200,content_type='image/png',body=png()))
     result=page.evaluate("""async a=>{
       ctx.modelId=a.model;ctx.styleId=a.style;ctx.printW=70;ctx.printH=140;initCanvas();
-      const raw={type:'image',src:'https://fixtures.invalid/sticker.png',publicSrc:'https://fixtures.invalid/sticker.png',width:512,height:256,left:30,top:40,scaleX:.1,scaleY:.1,angle:17};
-      const t={template_version:2,universal:true,reference_model_id:a.model,reference_style_id:a.style,source_canvas_w:ctx.printW*2,source_canvas_h:ctx.printH*2,objects_json:{objects:[raw]},slots:[]};
+      const raw={type:'image',src:'https://fixtures.invalid/sticker.png',publicSrc:'https://fixtures.invalid/sticker.png',width:512,height:256,left:30,top:40,originX:'center',originY:'center',scaleX:.1,scaleY:.1,angle:17};
+      const t={template_version:2,universal:true,reference_model_id:a.model,reference_style_id:a.style,source_canvas_w:ctx.printW*2,source_canvas_h:ctx.printH*2,objects_json:{objects:[raw]},slots:[{id:'legacy-frame',x:10,y:20,w:30,h:40}]};
       const adapted=BenfuwanTemplateAlignment.adapt(t),o=adapted.objects_json.objects[0];
       const image=await new Promise(resolve=>fabric.Image.fromURL(o.src,resolve));
       const c=new fabric.StaticCanvas(null,{width:100,height:100});c.add(image);const exported=c.toDataURL({format:'png'});c.dispose();
-      return {src:o.src,left:o.left,top:o.top,scale:o.scaleX,angle:o.angle,exported:exported.startsWith('data:image/png')};
+      await new Promise(resolve=>applyTemplate(t,resolve));
+      const placed=canvas.getObjects().find(x=>x.type==='image'),slot=canvas.getObjects().find(x=>x.role==='slot-guide');
+      const same={left:placed.left,top:placed.top,scale:placed.scaleX,angle:placed.angle,slotX:slot.left,slotY:slot.top,slotW:slot.width};
+      ctx.modelId='multilayer-17-pro-max';ctx.printW=77.6;ctx.printH=160.7;initCanvas();
+      await new Promise(resolve=>applyTemplate(t,resolve));
+      const cross=canvas.getObjects().find(x=>x.type==='image'),crossSlot=canvas.getObjects().find(x=>x.role==='slot-guide');
+      const mapped={left:cross.left,top:cross.top,scale:cross.scaleX,angle:cross.angle,slotX:crossSlot.left,slotW:crossSlot.width};
+      canvas.toDataURL({format:'png'});
+      ctx.modelId=a.model;ctx.printW=70;ctx.printH=140;initCanvas();
+      return {src:o.src,left:o.left,top:o.top,scale:o.scaleX,angle:o.angle,exported:exported.startsWith('data:image/png'),same,mapped};
     }""",dict(model=model,style=style))
     assert result['src'].startswith('/api/public/asset_proxy') and result['exported'],result
     assert (result['left'],result['top'],result['scale'],result['angle'])==(30,40,.1,17)
+    same=result['same'];assert same['left']==45 and same['top']==60 and abs(same['scale']-.15)<1e-9 and same['angle']==17,same
+    assert (same['slotX'],same['slotY'],same['slotW'])==(30,60,90),same
+    cross=result['mapped'];fit=min(77.6/70,160.7/140)
+    assert abs(cross['left']-30/140*(77.6*3))<1e-7 and abs(cross['top']-40/280*(160.7*3))<1e-7,cross
+    assert abs(cross['scale']-.1*fit*1.5)<1e-9 and cross['angle']==17,cross
+    assert abs(cross['slotW']-30*fit*3)<1e-7,cross
+    print('LEGACY_SAME_AND_CROSS_MODEL_SINGLE_MAPPING_IMAGE_AND_SLOT_OK')
     page.evaluate("""()=>{canvas.clear();const o=new fabric.Rect({width:30,height:30,left:40,top:60,role:'sticker'});canvas.add(o);canvas.setActiveObject(o);syncSelection();}""")
     page.evaluate("navigate('page-editor')")
     page.locator('#bf-object-lock').click();gesture_test(page,browser,locked=True)
