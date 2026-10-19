@@ -118,16 +118,16 @@
     const c=document.createElement('canvas');c.width=Math.ceil(iw+pad*2);c.height=Math.ceil(ih+pad*2);const g=c.getContext('2d');
 
     if(style==='shadow'){
-      g.save();g.shadowColor='rgba(0,0,0,.42)';g.shadowBlur=Math.max(8,w*2.6);g.shadowOffsetX=Math.max(2,w*.5);g.shadowOffsetY=Math.max(3,w*.75);g.drawImage(img,pad,pad);g.restore();g.drawImage(img,pad,pad);return c.toDataURL('image/png');
+      g.save();g.shadowColor='rgba(0,0,0,.42)';g.shadowBlur=Math.max(8,w*2.6);g.shadowOffsetX=Math.max(2,w*.5);g.shadowOffsetY=Math.max(3,w*.75);g.drawImage(img,pad,pad);g.restore();g.drawImage(img,pad,pad);return {src:c.toDataURL('image/png'),pad};
     }
     if(style==='glow'){
-      g.save();g.shadowColor=color||'#ff8fb2';g.shadowBlur=Math.max(12,w*3.2);for(let i=0;i<3;i++)g.drawImage(img,pad,pad);g.restore();g.drawImage(img,pad,pad);return c.toDataURL('image/png');
+      g.save();g.shadowColor=color||'#ff8fb2';g.shadowBlur=Math.max(12,w*3.2);for(let i=0;i<3;i++)g.drawImage(img,pad,pad);g.restore();g.drawImage(img,pad,pad);return {src:c.toDataURL('image/png'),pad};
     }
 
     if(style==='hand'){
       drawOffsetRing(g,img,pad,w,0.78,Math.max(1,w*.16));
       drawOffsetRing(g,img,pad,w*.72,0.5,Math.max(.6,w*.12));
-      tintCurrentAlpha(g,c,color||'#ffffff');g.drawImage(img,pad,pad);return c.toDataURL('image/png');
+      tintCurrentAlpha(g,c,color||'#ffffff');g.drawImage(img,pad,pad);return {src:c.toDataURL('image/png'),pad};
     }
 
     drawOffsetRing(g,img,pad,w,1,0);drawOffsetRing(g,img,pad,w*.58,1,0);
@@ -136,9 +136,9 @@
       g.globalCompositeOperation='destination-out';
       const cell=Math.max(7,Math.round(w*.95));
       for(let y=0;y<c.height;y+=cell*2){for(let x=(Math.floor(y/(cell*2))%2)*cell;x<c.width;x+=cell*2)g.clearRect(x,y,cell,cell)}
-      g.globalCompositeOperation='source-over';g.drawImage(img,pad,pad);return c.toDataURL('image/png');
+      g.globalCompositeOperation='source-over';g.drawImage(img,pad,pad);return {src:c.toDataURL('image/png'),pad};
     }
-    tintCurrentAlpha(g,c,color||'#ffffff');g.drawImage(img,pad,pad);return c.toDataURL('image/png');
+    tintCurrentAlpha(g,c,color||'#ffffff');g.drawImage(img,pad,pad);return {src:c.toDataURL('image/png'),pad};
   }
 
   function replaceFabricImage(oldObj,src,meta){
@@ -152,6 +152,12 @@
           for(const key of ['stickerId','assetId','layerId','templateLayerId','layerInstanceId','templateApplicationId','layerName','zIndex','normalizedGeometry','locked','canMove','canScale','canRotate','canDelete','canDuplicate','canEdit','templateSlot','sourceSize','bfUserLocked'])
             if(oldObj[key]!==undefined)props[key]=oldObj[key];
           props.originalPublicSrc=oldObj.originalPublicSrc||oldObj.publicSrc;
+          // A photo slot is a native source viewport. Padding belongs around
+          // the full source, never in the frame's display width/height.
+          if(oldObj.templateSlot&&oldObj.role==='slot-photo'){
+            const viewport=oldObj.aiOutlineViewport||{width:oldObj.width,height:oldObj.height,cropX:oldObj.cropX||0,cropY:oldObj.cropY||0};
+            Object.assign(props,{width:viewport.width,height:viewport.height,cropX:viewport.cropX+meta.pad,cropY:viewport.cropY+meta.pad,aiOutlineViewport:viewport});
+          }
           newObj.set(props);if(typeof styleEditableObject==='function')styleEditableObject(newObj);
           canvas.remove(oldObj);canvas.insertAt(newObj,Math.max(0,idx),false);canvas.setActiveObject(newObj);newObj.setCoords();canvas.renderAll();
           if(typeof recordHistory==='function')recordHistory();if(typeof renderLayerList==='function')renderLayerList();syncSheet();resolve(newObj);
@@ -184,8 +190,8 @@
     const color=STYLE_META[style].color||picked;
     if(typeof setBusy==='function')setBusy(true,style==='none'?'正在移除描邊...':'正在套用描邊...');
     try{
-      const out=style==='none'?source:await buildEffect(source,style,color,width);
-      await replaceFabricImage(o,out,{source,style,width,color});
+      const out=style==='none'?{src:source,pad:0}:await buildEffect(source,style,color,width);
+      await replaceFabricImage(o,out.src,{source,style,width,color,pad:out.pad});
       if(typeof toast==='function')toast(style==='none'?'描邊已關閉':STYLE_META[style].label+'已套用');
     }catch(e){console.error('[OUTLINE V2]',e);if(typeof toast==='function')toast('描邊處理失敗，請再試一次')}
     finally{if(typeof setBusy==='function')setBusy(false)}

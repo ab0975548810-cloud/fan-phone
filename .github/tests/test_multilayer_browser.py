@@ -149,6 +149,7 @@ def multilayer_browser_test(browser,base,poll):
             page=browser.new_page(viewport={'width':390,'height':844},has_touch=True,is_mobile=True)
             page.on('dialog',lambda dialog:dialog.accept())
             page.on('pageerror',lambda e:print('MULTILAYER_FRONT_ERROR',str(e),flush=True))
+            page.on('console',lambda m:print('MULTILAYER_CONSOLE_ERROR',m.text,flush=True) if m.type=='error' else None)
             page.goto(base);poll(page,"() => !!window.BenfuwanMultilayer && typeof shopData!=='undefined' && shopData.models.length===3")
             # An image-only template still needs a font manifest without having
             # previously selected any text or loaded a FontFace.
@@ -221,13 +222,48 @@ def multilayer_browser_test(browser,base,poll):
             poll(page,"() => canvas.getObjects().some(o=>o.role==='slot-photo')")
             assert page.evaluate("canvas.getObjects().find(o=>o.role==='slot-photo').sourceSize.width")==512
             assert page.evaluate("canvas.getObjects().find(o=>o.role==='slot-photo').lockMovementX") is True
+            with page.expect_file_chooser() as replacement:
+                page.locator('#replace-slot-btn').click()
+            replacement.value.set_files({'name':'slot-replacement.png','mimeType':'image/png','buffer':png('#6dacdf')})
+            poll(page,"() => canvas.getObjects().some(o=>o.role==='slot-photo'&&o.originalName==='slot-replacement.png')")
+            slot_before=page.evaluate("()=>{const o=canvas.getObjects().find(o=>o.role==='slot-photo');canvas.setActiveObject(o);return {g:BenfuwanMultilayer.geometry(o,canvas),center:o.getCenterPoint(),angle:o.angle};}")
+            page.route('**/api/ai/remove-background',lambda route:route.fulfill(status=200,content_type='image/png',body=png('#6dacdf')))
+            page.evaluate('openAiRemoveTools()')
+            poll(page,"() => canvas.getActiveObject()?.aiBackgroundRemoved && !document.getElementById('busy-overlay').classList.contains('show')")
+            page.unroute('**/api/ai/remove-background')
+            page.evaluate('openAiOutlineSheet()')
+            page.locator('#sheet-outline-v2 [data-style=white]').click()
+            poll(page,"() => canvas.getActiveObject()?.aiOutlineStyle==='white' && !document.getElementById('busy-overlay').classList.contains('show')")
+            page.evaluate('closeSheets()')
+            slot_after=page.evaluate("()=>{const o=canvas.getObjects().find(o=>o.role==='slot-photo');return {g:BenfuwanMultilayer.geometry(o,canvas),center:o.getCenterPoint(),angle:o.angle};}")
+            assert all(abs(slot_before['g'][k]-slot_after['g'][k])<.0002 for k in ('x','y','width','height')),(slot_before,slot_after)
+            page.evaluate('async()=>{recordHistory(true);await BenfuwanDesignDraft.saveNow()}')
+            page.reload();poll(page,"() => window.BenfuwanDesignDraft?.state().prompt==='ready'")
+            page.locator('#home-design-card').click()
+            poll(page,"() => document.getElementById('page-editor').classList.contains('active') && !BenfuwanDesignDraft.state().suspended && canvas?.getObjects().some(o=>o.role==='slot-photo'&&o.aiOutlineViewport)")
+            page.evaluate("()=>{canvas.setActiveObject(canvas.getObjects().find(o=>o.role==='slot-photo'));syncSelection()}")
+            outline_source=page.evaluate('canvas.getActiveObject().aiOutlineSource')
+            for style_name in ('pink','none','white'):
+                page.evaluate('openAiOutlineSheet()')
+                page.locator(f'#sheet-outline-v2 [data-style={style_name}]').click()
+                poll(page,f"() => canvas.getActiveObject()?.aiOutlineStyle==='{style_name}' && !document.getElementById('busy-overlay').classList.contains('show')")
+                assert page.evaluate('canvas.getActiveObject().aiOutlineSource')==outline_source
+                g=page.evaluate('BenfuwanMultilayer.geometry(canvas.getActiveObject(),canvas)')
+                assert all(abs(slot_before['g'][k]-g[k])<.0002 for k in ('x','y','width','height')),g
+                page.evaluate('closeSheets()')
             # Validate the FILLED slot, not only the reset/empty placeholder.
             filled=page.evaluate("async()=>BenfuwanDesignSources.prepare(await BenfuwanMultilayer.serialize(canvas,ctx))")
             probe=page.evaluate("()=>({model_id:ctx.modelId,style_id:ctx.styleId,color_name:'透明',quantity:1,payment_method:'現金',customer_name:'filled slot fixture',print_file:canvas.toDataURL({format:'png'}),mockup_file:canvas.toDataURL({format:'png'})})")
             probe.update(design_json=filled,idempotency_key='filled-slot-'+uuid.uuid4().hex)
             accepted=page.request.post(base+'/api/create_order',data=probe)
             assert accepted.status==200,accepted.text()
-            print('FRONT_TEMPLATE_FILLED_PHOTO_SLOT_SERVER_ORDER_OK')
+            filled_job=app_module.print_center.prepare(accepted.json()['order_id'],'filled-slot-render-'+uuid.uuid4().hex)
+            with Image.open(io.BytesIO(app_module.print_center._download_artwork(filled_job['artwork_path']))) as rendered_slot:
+                assert rendered_slot.size==(round(70*720/25.4),round(140*720/25.4))
+                assert abs(rendered_slot.info['dpi'][0]-720)<.05
+            assert filled_job['state']=='PREPARED'
+            print('FILLED_SLOT_EFFECTS_DRAFT_RECOLOR_REMOVE_720_RENDER_OK')
+            print('FRONT_TEMPLATE_FILLED_PHOTO_SLOT_REPLACE_AI_OUTLINE_SERVER_ORDER_OK')
             print('FRONT_TEMPLATE_PHOTO_UPLOAD_CLICK_FILECHOOSER_OK')
             page.evaluate("() => BenfuwanMultilayerFront.resetTemplate()")
             poll(page,"() => canvas.getObjects().some(o=>o.role==='slot-guide') && !canvas.getObjects().some(o=>o.role==='slot-photo')")

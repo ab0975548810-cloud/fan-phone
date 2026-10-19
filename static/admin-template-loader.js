@@ -31,6 +31,10 @@
     if(loaded)return;
     if(loading)return loading;
     loading=(async()=>{
+      // The editor modules use Fabric during installation. Load the existing
+      // pinned local copy before them, still only when the editor is opened.
+      if(!window.fabric)await loadOne('/static/vendor/fabric-5.3.1.min.js');
+      if(!window.fabric)throw new Error('模板編輯器載入失敗，請重新開啟');
       for(const src of STACK)await loadOne(src);
       loaded=true;
       window.__benfuwanTemplateStackReady=true;

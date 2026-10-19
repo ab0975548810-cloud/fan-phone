@@ -8,7 +8,7 @@
   const DRAFT_VERSION = 1;
   const DEBOUNCE_MS = 650;
   const DRAFT_CUSTOM_PROPS = [
-    ...CUSTOM_PROPS, 'bfUserLocked', 'stickerId', 'originalPublicSrc',
+    ...CUSTOM_PROPS, 'bfUserLocked', 'stickerId', 'originalPublicSrc', 'aiOutlineViewport',
     'aiRemovalMode',
     'aiOutlineSource',
     'aiOutlineStrength',
