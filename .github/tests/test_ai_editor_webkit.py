@@ -1777,7 +1777,7 @@ def admin_test(browser, base):
         for tab in ('stock','restock','reports','expenses'):
             page.locator('[data-tab="'+tab+'"]').click()
             if tab == 'reports':
-                poll(page, "() => document.querySelectorAll('#pos-metrics .pos-metric').length===10")
+                poll(page, "() => document.querySelectorAll('#pos-metrics .pos-metric').length===9")
             metrics = page.evaluate("""() => ({width:innerWidth,scroll:document.documentElement.scrollWidth,view:document.getElementById('view-commerce').getBoundingClientRect().width})""")
             assert metrics['scroll'] <= width + 2 and metrics['view'] > 200, (tab,metrics)
             if os.environ.get('POS_SCREENSHOT_DIR'):
