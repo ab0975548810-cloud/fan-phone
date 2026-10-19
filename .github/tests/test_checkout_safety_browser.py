@@ -76,7 +76,10 @@ def run():
                     page.route('**/api/create_order', checkout)
                     before = app.commerce.read()
                     try:
-                        page.goto(origin + '/', wait_until='domcontentloaded')
+                        # initializeFront restores IndexedDB cart before its health probe.
+                        # Seed the isolated cart only after that real boot lifecycle finishes.
+                        with page.expect_response(lambda r: r.url == origin + '/api/health'):
+                            page.goto(origin + '/', wait_until='domcontentloaded')
                         page.wait_for_function("() => !!window.BenfuwanOrderPayload && !!window.BenfuwanMultilayerFront && typeof shopData!=='undefined' && shopData.models?.length")
                         page.evaluate('''async data => {
                           if(data.design.layer_contract_version==='multilayer-v1'){
@@ -94,7 +97,8 @@ def run():
                         page.locator('#submit-order').click()
                         if lose_first:
                             page.wait_for_function("() => document.getElementById('toast').textContent.includes('送單失敗') && !document.getElementById('submit-order').disabled")
-                            page.reload(wait_until='domcontentloaded')
+                            with page.expect_response(lambda r: r.url == origin + '/api/health'):
+                                page.reload(wait_until='domcontentloaded')
                             page.wait_for_function("() => !!window.BenfuwanMultilayerFront && typeof cartItem!=='undefined' && cartItem?.orderKey")
                             page.evaluate('() => goCheckoutFromCart()')
                             page.locator('#form-surname').fill('回歸')
