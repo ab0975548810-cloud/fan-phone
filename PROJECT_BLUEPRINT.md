@@ -511,9 +511,10 @@ Callback 必須：
 
 ## 17. Print Phase 3.3：新訂單自動交接
 
-- 只有 Phase 3.3 上線後新建立的訂單可以自動交接；資格必須以 `auto_print_v1` marker 與訂單、財務快照、庫存交易及 checkout idempotency response 一起原子提交。
-- checkout replay 只有在原始 commerce request record 含有 marker，且 response 的 order id 相符時，才能補做 durable auto prepare。舊 request record 沒有 marker，永遠不得因重播而自動建立新列印 attempt。
-- 新訂單 commit 後若 process 在 auto prepare 前中斷，相同 checkout key 的 replay 必須利用既有 marker 補做交接；不得只用 request-local `replayed` 判斷而失去復原能力。
+- 只有 durable handoff release 上線後新建立的訂單可以自動交接；資格必須以 `auto_print_v1`、`auto_print_handoff_v1` 與 `print_handoffs` outbox row，連同訂單、財務快照、庫存交易及 checkout idempotency response 一起原子提交。
+- worker 只以 DB lease claim 新 marker outbox，並再次核對 immutable receipt 與 response order id；checkout replay、process restart、多 worker 不得建立第二筆 job、再次扣庫存或重複送 vendor。
+- migration 的 release cutoff 以前只有舊 marker、沒有 job 的資料一律標記 `REVIEW`，只出現在只讀告警，部署與重啟絕不自動補送。
+- 新訂單 commit 後若 process 在 prepare 前中斷，worker 必須由 outbox 自動恢復，不依賴客戶重送 checkout。
 - 自動 queue 只掃描帶有 `auto-prepare-` durable request marker 的 `PREPARED` job，不掃描歷史訂單或人工任務。
 - `receiveTask` 必須在 checkout response path 外執行；timeout 或不明結果進入 `UNKNOWN` 並先查核，明確拒絕保留 `PREPARED` 與人工送出入口。
 - 網站仍不得呼叫 `startPrint` 或 `pushPrint`，實體出墨維持銳印軟體人工確認。

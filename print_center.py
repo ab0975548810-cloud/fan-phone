@@ -291,6 +291,128 @@ class PrintService:
     def _auto_key(operation, identity):
         return f"auto-{operation}-{_hash(identity)[:48]}"
 
+    @staticmethod
+    def _handoff_ref(order_id):
+        return _hash(str(order_id or ""))[:12]
+
+    def _handoff_log(self, level, event, handoff, **fields):
+        payload = {
+            "event": event,
+            "order_ref": self._handoff_ref(handoff.get("order_id")),
+            "attempt": int(handoff.get("attempt_count") or 0),
+            **{key: value for key, value in fields.items()
+               if value is not None},
+        }
+        getattr(self.app.app.logger, level)(
+            "print_handoff %s", json.dumps(payload, separators=(",", ":")))
+
+    @staticmethod
+    def _handoff_retry_seconds(handoff):
+        attempt = max(1, int(handoff.get("attempt_count") or 1))
+        base = min(900, 5 * (2 ** min(attempt - 1, 7)))
+        jitter = int(_hash(str(handoff.get("id") or ""))[:2], 16) % max(1, base // 4)
+        return min(900, base + jitter)
+
+    def _try_finish_handoff(self, handoff, state, **fields):
+        try:
+            return self.store.finish_handoff(
+                handoff["id"], handoff["lease_token"], state, **fields)
+        except Exception as exc:
+            self._handoff_log(
+                "error", "state_write_failed", handoff, state=state,
+                code=type(exc).__name__.upper()[:100])
+            return {"ok": False, "code": "STATE_WRITE_FAILED"}
+
+    def recover_auto_handoffs_once(self, limit=20):
+        """Turn atomic checkout outbox rows into one durable PREPARED job.
+
+        Only the exact release marker is claimable. Legacy rows are REVIEW-only
+        and never enter this method, including after restarts or redeploys.
+        """
+        handoffs = self.store.claim_handoffs(limit=limit, lease_seconds=90)
+        if not handoffs:
+            return []
+        try:
+            commerce = self.app.commerce.read()
+        except Exception as exc:
+            for handoff in handoffs:
+                try:
+                    self.store.finish_handoff(
+                        handoff["id"], handoff["lease_token"], "RETRY",
+                        error_code="COMMERCE_UNAVAILABLE",
+                        retry_seconds=self._handoff_retry_seconds(handoff))
+                except Exception:
+                    self.app.app.logger.exception(
+                        "print_handoff lease release failed order_ref=%s",
+                        self._handoff_ref(handoff.get("order_id")))
+            raise exc
+
+        requests = commerce.get("requests") or {}
+        results = []
+        for handoff in handoffs:
+            try:
+                age_seconds = None
+                try:
+                    created = datetime.fromisoformat(
+                        str(handoff.get("created_at") or "").replace("Z", "+00:00"))
+                    if created.tzinfo is not None:
+                        age_seconds = max(0, int((datetime.now(timezone.utc) - created).total_seconds()))
+                except (TypeError, ValueError):
+                    pass
+                self._handoff_log(
+                    "warning" if (age_seconds or 0) >= 60 else "info",
+                    "marker_claimed", handoff, pending_age_seconds=age_seconds)
+                receipt = requests.get(str(handoff.get("request_key") or "")) or {}
+                marker = receipt.get("auto_print_handoff_v1") or {}
+                response = receipt.get("response") or {}
+                valid = (
+                    handoff.get("marker_version") == "auto-print-handoff-v1"
+                    and receipt.get("auto_print_v1") is True
+                    and marker.get("version") == "auto-print-handoff-v1"
+                    and str(marker.get("order_id") or "") == str(handoff.get("order_id") or "")
+                    and str(response.get("order_id") or "") == str(handoff.get("order_id") or "")
+                )
+                if not valid:
+                    self._try_finish_handoff(
+                        handoff, "REVIEW", error_code="INVALID_ATOMIC_MARKER")
+                    self._handoff_log("warning", "marker_rejected", handoff,
+                                      code="INVALID_ATOMIC_MARKER")
+                    continue
+                result = self.enqueue_auto(str(handoff["order_id"]))
+                if result.get("status") != "prepared":
+                    code = str(result.get("reason") or "PREFLIGHT_REVIEW")[:100]
+                    self._try_finish_handoff(
+                        handoff, "REVIEW", error_code=code)
+                    self._handoff_log("warning", "preflight_review", handoff,
+                                      code=code)
+                    continue
+                job = result["job"]
+                finished = self._try_finish_handoff(
+                    handoff, "PREPARED",
+                    prepared_job_id=job["id"])
+                if not finished.get("ok"):
+                    continue
+                self._handoff_log("info", "prepared", handoff,
+                                  job_ref=_hash(str(job["id"]))[:12])
+                results.append(job)
+            except (PrintError, PrintConflict) as exc:
+                self._try_finish_handoff(
+                    handoff, "REVIEW", error_code=exc.code)
+                self._handoff_log("warning", "preflight_review", handoff,
+                                  code=exc.code)
+            except Exception as exc:
+                attempt = int(handoff.get("attempt_count") or 0)
+                state = "FAILED" if attempt >= 8 else "RETRY"
+                code = type(exc).__name__.upper()[:100]
+                self._try_finish_handoff(
+                    handoff, state,
+                    error_code=code,
+                    retry_seconds=(self._handoff_retry_seconds(handoff)
+                                   if state == "RETRY" else None))
+                self._handoff_log("error", "recovery_failed", handoff,
+                                  state=state, code=code)
+        return results
+
     def enqueue_auto(self, order_id):
         """Durably prepare a committed order for asynchronous receiveTask."""
         if not self.vendor_ready:
@@ -315,11 +437,14 @@ class PrintService:
         response = request_row.get("response") or {}
         return bool(
             request_row.get("auto_print_v1") is True
+            and (request_row.get("auto_print_handoff_v1") or {}).get("version") == "auto-print-handoff-v1"
+            and str((request_row.get("auto_print_handoff_v1") or {}).get("order_id") or "") == str(order_id)
             and str(response.get("order_id") or "") == str(order_id)
         )
 
     def dispatch_auto_once(self):
         """Drain durable auto markers once; safe across retries and processes."""
+        self.recover_auto_handoffs_once()
         if not self.vendor_ready:
             return []
         results = []
@@ -1099,6 +1224,7 @@ class PrintService:
             })
         return {
             "rows": result,
+            "handoffs": self.store.handoff_summary(),
             "vendor_ready": self.vendor_ready,
             "vendor_connected": self.client.ready,
             "vendor_enabled": self.client.enabled,
@@ -1123,19 +1249,21 @@ def install(app_module):
 
     @wraps(original_create_order)
     def create_order_with_auto_handoff(*args, **kwargs):
-        request_payload = request.get_json(silent=True)
-        checkout_key = str(request.headers.get("Idempotency-Key") or
-                           ((request_payload or {}).get("idempotency_key") if isinstance(request_payload, dict) else "") or "")
         response = app.make_response(original_create_order(*args, **kwargs))
         if response.status_code < 300:
             payload = response.get_json(silent=True)
             order_id = str((payload or {}).get("order_id") or "") if isinstance(payload, dict) else ""
             if order_id:
+                # The durable outbox was committed with the order. Waking is
+                # in-memory only and may be lost safely: the bounded periodic
+                # worker will claim the DB row after restart. Checkout never
+                # performs a second Supabase read or calls the vendor here.
                 try:
-                    if service.checkout_auto_eligible(order_id, checkout_key):
-                        service.enqueue_auto(order_id)
+                    service.wake_dispatcher()
                 except Exception:
-                    app.logger.exception("Post-commit automatic print preparation failed for %s", order_id)
+                    app.logger.exception(
+                        "Post-commit print worker wake failed order_ref=%s",
+                        service._handoff_ref(order_id))
         return response
 
     app.view_functions["create_order"] = create_order_with_auto_handoff
@@ -1303,9 +1431,9 @@ def install(app_module):
         if request.path == "/admin" and response.status_code == 200 and response.mimetype == "text/html":
             response.direct_passthrough = False
             html = response.get_data(as_text=True)
-            src = "/static/admin-print-center.js?v=20261010safety1"
+            src = "/static/admin-print-center.js?v=20261019handoff1"
             if src not in html:
-                response.set_data(html.replace("</body>", f'<link rel="stylesheet" href="/static/admin-print-center.css?v=20261002operations1"><script src="{src}"></script></body>'))
+                response.set_data(html.replace("</body>", f'<link rel="stylesheet" href="/static/admin-print-center.css?v=20261019handoff1"><script src="{src}"></script></body>'))
             response.headers["Cache-Control"] = "no-store"
         return response
 
@@ -1327,12 +1455,19 @@ class AutoPrintDispatcher:
         self._event.set()
 
     def _run(self):
+        failures = 0
+        delay = self.interval
         while True:
-            self._event.wait(self.interval)
+            self._event.wait(delay)
             self._event.clear()
             try:
                 self.service.dispatch_auto_once()
+                failures = 0
+                delay = self.interval
             except Exception:
+                failures += 1
+                base = min(300, self.interval * (2 ** min(failures, 6)))
+                delay = base + (int(time.monotonic() * 1000) % max(1, base // 4))
                 self.service.app.app.logger.exception("Automatic print dispatcher cycle failed")
 
 

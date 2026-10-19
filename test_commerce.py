@@ -91,7 +91,7 @@ class CommerceTests(unittest.TestCase):
         if os.environ.get('TEST_POSTGRES_DSN'):
             import psycopg
             with psycopg.connect(os.environ['TEST_POSTGRES_DSN']) as db:
-                db.execute('TRUNCATE print_order_bindings, orders, app_store')
+                db.execute('TRUNCATE print_handoffs, print_order_bindings, orders, app_store')
         self.client = app.app.test_client()
         with self.client.session_transaction() as session:
             session['logged_in'] = True
@@ -153,6 +153,17 @@ class CommerceTests(unittest.TestCase):
             with self.assertRaises(Exception):
                 app.commerce.store.commit(original['revision'], changed)
             self.assertEqual(app.commerce.read(), original)
+
+    @unittest.skipUnless(os.environ.get('TEST_POSTGRES_DSN'),
+                         'Print handoff RPC concurrency runs on PostgreSQL CI')
+    def test_print_handoff_postgres_atomic_outbox_and_claim(self):
+        # The Commerce workflow already invokes this module with a real
+        # PostgreSQL 17 service. Keep the dedicated concurrency fixture in its
+        # own file while attaching it to the existing, workflow-scope-safe test
+        # entry point.
+        import runpy
+        runpy.run_path(str(Path('.github/tests/test_print_handoff_postgres.py')),
+                       run_name='__main__')
 
     def test_purchase_receipt_replay_and_atomic_validation(self):
         body = dict(idempotency_key=uuid.uuid4().hex, items=[dict(sku_id=self.sku_id, quantity=3)], note='到貨 A')
