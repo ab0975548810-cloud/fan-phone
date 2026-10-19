@@ -385,7 +385,7 @@ class _PostgresTableQuery:
     """Small PostgREST-shaped adapter for exercising the real PrintStore path."""
 
     def __init__(self, table):
-        if table != "print_jobs":
+        if table not in ("print_jobs", "print_handoffs"):
             raise AssertionError(f"unexpected test table: {table}")
         self.table = table
         self.filters = []
@@ -398,6 +398,10 @@ class _PostgresTableQuery:
 
     def eq(self, name, value):
         self.filters.append((name, value))
+        return self
+
+    def in_(self, name, values):
+        self.filters.append((name, list(values)))
         return self
 
     def order(self, name, desc=False):
@@ -428,7 +432,7 @@ class _PostgresTableQuery:
             if self.filters:
                 clauses = []
                 for name, value in self.filters:
-                    clauses.append(sql.SQL("{} = {}").format(
+                    clauses.append(sql.SQL("{} = ANY({})" if isinstance(value, list) else "{} = {}").format(
                         sql.Identifier(name), sql.Placeholder()))
                     params.append(value)
                 query += sql.SQL(" where ") + sql.SQL(" and ").join(clauses)
@@ -537,3 +541,25 @@ def race_real_create_job_and_callback(index):
 for race_index in range(20):
     race_real_create_job_and_callback(race_index)
 print("PRINT_RETRY_POSTGRES_CONCURRENCY_OK")
+
+
+# Exercise the production service guard against authoritative PostgreSQL rows.
+from print_center import PrintService, PrintError
+review_id = "review-backend-guard"
+with psycopg.connect(DSN) as db:
+    db.execute("delete from public.print_handoffs where order_id=%s", (review_id,))
+    db.execute("""insert into public.print_handoffs
+        (order_id,request_key,marker_version,state)
+        values (%s,'review-backend-key','legacy-auto-print-v1','REVIEW')""", (review_id,))
+module = SimpleNamespace(USE_SUPABASE=True, SUPABASE=_PostgresSupabaseAdapter())
+service = PrintService(module, client=SimpleNamespace())
+assert service.store.handoffs_for_orders([review_id])[review_id]["state"] == "REVIEW"
+for operation in (lambda: service.prepare(review_id, "review-prepare-key"),
+                  lambda: service._assert_no_prior_physical_activity(review_id)):
+    try:
+        operation()
+        raise AssertionError("historical REVIEW bypassed")
+    except PrintError as exc:
+        assert exc.code == "HANDOFF_REVIEW_REQUIRED", exc.code
+assert service.store.jobs_for_order(review_id) == []
+print("HISTORICAL_REVIEW_POSTGRES_SERVICE_GUARD_OK")

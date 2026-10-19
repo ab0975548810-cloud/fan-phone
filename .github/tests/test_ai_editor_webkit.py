@@ -2811,7 +2811,7 @@ def order_print_workspace_test(browser, base, poll):
     review_row=dict(order_id='PRINT-LEGACY-REVIEW',customer_name='舊客人',model='iPhone 13',style='晶彩',order_status='待處理',time=stamp-300,
                     has_print=True,profile_available=True,binding_required=False,sku_id='SKU',job=None,
                     handoff_alert=dict(state='REVIEW',error_code='LEGACY_CUTOFF_REVIEW',marker_version='legacy-auto-print-v1'))
-    handoffs=dict(counts=dict(REVIEW=1),alerts=[dict(order_id='PRINT-LEGACY-REVIEW',order_ref='fixture-ref',marker_version='legacy-auto-print-v1',state='REVIEW',attempt_count=0,error_code='LEGACY_CUTOFF_REVIEW')],bounded_limit=200,truncated=False)
+    handoffs=dict(counts=dict(REVIEW=1),alerts=[dict(order_id='PRINT-LEGACY-REVIEW',order_ref='fixture-ref',marker_version='legacy-auto-print-v1',state='REVIEW',attempt_count=0,error_code='LEGACY_CUTOFF_REVIEW')],bounded_limit=20,truncated=True,next_offset=20,offset=0)
     def print_route(route):
         p = parse_qs(urlsplit(route.request.url).query)
         if p.get('order_id') == ['ORDER-204']:
@@ -2857,6 +2857,10 @@ def order_print_workspace_test(browser, base, poll):
     page.locator('[data-pc="clear-exact"]').click()
     poll(page,"() => document.querySelectorAll('#pc-grid .pc-card').length===12")
     assert page.locator('[data-pc="handoff-order"]').count()==1
+    page.route('**/api/admin/print/handoffs?offset=20',lambda route: route.fulfill(
+        status=200,content_type='application/json',body=json.dumps(dict(status='success',handoffs=dict(handoffs,next_offset=None,offset=20)))))
+    page.locator('[data-pc="handoff-page"][data-offset="20"]').click()
+    poll(page,"() => !!document.querySelector('[data-pc=handoff-page][data-offset=\"0\"]')")
     page.locator('[data-pc="handoff-order"]').click()
     poll(page,"() => document.querySelector('#view-print-center.active .pc-card')?.textContent.includes('PRINT-LEGACY-REVIEW')")
     review_card=page.locator('.pc-card').filter(has=page.locator('.pc-id',has_text='PRINT-LEGACY-REVIEW'))

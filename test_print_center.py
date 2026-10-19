@@ -76,9 +76,15 @@ class PrintCenterTests(unittest.TestCase):
         data["skus"][0].update(cost_price=100, stock_qty=20, track_stock=True)
         self.assertEqual(self.client.post("/api/admin/save_commerce_data", json=data).status_code, 200)
         self.order_id = self.create_order()
-        # Settle the fixture's intentionally unconfigured order as REVIEW so
-        # later profile setup cannot make it an unrelated auto-send candidate.
-        app.print_center.recover_auto_handoffs_once()
+        # Baseline is a legitimate manual order with no historical handoff.
+        # REVIEW cases are explicit fixtures and must not be prepared manually.
+        data = app.commerce.read()
+        for receipt in data["requests"].values():
+            receipt.pop("auto_print_v1", None)
+            receipt.pop("auto_print_handoff_v1", None)
+        self.assertTrue(app.commerce.store.commit(data["revision"], data))
+        with app.print_center.store.connection(True) as db:
+            db.execute("DELETE FROM print_handoffs WHERE order_id=?", (self.order_id,))
 
     def tearDown(self):
         for name, value in self._old_print_env.items():
@@ -1918,6 +1924,35 @@ class PrintCenterTests(unittest.TestCase):
         self.assertEqual(next(row for row in after["skus"]
                               if row["id"] == self.sku_id)["stock_qty"], before_stock - 1)
 
+    def test_historical_review_blocks_every_manual_path_beyond_alert_page(self):
+        self.save_profile()
+        job = self.prepare()
+        with app.print_center.store.connection(True) as db:
+            for i in range(25):
+                db.execute("""INSERT INTO print_handoffs
+                    (id,order_id,request_key,marker_version,state,created_at,updated_at)
+                    VALUES (?,?,?,'legacy-auto-print-v1','REVIEW',?,?)""",
+                    (str(uuid.uuid4()), self.order_id if i == 0 else f"REVIEW-{i}",
+                     f"review-request-{i}", f"2026-01-{i+1:02d}", f"2026-01-{i+1:02d}"))
+        before = copy.deepcopy(app.commerce.read())
+        for state in ("PREPARED", "FAILED", "UNKNOWN"):
+            app.print_center.store.patch_job(job["id"], {"state": state})
+            for action, payload in (("prepare", {"order_id": self.order_id}),
+                                    ("send", {"job_id": job["id"]})):
+                response = self.post(action, payload)
+                self.assertEqual(response.get_json()["code"], "HANDOFF_REVIEW_REQUIRED")
+        app.print_center.store.patch_job(job["id"], {"state": "FAILED"})
+        self.assertEqual(self.post("retry", {"job_id": job["id"]}).get_json()["code"], "HANDOFF_REVIEW_REQUIRED")
+        exact = self.client.get("/api/admin/print/jobs?order_id=" + self.order_id).get_json()
+        self.assertEqual(exact["rows"][0]["handoff_alert"]["state"], "REVIEW")
+        self.assertNotIn(self.order_id, [a["order_id"] for a in exact["handoffs"]["alerts"]])
+        self.assertTrue(exact["handoffs"]["truncated"])
+        page2 = self.client.get("/api/admin/print/handoffs?offset=20").get_json()
+        self.assertIn(self.order_id, [a["order_id"] for a in page2["handoffs"]["alerts"]])
+        self.assertEqual(app.commerce.read(), before)
+        self.assertEqual(self.fake.calls, [])
+        self.assertEqual(len(app.print_center.store.jobs_for_order(self.order_id)), 1)
+
     def test_legacy_cutoff_candidate_is_alert_only_and_never_auto_sent(self):
         self.save_profile()
         key = "legacy-cutoff-review-0001"
@@ -1948,9 +1983,9 @@ class PrintCenterTests(unittest.TestCase):
                 key = f"historical-terminal-{index:04d}"
                 with mock.patch.object(app.print_center, "enqueue_auto"):
                     order_id = self.create_order(key=key)
-                self.remove_auto_marker(key)
                 self.order_id = order_id
                 job = self.prepare(f"manual-historical-{index:04d}")
+                self.remove_auto_marker(key)
                 app.print_center.store.patch_job(job["id"], {"state": state})
                 count_before = len(app.print_center.store.list_jobs())
 

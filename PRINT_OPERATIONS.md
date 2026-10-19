@@ -134,3 +134,9 @@ If `receiveTask` or `cancelTask` times out, returns a server error, or gives an 
 Stale `SENDING` and `CANCELING` states remain reconcilable. Legacy `STARTING` rows may also be reconciled, but Phase 3.1 never creates a new `STARTING` operation.
 
 `pushPrint`, website-triggered `startPrint`, maintenance controls, and vendor channel stock are intentionally absent from the A5 active flow. Vendor channel stock is not store SKU inventory.
+
+### 歷史 REVIEW 的後端封鎖
+
+一般 prepare/retry/send/manual recovery 共用 DB-backed handoff guard：REVIEW 或 legacy-auto-print-v1 回 HANDOFF_REVIEW_REQUIRED。沒有提供解除或補送 API。資料庫查詢失敗亦不放行。
+Dashboard 每筆訂單的 handoff 狀態採 exact/batched order lookup，不使用截斷告警判斷權限。告警每頁20筆、支援上一頁/下一頁，數字僅代表本頁。
+#89 整合時，其 resend-check 也會經同一 guard，UI 人工確認不能取代歷史 REVIEW 的授權／稽核流程。

@@ -469,7 +469,13 @@ class PrintService:
         if dispatcher:
             dispatcher.wake()
 
+    def _assert_handoff_review_clear(self, order_id):
+        row = self.store.handoffs_for_orders([order_id]).get(str(order_id))
+        if row and (row.get("state") == "REVIEW" or row.get("marker_version") == "legacy-auto-print-v1"):
+            raise PrintError("HANDOFF_REVIEW_REQUIRED", "歷史漏單或交接需人工核對；一般準備／重推／送出已封鎖，不能直接補送")
+
     def _assert_no_prior_physical_activity(self, order_id):
+        self._assert_handoff_review_clear(order_id)
         """Ordinary prepare/retry/send cannot cross evidence of physical output."""
         for attempt in self.store.jobs_for_order(order_id):
             if (str(attempt.get("state") or "") in ("PRINTING", "COMPLETED")
@@ -518,6 +524,7 @@ class PrintService:
         )
 
     def prepare(self, order_id, key):
+        self._assert_handoff_review_clear(order_id)
         fingerprint = _payload_hash("prepare", order_id)
         prior = self.store.request(key)
         if prior:
@@ -1228,17 +1235,14 @@ class PrintService:
                 "prior_physical_activity": order_id in physical,
             })
         handoffs = self.store.handoff_summary(include_order_ids=True)
-        handoff_by_order = {
-            str(item.get("order_id") or ""): item
-            for item in handoffs.get("alerts") or []
-            if item.get("order_id")
-        }
+        handoff_by_order = self.store.handoffs_for_orders(
+            [row["order_id"] for row in result])
         for row in result:
             alert = handoff_by_order.get(str(row.get("order_id") or ""))
             if alert:
                 row["handoff_alert"] = {
                     "state": alert.get("state"),
-                    "error_code": alert.get("error_code"),
+                    "error_code": alert.get("last_error_code"),
                     "marker_version": alert.get("marker_version"),
                 }
         return {
@@ -1323,6 +1327,16 @@ def install(app_module):
         if not KEY_RE.fullmatch(value):
             raise PrintError("IDEMPOTENCY_REQUIRED", "缺少有效的列印操作識別", 400)
         return value
+
+    @app.route("/api/admin/print/handoffs")
+    @guarded
+    def print_handoffs():
+        try:
+            offset = max(0, int(request.args.get("offset", 0)))
+        except ValueError:
+            raise PrintError("BAD_REQUEST", "分頁格式錯誤", 400)
+        return app_module.no_cache_json({"status": "success", "handoffs":
+            service.store.handoff_summary(include_order_ids=True, offset=offset)})
 
     @app.route("/api/admin/print/jobs")
     @guarded
@@ -1450,9 +1464,9 @@ def install(app_module):
         if request.path == "/admin" and response.status_code == 200 and response.mimetype == "text/html":
             response.direct_passthrough = False
             html = response.get_data(as_text=True)
-            src = "/static/admin-print-center.js?v=20261019handoff2"
+            src = "/static/admin-print-center.js?v=20261019handoff3"
             if src not in html:
-                response.set_data(html.replace("</body>", f'<link rel="stylesheet" href="/static/admin-print-center.css?v=20261019handoff2"><script src="{src}"></script></body>'))
+                response.set_data(html.replace("</body>", f'<link rel="stylesheet" href="/static/admin-print-center.css?v=20261019handoff3"><script src="{src}"></script></body>'))
             response.headers["Cache-Control"] = "no-store"
         return response
 

@@ -742,21 +742,41 @@ class PrintStore:
         return {"ok": bool(changed), "state": state if changed else None,
                 "code": None if changed else "LEASE_LOST"}
 
-    def handoff_summary(self, limit=200, *, include_order_ids=False):
+    def handoffs_for_orders(self, order_ids):
+        """Authoritative per-order lookup, independent of truncated alert summaries."""
+        ids = list(dict.fromkeys(str(value) for value in order_ids))
+        result = {}
+        for offset in range(0, len(ids), 100):
+            batch = ids[offset:offset + 100]
+            if self.app.USE_SUPABASE:
+                rows = (self.app.SUPABASE.table("print_handoffs").select("*")
+                        .in_("order_id", batch).execute().data or [])
+            else:
+                with self.connection() as db:
+                    rows = [self._decode(row) for row in db.execute(
+                        "SELECT * FROM print_handoffs WHERE order_id IN (" +
+                        ",".join("?" for _ in batch) + ")", batch).fetchall()]
+            result.update({str(row["order_id"]): row for row in rows})
+        return result
+
+    def handoff_summary(self, limit=20, *, include_order_ids=False, offset=0):
         """Bounded alerts; raw order IDs are opt-in for authenticated admin UI."""
         limit = max(1, min(int(limit), 200))
+        offset = max(0, int(offset))
         alert_states = ("REVIEW", "FAILED", "RETRY", "CLAIMED", "PENDING")
         if self.app.USE_SUPABASE:
             rows = (self.app.SUPABASE.table("print_handoffs")
                     .select("order_id,marker_version,state,attempt_count,last_error_code,created_at,updated_at")
                     .in_("state", list(alert_states))
-                    .order("updated_at", desc=True).limit(limit).execute().data or [])
+                    .order("updated_at", desc=True).order("order_id").range(offset, offset + limit).execute().data or [])
         else:
             with self.connection() as db:
                 rows = [self._decode(row) for row in db.execute("""SELECT
                     order_id,marker_version,state,attempt_count,last_error_code,created_at,updated_at
                     FROM print_handoffs WHERE state IN ('REVIEW','FAILED','RETRY','CLAIMED','PENDING')
-                    ORDER BY updated_at DESC LIMIT ?""", (limit,)).fetchall()]
+                    ORDER BY updated_at DESC, order_id LIMIT ? OFFSET ?""", (limit + 1, offset)).fetchall()]
+        more = len(rows) > limit
+        rows = rows[:limit]
         counts, alerts = {}, []
         for row in rows:
             state = str(row.get("state") or "")
@@ -773,8 +793,9 @@ class PrintStore:
             if include_order_ids:
                 alert["order_id"] = str(row.get("order_id") or "")
             alerts.append(alert)
-        return {"counts": counts, "alerts": alerts[:20],
-                "bounded_limit": limit, "truncated": len(rows) >= limit}
+        return {"counts": counts, "alerts": alerts, "offset": offset,
+                "next_offset": offset + limit if more else None,
+                "bounded_limit": limit, "truncated": more}
 
     def create_job(self, order, sku_id, profile, artwork_sha256, token_nonce):
         now = utcnow()
