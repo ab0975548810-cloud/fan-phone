@@ -685,3 +685,38 @@ with patch.dict(os.environ, {"PRINT_ARTWORK_TOKEN_SECRET": "test" * 16,
     except PrintError as exc:
         assert exc.code == "HANDOFF_REVIEW_REQUIRED", exc.code
 print("INTEGRATED_88_89_POSTGRES_RESEND_REVIEW_BLOCKED_OK")
+
+# Auto dispatch is opt-in independently of manual vendor readiness. Use the
+# production service over PostgreSQL; a pause must not consume durable rows.
+from print_vendor import YunPrintClient
+pause_order = 'auto-switch-postgres-pending'
+with psycopg.connect(DSN) as db:
+    db.execute("delete from public.print_handoffs where order_id=%s", (pause_order,))
+    db.execute("""insert into public.orders
+        (id,customer_name,payment_method,model_id,model_name,style_id,style_name,
+         unit_price,quantity,total,status,created_at_unix)
+        values (%s,'fixture','cash','m','m','s','s',100,1,100,'待處理',1)
+        on conflict (id) do nothing""", (pause_order,))
+    db.execute("""insert into public.print_handoffs
+        (order_id,request_key,marker_version,state)
+        values (%s,'auto-switch-pg-marker','auto-print-handoff-v1','PENDING')""", (pause_order,))
+with patch.dict(os.environ, {'PRINT_ARTWORK_TOKEN_SECRET': 'test'*16,
+                            'PRINT_PUBLIC_BASE_URL': 'https://isolated.invalid'}):
+    for master, auto in (('true', None), ('true', 'false'), ('false', 'true')):
+        calls = []
+        env = {'YUN_PRINT_ENABLED': master, 'YUN_PRINT_DEVICE_ID': 'fixture',
+               'YUN_PRINT_DEVICE_KEY': 'fixture-only', 'CI': 'true'}
+        if auto is not None:
+            env['YUN_AUTO_PRINT_ENABLED'] = auto
+        client = YunPrintClient(env=env, transport=lambda *args: calls.append(args))
+        paused = PrintService(module, client=client)
+        assert paused.vendor_ready == (master == 'true')
+        for _ in range(3):
+            assert paused.dispatch_auto_once() == []
+            assert paused.recover_auto_handoffs_once() == []
+        with psycopg.connect(DSN) as db:
+            row = db.execute('select state,attempt_count,lease_token from public.print_handoffs where order_id=%s',
+                             (pause_order,)).fetchone()
+        assert row == ('PENDING', 0, None), row
+        assert calls == []
+print('PRINT_AUTO_SWITCH_POSTGRES_PAUSE_WITH_MANUAL_READY_OK')

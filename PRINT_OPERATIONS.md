@@ -148,3 +148,27 @@ Dashboard 每筆訂單的 handoff 狀態採 exact/batched order lookup，不使�
 後端用按鈕操作 key 原子建立 attempt、request 與 `MANUAL_REPRINT_AUTHORIZED` 稽核事件，再以衍生的固定 send key 執行 `receiveTask`。雙擊、HTTP response 遺失或同 key replay 都只會對同一 attempt 回覆，不會再次呼叫 vendor。
 `SENDING`、`UNKNOWN`、QUEUED、STARTING、PRINTING、CANCELING 仍阻擋新 attempt。`receiveTask` 結果不明時維持 UNKNOWN，必須先查核，不能用新的按鈕操作繞過。
 此流程仍不呼叫 `startPrint` / `pushPrint`；店員需在銳印軟體人工確認實體打印。`YUN_PRINT_ENABLED` 未啟用時不建立 attempt，也不送出。
+
+## Independent automatic dispatch switch
+
+`YUN_PRINT_ENABLED` remains the vendor master switch. `YUN_AUTO_PRINT_ENABLED`
+ defaults to `false`; only explicit `true` (also `1`/`yes`) enables automatic
+handoff preparation and dispatch, and the master switch plus complete vendor
+and artwork credentials must also be ready.
+
+| Master | Auto | Manual order-card resend | Automatic worker |
+|---|---|---|---|
+| false | any | blocked | paused |
+| true | absent / false | allowed with complete credentials and safety checks | paused |
+| true | true | allowed with safety checks | eligible new handoffs only |
+
+A paused worker does not claim PENDING handoffs or consume retries, and does not
+send already PREPARED automatic jobs. Re-enabling auto intentionally resumes
+eligible pending work; historical REVIEW remains excluded. Manual one-click
+reprint retains original artwork/parameter snapshots and does not create an
+order or deduct stock. UNKNOWN/SENDING remain blocked by atomic send claims.
+
+For manual-only rollout keep `YUN_AUTO_PRINT_ENABLED=false`. Enabling the master
+switch alone no longer enables automatic dispatch. Existing deployments that
+intend automatic dispatch must explicitly opt in after review. No production
+environment variables are changed by this PR.

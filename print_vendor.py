@@ -42,6 +42,8 @@ class YunPrintClient:
         self._key = str(cfg.get("YUN_PRINT_DEVICE_KEY", "")).strip()
         self.base_url = str(cfg.get("YUN_PRINT_BASE_URL", "https://open.yunweiyin.com")).strip().rstrip("/")
         self.enabled = str(cfg.get("YUN_PRINT_ENABLED", "")).lower() in ("1", "true", "yes")
+        # Independent opt-in: enabling manual vendor access must not drain orders.
+        self.auto_enabled = str(cfg.get("YUN_AUTO_PRINT_ENABLED", "false")).lower() in ("1", "true", "yes")
         self.transport = transport
         self.clock = clock or time.time
         self.nonce = nonce or (lambda: secrets.token_hex(16))

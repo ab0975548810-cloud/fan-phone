@@ -2786,6 +2786,22 @@ def order_print_workspace_test(browser, base, poll):
     page.locator('input[name="password"]').fill('fan123')
     page.locator('button[type="submit"]').first.click()
     page.wait_for_url('**/admin')
+    # Real authenticated summary remains manually usable with auto opt-in off.
+    # Vendor transport is a fixture and this read cannot send a print task.
+    from print_vendor import YunPrintClient
+    from unittest.mock import patch
+    service = app_module.print_center
+    manual_client = YunPrintClient(env={
+        'YUN_PRINT_ENABLED': 'true', 'YUN_AUTO_PRINT_ENABLED': 'false',
+        'YUN_PRINT_DEVICE_ID': 'fixture', 'YUN_PRINT_DEVICE_KEY': 'fixture-only',
+        'CI': 'true'}, transport=lambda *args: (_ for _ in ()).throw(
+            AssertionError('summary must not call vendor')))
+    with patch.object(service, 'client', manual_client), patch.dict(os.environ, {
+            'PRINT_ARTWORK_TOKEN_SECRET': 'fixture-only-' * 4,
+            'PRINT_PUBLIC_BASE_URL': 'https://fixture.invalid'}):
+        summary = page.request.get(base + '/api/admin/print/order-summaries?order_ids=NO-ORDER')
+        assert summary.status == 200 and summary.json()['vendor_ready'] is True
+        assert service.auto_ready is False
     stamp = int(time.time())
     orders = [dict(order_id=f'ORDER-{i:03d}', customer_name='老客人' if i == 204 else '客人',
                    model='iPhone 13', style='晶彩', payment_method='現金', status='待處理',

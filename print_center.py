@@ -125,6 +125,10 @@ class PrintService:
         self.client = client or YunPrintClient()
 
     @property
+    def auto_ready(self):
+        return bool(self.client.auto_enabled and self.vendor_ready)
+
+    @property
     def vendor_ready(self):
         if not self.client.ready:
             return False
@@ -332,7 +336,7 @@ class PrintService:
         # A disabled or incompletely configured vendor is an operator pause,
         # not a failed preflight. Leave the durable row PENDING so a later
         # process with valid settings can claim it without consuming attempts.
-        if not self.vendor_ready:
+        if not self.auto_ready:
             return []
         handoffs = self.store.claim_handoffs(limit=limit, lease_seconds=90)
         if not handoffs:
@@ -420,6 +424,8 @@ class PrintService:
 
     def enqueue_auto(self, order_id):
         """Durably prepare a committed order for asynchronous receiveTask."""
+        if not self.client.auto_enabled:
+            return {"status": "skipped", "reason": "AUTO_PRINT_DISABLED"}
         if not self.vendor_ready:
             return {"status": "skipped", "reason": "VENDOR_NOT_READY"}
         order = self._order(order_id)
@@ -449,11 +455,13 @@ class PrintService:
 
     def dispatch_auto_once(self):
         """Drain durable auto markers once; safe across retries and processes."""
-        if not self.vendor_ready:
+        if not self.auto_ready:
             return []
         self.recover_auto_handoffs_once()
         results = []
         for job in self.store.auto_prepared_jobs():
+            if not self.auto_ready:
+                break
             try:
                 send_type = "send-recovery" if job.get("_auto_recovery") else "send"
                 results.append(self.send(job["id"], self._auto_key(send_type, job["id"])))

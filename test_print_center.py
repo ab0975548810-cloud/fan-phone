@@ -59,6 +59,7 @@ class PrintCenterTests(unittest.TestCase):
         app.print_center.store.path = app.commerce.store.path
         self.fake = FakeVendor()
         self.vendor_env = {
+            "YUN_AUTO_PRINT_ENABLED": "true",
             "YUN_PRINT_ENABLED": "true", "YUN_PRINT_DEVICE_ID": "device-fixture",
             "YUN_PRINT_DEVICE_KEY": "fake-key-never-production", "YUN_PRINT_BASE_URL": "https://fixture.invalid",
             "CI": "true",
@@ -260,6 +261,52 @@ class PrintCenterTests(unittest.TestCase):
                          (503, "VENDOR_NOT_READY"))
         self.assertIsNone(app.print_center.store.latest_job(self.order_id))
         self.assertFalse(any(p == "/api/Device/receiveTask" for p, _ in self.fake.calls))
+
+    def test_auto_switch_defaults_off_without_disabling_manual_reprint(self):
+        self.save_profile()
+        env = dict(self.vendor_env)
+        env.pop("YUN_AUTO_PRINT_ENABLED")
+        app.print_center.client = YunPrintClient(transport=self.fake, env=env)
+        self.assertTrue(app.print_center.vendor_ready)
+        self.assertFalse(app.print_center.auto_ready)
+        order_id = self.create_order(key="manual-only-checkout-0001")
+        before = copy.deepcopy(app.commerce.read())
+        for _ in range(12):
+            self.assertEqual(app.print_center.dispatch_auto_once(), [])
+            self.assertEqual(app.print_center.recover_auto_handoffs_once(), [])
+        self.assertEqual(app.print_center.enqueue_auto(order_id)["reason"], "AUTO_PRINT_DISABLED")
+        row = app.print_center.store.handoffs_for_orders([order_id])[order_id]
+        self.assertEqual((row["state"], row["attempt_count"]), ("PENDING", 0))
+        self.assertIsNone(app.print_center.store.latest_job(order_id))
+        self.fake.responses["/api/Device/receiveTask"] = {
+            "code": 0, "data": {"taskid": "manual-only-task", "status": 0}}
+        key = "manual-only-reprint-0001"
+        response = self.post("manual-reprint", {"order_id": order_id}, key)
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json()["job"]["state"], "QUEUED")
+        self.assertEqual(self.post("manual-reprint", {"order_id": order_id}, key).status_code, 200)
+        self.assertEqual(app.commerce.read(), before)
+        self.assertEqual(len([p for p, _ in self.fake.calls if p.endswith("receiveTask")]), 1)
+
+    def test_auto_switch_pauses_already_prepared_jobs_and_resumes_once(self):
+        self.save_profile()
+        order_id = self.create_order(key="auto-switch-resume-checkout-0001")
+        job = app.print_center.enqueue_auto(order_id)["job"]
+        app.print_center.client.auto_enabled = False
+        self.assertEqual(app.print_center.dispatch_auto_once(), [])
+        self.assertEqual(app.print_center.store.job(job["id"])["state"], "PREPARED")
+        self.assertEqual(self.fake.calls, [])
+        app.print_center.client.auto_enabled = True
+        app.print_center.client.enabled = False
+        self.assertEqual(app.print_center.dispatch_auto_once(), [])
+        self.assertEqual(self.fake.calls, [])
+        app.print_center.client.enabled = True
+        self.fake.responses["/api/Device/receiveTask"] = {
+            "code": 0, "data": {"taskid": "auto-switch-resumed", "status": 0}}
+        app.print_center.dispatch_auto_once()
+        app.print_center.dispatch_auto_once()
+        self.assertEqual(app.print_center.store.job(job["id"])["state"], "QUEUED")
+        self.assertEqual(len([p for p, _ in self.fake.calls if p.endswith("receiveTask")]), 1)
 
     def test_order_history_filters_pagination_and_exact_print_lookup(self):
         # Rows beyond the recent 200 must remain reachable without changing commerce state.
