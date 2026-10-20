@@ -846,6 +846,174 @@ class PrintStore:
                 return active
             raise
 
+    def authorize_manual_reprint(self, order_id, key, request_hash, actor,
+                                 order_status, seed, handoff_review=False):
+        """Atomically authorize one operator-initiated attempt and audit it.
+
+        A terminal prior attempt is copied byte-for-byte at the print snapshot
+        boundary (artwork path/hash and every vendor parameter). A never-sent
+        PREPARED attempt may be adopted, but an in-flight/unknown attempt is
+        never superseded. The request row makes a browser retry return the same
+        attempt instead of creating another one.
+        """
+        if self.app.USE_SUPABASE:
+            data = self.app.SUPABASE.rpc("authorize_manual_reprint", {
+                "p_order_id": order_id, "p_request_key": key,
+                "p_request_hash": request_hash, "p_actor": actor,
+                "p_order_status": order_status,
+                "p_seed": seed, "p_handoff_review": bool(handoff_review),
+            }).execute().data
+            return data if isinstance(data, dict) else {
+                "ok": False, "code": "PRINT_UNAVAILABLE"}
+
+        event_key = "manual-reprint:" + key
+        with self.connection(True) as db:
+            prior_request = self._decode(db.execute(
+                "SELECT * FROM print_requests WHERE request_key=?", (key,)
+            ).fetchone())
+            if prior_request:
+                if (prior_request.get("operation") != "manual_reprint"
+                        or prior_request.get("request_hash") != request_hash):
+                    return {"ok": False, "code": "IDEMPOTENCY_CONFLICT"}
+                replay = self._decode(db.execute(
+                    "SELECT * FROM print_jobs WHERE id=?",
+                    (prior_request.get("job_id"),),
+                ).fetchone())
+                return {"ok": bool(replay), "code": "OK" if replay else "JOB_NOT_FOUND",
+                        "replay": True, "job": replay}
+
+            attempts = [self._decode(row) for row in db.execute(
+                "SELECT * FROM print_jobs WHERE order_id=? ORDER BY attempt_no DESC",
+                (order_id,),
+            ).fetchall()]
+            latest = attempts[0] if attempts else None
+            active = next((row for row in attempts if row.get("state") in ACTIVE_STATES), None)
+            if active and active.get("state") != "PREPARED":
+                code = "RECONCILE_REQUIRED" if active.get("state") in (
+                    "SENDING", "UNKNOWN") else "ACTIVE_PRINT_JOB"
+                return {"ok": False, "code": code}
+
+            job = None
+            if active:
+                # A normal unsent first attempt is safe to adopt. A PREPARED
+                # manual attempt can also be retried after a definitive vendor
+                # rejection. Nothing with unresolved prior-activity quarantine
+                # is adopted.
+                authorized = db.execute(
+                    "SELECT 1 FROM print_events WHERE job_id=? AND event_type IN "
+                    "('MANUAL_REPRINT_AUTHORIZED','HANDOFF_REVIEW_MANUAL_REPRINT_AUTHORIZED') LIMIT 1",
+                    (active["id"],),
+                ).fetchone()
+                prior_physical = any(self._physical_evidence(row) for row in attempts
+                                     if row["id"] != active["id"])
+                if active.get("ambiguous_operation") or (prior_physical and not authorized):
+                    return {"ok": False, "code": "RECONCILE_REQUIRED"}
+                job = active
+            else:
+                source = latest
+                values = source or seed
+                required = ("artwork_path", "artwork_sha256", "sku_id", "width_mm",
+                            "height_mm", "left_mm", "top_mm", "copies", "spot_color",
+                            "channel", "angle")
+                if not values or any(values.get(name) is None for name in required):
+                    return {"ok": False, "code": "PROFILE_MISSING"}
+                now = utcnow()
+                job = {
+                    "id": str(uuid.uuid4()), "order_id": order_id,
+                    "attempt_no": int((latest or {}).get("attempt_no") or 0) + 1,
+                    "sku_id": values.get("sku_id"), "vendor_taskid": None,
+                    "artwork_path": values["artwork_path"],
+                    "artwork_sha256": values["artwork_sha256"],
+                    "artwork_token_nonce": str(seed.get("artwork_token_nonce") or uuid.uuid4().hex),
+                    "artwork_token_expires_at": None,
+                    "profile_complete": bool(values.get("profile_complete", True)),
+                    "width_mm": values["width_mm"], "height_mm": values["height_mm"],
+                    "left_mm": values["left_mm"], "top_mm": values["top_mm"],
+                    "copies": values["copies"], "spot_color": values["spot_color"],
+                    "channel": values["channel"], "angle": values["angle"],
+                    "device_id": None, "state": "PREPARED", "vendor_raw_status": None,
+                    "vendor_raw_message": None, "ambiguous_operation": None,
+                    "last_error": None, "reconcile_count": 0,
+                    "last_reconciled_at": None, "created_at": now, "updated_at": now,
+                    "prepared_at": now, "sent_at": None, "started_at": None,
+                    "completed_at": None, "canceled_at": None,
+                }
+                columns = ",".join(job)
+                encoded = [int(v) if k in BOOL_COLUMNS else v for k, v in job.items()]
+                db.execute(f"INSERT INTO print_jobs ({columns}) VALUES ({','.join('?' for _ in job)})", encoded)
+
+            now = utcnow()
+            event_type = ("HANDOFF_REVIEW_MANUAL_REPRINT_AUTHORIZED" if handoff_review
+                          else "MANUAL_REPRINT_AUTHORIZED")
+            payload = {
+                "actor": actor, "order_id": order_id, "order_status": order_status,
+                "source_job_id": (latest or {}).get("id"),
+                "source_attempt_no": (latest or {}).get("attempt_no"),
+                "source_state": (latest or {}).get("state"),
+                "handoff_review": bool(handoff_review),
+                "artwork_sha256": job.get("artwork_sha256"),
+                "parameters": {name: job.get(name) for name in (
+                    "width_mm", "height_mm", "left_mm", "top_mm", "copies",
+                    "spot_color", "channel", "angle")},
+            }
+            db.execute("""INSERT INTO print_events
+                (id,job_id,event_key,event_type,raw_status,raw_message,payload_json,created_at)
+                VALUES (?,?,?,?,?,?,?,?)""",
+                (str(uuid.uuid4()), job["id"], event_key, event_type,
+                 (latest or {}).get("vendor_raw_status"),
+                 "店員按下重新送任務，已授權建立獨立人工重印嘗試",
+                 json.dumps(payload, ensure_ascii=False), now))
+            db.execute("""INSERT INTO print_requests
+                (request_key,operation,job_id,request_hash,status,response_json,created_at,updated_at)
+                VALUES (?,?,?,?,?,?,?,?)""",
+                (key, "manual_reprint", job["id"], request_hash, "COMPLETED",
+                 json.dumps({"job_id": job["id"]}, ensure_ascii=False), now, now))
+            return {"ok": True, "code": "OK", "replay": False, "job": job}
+
+    def claim_manual_reprint_send_if_safe(self, job_id, *, nonce, expires_at,
+                                          device_id):
+        """Claim an audited manual attempt without treating old output as a ban."""
+        if self.app.USE_SUPABASE:
+            data = self.app.SUPABASE.rpc("claim_manual_reprint_send_if_safe", {
+                "p_job_id": job_id,
+                "p_artwork_token_nonce": nonce,
+                "p_artwork_token_expires_at": expires_at,
+                "p_device_id": device_id,
+            }).execute().data
+            return data if isinstance(data, dict) else {
+                "ok": False, "code": "PRINT_UNAVAILABLE"}
+        with self.connection(True) as db:
+            row = self._decode(db.execute(
+                "SELECT * FROM print_jobs WHERE id=?", (job_id,)).fetchone())
+            if not row:
+                return {"ok": False, "code": "JOB_NOT_FOUND"}
+            latest = self._decode(db.execute(
+                "SELECT * FROM print_jobs WHERE order_id=? ORDER BY attempt_no DESC LIMIT 1",
+                (row["order_id"],),
+            ).fetchone())
+            authorized = db.execute(
+                "SELECT 1 FROM print_events WHERE job_id=? AND event_type IN "
+                "('MANUAL_REPRINT_AUTHORIZED','HANDOFF_REVIEW_MANUAL_REPRINT_AUTHORIZED') LIMIT 1",
+                (job_id,),
+            ).fetchone()
+            if not authorized:
+                return {"ok": False, "code": "MANUAL_REPRINT_AUTH_REQUIRED"}
+            if not latest or latest.get("id") != job_id:
+                return {"ok": False, "code": "STALE_PRINT_ATTEMPT"}
+            if row.get("state") != "PREPARED" or row.get("ambiguous_operation"):
+                code = "RECONCILE_REQUIRED" if row.get("state") in (
+                    "SENDING", "UNKNOWN") or row.get("ambiguous_operation") else "CONCURRENT_OPERATION"
+                return {"ok": False, "code": code}
+            now = utcnow()
+            db.execute("""UPDATE print_jobs SET state='SENDING',artwork_token_nonce=?,
+                artwork_token_expires_at=?,device_id=?,last_error=NULL,
+                ambiguous_operation=NULL,updated_at=? WHERE id=? AND state='PREPARED'""",
+                (nonce, expires_at, device_id, now, job_id))
+            claimed = self._decode(db.execute(
+                "SELECT * FROM print_jobs WHERE id=?", (job_id,)).fetchone())
+            return {"ok": claimed.get("state") == "SENDING", "code": "OK",
+                    "job": claimed}
+
     def patch_job(self, job_id, fields, from_states=None):
         fields = {**fields, "updated_at": utcnow()}
         allowed = {

@@ -153,7 +153,7 @@
     const physical=Boolean(summary?.physical_activity||job?.started_at||job?.completed_at||job?.ambiguous_operation==='prior_attempt_activity');
     const printBusy=printActionsBusy.has(o.order_id);
     const disabled=printBusy?' disabled':'';
-    const printAction=`<button class="print-primary" data-order-action="print-resend" data-order-id="${e(o.order_id)}"${disabled}>${printBusy?'正在查核／處理…':'↻ 重新送任務'}</button>`;
+    const printAction=`<button class="print-primary" data-order-action="print-resend" data-order-id="${e(o.order_id)}"${disabled}>${printBusy?'正在傳送…':'↻ 重新送任務'}</button>`;
     const printMessage=printMessages.get(o.order_id)||'';
     const printLabel=!printStatusLoaded?'列印狀態暫時無法確認，請前往列印中心查核':!summary?'列印資料缺失，請前往列印中心查核':job?`列印嘗試 #${Number(job.attempt_no||1)}｜${e(job.state_label||printState)}${job.vendor_taskid?'｜銳印已回傳 Task ID':''}`:'尚未建立列印任務';
     const preview=o.mockup_url?`<a href="${e(o.mockup_url)}" target="_blank" rel="noopener"><img class="bf-order-thumb" loading="lazy" decoding="async" src="${e(o.mockup_url)}" onerror="this.style.opacity=.15"></a>`:'<div class="bf-order-thumb empty">無預覽</div>';
@@ -202,6 +202,7 @@
         'CONCURRENT_OPERATION','JOB_NOT_FOUND','VOID_ORDER','PRINT_FILE_REQUIRED',
         'SKU_BINDING_REQUIRED','BAD_REQUEST','IDEMPOTENCY_CONFLICT',
         'BAD_CONFIRMATION','VENDOR_TASK_STILL_EXISTS','PRODUCTION_REBUILD_FAILED',
+        'ACTIVE_PRINT_JOB','MANUAL_REPRINT_AUTH_REQUIRED',
       ]);
       if(slot&&definite.has(error.code))sessionStorage.removeItem(slot);
       throw error;
@@ -226,30 +227,28 @@
       'print-retry':'確定重新推送？會沿用客人的原始排版與生產資料，不需重新設計；僅在前次任務明確失敗或取消後才允許。',
       'print-manual-retry':'這筆任務的銳印接收結果尚不明確。只有你親自確認銳印待列印、歷史、完成及實體輸出都沒有原任務，才能繼續；仍存在重複列印風險。要核對嗎？',
       'print-reconcile':'查核銳印目前的任務狀態？查核不會建立新任務或開始打印。',
-      'print-resend':null, // One click starts a guarded recovery, not an unconditional second print.
+      'print-resend':null,
     };
     if(!Object.hasOwn(prompts,action))return;
     if(prompts[action]&&!confirm(prompts[action]))return;
     printActionsBusy.add(orderId);render();
     try{
+      if(action==='print-resend'){
+        printMessages.set(orderId,'正在把原生產圖重新送到銳印，請勿重複操作…');render();
+        const sent=(await printApi('/api/admin/print/manual-reprint',{
+          order_id:orderId
+        },'manual-reprint',orderId)).job;
+        if(!sent?.vendor_taskid&&!['SENDING','QUEUED','PRINTING','COMPLETED','UNKNOWN'].includes(sent?.state))
+          throw new Error('重印任務狀態未確認，請前往列印中心查核');
+        printMessages.set(orderId,sent?.state==='UNKNOWN'
+          ?'傳送結果不明，已鎖定防止重送；請到列印中心查核。'
+          :'任務已送到銳印 ✓；仍須在銳印軟體人工確認打印。');
+        await refreshOrders(true);
+        return;
+      }
       let summary=await latestPrintSummary(orderId),job=summary.job;
       if(summary.physical_activity&&action!=='print-reconcile')
         throw new Error('歷史任務已出現實體列印紀錄，禁止重推，請人工確認');
-      if(action==='print-resend'){
-        printMessages.set(orderId,'正在查核銳印任務，尚未重新送出…');render();
-        const checked=await printApi('/api/admin/print/resend-check?'+new URLSearchParams({order_id:orderId}));
-        printMessages.set(orderId,'查核通過，需要人工確認後才會重新送出。');render();
-        if(!confirm('銳印查無此訂單任務，系統也沒有實體列印紀錄。請再次確認現場未印出，確定沿用原訂單排版重新送任務？不會重複扣庫存，也不會啟動實體打印。')){
-          printMessages.set(orderId,'已取消，沒有重新送出任務。');return;
-        }
-        const rechecked=await printApi('/api/admin/print/resend-check?'+new URLSearchParams({order_id:orderId}));
-        if(rechecked.action!==checked.action||rechecked.job_id!==checked.job_id)
-          throw new Error('任務狀態已變更，請重新查核');
-        summary=await latestPrintSummary(orderId);job=summary.job;
-        if((job?.id||null)!==rechecked.job_id||summary.physical_activity)throw new Error('任務狀態已變更，請重新查核');
-        action='print-'+checked.action;
-        printMessages.set(orderId,'正在重新送任務，請勿重複操作…');render();
-      }
       if(action==='print-reconcile'){
         if(!job||!['UNKNOWN','SENDING','QUEUED','STARTING','CANCELING'].includes(job.state))
           throw new Error('最新列印任務目前不需要雲端查核，請重新整理');
