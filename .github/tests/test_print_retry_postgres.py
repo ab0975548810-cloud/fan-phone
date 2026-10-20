@@ -385,7 +385,7 @@ class _PostgresTableQuery:
     """Small PostgREST-shaped adapter for exercising the real PrintStore path."""
 
     def __init__(self, table):
-        if table != "print_jobs":
+        if table not in ("print_jobs", "print_handoffs"):
             raise AssertionError(f"unexpected test table: {table}")
         self.table = table
         self.filters = []
@@ -398,6 +398,10 @@ class _PostgresTableQuery:
 
     def eq(self, name, value):
         self.filters.append((name, value))
+        return self
+
+    def in_(self, name, values):
+        self.filters.append((name, list(values)))
         return self
 
     def order(self, name, desc=False):
@@ -428,7 +432,7 @@ class _PostgresTableQuery:
             if self.filters:
                 clauses = []
                 for name, value in self.filters:
-                    clauses.append(sql.SQL("{} = {}").format(
+                    clauses.append(sql.SQL("{} = ANY({})" if isinstance(value, list) else "{} = {}").format(
                         sql.Identifier(name), sql.Placeholder()))
                     params.append(value)
                 query += sql.SQL(" where ") + sql.SQL(" and ").join(clauses)
@@ -539,9 +543,34 @@ for race_index in range(20):
 print("PRINT_RETRY_POSTGRES_CONCURRENCY_OK")
 
 
+# Exercise the production service guard against authoritative PostgreSQL rows.
+from print_center import PrintService, PrintError
+review_id = "review-backend-guard"
+with psycopg.connect(DSN) as db:
+    db.execute("delete from public.print_handoffs where order_id=%s", (review_id,))
+    db.execute("""insert into public.orders
+        (id,customer_name,payment_method,model_id,model_name,style_id,style_name,
+         unit_price,quantity,total,status,created_at_unix)
+        values (%s,'fixture','cash','m','m','s','s',100,1,100,'待處理',1)
+        on conflict (id) do nothing""", (review_id,))
+    db.execute("""insert into public.print_handoffs
+        (order_id,request_key,marker_version,state)
+        values (%s,'review-backend-key','legacy-auto-print-v1','REVIEW')""", (review_id,))
+module = SimpleNamespace(USE_SUPABASE=True, SUPABASE=_PostgresSupabaseAdapter())
+service = PrintService(module, client=SimpleNamespace())
+assert service.store.handoffs_for_orders([review_id])[review_id]["state"] == "REVIEW"
+for operation in (lambda: service.prepare(review_id, "review-prepare-key"),
+                  lambda: service._assert_no_prior_physical_activity(review_id)):
+    try:
+        operation()
+        raise AssertionError("historical REVIEW bypassed")
+    except PrintError as exc:
+        assert exc.code == "HANDOFF_REVIEW_REQUIRED", exc.code
+assert service.store.jobs_for_order(review_id) == []
+print("HISTORICAL_REVIEW_POSTGRES_SERVICE_GUARD_OK")
+
 # Read-only order-card gate uses the production service and real PG attempt rows.
 from unittest.mock import patch
-from print_center import PrintService, PrintError
 
 def order_resend_postgres_test():
     order_id = "order-card-resend-pg"
@@ -582,3 +611,16 @@ def order_resend_postgres_test():
     print("ORDER_RESEND_POSTGRES_SERVICE_READ_ONLY_SAFETY_OK")
 
 order_resend_postgres_test()
+
+# Integrated #89 check uses the same authoritative REVIEW guard.
+with patch.dict(os.environ, {"PRINT_ARTWORK_TOKEN_SECRET": "test" * 16,
+                           "PRINT_PUBLIC_BASE_URL": "https://isolated.invalid"}):
+    module.commerce = SimpleNamespace(store=SimpleNamespace(order=lambda oid: {
+        "id": oid, "status": "待處理", "print_path": "fixture.png"}))
+    service.client = SimpleNamespace(ready=True, get_all_tasks=lambda: {"data": []})
+    try:
+        service.check_order_resend(review_id)
+        raise AssertionError("resend-check bypassed historical review")
+    except PrintError as exc:
+        assert exc.code == "HANDOFF_REVIEW_REQUIRED", exc.code
+print("INTEGRATED_88_89_POSTGRES_RESEND_REVIEW_BLOCKED_OK")

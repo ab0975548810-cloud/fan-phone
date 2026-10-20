@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import sqlite3
@@ -85,6 +86,16 @@ class PrintStore:
                     id TEXT PRIMARY KEY, event_key TEXT NOT NULL UNIQUE, device_id TEXT NOT NULL,
                     raw_status TEXT, raw_message TEXT, payload_json TEXT NOT NULL, created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS print_handoffs (
+                    id TEXT PRIMARY KEY, order_id TEXT NOT NULL UNIQUE,
+                    request_key TEXT NOT NULL UNIQUE, marker_version TEXT NOT NULL,
+                    state TEXT NOT NULL, attempt_count INTEGER NOT NULL DEFAULT 0,
+                    next_attempt_at TEXT, lease_token TEXT, lease_expires_at TEXT,
+                    prepared_job_id TEXT, last_error_code TEXT, last_error_at TEXT,
+                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_local_print_handoffs_due
+                    ON print_handoffs(state,next_attempt_at,created_at);
             """)
             db.commit()
             if write:
@@ -662,6 +673,129 @@ class PrintStore:
                 break
             offset += page_size
         return result
+
+    def claim_handoffs(self, limit=20, lease_seconds=60):
+        """Claim a bounded batch with a DB lease, safe across worker processes."""
+        limit = max(1, min(int(limit), 50))
+        lease_seconds = max(15, min(int(lease_seconds), 600))
+        if self.app.USE_SUPABASE:
+            return self.app.SUPABASE.rpc("claim_print_handoffs", {
+                "p_limit": limit, "p_lease_seconds": lease_seconds,
+            }).execute().data or []
+        now = datetime.now(timezone.utc)
+        now_text = now.isoformat()
+        expires = (now + timedelta(seconds=lease_seconds)).isoformat()
+        claimed = []
+        with self.connection(write=True) as db:
+            rows = db.execute("""SELECT * FROM print_handoffs
+                WHERE marker_version='auto-print-handoff-v1' AND (
+                    (state IN ('PENDING','RETRY') AND COALESCE(next_attempt_at,'') <= ?)
+                    OR (state='CLAIMED' AND lease_expires_at <= ?)
+                ) ORDER BY created_at,id LIMIT ?""",
+                (now_text, now_text, limit)).fetchall()
+            for row in rows:
+                token = str(uuid.uuid4())
+                db.execute("""UPDATE print_handoffs
+                    SET state='CLAIMED',attempt_count=attempt_count+1,
+                        lease_token=?,lease_expires_at=?,updated_at=? WHERE id=?""",
+                    (token, expires, now_text, row["id"]))
+                claimed.append(self._decode(db.execute(
+                    "SELECT * FROM print_handoffs WHERE id=?", (row["id"],)).fetchone()))
+        return claimed
+
+    def finish_handoff(self, handoff_id, lease_token, state, *,
+                       prepared_job_id=None, error_code=None, retry_seconds=None):
+        if state not in ("RETRY", "PREPARED", "REVIEW", "FAILED"):
+            raise ValueError("invalid handoff finish state")
+        if self.app.USE_SUPABASE:
+            result = self.app.SUPABASE.rpc("finish_print_handoff", {
+                "p_id": handoff_id, "p_lease_token": lease_token,
+                "p_state": state, "p_prepared_job_id": prepared_job_id,
+                "p_error_code": error_code, "p_retry_seconds": retry_seconds,
+            }).execute().data
+            return result or {"ok": False, "code": "LEASE_LOST"}
+        now = datetime.now(timezone.utc)
+        next_attempt = ((now + timedelta(seconds=int(retry_seconds))).isoformat()
+                        if state == "RETRY" else None)
+        with self.connection(write=True) as db:
+            handoff = db.execute("""SELECT order_id FROM print_handoffs
+                WHERE id=? AND state='CLAIMED' AND lease_token=?""",
+                (handoff_id, lease_token)).fetchone()
+            if not handoff:
+                return {"ok": False, "code": "LEASE_LOST"}
+            if state == "PREPARED":
+                if not prepared_job_id:
+                    return {"ok": False, "code": "PREPARED_JOB_REQUIRED"}
+                job = db.execute(
+                    "SELECT order_id FROM print_jobs WHERE id=?",
+                    (prepared_job_id,)).fetchone()
+                if not job or str(job["order_id"]) != str(handoff["order_id"]):
+                    return {"ok": False, "code": "PREPARED_JOB_MISMATCH"}
+            changed = db.execute("""UPDATE print_handoffs SET
+                state=?,prepared_job_id=CASE WHEN ?='PREPARED' THEN ? ELSE prepared_job_id END,
+                last_error_code=?,last_error_at=CASE WHEN ? IS NULL THEN last_error_at ELSE ? END,
+                next_attempt_at=?,lease_token=NULL,lease_expires_at=NULL,updated_at=?
+                WHERE id=? AND state='CLAIMED' AND lease_token=?""",
+                (state, state, prepared_job_id, error_code, error_code,
+                 now.isoformat(), next_attempt, now.isoformat(), handoff_id,
+                 lease_token)).rowcount
+        return {"ok": bool(changed), "state": state if changed else None,
+                "code": None if changed else "LEASE_LOST"}
+
+    def handoffs_for_orders(self, order_ids):
+        """Authoritative per-order lookup, independent of truncated alert summaries."""
+        ids = list(dict.fromkeys(str(value) for value in order_ids))
+        result = {}
+        for offset in range(0, len(ids), 100):
+            batch = ids[offset:offset + 100]
+            if self.app.USE_SUPABASE:
+                rows = (self.app.SUPABASE.table("print_handoffs").select("*")
+                        .in_("order_id", batch).execute().data or [])
+            else:
+                with self.connection() as db:
+                    rows = [self._decode(row) for row in db.execute(
+                        "SELECT * FROM print_handoffs WHERE order_id IN (" +
+                        ",".join("?" for _ in batch) + ")", batch).fetchall()]
+            result.update({str(row["order_id"]): row for row in rows})
+        return result
+
+    def handoff_summary(self, limit=20, *, include_order_ids=False, offset=0):
+        """Bounded alerts; raw order IDs are opt-in for authenticated admin UI."""
+        limit = max(1, min(int(limit), 200))
+        offset = max(0, int(offset))
+        alert_states = ("REVIEW", "FAILED", "RETRY", "CLAIMED", "PENDING")
+        if self.app.USE_SUPABASE:
+            rows = (self.app.SUPABASE.table("print_handoffs")
+                    .select("order_id,marker_version,state,attempt_count,last_error_code,created_at,updated_at")
+                    .in_("state", list(alert_states))
+                    .order("updated_at", desc=True).order("order_id").range(offset, offset + limit).execute().data or [])
+        else:
+            with self.connection() as db:
+                rows = [self._decode(row) for row in db.execute("""SELECT
+                    order_id,marker_version,state,attempt_count,last_error_code,created_at,updated_at
+                    FROM print_handoffs WHERE state IN ('REVIEW','FAILED','RETRY','CLAIMED','PENDING')
+                    ORDER BY updated_at DESC, order_id LIMIT ? OFFSET ?""", (limit + 1, offset)).fetchall()]
+        more = len(rows) > limit
+        rows = rows[:limit]
+        counts, alerts = {}, []
+        for row in rows:
+            state = str(row.get("state") or "")
+            counts[state] = counts.get(state, 0) + 1
+            alert = {
+                "order_ref": hashlib.sha256(
+                    str(row.get("order_id") or "").encode()).hexdigest()[:12],
+                "marker_version": str(row.get("marker_version") or ""),
+                "state": state,
+                "attempt_count": int(row.get("attempt_count") or 0),
+                "error_code": str(row.get("last_error_code") or "")[:100],
+                "updated_at": row.get("updated_at"),
+            }
+            if include_order_ids:
+                alert["order_id"] = str(row.get("order_id") or "")
+            alerts.append(alert)
+        return {"counts": counts, "alerts": alerts, "offset": offset,
+                "next_offset": offset + limit if more else None,
+                "bounded_limit": limit, "truncated": more}
 
     def create_job(self, order, sku_id, profile, artwork_sha256, token_nonce):
         now = utcnow()

@@ -21,6 +21,8 @@ with psycopg.connect(os.environ['TEST_POSTGRES_DSN']) as db:
             'public.apply_print_callback_safely(uuid,text,text)',
             'public.apply_print_reconcile_safely(uuid,boolean,text,text,text,boolean)',
             'public.attest_print_unknown_missing(uuid,text,text,text,text)',
+            'public.claim_print_handoffs(integer,integer)',
+            'public.finish_print_handoff(uuid,uuid,text,uuid,text,integer)',
         ):
             assert not db.execute(
                 'SELECT has_function_privilege(%s, %s, \'EXECUTE\')', (role, signature)
@@ -34,7 +36,9 @@ with psycopg.connect(os.environ['TEST_POSTGRES_DSN']) as db:
         'public.claim_print_send_if_safe(uuid,text,timestamptz,text)',
         'public.apply_print_callback_safely(uuid,text,text)',
         'public.apply_print_reconcile_safely(uuid,boolean,text,text,text,boolean)',
-            'public.attest_print_unknown_missing(uuid,text,text,text,text)',
+        'public.attest_print_unknown_missing(uuid,text,text,text,text)',
+        'public.claim_print_handoffs(integer,integer)',
+        'public.finish_print_handoff(uuid,uuid,text,uuid,text,integer)',
     ):
         assert db.execute(
             'SELECT has_function_privilege(\'service_role\', %s, \'EXECUTE\')', (signature,)
@@ -43,9 +47,10 @@ with psycopg.connect(os.environ['TEST_POSTGRES_DSN']) as db:
         'public.orders'::regclass,'public.app_store'::regclass,'public.production_profiles'::regclass,
         'public.print_order_bindings'::regclass,'public.print_jobs'::regclass,'public.print_requests'::regclass,
         'public.print_events'::regclass,'public.printer_status_events'::regclass,
-        'public.ai_usage_events'::regclass
+        'public.ai_usage_events'::regclass,'public.print_handoff_control'::regclass,
+        'public.print_handoffs'::regclass
     )""").fetchone()[0]
-    for table in ('production_profiles','print_order_bindings','print_jobs','print_requests','print_events','printer_status_events','ai_usage_events'):
+    for table in ('production_profiles','print_order_bindings','print_jobs','print_requests','print_events','printer_status_events','ai_usage_events','print_handoff_control','print_handoffs'):
         for role in ('anon','authenticated'):
             assert not db.execute("SELECT has_table_privilege(%s, %s, 'SELECT')", (role, 'public.' + table)).fetchone()[0]
             assert not db.execute("SELECT has_table_privilege(%s, %s, 'INSERT')", (role, 'public.' + table)).fetchone()[0]

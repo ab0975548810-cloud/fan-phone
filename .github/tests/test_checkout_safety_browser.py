@@ -50,7 +50,7 @@ def run():
     worker.start()
     origin = f'http://127.0.0.1:{server.server_port}'
     try:
-        with mock.patch.object(app.print_center, 'enqueue_auto') as enqueue, \
+        with mock.patch.object(app.print_center, 'wake_dispatcher'), \
              mock.patch('editable_stickers.public_image', return_value=fixture.fixture.mask()), \
              sync_playwright() as playwright:
             engine = os.environ.get('BROWSER_ENGINE', 'webkit')
@@ -117,6 +117,10 @@ def run():
                         assert new_sku['stock_qty'] == old_sku['stock_qty'] - 1
                         assert len([r for r in after['inventory_ledger'] if r['order_id'] == order_id]) == 1
                         order = app.commerce.store.order(order_id)
+                        with app.print_center.store.connection() as db:
+                            handoff = db.execute("""select marker_version,state from print_handoffs
+                                where order_id=?""", (order_id,)).fetchone()
+                        assert tuple(handoff) == ('auto-print-handoff-v1', 'PENDING'), handoff
                         for key in ('print_path', 'mockup_path'):
                             with Image.open(Path(app.SAVE_DIR) / order[key]) as saved:
                                 assert saved.size == (2030, 4241)
@@ -128,7 +132,6 @@ def run():
                         print('CHECKOUT_PROTECTED_OK', engine, name, 'one order / one deduction / no vendor', flush=True)
                     finally:
                         context.close()
-                assert enqueue.call_count == 7  # six orders plus one committed replay
             finally:
                 browser.close()
     finally:
