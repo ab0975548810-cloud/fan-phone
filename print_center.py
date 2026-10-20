@@ -802,7 +802,7 @@ class PrintService:
             base = (configured or request.host_url).strip().rstrip("/")
         return base
 
-    def send(self, job_id, key):
+    def send(self, job_id, key, manual_reprint=False):
         fingerprint = _payload_hash("send", job_id)
         replay = self._existing_operation(key, "send", job_id, fingerprint)
         if replay:
@@ -810,7 +810,8 @@ class PrintService:
         job = self.store.job(job_id)
         if not job:
             raise PrintError("JOB_NOT_FOUND", "找不到列印任務", 404)
-        self._assert_no_prior_physical_activity(job["order_id"])
+        if not manual_reprint:
+            self._assert_no_prior_physical_activity(job["order_id"])
         order = self._order(job["order_id"])
         self._assert_order_printable(order)
         if job["state"] == "UNKNOWN":
@@ -819,13 +820,14 @@ class PrintService:
             raise PrintError("BAD_PRINT_STATE", "目前任務狀態不可送到銳印")
         if not job.get("profile_complete"):
             raise PrintError("PROFILE_MISSING", "列印參數未設定，不可送到銳印")
-        self._assert_style_configured(order)
+        if not manual_reprint:
+            self._assert_style_configured(order)
         if not self.vendor_ready:
             raise PrintError("VENDOR_NOT_READY", "雲打印憑證、HTTPS public URL 或生產圖密鑰尚未完整設定", 503)
         # For operator-confirmed missing attempts, perform one more vendor
         # presence check just before the new vendor submission. An old task
         # can reappear after the operator's earlier check.
-        older_confirmed = [
+        older_confirmed = [] if manual_reprint else [
             attempt for attempt in self.store.jobs_for_order(job["order_id"])
             if int(attempt.get("attempt_no") or 0) < int(job.get("attempt_no") or 0)
             and attempt.get("ambiguous_operation") == "operator_confirmed_missing"
@@ -839,8 +841,10 @@ class PrintService:
             return self.store.job(job_id)
         nonce = secrets.token_urlsafe(18)
         expiry = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
-        decision = self.store.claim_send_if_safe(
-            job_id, nonce=nonce, expires_at=expiry, device_id=self.client.device_id)
+        claim = (self.store.claim_manual_reprint_send_if_safe if manual_reprint
+                 else self.store.claim_send_if_safe)
+        decision = claim(job_id, nonce=nonce, expires_at=expiry,
+                         device_id=self.client.device_id)
         if not decision.get("ok"):
             code = str(decision.get("code") or "CONCURRENT_OPERATION")
             self.store.finish_request(key, "FAILED", {"job_id": job_id, "code": code})
@@ -848,12 +852,19 @@ class PrintService:
                 raise PrintError("REPRINT_REQUIRED", "已有實體列印活動，禁止再次送出")
             if code == "JOB_NOT_FOUND":
                 raise PrintError("JOB_NOT_FOUND", "找不到列印任務", 404)
+            if code == "RECONCILE_REQUIRED":
+                raise PrintError("RECONCILE_REQUIRED", "送出狀態不明或有延遲回報，必須先查核，禁止重送")
+            if code == "STALE_PRINT_ATTEMPT":
+                raise PrintError("STALE_PRINT_ATTEMPT", "這筆訂單已有較新的列印嘗試")
+            if code == "MANUAL_REPRINT_AUTH_REQUIRED":
+                raise PrintError("MANUAL_REPRINT_AUTH_REQUIRED", "此任務缺少店員人工重印授權", 403)
             raise PrintError("CONCURRENT_OPERATION", "另一個列印操作正在執行")
         claimed = decision["job"]
         try:
             claimed_order = self._order(claimed["order_id"])
             self._assert_order_printable(claimed_order)
-            self._assert_style_configured(claimed_order)
+            if not manual_reprint:
+                self._assert_style_configured(claimed_order)
         except PrintError:
             self.store.patch_job(job_id, {"state": "PREPARED", "last_error": "送出前訂單或生產設定已失效"}, ("SENDING",))
             self.store.finish_request(key, "FAILED", {"job_id": job_id, "code": "SEND_PREFLIGHT_FAILED"})
@@ -1137,6 +1148,73 @@ class PrintService:
                 raise PrintError("INVALID_REPLAY", "printer callback 驗證資料已被重用", 403)
         return inserted
 
+    def _manual_reprint_seed(self, order_id):
+        """Build the first immutable print snapshot from the stored order image."""
+        order = self._order(order_id)
+        self._assert_order_printable(order)
+        self._assert_style_configured(order)
+        finance = self._finance(order_id)
+        sku_id = str(finance.get("sku_id") or "")
+        if not sku_id:
+            binding = self.store.binding(order_id)
+            sku_id = str((binding or {}).get("sku_id") or "")
+        if not sku_id:
+            raise PrintError("SKU_BINDING_REQUIRED", "舊訂單必須先明確補綁列印 SKU")
+        profile = self._materialize_sku_profile(order, sku_id)
+        if not profile:
+            raise PrintError("PROFILE_MISSING", "請先到「品牌及型號」儲存此型號的列印參數")
+        raw = self._download_artwork(order["print_path"])
+        return order, {
+            "sku_id": sku_id, "artwork_path": order["print_path"],
+            "artwork_sha256": hashlib.sha256(raw).hexdigest(),
+            "artwork_token_nonce": secrets.token_urlsafe(18),
+            "profile_complete": True,
+            **{name: profile.get(name) for name in (
+                "width_mm", "height_mm", "left_mm", "top_mm", "copies",
+                "spot_color", "channel", "angle")},
+        }
+
+    def manual_reprint(self, order_id, key, actor):
+        """One operator action: authorize an attempt and submit it at most once."""
+        if not self.vendor_ready:
+            raise PrintError(
+                "VENDOR_NOT_READY",
+                "銳印尚未啟用或連線設定不完整，這次沒有建立或送出重印任務",
+                503,
+            )
+        order = self._order(order_id)
+        self._assert_order_printable(order)
+        attempts = self.store.jobs_for_order(order_id)
+        if attempts:
+            seed = {"artwork_token_nonce": secrets.token_urlsafe(18)}
+        else:
+            order, seed = self._manual_reprint_seed(order_id)
+        handoff = self.store.handoffs_for_orders([order_id]).get(str(order_id))
+        review = bool(handoff and (
+            handoff.get("state") == "REVIEW"
+            or handoff.get("marker_version") == "legacy-auto-print-v1"))
+        fingerprint = _payload_hash("manual_reprint", order_id)
+        decision = self.store.authorize_manual_reprint(
+            order_id, key, fingerprint, str(actor or "authenticated_admin")[:100],
+            str(order.get("status") or ""), seed, handoff_review=review)
+        if not decision.get("ok") or not isinstance(decision.get("job"), dict):
+            code = str(decision.get("code") or "PRINT_UNAVAILABLE")
+            messages = {
+                "IDEMPOTENCY_CONFLICT": "同一操作識別已用於不同列印操作",
+                "RECONCILE_REQUIRED": "前次任務正在傳送、結果不明或有延遲回報；必須先查核，禁止盲目重送",
+                "ACTIVE_PRINT_JOB": "銳印已有待確認、列印中或取消中的任務，不能再建立重印",
+                "PROFILE_MISSING": "原列印任務沒有完整生產圖或列印參數",
+                "JOB_NOT_FOUND": "找不到已授權的重印任務",
+            }
+            status = 503 if code == "PRINT_UNAVAILABLE" else 409
+            raise PrintError(code, messages.get(code, "人工重印目前無法送出"), status)
+        job = decision["job"]
+        # A deterministic child key ties vendor submission to the same button
+        # operation. Replaying after a lost HTTP response returns the stored
+        # job and never invokes receiveTask a second time.
+        send_key = "manual-send-" + _hash(key)[:48]
+        return self.send(str(job["id"]), send_key, manual_reprint=True)
+
     def check_order_resend(self, order_id):
         """Read-only vendor check; queue absence never clears uncertain history."""
         order = self._order(order_id)
@@ -1384,6 +1462,18 @@ def install(app_module):
         if not re.fullmatch(r"[A-Za-z0-9-]{1,100}", order_id):
             raise PrintError("BAD_REQUEST", "訂單編號格式錯誤", 400)
         return app_module.no_cache_json({"status": "success", **service.check_order_resend(order_id)})
+
+    @app.route("/api/admin/print/manual-reprint", methods=["POST"])
+    @guarded
+    def print_manual_reprint():
+        payload = body()
+        order_id = str(payload.get("order_id") or "")
+        if not re.fullmatch(r"[A-Za-z0-9-]{1,100}", order_id):
+            raise PrintError("BAD_REQUEST", "訂單編號格式錯誤", 400)
+        actor = (session.get("admin_user") or session.get("username")
+                 or session.get("employee_name") or "authenticated_admin")
+        job = service.manual_reprint(order_id, key(payload), str(actor))
+        return app_module.no_cache_json({"status": "success", "job": _public_job(job)})
 
     @app.route("/api/admin/print/order-summaries")
     @guarded

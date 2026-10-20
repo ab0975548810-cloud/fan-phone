@@ -21,6 +21,8 @@ with psycopg.connect(os.environ['TEST_POSTGRES_DSN']) as db:
             'public.apply_print_callback_safely(uuid,text,text)',
             'public.apply_print_reconcile_safely(uuid,boolean,text,text,text,boolean)',
             'public.attest_print_unknown_missing(uuid,text,text,text,text)',
+            'public.authorize_manual_reprint(text,text,text,text,text,jsonb,boolean)',
+            'public.claim_manual_reprint_send_if_safe(uuid,text,timestamptz,text)',
             'public.claim_print_handoffs(integer,integer)',
             'public.finish_print_handoff(uuid,uuid,text,uuid,text,integer)',
         ):
@@ -37,6 +39,8 @@ with psycopg.connect(os.environ['TEST_POSTGRES_DSN']) as db:
         'public.apply_print_callback_safely(uuid,text,text)',
         'public.apply_print_reconcile_safely(uuid,boolean,text,text,text,boolean)',
         'public.attest_print_unknown_missing(uuid,text,text,text,text)',
+        'public.authorize_manual_reprint(text,text,text,text,text,jsonb,boolean)',
+        'public.claim_manual_reprint_send_if_safe(uuid,text,timestamptz,text)',
         'public.claim_print_handoffs(integer,integer)',
         'public.finish_print_handoff(uuid,uuid,text,uuid,text,integer)',
     ):

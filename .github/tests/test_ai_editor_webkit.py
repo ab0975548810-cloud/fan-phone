@@ -2905,8 +2905,8 @@ def order_print_workspace_test(browser, base, poll):
         assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+2'),width
         assert page.locator('#pc-triage').evaluate('(e)=>e.scrollWidth>=e.clientWidth')
 
-    # Order-card print operations use a single batch read and existing print
-    # endpoints. All writes below are Playwright-mocked: no vendor calls.
+    # Order-card manual reprint is one POST with no confirm dialog. All writes
+    # below are Playwright-mocked: no real vendor calls.
     statuses = {
         'CARD-NOJOB': None,
         'CARD-PREPARED': dict(id='JOB-CARD-PREPARED',state='PREPARED',state_label='待送出',attempt_no=1,profile_complete=True),
@@ -2921,7 +2921,7 @@ def order_print_workspace_test(browser, base, poll):
         'CARD-OLD-PHYSICAL': dict(id='JOB-CARD-OLD-PHYSICAL',state='FAILED',state_label='失敗',attempt_no=2,profile_complete=True),
     }
     orders[:] = [dict(order_id=key,customer_name='卡片測試',model='iPhone 13',style='晶彩',
-                     payment_method='現金',status='待處理',time=stamp,has_print=True,
+                     payment_method='現金',status='已完成' if key=='CARD-COMPLETED' else '待處理',time=stamp,has_print=True,
                      has_mockup=False,quantity=1,total=100) for key in statuses]
     api_calls = []
     def card_summary(route):
@@ -2933,54 +2933,27 @@ def order_print_workspace_test(browser, base, poll):
                 for order_id in ids if order_id}
         route.fulfill(status=200, content_type='application/json',
                       body=json.dumps(dict(status='success',jobs=data,vendor_ready=True,vendor_connected=True)))
-    def card_mutation(route):
-        endpoint = route.request.url.rsplit('/',1)[-1]
+    def card_manual_reprint(route):
         payload = route.request.post_data_json
-        api_calls.append((endpoint,payload))
-        if endpoint == 'prepare':
-            order_id=payload['order_id']
-            assert statuses[order_id] is None
-            job=dict(id='JOB-'+order_id+'-FIRST',state='PREPARED',state_label='待送出',
-                     attempt_no=1,profile_complete=True)
-            statuses[order_id]=job
-        elif endpoint == 'retry':
-            old = next(value for value in statuses.values() if value and value['id']==payload['job_id'])
-            order_id = next(key for key,val in statuses.items() if val is old)
-            assert old['state'] in ('FAILED','CANCELED')
-            job=dict(id='JOB-'+order_id+'-RETRY',state='PREPARED',state_label='待送出',
-                     attempt_no=2,profile_complete=True)
-            statuses[order_id]=job
-        elif endpoint == 'manual-missing-retry':
-            assert payload['vendor_taskid']=='old-task-for-check', payload
-            assert payload['operator_confirmation']=='VERIFIED_RUIYIN_HISTORY_AND_NO_PHYSICAL_OUTPUT'
-            assert payload['job_id']=='JOB-CARD-UNKNOWN-ACK'
-            job=dict(id='JOB-CARD-UNKNOWN-ACK-RETRY',state='PREPARED',state_label='待送出',
-                     attempt_no=2,profile_complete=True)
-            statuses['CARD-UNKNOWN-ACK']=job
-        elif endpoint == 'send':
-            job = next(value for value in statuses.values() if value and value['id']==payload['job_id'])
-            assert job['state']=='PREPARED'
-            job.update(state='QUEUED',state_label='等待銳印確認',vendor_taskid='vendor-'+job['id'])
-        elif endpoint == 'reconcile':
-            job = next(value for value in statuses.values() if value and value['id']==payload['job_id'])
-            assert job['state']=='UNKNOWN'
-            job.update(state='QUEUED',state_label='等待銳印確認',vendor_taskid='vendor-'+job['id'])
-        else:
-            raise AssertionError(endpoint)
-        route.fulfill(status=200,content_type='application/json',body=json.dumps(dict(status='success',job=job)))
-    def resend_check(route):
-        order_id=parse_qs(urlsplit(route.request.url).query)['order_id'][0]
+        order_id=payload['order_id']
         job=statuses.get(order_id)
-        api_calls.append(('resend-check',dict(order_id=order_id)))
-        if job and (job.get('vendor_taskid') or job['state'] not in ('PREPARED','FAILED','CANCELED')):
-            route.fulfill(status=409,content_type='application/json',body=json.dumps(dict(status='error',code='RECONCILE_REQUIRED',msg='已有 Task ID 或任務狀態不明，禁止重新送出')))
+        api_calls.append(('manual-reprint',payload))
+        if job and job['state'] in ('SENDING','UNKNOWN'):
+            route.fulfill(status=409,content_type='application/json',body=json.dumps(dict(status='error',code='RECONCILE_REQUIRED',msg='結果不明，必須先查核')))
             return
-        action='prepare' if not job else ('send' if job['state']=='PREPARED' else 'retry')
-        route.fulfill(status=200,content_type='application/json',body=json.dumps(dict(status='success',action=action,job_id=job['id'] if job else None)))
-    page.route('**/api/admin/print/resend-check?*',resend_check)
+        if job and job['state'] in ('QUEUED','STARTING','PRINTING','CANCELING'):
+            route.fulfill(status=409,content_type='application/json',body=json.dumps(dict(status='error',code='ACTIVE_PRINT_JOB',msg='已有進行中的任務')))
+            return
+        if job and job['state']=='PREPARED':
+            attempt=job['attempt_no'];job_id=job['id']
+        else:
+            attempt=(job or {}).get('attempt_no',0)+1;job_id='JOB-'+order_id+'-MANUAL-'+str(attempt)
+        job=dict(id=job_id,state='QUEUED',state_label='等待銳印確認',attempt_no=attempt,
+                 profile_complete=True,vendor_taskid='vendor-'+job_id)
+        statuses[order_id]=job
+        route.fulfill(status=200,content_type='application/json',body=json.dumps(dict(status='success',job=job)))
     page.route('**/api/admin/print/order-summaries?*',card_summary)
-    for endpoint in ('prepare','retry','send','reconcile','manual-missing-retry'):
-        page.route('**/api/admin/print/'+endpoint,card_mutation)
+    page.route('**/api/admin/print/manual-reprint',card_manual_reprint)
     page.locator('.nav button[data-view="orders"]').click()
     page.locator('[data-range="all"]').click()
     # Wait for the entire page + batch print-status transaction to finish.
@@ -2998,28 +2971,24 @@ def order_print_workspace_test(browser, base, poll):
         assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+2')
         Path('artifacts').mkdir(exist_ok=True)
         page.screenshot(path=f"artifacts/order-resend-{os.environ.get('BROWSER_ENGINE','webkit')}-{width}.png",full_page=True)
-    page.remove_listener('dialog',handle_print_dialog)
-    page.once('dialog',lambda dialog: dialog.dismiss())
-    before=len(api_calls)
-    page.locator('[data-order-id="CARD-NOJOB"][data-order-action="print-resend"]').click()
-    poll(page, "() => document.querySelector('[data-order-id=\"CARD-NOJOB\"][data-order-action=print-resend]')?.closest('.bf-order-card')?.textContent.includes('已取消，沒有重新送出')")
-    poll(page, "() => !document.querySelector('[data-order-action=print-resend]:disabled')")
-    assert [op for op,_ in api_calls[before:]]==['resend-check']
-    page.on('dialog',handle_print_dialog)
-    for order_id, operations in (('CARD-NOJOB',['prepare','send']),('CARD-PREPARED',['send']),('CARD-FAILED',['retry','send'])):
+    dialog_count=len(dialogs)
+    for order_id in ('CARD-NOJOB','CARD-PREPARED','CARD-FAILED','CARD-COMPLETED','CARD-OLD-PHYSICAL'):
         before=len(api_calls)
         page.locator(f'[data-order-id="{order_id}"][data-order-action="print-resend"]').click()
         poll(page, f"() => document.querySelector('[data-order-id=\"{order_id}\"][data-order-action=print-resend]')?.closest('.bf-order-card')?.querySelector('.bf-print-message')?.textContent.includes('任務已送到銳印')")
         poll(page, "() => !document.querySelector('[data-order-action=print-resend]:disabled')")
-        assert [op for op,_ in api_calls[before:]]==['resend-check','resend-check']+operations,api_calls[before:]
-    for order_id in ('CARD-UNKNOWN','CARD-UNKNOWN-ACK','CARD-QUEUED','CARD-PRINTING','CARD-COMPLETED','CARD-OLD-PHYSICAL'):
+        assert [op for op,_ in api_calls[before:]]==['manual-reprint'],api_calls[before:]
+    assert len(dialogs)==dialog_count,dialogs[dialog_count:]
+    blocked_dialog_count=len(dialogs)
+    for order_id in ('CARD-UNKNOWN','CARD-UNKNOWN-ACK','CARD-QUEUED','CARD-PRINTING'):
         before=len(api_calls)
         page.locator(f'[data-order-id="{order_id}"][data-order-action="print-resend"]').click()
         poll(page, f"() => document.querySelector('[data-order-id=\"{order_id}\"][data-order-action=print-resend]')?.closest('.bf-order-card')?.querySelector('.bf-print-message')?.textContent.includes('操作未完成')")
         poll(page, "() => !document.querySelector('[data-order-action=print-resend]:disabled')")
-        assert all(op=='resend-check' for op,_ in api_calls[before:]),api_calls[before:]
-    assert not any(op in ('manual-missing-retry','start','pushPrint') for op,_ in api_calls)
-    print('ADMIN_ORDER_ALWAYS_VISIBLE_RESEND_CHECK_CONFIRM_NO_BLIND_SEND_OK')
+        assert [op for op,_ in api_calls[before:]]==['manual-reprint'],api_calls[before:]
+    assert len(dialogs)==blocked_dialog_count+4,dialogs[blocked_dialog_count:]
+    assert not any(op in ('resend-check','manual-missing-retry','start','pushPrint') for op,_ in api_calls)
+    print('ADMIN_ORDER_ONE_CLICK_MANUAL_REPRINT_NO_DIALOG_UNKNOWN_GUARD_OK')
     page.close()
 
 

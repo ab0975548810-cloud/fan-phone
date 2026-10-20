@@ -167,6 +167,100 @@ class PrintCenterTests(unittest.TestCase):
         self.assertIsNone(app.print_center.store.latest_job(self.order_id))
         self.assertFalse(any(path.endswith("receiveTask") for path, _ in self.fake.calls))
 
+    def test_manual_reprint_completed_order_is_one_click_audited_and_idempotent(self):
+        self.save_profile()
+        old = self.prepare("manual-reprint-old-prepare-0001")
+        sent = self.send(old["id"], key="manual-reprint-old-send-0001",
+                         taskid="manual-old-task")
+        self.assertEqual(sent.status_code, 200, sent.get_data(as_text=True))
+        self.assertEqual(self.callback("manual-old-task", "2").status_code, 200)
+        old = app.print_center.store.job(old["id"])
+        self.assertEqual(old["state"], "COMPLETED")
+        before_order = copy.deepcopy(app.commerce.store.order(self.order_id))
+        before_commerce = copy.deepcopy(app.commerce.read())
+        self.fake.responses["/api/Device/receiveTask"] = {
+            "code": 0, "data": {"taskid": "manual-new-task", "status": 0}}
+        with self.client.session_transaction() as session:
+            session["admin_user"] = "fixture-clerk"
+        key = "manual-reprint-click-00000001"
+        first = self.post("manual-reprint", {"order_id": self.order_id}, key=key)
+        second = self.post("manual-reprint", {"order_id": self.order_id}, key=key)
+        self.assertEqual(first.status_code, 200, first.get_data(as_text=True))
+        self.assertEqual(second.status_code, 200, second.get_data(as_text=True))
+        new = first.get_json()["job"]
+        self.assertEqual((new["id"], new["attempt_no"], new["vendor_taskid"]),
+                         (second.get_json()["job"]["id"], 2, "manual-new-task"))
+        stored = app.print_center.store.job(new["id"])
+        for name in ("artwork_path", "artwork_sha256", "sku_id", "width_mm",
+                     "height_mm", "left_mm", "top_mm", "copies", "spot_color",
+                     "channel", "angle"):
+            self.assertEqual(stored[name], old[name], name)
+        event = app.print_center.store.event("print_events", "manual-reprint:" + key)
+        self.assertEqual(event["event_type"], "MANUAL_REPRINT_AUTHORIZED")
+        self.assertEqual(event["payload_json"]["actor"], "fixture-clerk")
+        self.assertEqual(event["payload_json"]["source_job_id"], old["id"])
+        self.assertEqual(len([p for p, _ in self.fake.calls
+                             if p == "/api/Device/receiveTask"]), 2)
+        self.assertFalse(any(p in ("/api/Device/startPrint", "/api/Device/pushPrint")
+                             for p, _ in self.fake.calls))
+        self.assertEqual(app.commerce.store.order(self.order_id), before_order)
+        self.assertEqual(app.commerce.read(), before_commerce)
+
+    def test_manual_reprint_lost_response_locks_unknown_and_never_resends(self):
+        self.save_profile()
+        self.fake.timeout_paths.add("/api/Device/receiveTask")
+        key = "manual-reprint-timeout-000001"
+        first = self.post("manual-reprint", {"order_id": self.order_id}, key=key)
+        self.assertEqual((first.status_code, first.get_json()["code"]),
+                         (503, "RECONCILE_REQUIRED"))
+        job = app.print_center.store.latest_job(self.order_id)
+        self.assertEqual((job["state"], job["ambiguous_operation"]),
+                         ("UNKNOWN", "receiveTask"))
+        # Browser/network replay uses the same authorization and child send
+        # key. It returns the locked attempt without another receiveTask.
+        replay = self.post("manual-reprint", {"order_id": self.order_id}, key=key)
+        self.assertEqual(replay.status_code, 200, replay.get_data(as_text=True))
+        self.assertEqual(replay.get_json()["job"]["state"], "UNKNOWN")
+        blocked = self.post("manual-reprint", {"order_id": self.order_id},
+                            key="manual-reprint-after-unknown-0001")
+        self.assertEqual((blocked.status_code, blocked.get_json()["code"]),
+                         (409, "RECONCILE_REQUIRED"))
+        self.assertEqual(len([p for p, _ in self.fake.calls
+                             if p == "/api/Device/receiveTask"]), 1)
+
+    def test_historical_review_has_separate_audited_manual_path_only(self):
+        self.save_profile()
+        checkout_key = "checkout-review-manual-reprint-0001"
+        order_id = self.create_order(key=checkout_key)
+        self.remove_auto_marker(checkout_key)
+        self.fake.responses["/api/Device/receiveTask"] = {
+            "code": 0, "data": {"taskid": "review-manual-task", "status": 0}}
+        key = "manual-reprint-review-00000001"
+        response = self.post("manual-reprint", {"order_id": order_id}, key=key)
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        event = app.print_center.store.event("print_events", "manual-reprint:" + key)
+        self.assertEqual(event["event_type"],
+                         "HANDOFF_REVIEW_MANUAL_REPRINT_AUTHORIZED")
+        self.assertTrue(event["payload_json"]["handoff_review"])
+        handoff = app.print_center.store.handoffs_for_orders([order_id])[order_id]
+        self.assertEqual(handoff["state"], "REVIEW")
+        before = len([p for p, _ in self.fake.calls if p == "/api/Device/receiveTask"])
+        app.print_center.dispatch_auto_once()
+        self.assertEqual(len([p for p, _ in self.fake.calls
+                             if p == "/api/Device/receiveTask"]), before)
+
+    def test_manual_reprint_disabled_vendor_creates_nothing(self):
+        self.save_profile()
+        app.print_center.client = YunPrintClient(
+            transport=self.fake,
+            env={**self.vendor_env, "YUN_PRINT_ENABLED": "false"})
+        response = self.post("manual-reprint", {"order_id": self.order_id},
+                             key="manual-reprint-disabled-000001")
+        self.assertEqual((response.status_code, response.get_json()["code"]),
+                         (503, "VENDOR_NOT_READY"))
+        self.assertIsNone(app.print_center.store.latest_job(self.order_id))
+        self.assertFalse(any(p == "/api/Device/receiveTask" for p, _ in self.fake.calls))
+
     def test_order_history_filters_pagination_and_exact_print_lookup(self):
         # Rows beyond the recent 200 must remain reachable without changing commerce state.
         with app.commerce.store.connection() as db:

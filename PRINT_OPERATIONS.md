@@ -135,17 +135,16 @@ Stale `SENDING` and `CANCELING` states remain reconcilable. Legacy `STARTING` ro
 
 `pushPrint`, website-triggered `startPrint`, maintenance controls, and vendor channel stock are intentionally absent from the A5 active flow. Vendor channel stock is not store SKU inventory.
 
-### 歷史 REVIEW 的後端封鎖
+### 歷史 REVIEW 的人工處置
 
-一般 prepare/retry/send/manual recovery 共用 DB-backed handoff guard：REVIEW 或 legacy-auto-print-v1 回 HANDOFF_REVIEW_REQUIRED。沒有提供解除或補送 API。資料庫查詢失敗亦不放行。
+一般 prepare/retry/send/manual recovery 仍共用 DB-backed handoff guard：REVIEW 或 legacy-auto-print-v1 回 HANDOFF_REVIEW_REQUIRED。資料庫查詢失敗亦不放行。
 Dashboard 每筆訂單的 handoff 狀態採 exact/batched order lookup，不使用截斷告警判斷權限。告警每頁20筆、支援上一頁/下一頁，數字僅代表本頁。
-#89 整合時，其 resend-check 也會經同一 guard，UI 人工確認不能取代歷史 REVIEW 的授權／稽核流程。
+只有已登入店員按訂單卡「重新送任務」時，才可走獨立 `manual-reprint` 授權交易。它會寫入 `HANDOFF_REVIEW_MANUAL_REPRINT_AUTHORIZED` 稽核事件；REVIEW row 保持 REVIEW，不會改成可供 worker 自動補送的狀態。
 
 ## 訂單卡固定重新送任務入口
 
-每張訂單卡（包含作廢及完成訂單）固定顯示「重新送任務」，入口可見不代表允許重推。
-先以 admin-only GET `/api/admin/print/resend-check` 查核 `getAllTasks`，不修改任務。
-只允許沒有任何歷史 Task ID／實體輸出證據，且無任務或最新為 PREPARED/FAILED/CANCELED 的訂單進人工確認；確認後再查核一次，沿用既有 prepare/retry/send 和 DB atomic claim/idempotency。
-UNKNOWN／active／quarantine、銳印仍有訂單或 attempt identity、查核失敗或格式不明皆阻擋。清單查無任務不能解除既有 Task ID 或不明狀態。
-頁面顯示處理中、成功、取消及失敗原因。此流程不建立客戶訂單、不調整庫存／金額、不呼叫 startPrint/pushPrint。
-本變更不需要 migration；測試只用隔離 SQLite/PostgreSQL 與 mock 銳印。
+每張訂單卡（包含作廢及完成訂單）固定顯示「重新送任務」。已登入店員按一下即 POST `/api/admin/print/manual-reprint`，不顯示多重確認，也不先呼叫 `getAllTasks`。
+已完成、已印壞、FAILED、CANCELED 的訂單會建立新 attempt、新 vendor task；新 attempt 逐欄複製前一 attempt 的原生產圖 hash/path 與 width/height/left/top/copies/spot/channel/angle 快照，不重新建訂單、不重新排版、不調整庫存或金額。
+後端用按鈕操作 key 原子建立 attempt、request 與 `MANUAL_REPRINT_AUTHORIZED` 稽核事件，再以衍生的固定 send key 執行 `receiveTask`。雙擊、HTTP response 遺失或同 key replay 都只會對同一 attempt 回覆，不會再次呼叫 vendor。
+`SENDING`、`UNKNOWN`、QUEUED、STARTING、PRINTING、CANCELING 仍阻擋新 attempt。`receiveTask` 結果不明時維持 UNKNOWN，必須先查核，不能用新的按鈕操作繞過。
+此流程仍不呼叫 `startPrint` / `pushPrint`；店員需在銳印軟體人工確認實體打印。`YUN_PRINT_ENABLED` 未啟用時不建立 attempt，也不送出。
