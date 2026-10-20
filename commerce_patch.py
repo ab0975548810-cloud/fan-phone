@@ -330,8 +330,17 @@ class Commerce:
             # Phase 3.3 eligibility is committed with the order transaction.
             # Historical request records lack this marker and must never become
             # auto-print eligible merely because their response is replayed.
+            handoff = dict(
+                version='auto-print-handoff-v1', order_id=order['id'])
             data['requests'][key] = dict(
-                fingerprint=fingerprint, response=result, auto_print_v1=True)
+                fingerprint=fingerprint, response=result, auto_print_v1=True,
+                auto_print_handoff_v1=handoff)
+            # commerce_commit consumes this private envelope inside the same
+            # transaction as the order, finance snapshot and stock ledger. It
+            # is deliberately omitted from the persisted order row.
+            order['_print_handoff'] = {
+                **handoff, 'request_key': key,
+            }
             return result, order, 'create'
         return self.mutate(update)
 

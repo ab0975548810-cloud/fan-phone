@@ -6,7 +6,9 @@ An order write and its entire finance/inventory change commit together.
 import json
 import os
 import sqlite3
+import uuid
 from contextlib import contextmanager
+from datetime import datetime, timezone
 
 
 class CommerceError(ValueError):
@@ -30,6 +32,14 @@ class Store:
             db.execute('PRAGMA synchronous=FULL')
             db.execute('CREATE TABLE IF NOT EXISTS state (id INTEGER PRIMARY KEY, value TEXT NOT NULL)')
             db.execute('CREATE TABLE IF NOT EXISTS orders (id TEXT PRIMARY KEY, value TEXT NOT NULL)')
+            db.execute('''CREATE TABLE IF NOT EXISTS print_handoffs (
+                id TEXT PRIMARY KEY, order_id TEXT NOT NULL UNIQUE,
+                request_key TEXT NOT NULL UNIQUE, marker_version TEXT NOT NULL,
+                state TEXT NOT NULL, attempt_count INTEGER NOT NULL DEFAULT 0,
+                next_attempt_at TEXT, lease_token TEXT, lease_expires_at TEXT,
+                prepared_job_id TEXT, last_error_code TEXT, last_error_at TEXT,
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            )''')
             db.execute('BEGIN IMMEDIATE')
             if not db.execute('SELECT 1 FROM state WHERE id=1').fetchone():
                 raw = {}
@@ -97,7 +107,32 @@ class Store:
             if int(current.get('revision', 0)) != revision:
                 return False
             if action == 'create':
-                db.execute('INSERT INTO orders VALUES (?,?)', (order['id'], json.dumps(order)))
+                stored_order = {key: value for key, value in order.items()
+                                if key != '_print_handoff'}
+                db.execute('INSERT INTO orders VALUES (?,?)',
+                           (stored_order['id'], json.dumps(stored_order)))
+                handoff = order.get('_print_handoff') or {}
+                request_key = str(handoff.get('request_key') or '')
+                request_row = (data.get('requests') or {}).get(request_key) or {}
+                marker = request_row.get('auto_print_handoff_v1') or {}
+                response = request_row.get('response') or {}
+                if handoff:
+                    if not (
+                        handoff.get('version') == 'auto-print-handoff-v1'
+                        and marker.get('version') == 'auto-print-handoff-v1'
+                        and request_row.get('auto_print_v1') is True
+                        and str(handoff.get('order_id') or '') == stored_order['id']
+                        and str(marker.get('order_id') or '') == stored_order['id']
+                        and str(response.get('order_id') or '') == stored_order['id']
+                    ):
+                        raise CommerceError('INVALID_PRINT_HANDOFF',
+                                            '自動列印交接標記不一致', 500)
+                    now = datetime.now(timezone.utc).isoformat()
+                    db.execute('''INSERT INTO print_handoffs
+                        (id,order_id,request_key,marker_version,state,next_attempt_at,
+                         created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)''',
+                        (str(uuid.uuid4()), stored_order['id'], request_key,
+                         'auto-print-handoff-v1', 'PENDING', now, now, now))
             elif action in ('status', 'delete'):
                 old = db.execute('SELECT value FROM orders WHERE id=?', (order['id'],)).fetchone()
                 if not old:
@@ -110,6 +145,8 @@ class Store:
                         if active:
                             raise CommerceError('ACTIVE_PRINT_JOB', '此訂單仍有進行中的列印任務，完成或取消後才能永久刪除')
                     db.execute('DELETE FROM orders WHERE id=?', (order['id'],))
+                    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='print_handoffs'").fetchone():
+                        db.execute('DELETE FROM print_handoffs WHERE order_id=?', (order['id'],))
                     if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='print_order_bindings'").fetchone():
                         db.execute('DELETE FROM print_order_bindings WHERE order_id=?', (order['id'],))
                 else:
