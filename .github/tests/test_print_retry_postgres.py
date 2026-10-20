@@ -160,7 +160,8 @@ with psycopg.connect(DSN) as db:
         (first["job"]["id"],)).fetchone()[0]
 assert manual_claim["ok"] and manual_claim["job"]["state"] == "SENDING", manual_claim
 
-# An unresolved receiveTask can never be superseded by a fresh manual click.
+# A fresh operator key may create a new independent task after UNKNOWN;
+# the old unresolved task remains unchanged.
 unknown_order = "manual-reprint-unknown-postgres"
 with psycopg.connect(DSN) as db:
     db.execute("delete from public.print_jobs where order_id=%s", (unknown_order,))
@@ -168,10 +169,18 @@ with psycopg.connect(DSN) as db:
         (id,order_id,attempt_no,artwork_path,artwork_token_nonce,state,ambiguous_operation)
         values (%s,%s,1,'unknown.png','unknown','UNKNOWN','receiveTask')""",
         (str(uuid.uuid4()), unknown_order))
+    db.execute("""update public.print_jobs set sku_id='sku', artwork_sha256=%s,
+        profile_complete=true,width_mm=80,height_mm=160,left_mm=1,top_mm=2,
+        copies=1,spot_color='',channel='1',angle=0 where order_id=%s""", ('d'*64,unknown_order))
     blocked = db.execute("""select public.authorize_manual_reprint(
         %s,%s,%s,'fixture-clerk','待處理','{}'::jsonb,false)""",
         (unknown_order, "manual-reprint-postgres-unknown-01", "c" * 64)).fetchone()[0]
-assert blocked == {"ok": False, "code": "RECONCILE_REQUIRED"}, blocked
+assert blocked['ok'] and blocked['job']['attempt_no']==2, blocked
+assert blocked['job']['manual_independent'] is True
+with psycopg.connect(DSN) as db:
+    assert db.execute('select state from public.print_jobs where order_id=%s and attempt_no=1',
+                      (unknown_order,)).fetchone()[0]=='UNKNOWN'
+
 
 
 def assert_reconcile_timestamp_sticky(index, first_status, final_status, timestamp_column):
@@ -720,3 +729,33 @@ with patch.dict(os.environ, {'PRINT_ARTWORK_TOKEN_SECRET': 'test'*16,
         assert row == ('PENDING', 0, None), row
         assert calls == []
 print('PRINT_AUTO_SWITCH_POSTGRES_PAUSE_WITH_MANUAL_READY_OK')
+
+
+# Real PostgreSQL concurrency: identical operation keys create one attempt;
+# distinct operator actions coexist even while an old task is SENDING.
+def independent_authorize(key):
+    with psycopg.connect(DSN) as db:
+        return db.execute("""select public.authorize_manual_reprint(
+            %s,%s,%s,'fixture-clerk','列印中','{}'::jsonb,false)""",
+            (manual_order,key,'f'*64)).fetchone()[0]
+with ThreadPoolExecutor(max_workers=6) as pool:
+    same=list(pool.map(independent_authorize,['independent-pg-same-0001']*6))
+assert all(x['ok'] for x in same),same
+assert len({x['job']['id'] for x in same})==1
+with ThreadPoolExecutor(max_workers=6) as pool:
+    different=list(pool.map(independent_authorize,[f'independent-pg-key-{i:04}' for i in range(6)]))
+assert all(x['ok'] for x in different),different
+assert len({x['job']['attempt_no'] for x in different})==6
+# Claims no longer depend on being the highest attempt; each authorized action
+# can send once. Old callbacks do not quarantine these separate actions.
+for item in [same[0],*different]:
+    with psycopg.connect(DSN) as db:
+        result=db.execute("select public.claim_manual_reprint_send_if_safe(%s,'nonce',now()+interval '1 day','fixture')",
+                          (item['job']['id'],)).fetchone()[0]
+        assert result['ok'],result
+with psycopg.connect(DSN) as db:
+    db.execute("select public.apply_print_callback_safely(%s,'2','old completed')",(manual_old,))
+    rows=db.execute('select state,ambiguous_operation from public.print_jobs where id=any(%s::uuid[])',
+                    ([x['job']['id'] for x in [same[0],*different]],)).fetchall()
+assert all(row==('SENDING',None) for row in rows),rows
+print('INDEPENDENT_MANUAL_POSTGRES_CONCURRENCY_AND_CALLBACK_OK')

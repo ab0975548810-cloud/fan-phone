@@ -2949,21 +2949,19 @@ def order_print_workspace_test(browser, base, poll):
                 for order_id in ids if order_id}
         route.fulfill(status=200, content_type='application/json',
                       body=json.dumps(dict(status='success',jobs=data,vendor_ready=True,vendor_connected=True)))
+    manual_fail_next = [False]
     def card_manual_reprint(route):
         payload = route.request.post_data_json
         order_id=payload['order_id']
         job=statuses.get(order_id)
         api_calls.append(('manual-reprint',payload))
-        if job and job['state'] in ('SENDING','UNKNOWN'):
-            route.fulfill(status=409,content_type='application/json',body=json.dumps(dict(status='error',code='RECONCILE_REQUIRED',msg='結果不明，必須先查核')))
+        if manual_fail_next[0]:
+            manual_fail_next[0] = False
+            route.fulfill(status=503,content_type='application/json',body=json.dumps(
+                dict(status='error',code='RECONCILE_REQUIRED',msg='傳送結果不明')))
             return
-        if job and job['state'] in ('QUEUED','STARTING','PRINTING','CANCELING'):
-            route.fulfill(status=409,content_type='application/json',body=json.dumps(dict(status='error',code='ACTIVE_PRINT_JOB',msg='已有進行中的任務')))
-            return
-        if job and job['state']=='PREPARED':
-            attempt=job['attempt_no'];job_id=job['id']
-        else:
-            attempt=(job or {}).get('attempt_no',0)+1;job_id='JOB-'+order_id+'-MANUAL-'+str(attempt)
+        attempt=(job or {}).get('attempt_no',0)+1
+        job_id='JOB-'+order_id+'-MANUAL-'+str(attempt)
         job=dict(id=job_id,state='QUEUED',state_label='等待銳印確認',attempt_no=attempt,
                  profile_complete=True,vendor_taskid='vendor-'+job_id)
         statuses[order_id]=job
@@ -2988,23 +2986,39 @@ def order_print_workspace_test(browser, base, poll):
         Path('artifacts').mkdir(exist_ok=True)
         page.screenshot(path=f"artifacts/order-resend-{os.environ.get('BROWSER_ENGINE','webkit')}-{width}.png",full_page=True)
     dialog_count=len(dialogs)
-    for order_id in ('CARD-NOJOB','CARD-PREPARED','CARD-FAILED','CARD-COMPLETED','CARD-OLD-PHYSICAL'):
+    for order_id in statuses:
         before=len(api_calls)
         page.locator(f'[data-order-id="{order_id}"][data-order-action="print-resend"]').click()
         poll(page, f"() => document.querySelector('[data-order-id=\"{order_id}\"][data-order-action=print-resend]')?.closest('.bf-order-card')?.querySelector('.bf-print-message')?.textContent.includes('任務已送到銳印')")
         poll(page, "() => !document.querySelector('[data-order-action=print-resend]:disabled')")
         assert [op for op,_ in api_calls[before:]]==['manual-reprint'],api_calls[before:]
     assert len(dialogs)==dialog_count,dialogs[dialog_count:]
-    blocked_dialog_count=len(dialogs)
-    for order_id in ('CARD-UNKNOWN','CARD-UNKNOWN-ACK','CARD-QUEUED','CARD-PRINTING'):
-        before=len(api_calls)
-        page.locator(f'[data-order-id="{order_id}"][data-order-action="print-resend"]').click()
-        poll(page, f"() => document.querySelector('[data-order-id=\"{order_id}\"][data-order-action=print-resend]')?.closest('.bf-order-card')?.querySelector('.bf-print-message')?.textContent.includes('操作未完成')")
-        poll(page, "() => !document.querySelector('[data-order-action=print-resend]:disabled')")
-        assert [op for op,_ in api_calls[before:]]==['manual-reprint'],api_calls[before:]
-    assert len(dialogs)==blocked_dialog_count+4,dialogs[blocked_dialog_count:]
+    # A real double click is one UI operation even with a fast mock response.
+    before=len(api_calls)
+    page.locator('[data-order-id="CARD-NOJOB"][data-order-action="print-resend"]').dblclick()
+    poll(page, "() => !document.querySelector('[data-order-action=print-resend]:disabled')")
+    assert len(api_calls)==before+1,api_calls[before:]
+    prior_key=api_calls[-1][1]['idempotency_key']
+    # A later intentional click is a new key, regardless of old QUEUED state.
+    page.locator('[data-order-id="CARD-NOJOB"][data-order-action="print-resend"]').click()
+    poll(page, "() => !document.querySelector('[data-order-action=print-resend]:disabled')")
+    assert len(api_calls)==before+2
+    assert api_calls[-1][1]['idempotency_key']!=prior_key
+    assert len(dialogs)==dialog_count
+    manual_fail_next[0]=True
+    page.locator('[data-order-id="CARD-NOJOB"][data-order-action="print-resend"]').click()
+    poll(page, "() => document.querySelector('[data-order-id=\"CARD-NOJOB\"][data-order-action=print-resend]')?.closest('.bf-order-card')?.querySelector('.bf-print-message')?.textContent.includes('UNKNOWN')")
+    poll(page, "() => !document.querySelector('[data-order-action=print-resend]:disabled')")
+    failed_key=api_calls[-1][1]['idempotency_key']
+    failed_count=len(api_calls)
+    page.wait_for_timeout(100)
+    assert len(api_calls)==failed_count  # no automatic retry
+    page.locator('[data-order-id="CARD-NOJOB"][data-order-action="print-resend"]').click()
+    poll(page, "() => !document.querySelector('[data-order-action=print-resend]:disabled')")
+    assert len(api_calls)==failed_count+1
+    assert api_calls[-1][1]['idempotency_key']!=failed_key
     assert not any(op in ('resend-check','manual-missing-retry','start','pushPrint') for op,_ in api_calls)
-    print('ADMIN_ORDER_ONE_CLICK_MANUAL_REPRINT_NO_DIALOG_UNKNOWN_GUARD_OK')
+    print('ADMIN_INDEPENDENT_MANUAL_REPRINT_ALL_STATES_DOUBLE_CLICK_OK')
     page.close()
 
 

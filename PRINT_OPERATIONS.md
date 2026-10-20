@@ -146,7 +146,7 @@ Dashboard 每筆訂單的 handoff 狀態採 exact/batched order lookup，不使�
 每張訂單卡（包含作廢及完成訂單）固定顯示「重新送任務」。已登入店員按一下即 POST `/api/admin/print/manual-reprint`，不顯示多重確認，也不先呼叫 `getAllTasks`。
 已完成、已印壞、FAILED、CANCELED 的訂單會建立新 attempt、新 vendor task；新 attempt 逐欄複製前一 attempt 的原生產圖 hash/path 與 width/height/left/top/copies/spot/channel/angle 快照，不重新建訂單、不重新排版、不調整庫存或金額。
 後端用按鈕操作 key 原子建立 attempt、request 與 `MANUAL_REPRINT_AUTHORIZED` 稽核事件，再以衍生的固定 send key 執行 `receiveTask`。雙擊、HTTP response 遺失或同 key replay 都只會對同一 attempt 回覆，不會再次呼叫 vendor。
-`SENDING`、`UNKNOWN`、QUEUED、STARTING、PRINTING、CANCELING 仍阻擋新 attempt。`receiveTask` 結果不明時維持 UNKNOWN，必須先查核，不能用新的按鈕操作繞過。
+每次獨立點擊均建立新 attempt，包括舊任務為 QUEUED、PRINTING、UNKNOWN 或 SENDING；舊任務完全保留，不自動取消。相同操作 key 仍不得再次 receiveTask；UNKNOWN 留在原 attempt，但店員可用新的點擊明確新增重印，並自行在銳印處理多餘任務。
 此流程仍不呼叫 `startPrint` / `pushPrint`；店員需在銳印軟體人工確認實體打印。`YUN_PRINT_ENABLED` 未啟用時不建立 attempt，也不送出。
 
 ## Independent automatic dispatch switch
@@ -166,9 +166,23 @@ A paused worker does not claim PENDING handoffs or consume retries, and does not
 send already PREPARED automatic jobs. Re-enabling auto intentionally resumes
 eligible pending work; historical REVIEW remains excluded. Manual one-click
 reprint retains original artwork/parameter snapshots and does not create an
-order or deduct stock. UNKNOWN/SENDING remain blocked by atomic send claims.
+order or deduct stock. An UNKNOWN/SENDING attempt cannot be sent again; a new
+explicit operator action may create a separate independent attempt.
 
 For manual-only rollout keep `YUN_AUTO_PRINT_ENABLED=false`. Enabling the master
 switch alone no longer enables automatic dispatch. Existing deployments that
 intend automatic dispatch must explicitly opt in after review. No production
 environment variables are changed by this PR.
+
+
+## 獨立人工重印 migration / 回復注意
+
+`20261020114748_independent_manual_reprints.sql` 新增 `manual_independent`（舊列預設 false，未改寫歷史狀態）。
+唯一 active 約束僅保護非獨立人工任務；同訂單 attempt_no 仍唯一，vendor_taskid 仍唯一。
+新增人工操作在同一 order advisory lock / SQLite BEGIN IMMEDIATE 中配置序號、request 與 audit。
+同 key replay 回同一 attempt；不同 key 是明確的新人工操作。舊 callback 只影響相對應任務；普通 retry 的 superseded quarantine 保持。
+新人工任務 callback / reconcile 不同步原訂單狀態。原圖與參數仍由已儲存快照取得，不重新 render。
+
+正式上線需另行批准：先備份、停止舊應用/worker，再套 migration，再部署相容版本；本 PR 未執行這些正式操作。
+不能在已有多個 active 人工任務時直接恢復舊 unique index 或部署舊 callback 程式；回復需保留新 schema/相容程式並由店主另行規劃，不能刪除/取消任務來硬退版。
+作廢訂單、遺失原圖/參數、總開關關閉或憑證不完整仍 fail closed；這不是以舊任務狀態限制人工重印。
