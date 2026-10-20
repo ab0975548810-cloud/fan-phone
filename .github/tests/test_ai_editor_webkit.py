@@ -2908,6 +2908,7 @@ def order_print_workspace_test(browser, base, poll):
     # Order-card print operations use a single batch read and existing print
     # endpoints. All writes below are Playwright-mocked: no vendor calls.
     statuses = {
+        'CARD-REVIEW': None,
         'CARD-NOJOB': None,
         'CARD-PREPARED': dict(id='JOB-CARD-PREPARED',state='PREPARED',state_label='待送出',attempt_no=1,profile_complete=True),
         'CARD-FAILED': dict(id='JOB-CARD-FAILED',state='FAILED',state_label='失敗',attempt_no=1,profile_complete=True),
@@ -2968,6 +2969,19 @@ def order_print_workspace_test(browser, base, poll):
         else:
             raise AssertionError(endpoint)
         route.fulfill(status=200,content_type='application/json',body=json.dumps(dict(status='success',job=job)))
+    def resend_check(route):
+        order_id=parse_qs(urlsplit(route.request.url).query)['order_id'][0]
+        job=statuses.get(order_id)
+        api_calls.append(('resend-check',dict(order_id=order_id)))
+        if order_id=='CARD-REVIEW':
+            route.fulfill(status=409,content_type='application/json',body=json.dumps(dict(status='error',code='HANDOFF_REVIEW_REQUIRED',msg='歷史漏單需人工核對，禁止直接補送')))
+            return
+        if job and (job.get('vendor_taskid') or job['state'] not in ('PREPARED','FAILED','CANCELED')):
+            route.fulfill(status=409,content_type='application/json',body=json.dumps(dict(status='error',code='RECONCILE_REQUIRED',msg='已有 Task ID 或任務狀態不明，禁止重新送出')))
+            return
+        action='prepare' if not job else ('send' if job['state']=='PREPARED' else 'retry')
+        route.fulfill(status=200,content_type='application/json',body=json.dumps(dict(status='success',action=action,job_id=job['id'] if job else None)))
+    page.route('**/api/admin/print/resend-check?*',resend_check)
     page.route('**/api/admin/print/order-summaries?*',card_summary)
     for endpoint in ('prepare','retry','send','reconcile','manual-missing-retry'):
         page.route('**/api/admin/print/'+endpoint,card_mutation)
@@ -2977,62 +2991,39 @@ def order_print_workspace_test(browser, base, poll):
     # Checking while another in-flight order refresh repaints the cards gives
     # false failures unrelated to the retry visibility contract.
     page.evaluate("async () => await window.refreshOrders(true)")
-    poll(page, "() => document.querySelectorAll('.bf-order-card').length===9 && !!document.querySelector('[data-order-action=print-retry]')")
-    assert page.locator('[data-order-action="print-retry"]').count()==1
-    assert page.locator('[data-order-action="print-resend"]').count()==3
-    assert page.locator('[data-order-action="print-reconcile"]').count()==0
-    assert page.locator('[data-order-action="print-manual-retry"]').count()==0
-    for order_id in ('CARD-UNKNOWN','CARD-UNKNOWN-ACK','CARD-QUEUED'):
-        target=page.locator(f'[data-order-id="{order_id}"][data-order-action="print-resend"]')
-        assert target.count()==1 and '重新送任務' in (target.text_content() or ''), (order_id,target.count(),target.all_text_contents())
-    for order_id in ('CARD-PRINTING','CARD-COMPLETED','CARD-OLD-PHYSICAL'):
-        assert page.locator(f'[data-order-id="{order_id}"][data-order-action="print-resend"]').count()==0
-        assert page.locator(f'[data-order-id="{order_id}"][data-order-action="print-retry"]').count()==0
-    physical_snapshot = page.evaluate("""() => {
-      const cards=[...document.querySelectorAll('.bf-order-card')];
-      const card=cards.find(el=>el.querySelector('.bf-order-id')?.textContent.includes('CARD-OLD-PHYSICAL'));
-      return {text:card?.innerText||'',blocked:!!card?.querySelector('.print-blocked'),busy:!!card?.querySelector('[data-order-action="print-retry"]')};
-    }""")
-    assert physical_snapshot['blocked'] and not physical_snapshot['busy'], physical_snapshot
-
-    page.locator('[data-order-action="print-prepare"]').click()
-    poll(page, "() => !!document.querySelector('[data-order-action=print-resend][data-order-id=\"CARD-NOJOB\"]')")
-    assert [(op,p.get('order_id') or p.get('job_id')) for op,p in api_calls[-2:]] == [
-        ('prepare','CARD-NOJOB'),('send','JOB-CARD-NOJOB-FIRST')]
-    page.locator('[data-order-action="print-send"]').click()
-    poll(page, "() => !!document.querySelector('[data-order-action=print-resend][data-order-id=\"CARD-PREPARED\"]')")
-    assert api_calls[-1][0]=='send' and api_calls[-1][1]['job_id']=='JOB-CARD-PREPARED'
-    page.locator('[data-order-action="print-retry"]').click()
-    poll(page, "() => !!document.querySelector('[data-order-action=print-resend][data-order-id=\"CARD-FAILED\"]')")
-    assert [entry[0] for entry in api_calls[-2:]] == ['retry','send']
-    assert statuses['CARD-FAILED']['attempt_no']==2
-    assert all(entry[0]!='start' for entry in api_calls)
-    dialogs.clear()
-    page.locator('[data-order-id="CARD-UNKNOWN-ACK"][data-order-action="print-resend"]').click()
-    # UNKNOWN had a vendor Task ID; wait for the second attempt (after manual attestation)
-    # instead of mistaking the old card for a completed asynchronous send.
-    poll(page, """() => [...document.querySelectorAll('.bf-order-card')].some(card =>
-      card.querySelector('.bf-order-id')?.textContent.includes('CARD-UNKNOWN-ACK')
-      && card.querySelector('.bf-order-printstate')?.textContent.includes('列印嘗試 #2')
-      && card.querySelector('.bf-order-printstate')?.textContent.includes('銳印已回傳 Task ID'))""")
-    assert [entry[0] for entry in api_calls[-2:]] == ['manual-missing-retry','send'],api_calls[-2:]
-    assert statuses['CARD-UNKNOWN-ACK']['attempt_no']==2,statuses['CARD-UNKNOWN-ACK']
-    assert statuses['CARD-UNKNOWN-ACK']['vendor_taskid']=='vendor-JOB-CARD-UNKNOWN-ACK-RETRY'
-    # One order-card click starts the same guarded manual attestation;
-    # there is no extra preliminary confirmation, but the old Task ID must be typed.
-    assert len(dialogs)==2 and any('old-task-for-check' in text for text in dialogs),dialogs
-    dialogs.clear()
+    poll(page, "() => document.querySelectorAll('[data-order-action=print-resend]').length===10")
+    for width,height in ((390,844),(768,1024),(1180,900)):
+        page.set_viewport_size(dict(width=width,height=height))
+        page.keyboard.press('Escape')
+        page.locator('[data-order-action="print-resend"]').first.scroll_into_view_if_needed()
+        assert page.locator('[data-order-action="print-resend"]').count()==10
+        assert page.locator('.bf-order-card').first.evaluate("e=>getComputedStyle(e).contentVisibility")=="visible"
+        assert page.locator('[data-order-action="print-resend"]').first.bounding_box()['height']>=44
+        assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+2')
+        Path('artifacts').mkdir(exist_ok=True)
+        page.screenshot(path=f"artifacts/order-resend-{os.environ.get('BROWSER_ENGINE','webkit')}-{width}.png",full_page=True)
+    page.remove_listener('dialog',handle_print_dialog)
+    page.once('dialog',lambda dialog: dialog.dismiss())
     before=len(api_calls)
-    page.locator('[data-order-id="CARD-UNKNOWN"][data-order-action="print-resend"]').click()
-    poll(page, """() => document.querySelector('[data-order-id="CARD-UNKNOWN"][data-order-action="print-resend"]')
-      ?.closest('.bf-order-card')?.querySelector('.bf-order-printstate')?.textContent.includes('等待銳印確認')""")
-    # Reconcile finding an existing/in-flight task must never auto-create
-    # a second attempt or invoke receiveTask/send.
-    assert [entry[0] for entry in api_calls[before:]]==['reconcile'],api_calls[before:]
-    assert any('無法安全重新送出' in msg for msg in dialogs),dialogs
-    assert all(entry[0] not in ('start','pushPrint') for entry in api_calls)
-    print('ADMIN_ORDER_CARD_SINGLE_ENTRY_MANUAL_UNKNOWN_WITH_TYPED_TASKID_OK')
-    print('ADMIN_ORDER_CARD_RECONCILE_STILL_ACTIVE_NO_DUPLICATE_SEND_OK')
+    page.locator('[data-order-id="CARD-NOJOB"][data-order-action="print-resend"]').click()
+    poll(page, "() => document.querySelector('[data-order-id=\"CARD-NOJOB\"][data-order-action=print-resend]')?.closest('.bf-order-card')?.textContent.includes('已取消，沒有重新送出')")
+    poll(page, "() => !document.querySelector('[data-order-action=print-resend]:disabled')")
+    assert [op for op,_ in api_calls[before:]]==['resend-check']
+    page.on('dialog',handle_print_dialog)
+    for order_id, operations in (('CARD-NOJOB',['prepare','send']),('CARD-PREPARED',['send']),('CARD-FAILED',['retry','send'])):
+        before=len(api_calls)
+        page.locator(f'[data-order-id="{order_id}"][data-order-action="print-resend"]').click()
+        poll(page, f"() => document.querySelector('[data-order-id=\"{order_id}\"][data-order-action=print-resend]')?.closest('.bf-order-card')?.querySelector('.bf-print-message')?.textContent.includes('任務已送到銳印')")
+        poll(page, "() => !document.querySelector('[data-order-action=print-resend]:disabled')")
+        assert [op for op,_ in api_calls[before:]]==['resend-check','resend-check']+operations,api_calls[before:]
+    for order_id in ('CARD-REVIEW','CARD-UNKNOWN','CARD-UNKNOWN-ACK','CARD-QUEUED','CARD-PRINTING','CARD-COMPLETED','CARD-OLD-PHYSICAL'):
+        before=len(api_calls)
+        page.locator(f'[data-order-id="{order_id}"][data-order-action="print-resend"]').click()
+        poll(page, f"() => document.querySelector('[data-order-id=\"{order_id}\"][data-order-action=print-resend]')?.closest('.bf-order-card')?.querySelector('.bf-print-message')?.textContent.includes('操作未完成')")
+        poll(page, "() => !document.querySelector('[data-order-action=print-resend]:disabled')")
+        assert all(op=='resend-check' for op,_ in api_calls[before:]),api_calls[before:]
+    assert not any(op in ('manual-missing-retry','start','pushPrint') for op,_ in api_calls)
+    print('ADMIN_ORDER_ALWAYS_VISIBLE_RESEND_CHECK_CONFIRM_NO_BLIND_SEND_OK')
     page.close()
 
 

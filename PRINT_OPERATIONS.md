@@ -135,8 +135,12 @@ Stale `SENDING` and `CANCELING` states remain reconcilable. Legacy `STARTING` ro
 
 `pushPrint`, website-triggered `startPrint`, maintenance controls, and vendor channel stock are intentionally absent from the A5 active flow. Vendor channel stock is not store SKU inventory.
 
-### 歷史 REVIEW 的後端封鎖
 
-一般 prepare/retry/send/manual recovery 共用 DB-backed handoff guard：REVIEW 或 legacy-auto-print-v1 回 HANDOFF_REVIEW_REQUIRED。沒有提供解除或補送 API。資料庫查詢失敗亦不放行。
-Dashboard 每筆訂單的 handoff 狀態採 exact/batched order lookup，不使用截斷告警判斷權限。告警每頁20筆、支援上一頁/下一頁，數字僅代表本頁。
-#89 整合時，其 resend-check 也會經同一 guard，UI 人工確認不能取代歷史 REVIEW 的授權／稽核流程。
+## 訂單卡固定重新送任務入口
+
+每張訂單卡（包含作廢及完成訂單）固定顯示「重新送任務」，入口可見不代表允許重推。
+先以 admin-only GET `/api/admin/print/resend-check` 查核 `getAllTasks`，不修改任務。
+只允許沒有任何歷史 Task ID／實體輸出證據，且無任務或最新為 PREPARED/FAILED/CANCELED 的訂單進人工確認；確認後再查核一次，沿用既有 prepare/retry/send 和 DB atomic claim/idempotency。
+UNKNOWN／active／quarantine、銳印仍有訂單或 attempt identity、查核失敗或格式不明皆阻擋。清單查無任務不能解除既有 Task ID 或不明狀態。
+頁面顯示處理中、成功、取消及失敗原因。此流程不建立客戶訂單、不調整庫存／金額、不呼叫 startPrint/pushPrint。
+本變更不需要 migration；測試只用隔離 SQLite/PostgreSQL 與 mock 銳印。
