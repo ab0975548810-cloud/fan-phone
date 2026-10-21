@@ -162,6 +162,7 @@
       if (!overlay) return;
       overlay.src = overlayState.dataUrl;
       overlay.style.display = overlayState.dataUrl ? 'block' : 'none';
+      refreshFilmDisplay(target);
     }).catch(error => {
       if (canvas === target && typeof toast === 'function') toast(/[\u3400-\u9fff]/.test(error.message) ? error.message : '可印範圍無法讀取，請聯絡店家。');
     });
@@ -281,9 +282,10 @@
     return { canvas: mapped, frame: { left: 0, top: 0, width, height }, sourceWidth, sourceHeight, pixelRatio: dpr };
   }
 
-  function renderEditorGuide(mask, width, height, pixelRatio = previewDpr()) {
-    const logicalWidth = Math.round(Number(width)), logicalHeight = Math.round(Number(height));
-    const dpr = Math.max(1, Math.min(Number(pixelRatio) || 1, 3));
+  function renderEditorGuide(mask, width, height, pixelRatio = previewDpr(), displayScale = 1) {
+    const logicalWidth = displayScale === 1 ? Math.round(Number(width)) : Number(width);
+    const logicalHeight = displayScale === 1 ? Math.round(Number(height)) : Number(height);
+    const dpr = Math.max(1, Math.min(Number(pixelRatio) || 1, 3)) * displayScale;
     const backingWidth = backingSize(logicalWidth, dpr), backingHeight = backingSize(logicalHeight, dpr);
     const layer = resampleMask(mask, backingWidth, backingHeight);
     const g = layer.getContext('2d', { willReadFrequently: true });
@@ -321,11 +323,30 @@
       guide.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:fill;pointer-events:none;z-index:0';
       shell.prepend(guide);
     }
-    guide.src = renderEditorGuide(mask, target.width, target.height).toDataURL('image/png');
+    const scale = target.__bfFilmDisplayScale || 1;
+    const key = [target.width, target.height, scale, previewDpr()].join('|');
+    if (guide.__bfMask !== mask || guide.__bfResolution !== key) {
+      guide.src = renderEditorGuide(mask, target.width, target.height, previewDpr(), scale).toDataURL('image/png');
+      guide.__bfMask = mask;
+      guide.__bfResolution = key;
+    }
     guide.style.display = 'block';
     target.wrapperEl.style.zIndex = '1';
     const oldGuide = document.getElementById('safe-guide');
     if (oldGuide) oldGuide.style.display = 'none';
+  }
+
+  function refreshFilmDisplay(target) {
+    if (!target.__bfFilmRetina || typeof canvas === 'undefined' || canvas !== target) return;
+    const clip = states.get(target), preview = overlayStates.get(target);
+    if (clip?.image && !clip.error) applyEditorGuide(target, clip.image);
+    const overlay = document.getElementById('phone-mask');
+    // The validated original full-frame PNG already has sufficient resolution.
+    // Avoid enlarging its logical-canvas raster; preview/export keep their cache.
+    if (overlay && preview?.overlay && preview.image && !preview.error) {
+      if (overlay.getAttribute('src') !== preview.image.src) overlay.src = preview.image.src;
+      overlay.style.display = 'block';
+    }
   }
 
   function renderPreviewFallback(mask, width, height) {
@@ -398,6 +419,7 @@
   window.BenfuwanPrintMask = Object.freeze({
     PIXELS_PER_MM,
     previewDpr,
+    refreshFilmDisplay,
     loadImage,
     normalizeMaskImage,
     resampleMask,
