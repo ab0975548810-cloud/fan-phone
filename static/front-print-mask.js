@@ -325,7 +325,7 @@
     }
     const scale = target.__bfFilmDisplayScale || 1;
     const key = [target.width, target.height, scale, previewDpr()].join('|');
-    if (guide.__bfMask !== mask || guide.__bfResolution !== key) {
+    if (!target.__bfFilmRetina || guide.__bfMask !== mask || guide.__bfResolution !== key) {
       guide.src = renderEditorGuide(mask, target.width, target.height, previewDpr(), scale).toDataURL('image/png');
       guide.__bfMask = mask;
       guide.__bfResolution = key;
