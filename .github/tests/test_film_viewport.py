@@ -79,14 +79,54 @@ def film_density_test(browser, base, poll, dpr):
     restored=page.evaluate("() => {const o=canvas.getObjects().find(o=>o.originalName==='film-photo.png');return {left:o.left,top:o.top,scaleX:o.scaleX,scaleY:o.scaleY,angle:o.angle}}")
     saved_photo=next(o for o in saved['canvasJson']['objects'] if o.get('originalName')=='film-photo.png')
     assert all(restored[k]==saved_photo[k] for k in scaled),(restored,saved_photo)
+    # Changing the film background must never move or resize the customer's
+    # photo objects. This corresponds to the reported transparent -> pink edit.
+    photo_positions = """() => canvas.getObjects().filter(o => o.role === 'photo').map(
+      o => [o.left,o.top,o.scaleX,o.scaleY,o.angle,o.originX,o.originY]
+    )"""
+    before_background = page.evaluate(photo_positions)
+    page.evaluate("() => { setCanvasBackground('#ffc7d9'); closeSheets(); }")
+    page.wait_for_timeout(50)
+    assert page.evaluate(photo_positions) == before_background, 'setting pink background moved artwork'
     page.evaluate("async () => {await BenfuwanPrintMask.ensureClip(canvas,ctx.printLineUrl);canvas.renderAll()}")
     poll(page,"""() => {const p=canvas.lowerCanvasEl.getContext('2d').getImageData(0,0,canvas.lowerCanvasEl.width,canvas.lowerCanvasEl.height).data;let red=0;for(let i=0;i<p.length;i+=4)if(p[i]>180&&p[i+1]<80&&p[i+3]>200)red++;return red>100}""")
     Path('artifacts').mkdir(exist_ok=True)
     page.screenshot(path=f'artifacts/film-{browser.browser_type.name}-390-dpr{dpr}.png')
-    # Real HQ preview path: display-only geometry cannot change production W/H.
+    # Real HQ preview path: the final film preview MUST use the same
+    # production raster, not the separately-cropped source-frame mockup.
+    before_preview = page.evaluate(photo_positions)
     page.evaluate("async () => {await openPreview()}")
     meta=poll(page,"() => ctx.productionMeta")
     assert [meta['width'],meta['height'],meta['dpi']]==[1899,1332,720],meta
+    assert page.evaluate(photo_positions) == before_preview, 'final preview moved artwork'
+    poll(page, "() => document.getElementById('preview-image')?.naturalWidth === 1200")
+    assert page.evaluate("""() => {
+      const image=document.getElementById('preview-image'), meta=ctx.productionMeta;
+      const expectedHeight=Math.round(1200*meta.height/meta.width);
+      return image.src===ctx.mockupBase64
+        && image.naturalWidth===1200 && image.naturalHeight===expectedHeight
+        && document.querySelector('.preview-info p').textContent.includes('720 DPI')
+        && document.querySelector('.design-checker').style.aspectRatio===meta.width+' / '+meta.height;
+    }"""), 'film final preview diverged from production PNG'
+    # Compare actual thumbnail pixels against downscaled production PNG at fixed
+    # camera-hole and artwork reference points. Never rely only on dimensions.
+    assert page.evaluate("""async () => {
+      const image=document.getElementById('preview-image');
+      const full=new Image();full.src=ctx.printBase64;await full.decode();
+      const cv=document.createElement('canvas');
+      cv.width=image.naturalWidth;cv.height=image.naturalHeight;
+      const g=cv.getContext('2d');g.imageSmoothingEnabled=true;g.imageSmoothingQuality='high';
+      g.drawImage(full,0,0,cv.width,cv.height);
+      const expected=g.getImageData(0,0,cv.width,cv.height).data;
+      g.clearRect(0,0,cv.width,cv.height);
+      g.drawImage(image,0,0,cv.width,cv.height);
+      const actual=g.getImageData(0,0,cv.width,cv.height).data;
+      const positions=[[.05,.2],[.24,.55],[.6,.15],[.75,.35],[.82,.85]];
+      return positions.every(([x,y])=>{
+        const i=(Math.floor(y*cv.height)*cv.width+Math.floor(x*cv.width))*4;
+        return [0,1,2,3].every(channel=>Math.abs(expected[i+channel]-actual[i+channel])<=8);
+      });
+    }"""), 'film thumbnail pixels do not match production PNG'
     output=page.evaluate("""() => new Promise((resolve,reject)=>{const im=new Image();im.onerror=reject;im.onload=()=>{const c=document.createElement('canvas');c.width=im.width;c.height=im.height;const g=c.getContext('2d');g.drawImage(im,0,0);const p=g.getImageData(0,0,c.width,c.height).data;let red=0;for(let i=0;i<p.length;i+=4)if(p[i]>180&&p[i+1]<80&&p[i+3]>200)red++;const x=Math.round((200-6)/1519*c.width),y=Math.round((190-5)/817*c.height);resolve({width:im.width,height:im.height,red,hole:p[(y*c.width+x)*4+3]})};im.src=ctx.printBase64})""")
     assert output['width']==1899 and output['height']==1332 and output['red']>100 and output['hole']==0,output
     # Export pixels must be identical with/without the display-only retina override.
