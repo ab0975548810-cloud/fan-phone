@@ -43,8 +43,10 @@
       if(!workspace||!shell||typeof canvas==='undefined'||!canvas)return;
       const logicalW=Number(canvas.lowerCanvasEl?.width||canvas.width||0),logicalH=Number(canvas.lowerCanvasEl?.height||canvas.height||0);
       if(!(logicalW>0&&logicalH>0))return;
-      const maxW=Math.max(120,workspace.clientWidth-20),maxH=Math.max(180,workspace.clientHeight-16);
-      const ratio=Math.min(1,maxW/logicalW,maxH/logicalH);
+      const maxW=Math.max(120,workspace.clientWidth-32),maxH=Math.max(120,workspace.clientHeight-32);
+      // Display-only fit: allow a physically small landscape film to grow to a usable size.
+      // Both axes share one scale; Fabric's logical pixels and print dimensions are unchanged.
+      const ratio=Math.min(maxW/logicalW,maxH/logicalH);
       const displayW=Math.max(1,Math.floor(logicalW*ratio)),displayH=Math.max(1,Math.floor(logicalH*ratio));
       shell.style.width=displayW+'px';shell.style.height=displayH+'px';
       // initCanvas applies its own transform scale. Once this responsive fit

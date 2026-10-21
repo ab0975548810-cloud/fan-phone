@@ -578,6 +578,31 @@ def front_test(browser, base):
     print('FRONT_FOUR_MODEL_PRODUCTION_SHARED_CROP_LANDMARK_CAMERA_HQ_OK', production_crop_contract)
 
     page.evaluate("""() => {navigate('page-editor');initCanvas();editorHasSession=true;window.BenfuwanEditorAccess?.fitCanvas?.()}""")
+    # A short landscape back-film (e.g. 67 x 47 mm) must stay landscape in
+    # both Fabric logical pixels and the on-screen mask/shell. Historically the
+    # 360px minimum height distorted these cut-outs into tall ovals.
+    film_canvas = page.evaluate("""() => {
+      const original={w:ctx.printW,h:ctx.printH,mask:ctx.maskUrl};
+      ctx.printW=67;ctx.printH=47;
+      ctx.maskUrl=original.mask||'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+iO1sAAAAASUVORK5CYII=';
+      initCanvas();window.BenfuwanEditorAccess?.fitCanvas?.();
+      const shell=document.getElementById('canvas-shell').getBoundingClientRect();
+      const mask=document.getElementById('phone-mask').getBoundingClientRect();
+      const workspace=document.querySelector('#page-editor>.workspace').getBoundingClientRect();
+      const result={logicalW:canvas.width,logicalH:canvas.height,
+        shellW:shell.width,shellH:shell.height,maskW:mask.width,maskH:mask.height,
+        workspaceW:workspace.width,workspaceH:workspace.height};
+      ctx.printW=original.w;ctx.printH=original.h;ctx.maskUrl=original.mask;
+      initCanvas();window.BenfuwanEditorAccess?.fitCanvas?.();
+      return result;
+    }""")
+    assert film_canvas['logicalW']==201 and film_canvas['logicalH']==141, film_canvas
+    assert abs(film_canvas['shellW']/film_canvas['shellH']-67/47)<.025, film_canvas
+    assert abs(film_canvas['maskW']/film_canvas['maskH']-67/47)<.025, film_canvas
+    assert film_canvas['shellW']<=film_canvas['workspaceW']-20, film_canvas
+    assert film_canvas['shellH']<=film_canvas['workspaceH']-20, film_canvas
+    print('FRONT_LANDSCAPE_FILM_CANVAS_ASPECT_AND_SAFE_MARGIN_OK',film_canvas)
+
     editor_contract = page.evaluate("""async ({fixtures,models}) => {
       const ids={iphone13:'model_apple_13',iphone14:'model_apple_14',iphone14ProMax:'model_apple_14_pro_max',iphone17Pro:'model_apple_17_pro'};
       const alphaStats=canvas=>{const p=canvas.getContext('2d',{willReadFrequently:true}).getImageData(0,0,canvas.width,canvas.height).data;let visible=0,transparent=0;for(let i=3;i<p.length;i+=4)(p[i]>24?visible++:transparent++);return {visible,transparent}};
