@@ -53,4 +53,6 @@ PR #95 的 CSS fit 正確保留 PNG 1530:827 比例，但 Fabric 與預覽素材
 
 ## 限制
 
+完整 CI 另暴露既有多圖層 hit-through 測試的座標競態：`discardActiveObject()` 關閉工具列後，測試立即讀取 282×564 的 canvas；實際 pointerdown 前 observer 已將它改為 313×626，因此點錯位置。隔離診斷在計算座標與點擊間延遲 100ms 可重現（film hook 為 false）。只修測試的等待順序：先取消選取、等待兩個 animation frames，再量測與真實點擊；沒有 force click、直接呼叫 handler 或放寬 assertion，也沒有改多圖層產品邏輯。
+
 WebKit 模擬不能取代真實 iPhone Safari 硬體驗收；仍需店主確認實機觀感。PNG 比例與現有 67×47mm 生產比例的差異延續 PR #95 的明確決策，本次不改。未修改原始刀模、列印參數、720 DPI renderer、訂單、庫存、銳印或正式資料。
