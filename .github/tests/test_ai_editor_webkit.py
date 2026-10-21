@@ -584,6 +584,7 @@ def front_test(browser, base):
     film_canvas = page.evaluate("""() => {
       const original={w:ctx.printW,h:ctx.printH,mask:ctx.maskUrl};
       ctx.printW=67;ctx.printH=47;
+      ctx.maskUrl=original.mask||'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+iO1sAAAAASUVORK5CYII=';
       initCanvas();window.BenfuwanEditorAccess?.fitCanvas?.();
       const shell=document.getElementById('canvas-shell').getBoundingClientRect();
       const mask=document.getElementById('phone-mask').getBoundingClientRect();
