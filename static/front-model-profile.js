@@ -6,6 +6,42 @@
 
   const LEGACY_CRYSTAL_STYLE_ID = 'style_1789287807818';
   const text = value => String(value || '').trim();
+  const filmFrames = new Map();
+  const filmLoads = new Map();
+  const isFilm = model => /背膜|底膜/.test(String(model?.brand || '') + String(model?.name || ''));
+
+  function editorGeometry(model, profile) {
+    const width = Math.max(1, Math.round(profile.printW * 3));
+    if (!isFilm(model)) return { width, height: Math.max(1, Math.round(profile.printH * 3)) };
+    const frame = filmFrames.get(profile.printUrl);
+    if (!frame) throw new Error('背膜刀模尚未載入，請稍後再試。');
+    // Fabric logical dimensions may be fractional: do not round each axis
+    // independently and distort the source frame. Raster backing rounds later.
+    return { width, height: width * frame.height / frame.width };
+  }
+
+  async function prepareEditorGeometry(model, styleId) {
+    const profile = profileFor(model, styleId);
+    if (!isFilm(model)) return editorGeometry(model, profile);
+    if (!filmFrames.has(profile.printUrl)) {
+      if (!filmLoads.has(profile.printUrl)) {
+        filmLoads.set(profile.printUrl, new Promise((resolve, reject) => {
+          const img = new Image();
+          const timer = setTimeout(() => finish(new Error('背膜刀模載入失敗，請稍後再試。')), 15000);
+          function finish(error) {
+            clearTimeout(timer); img.onload = img.onerror = null;
+            if (error) reject(error);
+            else { filmFrames.set(profile.printUrl, { width: img.naturalWidth, height: img.naturalHeight }); resolve(); }
+          }
+          img.onload = () => finish(img.naturalWidth && img.naturalHeight ? null : new Error('背膜刀模無效。'));
+          img.onerror = () => finish(new Error('背膜刀模載入失敗，請稍後再試。'));
+          img.src = /^(data:|blob:|\/)/.test(profile.printUrl) ? profile.printUrl : '/api/public/asset_proxy?url=' + encodeURIComponent(profile.printUrl);
+        }).finally(() => filmLoads.delete(profile.printUrl)));
+      }
+      await filmLoads.get(profile.printUrl);
+    }
+    return editorGeometry(model, profile);
+  }
 
   function rawProfileFor(model, styleId) {
     if (!model || !styleId) return null;
@@ -110,9 +146,18 @@
     const original = window[name];
     window[name] = function () {
       if (blockUnconfigured(currentModel(), currentStyle())) return false;
+      if (name === 'startEditor' && isFilm(currentModel()) && !editorHasSession) {
+        const model = currentModel(), styleId = ctx.styleId, context = ctx, args = arguments;
+        setBusy(true, '正在載入背膜刀模…');
+        return prepareEditorGeometry(model, styleId).then(() => {
+          if (ctx !== context || ctx.modelId !== model.id || ctx.styleId !== styleId) return false;
+          return original.apply(this, args);
+        }).catch(error => { console.warn('[FILM]', error); toast('背膜刀模載入失敗，請稍後再試。'); return false; })
+          .finally(() => setBusy(false));
+      }
       return original.apply(this, arguments);
     };
   }
 
-  window.BenfuwanModelProfile = Object.freeze({ LEGACY_CRYSTAL_STYLE_ID, profileFor, audit });
+  window.BenfuwanModelProfile = Object.freeze({ LEGACY_CRYSTAL_STYLE_ID, profileFor, audit, isFilm, editorGeometry, prepareEditorGeometry });
 })();

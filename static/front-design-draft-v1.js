@@ -121,11 +121,22 @@
   async function readDraft() {
     try {
       cachedDraft = await idbGet(DRAFT_KEY);
+      await prepareDraftGeometry(cachedDraft);
       return cachedDraft;
     } catch (error) {
       console.warn('[DESIGN DRAFT] read failed', error);
       cachedDraft = null;
       return null;
+    }
+  }
+
+  async function prepareDraftGeometry(raw) {
+    const model=(currentShopData()?.models||[]).find(m=>String(m.id)===String(raw?.modelId));
+    const resolver=window.BenfuwanModelProfile;
+    if(resolver?.isFilm(model)) {
+      // Resolve current source geometry, never trust a draft's mask or old dimensions.
+      try { await resolver.prepareEditorGeometry(model, raw.styleId); }
+      catch(error) { console.warn('[DESIGN DRAFT] film geometry unavailable',error); }
     }
   }
 
@@ -181,8 +192,9 @@
         return { ok: false, reason: 'color-not-available', message: INVALID_ERROR };
       }
 
-      const currentWidth = Math.max(180, Math.round(Number(profile.printW) * 3));
-      const currentHeight = Math.max(360, Math.round(Number(profile.printH) * 3));
+      const geometry=resolver.editorGeometry(model,profile);
+      const currentWidth = geometry.width;
+      const currentHeight = geometry.height;
       if (savedWidth !== currentWidth || savedHeight !== currentHeight) {
         return { ok: false, reason: 'geometry-changed', message: GEOMETRY_ERROR, model, style, profile };
       }
@@ -249,6 +261,7 @@
   async function continueEditing() {
     if (suspended) return false;
     const raw = cachedDraft || await readDraft();
+    await prepareDraftGeometry(raw);
     const inspection = inspectDraft(raw);
     if (!inspection.ok) { setPrompt('invalid', inspection.message); return false; }
     autosaveEnabled = true;
@@ -266,7 +279,7 @@
       ctx.printBase64 = null;
       ctx.mockupBase64 = null;
       ctx.productionMeta = null;
-      startEditor(false);
+      await startEditor(false);
       if (!canvas || Number(canvas.width) !== inspection.currentWidth || Number(canvas.height) !== inspection.currentHeight) throw new Error('Logical canvas changed');
 
       restoringHistory = true;
