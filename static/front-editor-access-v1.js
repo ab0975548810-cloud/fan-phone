@@ -41,13 +41,16 @@
     try{
       const workspace=document.querySelector('#page-editor>.workspace'),shell=document.getElementById('canvas-shell');
       if(!workspace||!shell||typeof canvas==='undefined'||!canvas)return;
-      const logicalW=Number(canvas.lowerCanvasEl?.width||canvas.width||0),logicalH=Number(canvas.lowerCanvasEl?.height||canvas.height||0);
+      if(!document.getElementById('page-editor')?.classList.contains('active'))return;
+      const logicalW=Number(canvas.width||0),logicalH=Number(canvas.height||0);
       if(!(logicalW>0&&logicalH>0))return;
-      const maxW=Math.max(120,workspace.clientWidth-32),maxH=Math.max(120,workspace.clientHeight-32);
+      const model=(shopData.models||[]).find(m=>String(m.id)===String(ctx.modelId));
+      const padding=window.BenfuwanModelProfile?.isFilm(model)?48:32;
+      const maxW=Math.max(1,workspace.clientWidth-padding),maxH=Math.max(1,workspace.clientHeight-padding);
       // Display-only fit: allow a physically small landscape film to grow to a usable size.
       // Both axes share one scale; Fabric's logical pixels and print dimensions are unchanged.
       const ratio=Math.min(maxW/logicalW,maxH/logicalH);
-      const displayW=Math.max(1,Math.floor(logicalW*ratio)),displayH=Math.max(1,Math.floor(logicalH*ratio));
+      const displayW=logicalW*ratio,displayH=logicalH*ratio;
       shell.style.width=displayW+'px';shell.style.height=displayH+'px';
       // initCanvas applies its own transform scale. Once this responsive fit
       // takes over, leaving that transform in place scales Fabric a second
@@ -110,6 +113,8 @@
 
   function boot(){
     bind();
+    const workspace=document.querySelector('#page-editor>.workspace');
+    if(workspace)new ResizeObserver(()=>requestAnimationFrame(fitCanvasToWorkspace)).observe(workspace);
     const obs=new MutationObserver(bind);obs.observe(document.documentElement,{childList:true,subtree:true});setTimeout(()=>{try{obs.disconnect()}catch(e){}},30000);
     window.addEventListener('resize',()=>requestAnimationFrame(fitCanvasToWorkspace),{passive:true});
     window.addEventListener('orientationchange',()=>setTimeout(fitCanvasToWorkspace,80),{passive:true});

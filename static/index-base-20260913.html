@@ -355,7 +355,9 @@ function openTemplatesInEditor(){templateEntry='editor';selectedTpl=null;renderT
 function startEditor(applyTemplateNow){$('editor-model').textContent=ctx.modelName||'';$('editor-style').textContent=ctx.styleName||'';navigate('page-editor');if(!editorHasSession){initCanvas();editorHasSession=true}if(applyTemplateNow&&selectedTpl)applyTemplate(selectedTpl)}
 function initCanvas(){
   // Preserve the actual print profile aspect ratio. A short landscape back-film must not be forced into a 360px portrait canvas.
-  const scale=3,w=Math.max(1,Math.round(ctx.printW*scale)),h=Math.max(1,Math.round(ctx.printH*scale));
+  const model=(shopData.models||[]).find(m=>String(m.id)===String(ctx.modelId));
+  const geometry=window.BenfuwanModelProfile?.isFilm(model)?window.BenfuwanModelProfile.editorGeometry(model,{printW:ctx.printW,printH:ctx.printH,printUrl:ctx.printLineUrl}):null;
+  const scale=3,w=geometry?.width||Math.max(1,Math.round(ctx.printW*scale)),h=geometry?.height||Math.max(1,Math.round(ctx.printH*scale));
   const availH=Math.max(160,window.innerHeight-58-78-50-32),availW=Math.max(160,Math.min(window.innerWidth,480)-38);const ratio=Math.min(availH/h,availW/w);
   const shell=$('canvas-shell');shell.style.width=(w*ratio)+'px';shell.style.height=(h*ratio)+'px';
   if(canvas){canvas.dispose();canvas=null}
