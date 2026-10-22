@@ -18,7 +18,7 @@ CALLBACK_STATES = {
     "8": "FAILED", "11": "FAILED",
 }
 JSON_COLUMNS = {"response_json", "payload_json"}
-BOOL_COLUMNS = {"profile_complete", "active"}
+BOOL_COLUMNS = {"profile_complete", "active", "manual_independent"}
 
 
 def utcnow():
@@ -70,8 +70,6 @@ class PrintStore:
                     completed_at TEXT, canceled_at TEXT, UNIQUE(order_id, attempt_no)
                 );
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_local_print_vendor_taskid ON print_jobs(vendor_taskid) WHERE vendor_taskid IS NOT NULL;
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_local_print_one_active ON print_jobs(order_id)
-                    WHERE state IN ('PREPARED','SENDING','QUEUED','STARTING','PRINTING','CANCELING','UNKNOWN');
                 CREATE TABLE IF NOT EXISTS print_requests (
                     request_key TEXT PRIMARY KEY, operation TEXT NOT NULL, job_id TEXT,
                     request_hash TEXT NOT NULL, status TEXT NOT NULL, response_json TEXT,
@@ -97,6 +95,13 @@ class PrintStore:
                 CREATE INDEX IF NOT EXISTS idx_local_print_handoffs_due
                     ON print_handoffs(state,next_attempt_at,created_at);
             """)
+            db.execute("BEGIN IMMEDIATE")
+            if "manual_independent" not in {row[1] for row in db.execute("PRAGMA table_info(print_jobs)")}:
+                db.execute("ALTER TABLE print_jobs ADD COLUMN manual_independent INTEGER NOT NULL DEFAULT 0")
+            db.execute("DROP INDEX IF EXISTS idx_local_print_one_active")
+            db.execute("""CREATE UNIQUE INDEX IF NOT EXISTS idx_local_print_one_ordinary_active
+                ON print_jobs(order_id) WHERE manual_independent=0
+                AND state IN ('PREPARED','SENDING','QUEUED','STARTING','PRINTING','CANCELING','UNKNOWN')""")
             db.commit()
             if write:
                 db.execute("BEGIN IMMEDIATE")
@@ -432,10 +437,11 @@ class PrintStore:
             if not job:
                 raise ValueError("JOB_NOT_FOUND")
             latest = self._decode(db.execute(
-                "SELECT * FROM print_jobs WHERE order_id=? ORDER BY attempt_no DESC LIMIT 1",
+                "SELECT * FROM print_jobs WHERE order_id=? AND manual_independent=0 ORDER BY attempt_no DESC LIMIT 1",
                 (job["order_id"],),
-            ).fetchone())
-            superseded = int(job.get("attempt_no") or 0) < int(latest.get("attempt_no") or 0)
+            ).fetchone()) or job
+            superseded = (not job.get("manual_independent")
+                          and int(job.get("attempt_no") or 0) < int(latest.get("attempt_no") or 0))
             now = utcnow()
             raw_status, raw_message = status, message
             prior_raw = str(job.get("vendor_raw_status") or "")
@@ -598,6 +604,8 @@ class PrintStore:
             "PRINT_AUTO_RECOVER_STALE_SENDS", "").strip().lower() in ("1", "true", "yes")
 
         def ready(job, requests):
+            if job.get("manual_independent"):
+                return None
             if job.get("state") != "PREPARED" or any(job.get(field) for field in (
                     "vendor_taskid", "sent_at", "started_at", "completed_at",
                     "artwork_token_expires_at", "vendor_raw_status",
@@ -807,6 +815,7 @@ class PrintStore:
         attempt = int(prior["attempt_no"]) + 1 if prior else 1
         row = {
             "id": str(uuid.uuid4()), "order_id": order["id"], "attempt_no": attempt,
+            "manual_independent": False,
             "sku_id": sku_id or None, "vendor_taskid": None, "artwork_path": order["print_path"],
             "artwork_sha256": artwork_sha256, "artwork_token_nonce": token_nonce,
             "artwork_token_expires_at": None, "profile_complete": bool(profile),
@@ -850,11 +859,9 @@ class PrintStore:
                                  order_status, seed, handoff_review=False):
         """Atomically authorize one operator-initiated attempt and audit it.
 
-        A terminal prior attempt is copied byte-for-byte at the print snapshot
-        boundary (artwork path/hash and every vendor parameter). A never-sent
-        PREPARED attempt may be adopted, but an in-flight/unknown attempt is
-        never superseded. The request row makes a browser retry return the same
-        attempt instead of creating another one.
+        Every new operator key creates an independent attempt, copying the
+        latest immutable artwork/parameter snapshot without changing old jobs.
+        Replaying the same key returns the same attempt, even if it is UNKNOWN.
         """
         if self.app.USE_SUPABASE:
             data = self.app.SUPABASE.rpc("authorize_manual_reprint", {
@@ -887,60 +894,37 @@ class PrintStore:
                 (order_id,),
             ).fetchall()]
             latest = attempts[0] if attempts else None
-            active = next((row for row in attempts if row.get("state") in ACTIVE_STATES), None)
-            if active and active.get("state") != "PREPARED":
-                code = "RECONCILE_REQUIRED" if active.get("state") in (
-                    "SENDING", "UNKNOWN") else "ACTIVE_PRINT_JOB"
-                return {"ok": False, "code": code}
-
-            job = None
-            if active:
-                # A normal unsent first attempt is safe to adopt. A PREPARED
-                # manual attempt can also be retried after a definitive vendor
-                # rejection. Nothing with unresolved prior-activity quarantine
-                # is adopted.
-                authorized = db.execute(
-                    "SELECT 1 FROM print_events WHERE job_id=? AND event_type IN "
-                    "('MANUAL_REPRINT_AUTHORIZED','HANDOFF_REVIEW_MANUAL_REPRINT_AUTHORIZED') LIMIT 1",
-                    (active["id"],),
-                ).fetchone()
-                prior_physical = any(self._physical_evidence(row) for row in attempts
-                                     if row["id"] != active["id"])
-                if active.get("ambiguous_operation") or (prior_physical and not authorized):
-                    return {"ok": False, "code": "RECONCILE_REQUIRED"}
-                job = active
-            else:
-                source = latest
-                values = source or seed
-                required = ("artwork_path", "artwork_sha256", "sku_id", "width_mm",
-                            "height_mm", "left_mm", "top_mm", "copies", "spot_color",
-                            "channel", "angle")
-                if not values or any(values.get(name) is None for name in required):
-                    return {"ok": False, "code": "PROFILE_MISSING"}
-                now = utcnow()
-                job = {
-                    "id": str(uuid.uuid4()), "order_id": order_id,
-                    "attempt_no": int((latest or {}).get("attempt_no") or 0) + 1,
-                    "sku_id": values.get("sku_id"), "vendor_taskid": None,
-                    "artwork_path": values["artwork_path"],
-                    "artwork_sha256": values["artwork_sha256"],
-                    "artwork_token_nonce": str(seed.get("artwork_token_nonce") or uuid.uuid4().hex),
-                    "artwork_token_expires_at": None,
-                    "profile_complete": bool(values.get("profile_complete", True)),
-                    "width_mm": values["width_mm"], "height_mm": values["height_mm"],
-                    "left_mm": values["left_mm"], "top_mm": values["top_mm"],
-                    "copies": values["copies"], "spot_color": values["spot_color"],
-                    "channel": values["channel"], "angle": values["angle"],
-                    "device_id": None, "state": "PREPARED", "vendor_raw_status": None,
-                    "vendor_raw_message": None, "ambiguous_operation": None,
-                    "last_error": None, "reconcile_count": 0,
-                    "last_reconciled_at": None, "created_at": now, "updated_at": now,
-                    "prepared_at": now, "sent_at": None, "started_at": None,
-                    "completed_at": None, "canceled_at": None,
-                }
-                columns = ",".join(job)
-                encoded = [int(v) if k in BOOL_COLUMNS else v for k, v in job.items()]
-                db.execute(f"INSERT INTO print_jobs ({columns}) VALUES ({','.join('?' for _ in job)})", encoded)
+            source = latest
+            values = source or seed
+            required = ("artwork_path", "artwork_sha256", "sku_id", "width_mm",
+                        "height_mm", "left_mm", "top_mm", "copies", "spot_color",
+                        "channel", "angle")
+            if not values or any(values.get(name) is None for name in required):
+                return {"ok": False, "code": "PROFILE_MISSING"}
+            now = utcnow()
+            job = {
+                "id": str(uuid.uuid4()), "order_id": order_id, "manual_independent": True,
+                "attempt_no": int((latest or {}).get("attempt_no") or 0) + 1,
+                "sku_id": values.get("sku_id"), "vendor_taskid": None,
+                "artwork_path": values["artwork_path"],
+                "artwork_sha256": values["artwork_sha256"],
+                "artwork_token_nonce": str(seed.get("artwork_token_nonce") or uuid.uuid4().hex),
+                "artwork_token_expires_at": None,
+                "profile_complete": bool(values.get("profile_complete", True)),
+                "width_mm": values["width_mm"], "height_mm": values["height_mm"],
+                "left_mm": values["left_mm"], "top_mm": values["top_mm"],
+                "copies": values["copies"], "spot_color": values["spot_color"],
+                "channel": values["channel"], "angle": values["angle"],
+                "device_id": None, "state": "PREPARED", "vendor_raw_status": None,
+                "vendor_raw_message": None, "ambiguous_operation": None,
+                "last_error": None, "reconcile_count": 0,
+                "last_reconciled_at": None, "created_at": now, "updated_at": now,
+                "prepared_at": now, "sent_at": None, "started_at": None,
+                "completed_at": None, "canceled_at": None,
+            }
+            columns = ",".join(job)
+            encoded = [int(v) if k in BOOL_COLUMNS else v for k, v in job.items()]
+            db.execute(f"INSERT INTO print_jobs ({columns}) VALUES ({','.join('?' for _ in job)})", encoded)
 
             now = utcnow()
             event_type = ("HANDOFF_REVIEW_MANUAL_REPRINT_AUTHORIZED" if handoff_review
@@ -987,19 +971,13 @@ class PrintStore:
                 "SELECT * FROM print_jobs WHERE id=?", (job_id,)).fetchone())
             if not row:
                 return {"ok": False, "code": "JOB_NOT_FOUND"}
-            latest = self._decode(db.execute(
-                "SELECT * FROM print_jobs WHERE order_id=? ORDER BY attempt_no DESC LIMIT 1",
-                (row["order_id"],),
-            ).fetchone())
             authorized = db.execute(
                 "SELECT 1 FROM print_events WHERE job_id=? AND event_type IN "
                 "('MANUAL_REPRINT_AUTHORIZED','HANDOFF_REVIEW_MANUAL_REPRINT_AUTHORIZED') LIMIT 1",
                 (job_id,),
             ).fetchone()
-            if not authorized:
+            if not authorized or not row.get("manual_independent"):
                 return {"ok": False, "code": "MANUAL_REPRINT_AUTH_REQUIRED"}
-            if not latest or latest.get("id") != job_id:
-                return {"ok": False, "code": "STALE_PRINT_ATTEMPT"}
             if row.get("state") != "PREPARED" or row.get("ambiguous_operation"):
                 code = "RECONCILE_REQUIRED" if row.get("state") in (
                     "SENDING", "UNKNOWN") or row.get("ambiguous_operation") else "CONCURRENT_OPERATION"
