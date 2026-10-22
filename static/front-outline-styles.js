@@ -21,7 +21,8 @@
   function activeObject(){
     try{return (typeof canvas!=='undefined'&&canvas)?canvas.getActiveObject():null}catch(e){return null}
   }
-  function isAiImage(o){return !!(o&&o.type==='image'&&o.aiBackgroundRemoved)}
+  function isAiImage(o){return !!(o&&((o.type==='image'&&(o.aiBackgroundRemoved||['sticker','template-sticker'].includes(o.role)||o.stickerId))||(['text','textbox','i-text'].includes(o.type)&&o.role==='sticker')))}
+  function isTextSticker(o){return !!(o&&['text','textbox','i-text'].includes(o.type)&&o.role==='sticker')}
   function esc(s){return String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 
   function ensureStyles(){
@@ -61,7 +62,7 @@
     const app=document.getElementById('app');if(!app)return null;
     sheet=document.createElement('div');sheet.className='sheet';sheet.id='sheet-outline-v2';
     const cards=Object.entries(STYLE_META).map(([key,m])=>`<button type="button" class="bf-os-card" data-style="${key}"><i class="fa-solid ${iconFor(key)}"></i>${esc(m.label)}</button>`).join('');
-    sheet.innerHTML=`<div class="sheet-header"><span>描邊樣式</span><button class="sheet-close" onclick="closeSheets()"><i class="fa-solid fa-xmark"></i></button></div><div class="sheet-body"><div class="bf-os-wrap"><div class="bf-os-tip">AI 去背後可直接套用。描邊效果會一起進入預覽、購物車與生產 PNG。</div><div class="bf-os-grid">${cards}</div><div class="bf-os-section"><div class="bf-os-row"><label>粗細</label><input id="bf-os-width" type="range" min="2" max="28" step="1" value="8"><span id="bf-os-width-value" class="bf-os-value">8</span></div><div class="bf-os-row"><label>顏色</label><div class="bf-os-colors"><button type="button" class="bf-os-swatch" data-color="#ffffff" style="background:#fff"></button><button type="button" class="bf-os-swatch" data-color="#111111" style="background:#111"></button><button type="button" class="bf-os-swatch" data-color="#ff6f9a" style="background:#ff6f9a"></button><input id="bf-os-custom-color" type="color" value="#ffffff" title="自訂顏色"></div></div></div><div class="bf-os-note">人物／寵物：白邊、厚貼紙最好用；夢幻風可用發光；拼貼或手帳風可試虛線、手繪。</div></div></div>`;
+    sheet.innerHTML=`<div class="sheet-header"><span>描邊樣式</span><button class="sheet-close" onclick="closeSheets()"><i class="fa-solid fa-xmark"></i></button></div><div class="sheet-body"><div class="bf-os-wrap"><div class="bf-os-tip">選取去背圖片或貼紙即可套用。效果會一起進入預覽、購物車與生產 PNG。</div><div class="bf-os-grid">${cards}</div><div class="bf-os-section"><div class="bf-os-row"><label>粗細</label><input id="bf-os-width" type="range" min="2" max="28" step="1" value="8"><span id="bf-os-width-value" class="bf-os-value">8</span></div><div class="bf-os-row"><label>顏色</label><div class="bf-os-colors"><button type="button" class="bf-os-swatch" data-color="#ffffff" style="background:#fff"></button><button type="button" class="bf-os-swatch" data-color="#111111" style="background:#111"></button><button type="button" class="bf-os-swatch" data-color="#ff6f9a" style="background:#ff6f9a"></button><input id="bf-os-custom-color" type="color" value="#ffffff" title="自訂顏色"></div></div></div><div class="bf-os-note">人物／寵物：白邊、厚貼紙最好用；夢幻風可用發光；拼貼或手帳風可試虛線、手繪。</div></div></div>`;
     app.appendChild(sheet);
     sheet.querySelectorAll('.bf-os-card').forEach(b=>b.addEventListener('click',()=>applyStyle(b.dataset.style)));
     sheet.querySelectorAll('.bf-os-swatch').forEach(b=>b.addEventListener('click',()=>{
@@ -90,7 +91,7 @@
 
   window.openAiOutlineSheet=function(){
     const o=activeObject();
-    if(!isAiImage(o)){if(typeof toast==='function')toast('請先選取 AI 去背後的圖片');return}
+    if(!isAiImage(o)){if(typeof toast==='function')toast('請先選取去背圖片或貼紙');return}
     ensureSheet();syncSheet();
     if(typeof openSheet==='function')openSheet('sheet-outline-v2');
   };
@@ -117,16 +118,16 @@
     const c=document.createElement('canvas');c.width=Math.ceil(iw+pad*2);c.height=Math.ceil(ih+pad*2);const g=c.getContext('2d');
 
     if(style==='shadow'){
-      g.save();g.shadowColor='rgba(0,0,0,.42)';g.shadowBlur=Math.max(8,w*2.6);g.shadowOffsetX=Math.max(2,w*.5);g.shadowOffsetY=Math.max(3,w*.75);g.drawImage(img,pad,pad);g.restore();g.drawImage(img,pad,pad);return c.toDataURL('image/png');
+      g.save();g.shadowColor='rgba(0,0,0,.42)';g.shadowBlur=Math.max(8,w*2.6);g.shadowOffsetX=Math.max(2,w*.5);g.shadowOffsetY=Math.max(3,w*.75);g.drawImage(img,pad,pad);g.restore();g.drawImage(img,pad,pad);return {src:c.toDataURL('image/png'),pad};
     }
     if(style==='glow'){
-      g.save();g.shadowColor=color||'#ff8fb2';g.shadowBlur=Math.max(12,w*3.2);for(let i=0;i<3;i++)g.drawImage(img,pad,pad);g.restore();g.drawImage(img,pad,pad);return c.toDataURL('image/png');
+      g.save();g.shadowColor=color||'#ff8fb2';g.shadowBlur=Math.max(12,w*3.2);for(let i=0;i<3;i++)g.drawImage(img,pad,pad);g.restore();g.drawImage(img,pad,pad);return {src:c.toDataURL('image/png'),pad};
     }
 
     if(style==='hand'){
       drawOffsetRing(g,img,pad,w,0.78,Math.max(1,w*.16));
       drawOffsetRing(g,img,pad,w*.72,0.5,Math.max(.6,w*.12));
-      tintCurrentAlpha(g,c,color||'#ffffff');g.drawImage(img,pad,pad);return c.toDataURL('image/png');
+      tintCurrentAlpha(g,c,color||'#ffffff');g.drawImage(img,pad,pad);return {src:c.toDataURL('image/png'),pad};
     }
 
     drawOffsetRing(g,img,pad,w,1,0);drawOffsetRing(g,img,pad,w*.58,1,0);
@@ -135,9 +136,9 @@
       g.globalCompositeOperation='destination-out';
       const cell=Math.max(7,Math.round(w*.95));
       for(let y=0;y<c.height;y+=cell*2){for(let x=(Math.floor(y/(cell*2))%2)*cell;x<c.width;x+=cell*2)g.clearRect(x,y,cell,cell)}
-      g.globalCompositeOperation='source-over';g.drawImage(img,pad,pad);return c.toDataURL('image/png');
+      g.globalCompositeOperation='source-over';g.drawImage(img,pad,pad);return {src:c.toDataURL('image/png'),pad};
     }
-    tintCurrentAlpha(g,c,color||'#ffffff');g.drawImage(img,pad,pad);return c.toDataURL('image/png');
+    tintCurrentAlpha(g,c,color||'#ffffff');g.drawImage(img,pad,pad);return {src:c.toDataURL('image/png'),pad};
   }
 
   function replaceFabricImage(oldObj,src,meta){
@@ -145,7 +146,18 @@
       const center=oldObj.getCenterPoint(),idx=canvas.getObjects().indexOf(oldObj);
       fabric.Image.fromURL(src,newObj=>{
         try{
-          const props={left:center.x,top:center.y,originX:'center',originY:'center',angle:oldObj.angle||0,scaleX:oldObj.scaleX||1,scaleY:oldObj.scaleY||1,flipX:!!oldObj.flipX,flipY:!!oldObj.flipY,opacity:oldObj.opacity??1,visible:oldObj.visible!==false,selectable:oldObj.selectable!==false,evented:oldObj.evented!==false,role:oldObj.role,slotId:oldObj.slotId,slotMeta:oldObj.slotMeta,aiBackgroundRemoved:true,originalName:oldObj.originalName,materialType:oldObj.materialType,clipPath:oldObj.clipPath||undefined,aiOutlineSource:meta.source,aiOutlineStrength:meta.style==='none'?'0':'custom',aiOutlineStyle:meta.style,aiOutlineWidth:meta.width,aiOutlineColor:meta.color};
+          const props={left:center.x,top:center.y,originX:'center',originY:'center',angle:oldObj.angle||0,scaleX:oldObj.scaleX||1,scaleY:oldObj.scaleY||1,flipX:!!oldObj.flipX,flipY:!!oldObj.flipY,opacity:oldObj.opacity??1,visible:oldObj.visible!==false,selectable:oldObj.selectable!==false,evented:oldObj.evented!==false,role:oldObj.role,slotId:oldObj.slotId,slotMeta:oldObj.slotMeta,aiBackgroundRemoved:!!oldObj.aiBackgroundRemoved,originalName:oldObj.originalName,materialType:oldObj.materialType,clipPath:oldObj.clipPath||undefined,aiOutlineSource:meta.source,aiOutlineStrength:meta.style==='none'?'0':'custom',aiOutlineStyle:meta.style,aiOutlineWidth:meta.width,aiOutlineColor:meta.color};
+          // Replacing a raster must not lose sticker identity, author layer
+          // permissions, a user position lock or the original asset metadata.
+          for(const key of ['stickerId','assetId','layerId','templateLayerId','layerInstanceId','templateApplicationId','layerName','zIndex','normalizedGeometry','locked','canMove','canScale','canRotate','canDelete','canDuplicate','canEdit','templateSlot','sourceSize','bfUserLocked'])
+            if(oldObj[key]!==undefined)props[key]=oldObj[key];
+          props.originalPublicSrc=oldObj.originalPublicSrc||oldObj.publicSrc;
+          // A photo slot is a native source viewport. Padding belongs around
+          // the full source, never in the frame's display width/height.
+          if(oldObj.templateSlot&&oldObj.role==='slot-photo'){
+            const viewport=oldObj.aiOutlineViewport||{width:oldObj.width,height:oldObj.height,cropX:oldObj.cropX||0,cropY:oldObj.cropY||0};
+            Object.assign(props,{width:viewport.width,height:viewport.height,cropX:viewport.cropX+meta.pad,cropY:viewport.cropY+meta.pad,aiOutlineViewport:viewport});
+          }
           newObj.set(props);if(typeof styleEditableObject==='function')styleEditableObject(newObj);
           canvas.remove(oldObj);canvas.insertAt(newObj,Math.max(0,idx),false);canvas.setActiveObject(newObj);newObj.setCoords();canvas.renderAll();
           if(typeof recordHistory==='function')recordHistory();if(typeof renderLayerList==='function')renderLayerList();syncSheet();resolve(newObj);
@@ -155,8 +167,22 @@
   }
 
   async function applyStyle(style){
-    const o=activeObject();if(!isAiImage(o)){if(typeof toast==='function')toast('請先選取 AI 去背後的圖片');return}
+    const o=activeObject();if(!isAiImage(o)){if(typeof toast==='function')toast('請先選取去背圖片或貼紙');return}
     style=STYLE_META[style]?style:'none';
+    if(isTextSticker(o)){
+      const width=Number(document.getElementById('bf-os-width')?.value||o.aiOutlineWidth||8);
+      const color=STYLE_META[style].color||document.getElementById('bf-os-custom-color')?.value||o.aiOutlineColor||'#ffffff';
+      const active=style!=='none',thick=style==='sticker'?1.8:1;
+      o.set({stroke:active&&style!=='shadow'&&style!=='glow'?color:null,
+        strokeWidth:active&&style!=='shadow'&&style!=='glow'?Math.max(1,Math.round(width*.42*thick)):0,
+        strokeLineJoin:'round',paintFirst:'stroke',
+        strokeDashArray:style==='dashed'?[5,4]:null,
+        shadow:style==='shadow'?new fabric.Shadow({color:'rgba(0,0,0,.45)',blur:Math.max(3,width),offsetX:2,offsetY:3}):
+          style==='glow'?new fabric.Shadow({color,blur:Math.max(8,width*2),offsetX:0,offsetY:0}):null});
+      o.aiOutlineStyle=style;o.aiOutlineWidth=width;o.aiOutlineColor=color;
+      o.setCoords();canvas.requestRenderAll();window.recordHistory?.();syncSheet();
+      window.toast?.(active?'貼紙描邊已套用':'貼紙描邊已關閉');return;
+    }
     const current=o.getSrc?.()||o._element?.src||'';if(!current)return;
     const source=o.aiOutlineSource||current;
     const width=Number(document.getElementById('bf-os-width')?.value||o.aiOutlineWidth||8);
@@ -164,8 +190,8 @@
     const color=STYLE_META[style].color||picked;
     if(typeof setBusy==='function')setBusy(true,style==='none'?'正在移除描邊...':'正在套用描邊...');
     try{
-      const out=style==='none'?source:await buildEffect(source,style,color,width);
-      await replaceFabricImage(o,out,{source,style,width,color});
+      const out=style==='none'?{src:source,pad:0}:await buildEffect(source,style,color,width);
+      await replaceFabricImage(o,out.src,{source,style,width,color,pad:out.pad});
       if(typeof toast==='function')toast(style==='none'?'描邊已關閉':STYLE_META[style].label+'已套用');
     }catch(e){console.error('[OUTLINE V2]',e);if(typeof toast==='function')toast('描邊處理失敗，請再試一次')}
     finally{if(typeof setBusy==='function')setBusy(false)}
