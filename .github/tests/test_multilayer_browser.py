@@ -173,7 +173,11 @@ def multilayer_browser_test(browser,base,poll):
             rotation=page.evaluate("() => {const o=canvas.getObjects().find(o=>o.text==='Layer 11');canvas.setActiveObject(o);changeAngle(90);return o.angle;}")
             assert rotation==0
             # Real click hits the lower image through the locked foreground image.
-            point=page.evaluate("""id=>{canvas.discardActiveObject();const o=canvas.getObjects().find(o=>o.templateLayerId===id),p=o.getCenterPoint(),r=canvas.upperCanvasEl.getBoundingClientRect();return {x:r.x+p.x*r.width/canvas.width,y:r.y+p.y*r.height/canvas.height}}""",info['lower'])
+            # Clearing selection collapses the docked toolbar; its observer fits
+            # the canvas on the next frame. Measure after that layout, otherwise
+            # CI can click coordinates from the old 282x564 instead of 313x626.
+            page.evaluate("() => {canvas.discardActiveObject();return new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))}")
+            point=page.evaluate("""id=>{const o=canvas.getObjects().find(o=>o.templateLayerId===id),p=o.getCenterPoint(),r=canvas.upperCanvasEl.getBoundingClientRect();return {x:r.x+p.x*r.width/canvas.width,y:r.y+p.y*r.height/canvas.height}}""",info['lower'])
             page.mouse.click(point['x'],point['y']);assert page.evaluate('canvas.getActiveObject()?.templateLayerId')==info['lower']
             page.evaluate('() => new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
             point=page.evaluate("""()=>{const p=canvas.getActiveObject().getCenterPoint(),r=canvas.upperCanvasEl.getBoundingClientRect();return {x:r.x+p.x*r.width/canvas.width,y:r.y+p.y*r.height/canvas.height}}""")

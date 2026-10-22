@@ -38,6 +38,12 @@ For feature or bugfix PRs:
 
 ## 3. Frontend/editor invariants
 
+Checkout is a protected business-critical path. Changes to submitOrder, create_order,
+source receipts, commerce commits, or the post-commit print handoff require explicit
+owner authorization for that task. Unrelated editor/template/UI work must not modify
+these paths. The protected checkout browser matrix (WebKit and Chromium), storage
+compatibility, and commerce idempotency/rollback tests are required PR gates.
+
 The customer flow is QR scan → choose product → design phone case → submit order.
 
 Keep these working:

@@ -14,6 +14,7 @@
   let statusFilter='全部';
   let printSummaries=new Map(),printStatusLoaded=false,printVendorReady=false,printVendorConnected=false;
   const printActionsBusy=new Set();
+  const printMessages=new Map();
 
   const e=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const fmtParts=(ts)=>{
@@ -46,11 +47,15 @@
       .bf-order-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.bf-order-actions a,.bf-order-actions button{border:1px solid #edc4d0;background:#fff;color:#d95580;border-radius:999px;padding:6px 9px;font-size:11px;font-weight:850;text-decoration:none;cursor:pointer}.bf-order-actions button:disabled,.bf-order-status-row select:disabled{opacity:.5;cursor:not-allowed}.bf-order-actions .danger{color:#d94d61;border-color:#efc0c9}.bf-order-actions .voidbtn{color:#8a6c35;border-color:#ead8b7}.bf-order-empty{padding:50px 20px;text-align:center;color:#aaa;background:#fff;border:1px solid var(--line);border-radius:18px}
       .bf-order-printstate{font-size:10px;color:#796b72;margin-top:6px;line-height:1.5}
       .bf-order-printstate.warn{color:#bd4b60;font-weight:850}
-      .bf-order-actions .print-primary{background:#fff1f6;border-color:#eaa4bd;color:#ad3f67}
+      .bf-print-message{flex-basis:100%;font-size:12px;line-height:1.5;overflow-wrap:anywhere}.bf-order-actions .print-primary{min-height:44px;background:#fff1f6;border-color:#eaa4bd;color:#ad3f67}
       .bf-order-actions .print-blocked{font-size:11px;color:#bf4d62;font-weight:850}
       .bf-order-page{position:relative;z-index:1;display:flex;justify-content:center;align-items:center;gap:10px;padding:12px;color:#82757a;font-size:12px}.bf-order-page button{min-height:44px;border:1px solid #edc4d0;background:#fff;color:#d95580;border-radius:999px;padding:8px 18px;font-weight:850}
       @media(max-width:800px){.bf-order-summary{grid-template-columns:repeat(3,minmax(0,1fr))}}
       @media(max-width:700px){.bf-order-tools{position:static}.bf-order-grid{grid-template-columns:1fr}.bf-order-card{grid-template-columns:82px minmax(0,1fr)}.bf-order-thumb{width:82px;height:108px}.bf-order-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
+      /* Interactive order actions must be hit-testable after scrolling in Safari.
+         Generic card content-visibility deferral can swallow a real click while
+         WebKit replaces its estimated offscreen layout with the actual card. */
+      #bf-order-manager .bf-order-card{content-visibility:visible}
     `;document.head.appendChild(s);
   }
 
@@ -148,24 +153,8 @@
     const physical=Boolean(summary?.physical_activity||job?.started_at||job?.completed_at||job?.ambiguous_operation==='prior_attempt_activity');
     const printBusy=printActionsBusy.has(o.order_id);
     const disabled=printBusy?' disabled':'';
-    let printAction='';
-    if(!isVoid&&o.has_print&&printStatusLoaded&&summary){
-      if(physical && ['PREPARED','FAILED','CANCELED'].includes(printState)){
-        printAction='<span class="print-blocked">曾有實體列印紀錄，禁止重推</span>';
-      }else if(!job&&printVendorReady){
-        printAction=`<button class="print-primary" data-order-action="print-prepare" data-order-id="${e(o.order_id)}"${disabled}>推送到銳印</button>`;
-      }else if(printState==='PREPARED'&&job.profile_complete&&printVendorReady){
-        printAction=`<button class="print-primary" data-order-action="print-send" data-order-id="${e(o.order_id)}"${disabled}>送到銳印</button>`;
-      }else if(['FAILED','CANCELED'].includes(printState)&&!physical&&printVendorReady){
-        printAction=`<button class="print-primary" data-order-action="print-retry" data-order-id="${e(o.order_id)}"${disabled}>↻ 重新推送任務</button>`;
-      }else if(['UNKNOWN','SENDING','QUEUED','STARTING','CANCELING'].includes(printState)){
-        // Keep the order card simple: one resend entry point, never a blind
-        // force-print. The handler reconciles or requires operator attestation.
-        printAction=printVendorReady&&printVendorConnected
-          ?`<button class="print-primary" data-order-action="print-resend" data-order-id="${e(o.order_id)}"${disabled}>↻ 重新送任務</button>`
-          :'<span class="print-blocked">銳印尚未連線，禁止重送</span>';
-      }
-    }
+    const printAction=`<button class="print-primary" data-order-action="print-resend" data-order-id="${e(o.order_id)}"${disabled}>${printBusy?'正在傳送…':'↻ 重新送任務'}</button>`;
+    const printMessage=printMessages.get(o.order_id)||'';
     const printLabel=!printStatusLoaded?'列印狀態暫時無法確認，請前往列印中心查核':!summary?'列印資料缺失，請前往列印中心查核':job?`列印嘗試 #${Number(job.attempt_no||1)}｜${e(job.state_label||printState)}${job.vendor_taskid?'｜銳印已回傳 Task ID':''}`:'尚未建立列印任務';
     const preview=o.mockup_url?`<a href="${e(o.mockup_url)}" target="_blank" rel="noopener"><img class="bf-order-thumb" loading="lazy" decoding="async" src="${e(o.mockup_url)}" onerror="this.style.opacity=.15"></a>`:'<div class="bf-order-thumb empty">無預覽</div>';
     return `<article class="bf-order-card${isVoid?' void':''}">
@@ -181,6 +170,7 @@
           ${o.print_url?`<a href="${e(o.print_url)}" target="_blank" rel="noopener"><i class="fa-solid fa-file-arrow-down"></i> 生產圖</a>`:''}
           ${!isVoid&&o.has_print?`<button data-order-action="print" data-order-id="${e(o.order_id)}">前往列印中心</button>`:''}
           ${printAction}
+          <div class="bf-print-message" role="status" aria-live="polite">${e(printMessage)}</div>
           ${isVoid?`<button data-order-action="restore" data-order-id="${e(o.order_id)}">恢復</button>`:`<button class="voidbtn" data-order-action="void" data-order-id="${e(o.order_id)}">作廢</button>`}
           <button class="danger" data-order-action="delete" data-order-id="${e(o.order_id)}">刪除</button>
         </div>
@@ -212,6 +202,7 @@
         'CONCURRENT_OPERATION','JOB_NOT_FOUND','VOID_ORDER','PRINT_FILE_REQUIRED',
         'SKU_BINDING_REQUIRED','BAD_REQUEST','IDEMPOTENCY_CONFLICT',
         'BAD_CONFIRMATION','VENDOR_TASK_STILL_EXISTS','PRODUCTION_REBUILD_FAILED',
+        'ACTIVE_PRINT_JOB','MANUAL_REPRINT_AUTH_REQUIRED',
       ]);
       if(slot&&definite.has(error.code))sessionStorage.removeItem(slot);
       throw error;
@@ -236,37 +227,28 @@
       'print-retry':'確定重新推送？會沿用客人的原始排版與生產資料，不需重新設計；僅在前次任務明確失敗或取消後才允許。',
       'print-manual-retry':'這筆任務的銳印接收結果尚不明確。只有你親自確認銳印待列印、歷史、完成及實體輸出都沒有原任務，才能繼續；仍存在重複列印風險。要核對嗎？',
       'print-reconcile':'查核銳印目前的任務狀態？查核不會建立新任務或開始打印。',
-      'print-resend':null, // One click starts a guarded recovery, not an unconditional second print.
+      'print-resend':null,
     };
     if(!Object.hasOwn(prompts,action))return;
     if(prompts[action]&&!confirm(prompts[action]))return;
     printActionsBusy.add(orderId);render();
     try{
+      if(action==='print-resend'){
+        printMessages.set(orderId,'正在把原生產圖重新送到銳印，請勿重複操作…');render();
+        const sent=(await printApi('/api/admin/print/manual-reprint',{
+          order_id:orderId
+        },'manual-reprint',orderId)).job;
+        if(!sent?.vendor_taskid&&!['SENDING','QUEUED','PRINTING','COMPLETED','UNKNOWN'].includes(sent?.state))
+          throw new Error('重印任務狀態未確認，請前往列印中心查核');
+        printMessages.set(orderId,sent?.state==='UNKNOWN'
+          ?'傳送結果不明，已鎖定防止重送；請到列印中心查核。'
+          :'任務已送到銳印 ✓；仍須在銳印軟體人工確認打印。');
+        await refreshOrders(true);
+        return;
+      }
       let summary=await latestPrintSummary(orderId),job=summary.job;
       if(summary.physical_activity&&action!=='print-reconcile')
         throw new Error('歷史任務已出現實體列印紀錄，禁止重推，請人工確認');
-      if(action==='print-resend'){
-        if(!job||!['UNKNOWN','SENDING','QUEUED','STARTING','CANCELING'].includes(job.state))
-          throw new Error('任務狀態已變更，請重新整理後操作');
-        // An acknowledged UNKNOWN task is already reconciled: the missing
-        // history/physical-output fact still requires a human, not queue lookup.
-        // Other in-flight states must first reconcile and become definitively
-        // FAILED/CANCELED before any automatic resend is allowed.
-        if(!(job.state==='UNKNOWN'&&job.vendor_taskid&&job.last_reconciled_at&&!job.ambiguous_operation)){
-          await printApi('/api/admin/print/reconcile',{job_id:job.id},'reconcile',job.id);
-          summary=await latestPrintSummary(orderId);
-          job=summary.job;
-        }
-        if(summary.physical_activity)
-          throw new Error('發現歷史列印活動，禁止重送；請到列印中心確認');
-        if(job&&['FAILED','CANCELED'].includes(job.state)){
-          action='print-retry';
-        }else if(job?.state==='UNKNOWN'&&!job.ambiguous_operation&&job.vendor_taskid&&job.sent_at&&job.last_reconciled_at){
-          action='print-manual-retry';
-        }else{
-          throw new Error('舊任務仍可能存在於銳印，無法安全重新送出；請到列印中心核對。系統沒有建立新任務');
-        }
-      }
       if(action==='print-reconcile'){
         if(!job||!['UNKNOWN','SENDING','QUEUED','STARTING','CANCELING'].includes(job.state))
           throw new Error('最新列印任務目前不需要雲端查核，請重新整理');
@@ -304,8 +286,10 @@
           throw new Error('新任務狀態未確認，請查核列印中心');
         }
       }
+      printMessages.set(orderId,'任務已送到銳印 ✓；仍須在銳印軟體人工確認打印。');
       await refreshOrders(true);
     }catch(err){
+      printMessages.set(orderId,'操作未完成：'+(err.message||'請到列印中心查核'));
       try{await refreshOrders(true)}catch(ignore){}
       alert((err.code==='REPRINT_REQUIRED'?'禁止重複列印：':'列印操作未完成：')+(err.message||'請前往列印中心查核最新狀態，勿連續重送'));
     }finally{

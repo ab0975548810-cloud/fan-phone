@@ -118,6 +118,61 @@ with psycopg.connect(DSN) as db:
                                  (jobs[1][0],)).fetchone()
 assert quarantined_row == ("CANCELED", "prior_attempt_activity", "1", True), quarantined_row
 
+# Explicit operator reprint is a separate audited path: it copies the immutable
+# completed snapshot, permits exactly that new attempt to send, and replays the
+# same request without creating another attempt.
+manual_order = "manual-reprint-postgres-fixture"
+manual_old = str(uuid.uuid4())
+manual_key = "manual-reprint-postgres-000001"
+manual_hash = "a" * 64
+with psycopg.connect(DSN) as db:
+    db.execute("delete from public.print_requests where request_key like 'manual-reprint-postgres-%'")
+    db.execute("delete from public.print_jobs where order_id=%s", (manual_order,))
+    db.execute("""insert into public.print_jobs
+        (id,order_id,attempt_no,sku_id,vendor_taskid,artwork_path,artwork_sha256,
+         artwork_token_nonce,profile_complete,width_mm,height_mm,left_mm,top_mm,
+         copies,spot_color,channel,angle,state,vendor_raw_status,sent_at,
+         started_at,completed_at)
+        values (%s,%s,1,'sku-original','vendor-old','original.png',%s,'old-nonce',
+                true,80,160,1.5,2.5,2,'','1',0,'COMPLETED','2',now(),now(),now())""",
+        (manual_old, manual_order, "b" * 64))
+    args = (manual_order, manual_key, manual_hash, "fixture-clerk", "已完成",
+            '{"artwork_token_nonce":"new-nonce"}', False)
+    first = db.execute("select public.authorize_manual_reprint(%s,%s,%s,%s,%s,%s::jsonb,%s)",
+                       args).fetchone()[0]
+    replay = db.execute("select public.authorize_manual_reprint(%s,%s,%s,%s,%s,%s::jsonb,%s)",
+                        args).fetchone()[0]
+assert first["ok"] and replay["ok"] and replay["replay"], (first, replay)
+assert first["job"]["id"] == replay["job"]["id"], (first, replay)
+with psycopg.connect(DSN) as db:
+    copied = db.execute("""select attempt_no,artwork_path,artwork_sha256,sku_id,
+        width_mm,height_mm,left_mm,top_mm,copies,spot_color,channel,angle,state
+        from public.print_jobs where id=%s""", (first["job"]["id"],)).fetchone()
+    event = db.execute("""select event_type,payload_json->>'actor'
+        from public.print_events where event_key=%s""",
+        ("manual-reprint:" + manual_key,)).fetchone()
+assert copied == (2, "original.png", "b" * 64, "sku-original", 80, 160, 1.5,
+                  2.5, 2, "", "1", 0, "PREPARED"), copied
+assert event == ("MANUAL_REPRINT_AUTHORIZED", "fixture-clerk"), event
+with psycopg.connect(DSN) as db:
+    manual_claim = db.execute("""select public.claim_manual_reprint_send_if_safe(
+        %s,'send-nonce',now()+interval '1 day','device')""",
+        (first["job"]["id"],)).fetchone()[0]
+assert manual_claim["ok"] and manual_claim["job"]["state"] == "SENDING", manual_claim
+
+# An unresolved receiveTask can never be superseded by a fresh manual click.
+unknown_order = "manual-reprint-unknown-postgres"
+with psycopg.connect(DSN) as db:
+    db.execute("delete from public.print_jobs where order_id=%s", (unknown_order,))
+    db.execute("""insert into public.print_jobs
+        (id,order_id,attempt_no,artwork_path,artwork_token_nonce,state,ambiguous_operation)
+        values (%s,%s,1,'unknown.png','unknown','UNKNOWN','receiveTask')""",
+        (str(uuid.uuid4()), unknown_order))
+    blocked = db.execute("""select public.authorize_manual_reprint(
+        %s,%s,%s,'fixture-clerk','待處理','{}'::jsonb,false)""",
+        (unknown_order, "manual-reprint-postgres-unknown-01", "c" * 64)).fetchone()[0]
+assert blocked == {"ok": False, "code": "RECONCILE_REQUIRED"}, blocked
+
 
 def assert_reconcile_timestamp_sticky(index, first_status, final_status, timestamp_column):
     order_id = f"reconcile-sticky-timestamp-{index}"
@@ -385,7 +440,7 @@ class _PostgresTableQuery:
     """Small PostgREST-shaped adapter for exercising the real PrintStore path."""
 
     def __init__(self, table):
-        if table != "print_jobs":
+        if table not in ("print_jobs", "print_handoffs"):
             raise AssertionError(f"unexpected test table: {table}")
         self.table = table
         self.filters = []
@@ -398,6 +453,10 @@ class _PostgresTableQuery:
 
     def eq(self, name, value):
         self.filters.append((name, value))
+        return self
+
+    def in_(self, name, values):
+        self.filters.append((name, list(values)))
         return self
 
     def order(self, name, desc=False):
@@ -428,7 +487,7 @@ class _PostgresTableQuery:
             if self.filters:
                 clauses = []
                 for name, value in self.filters:
-                    clauses.append(sql.SQL("{} = {}").format(
+                    clauses.append(sql.SQL("{} = ANY({})" if isinstance(value, list) else "{} = {}").format(
                         sql.Identifier(name), sql.Placeholder()))
                     params.append(value)
                 query += sql.SQL(" where ") + sql.SQL(" and ").join(clauses)
@@ -447,6 +506,12 @@ class _PostgresRpcQuery:
         "apply_print_callback_safely": (
             "p_job_id", "p_status", "p_message"),
         "claim_print_send_if_safe": (
+            "p_job_id", "p_artwork_token_nonce",
+            "p_artwork_token_expires_at", "p_device_id"),
+        "authorize_manual_reprint": (
+            "p_order_id", "p_request_key", "p_request_hash", "p_actor",
+            "p_order_status", "p_seed", "p_handoff_review"),
+        "claim_manual_reprint_send_if_safe": (
             "p_job_id", "p_artwork_token_nonce",
             "p_artwork_token_expires_at", "p_device_id"),
     }
@@ -537,3 +602,121 @@ def race_real_create_job_and_callback(index):
 for race_index in range(20):
     race_real_create_job_and_callback(race_index)
 print("PRINT_RETRY_POSTGRES_CONCURRENCY_OK")
+
+
+# Exercise the production service guard against authoritative PostgreSQL rows.
+from print_center import PrintService, PrintError
+review_id = "review-backend-guard"
+with psycopg.connect(DSN) as db:
+    db.execute("delete from public.print_handoffs where order_id=%s", (review_id,))
+    db.execute("""insert into public.orders
+        (id,customer_name,payment_method,model_id,model_name,style_id,style_name,
+         unit_price,quantity,total,status,created_at_unix)
+        values (%s,'fixture','cash','m','m','s','s',100,1,100,'待處理',1)
+        on conflict (id) do nothing""", (review_id,))
+    db.execute("""insert into public.print_handoffs
+        (order_id,request_key,marker_version,state)
+        values (%s,'review-backend-key','legacy-auto-print-v1','REVIEW')""", (review_id,))
+module = SimpleNamespace(USE_SUPABASE=True, SUPABASE=_PostgresSupabaseAdapter())
+service = PrintService(module, client=SimpleNamespace())
+assert service.store.handoffs_for_orders([review_id])[review_id]["state"] == "REVIEW"
+for operation in (lambda: service.prepare(review_id, "review-prepare-key"),
+                  lambda: service._assert_no_prior_physical_activity(review_id)):
+    try:
+        operation()
+        raise AssertionError("historical REVIEW bypassed")
+    except PrintError as exc:
+        assert exc.code == "HANDOFF_REVIEW_REQUIRED", exc.code
+assert service.store.jobs_for_order(review_id) == []
+print("HISTORICAL_REVIEW_POSTGRES_SERVICE_GUARD_OK")
+
+# Read-only order-card gate uses the production service and real PG attempt rows.
+from unittest.mock import patch
+
+def order_resend_postgres_test():
+    order_id = "order-card-resend-pg"
+    job_id = str(uuid.uuid4())
+    module = SimpleNamespace(USE_SUPABASE=True, SUPABASE=_PostgresSupabaseAdapter(),
+        commerce=SimpleNamespace(store=SimpleNamespace(order=lambda oid: {
+            "id": oid, "status": "待處理", "print_path": "fixture.png"})))
+    vendor = SimpleNamespace(ready=True, get_all_tasks=lambda: {"data": []})
+    service = PrintService(module, client=vendor)
+    with psycopg.connect(DSN) as db:
+        db.execute("delete from public.print_jobs where order_id=%s", (order_id,))
+    with patch.dict(os.environ, {"PRINT_ARTWORK_TOKEN_SECRET": "test" * 16,
+                               "PRINT_PUBLIC_BASE_URL": "https://isolated.invalid"}):
+        assert service.check_order_resend(order_id)["action"] == "prepare"
+        with psycopg.connect(DSN) as db:
+            db.execute("""insert into public.print_jobs
+                (id,order_id,attempt_no,artwork_path,artwork_token_nonce,state)
+                values (%s,%s,1,'fixture.png','resend-test','FAILED')""", (job_id,order_id))
+        checked = service.check_order_resend(order_id)
+        assert checked["action"] == "retry" and str(checked["job_id"]) == job_id, checked
+        for column, value, expected in (
+            ("vendor_taskid", "old-vendor-task", "VENDOR_TASK_STILL_EXISTS"),
+            ("started_at", "2026-01-01T00:00:00Z", "REPRINT_REQUIRED"),
+            ("completed_at", "2026-01-01T00:00:00Z", "REPRINT_REQUIRED"),
+        ):
+            with psycopg.connect(DSN) as db:
+                db.execute(sql.SQL("update public.print_jobs set {}=%s where id=%s").format(sql.Identifier(column)), (value, job_id))
+            try:
+                service.check_order_resend(order_id)
+                raise AssertionError("unsafe resend allowed")
+            except PrintError as exc:
+                assert exc.code == expected, exc.code
+            with psycopg.connect(DSN) as db:
+                db.execute(sql.SQL("update public.print_jobs set {}=NULL where id=%s").format(sql.Identifier(column)), (job_id,))
+        with psycopg.connect(DSN) as db:
+            rows=db.execute("select state from public.print_jobs where order_id=%s", (order_id,)).fetchall()
+            assert rows == [("FAILED",)], rows
+    print("ORDER_RESEND_POSTGRES_SERVICE_READ_ONLY_SAFETY_OK")
+
+order_resend_postgres_test()
+
+# Integrated #89 check uses the same authoritative REVIEW guard.
+with patch.dict(os.environ, {"PRINT_ARTWORK_TOKEN_SECRET": "test" * 16,
+                           "PRINT_PUBLIC_BASE_URL": "https://isolated.invalid"}):
+    module.commerce = SimpleNamespace(store=SimpleNamespace(order=lambda oid: {
+        "id": oid, "status": "待處理", "print_path": "fixture.png"}))
+    service.client = SimpleNamespace(ready=True, get_all_tasks=lambda: {"data": []})
+    try:
+        service.check_order_resend(review_id)
+        raise AssertionError("resend-check bypassed historical review")
+    except PrintError as exc:
+        assert exc.code == "HANDOFF_REVIEW_REQUIRED", exc.code
+print("INTEGRATED_88_89_POSTGRES_RESEND_REVIEW_BLOCKED_OK")
+
+# Auto dispatch is opt-in independently of manual vendor readiness. Use the
+# production service over PostgreSQL; a pause must not consume durable rows.
+from print_vendor import YunPrintClient
+pause_order = 'auto-switch-postgres-pending'
+with psycopg.connect(DSN) as db:
+    db.execute("delete from public.print_handoffs where order_id=%s", (pause_order,))
+    db.execute("""insert into public.orders
+        (id,customer_name,payment_method,model_id,model_name,style_id,style_name,
+         unit_price,quantity,total,status,created_at_unix)
+        values (%s,'fixture','cash','m','m','s','s',100,1,100,'待處理',1)
+        on conflict (id) do nothing""", (pause_order,))
+    db.execute("""insert into public.print_handoffs
+        (order_id,request_key,marker_version,state)
+        values (%s,'auto-switch-pg-marker','auto-print-handoff-v1','PENDING')""", (pause_order,))
+with patch.dict(os.environ, {'PRINT_ARTWORK_TOKEN_SECRET': 'test'*16,
+                            'PRINT_PUBLIC_BASE_URL': 'https://isolated.invalid'}):
+    for master, auto in (('true', None), ('true', 'false'), ('false', 'true')):
+        calls = []
+        env = {'YUN_PRINT_ENABLED': master, 'YUN_PRINT_DEVICE_ID': 'fixture',
+               'YUN_PRINT_DEVICE_KEY': 'fixture-only', 'CI': 'true'}
+        if auto is not None:
+            env['YUN_AUTO_PRINT_ENABLED'] = auto
+        client = YunPrintClient(env=env, transport=lambda *args: calls.append(args))
+        paused = PrintService(module, client=client)
+        assert paused.vendor_ready == (master == 'true')
+        for _ in range(3):
+            assert paused.dispatch_auto_once() == []
+            assert paused.recover_auto_handoffs_once() == []
+        with psycopg.connect(DSN) as db:
+            row = db.execute('select state,attempt_count,lease_token from public.print_handoffs where order_id=%s',
+                             (pause_order,)).fetchone()
+        assert row == ('PENDING', 0, None), row
+        assert calls == []
+print('PRINT_AUTO_SWITCH_POSTGRES_PAUSE_WITH_MANUAL_READY_OK')

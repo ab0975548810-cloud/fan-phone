@@ -125,6 +125,10 @@ class PrintService:
         self.client = client or YunPrintClient()
 
     @property
+    def auto_ready(self):
+        return bool(self.client.auto_enabled and self.vendor_ready)
+
+    @property
     def vendor_ready(self):
         if not self.client.ready:
             return False
@@ -291,8 +295,137 @@ class PrintService:
     def _auto_key(operation, identity):
         return f"auto-{operation}-{_hash(identity)[:48]}"
 
+    @staticmethod
+    def _handoff_ref(order_id):
+        return _hash(str(order_id or ""))[:12]
+
+    def _handoff_log(self, level, event, handoff, **fields):
+        payload = {
+            "event": event,
+            "order_ref": self._handoff_ref(handoff.get("order_id")),
+            "attempt": int(handoff.get("attempt_count") or 0),
+            **{key: value for key, value in fields.items()
+               if value is not None},
+        }
+        getattr(self.app.app.logger, level)(
+            "print_handoff %s", json.dumps(payload, separators=(",", ":")))
+
+    @staticmethod
+    def _handoff_retry_seconds(handoff):
+        attempt = max(1, int(handoff.get("attempt_count") or 1))
+        base = min(900, 5 * (2 ** min(attempt - 1, 7)))
+        jitter = int(_hash(str(handoff.get("id") or ""))[:2], 16) % max(1, base // 4)
+        return min(900, base + jitter)
+
+    def _try_finish_handoff(self, handoff, state, **fields):
+        try:
+            return self.store.finish_handoff(
+                handoff["id"], handoff["lease_token"], state, **fields)
+        except Exception as exc:
+            self._handoff_log(
+                "error", "state_write_failed", handoff, state=state,
+                code=type(exc).__name__.upper()[:100])
+            return {"ok": False, "code": "STATE_WRITE_FAILED"}
+
+    def recover_auto_handoffs_once(self, limit=20):
+        """Turn atomic checkout outbox rows into one durable PREPARED job.
+
+        Only the exact release marker is claimable. Legacy rows are REVIEW-only
+        and never enter this method, including after restarts or redeploys.
+        """
+        # A disabled or incompletely configured vendor is an operator pause,
+        # not a failed preflight. Leave the durable row PENDING so a later
+        # process with valid settings can claim it without consuming attempts.
+        if not self.auto_ready:
+            return []
+        handoffs = self.store.claim_handoffs(limit=limit, lease_seconds=90)
+        if not handoffs:
+            return []
+        try:
+            commerce = self.app.commerce.read()
+        except Exception as exc:
+            for handoff in handoffs:
+                try:
+                    self.store.finish_handoff(
+                        handoff["id"], handoff["lease_token"], "RETRY",
+                        error_code="COMMERCE_UNAVAILABLE",
+                        retry_seconds=self._handoff_retry_seconds(handoff))
+                except Exception:
+                    self.app.app.logger.exception(
+                        "print_handoff lease release failed order_ref=%s",
+                        self._handoff_ref(handoff.get("order_id")))
+            raise exc
+
+        requests = commerce.get("requests") or {}
+        results = []
+        for handoff in handoffs:
+            try:
+                age_seconds = None
+                try:
+                    created = datetime.fromisoformat(
+                        str(handoff.get("created_at") or "").replace("Z", "+00:00"))
+                    if created.tzinfo is not None:
+                        age_seconds = max(0, int((datetime.now(timezone.utc) - created).total_seconds()))
+                except (TypeError, ValueError):
+                    pass
+                self._handoff_log(
+                    "warning" if (age_seconds or 0) >= 60 else "info",
+                    "marker_claimed", handoff, pending_age_seconds=age_seconds)
+                receipt = requests.get(str(handoff.get("request_key") or "")) or {}
+                marker = receipt.get("auto_print_handoff_v1") or {}
+                response = receipt.get("response") or {}
+                valid = (
+                    handoff.get("marker_version") == "auto-print-handoff-v1"
+                    and receipt.get("auto_print_v1") is True
+                    and marker.get("version") == "auto-print-handoff-v1"
+                    and str(marker.get("order_id") or "") == str(handoff.get("order_id") or "")
+                    and str(response.get("order_id") or "") == str(handoff.get("order_id") or "")
+                )
+                if not valid:
+                    self._try_finish_handoff(
+                        handoff, "REVIEW", error_code="INVALID_ATOMIC_MARKER")
+                    self._handoff_log("warning", "marker_rejected", handoff,
+                                      code="INVALID_ATOMIC_MARKER")
+                    continue
+                result = self.enqueue_auto(str(handoff["order_id"]))
+                if result.get("status") != "prepared":
+                    code = str(result.get("reason") or "PREFLIGHT_REVIEW")[:100]
+                    self._try_finish_handoff(
+                        handoff, "REVIEW", error_code=code)
+                    self._handoff_log("warning", "preflight_review", handoff,
+                                      code=code)
+                    continue
+                job = result["job"]
+                finished = self._try_finish_handoff(
+                    handoff, "PREPARED",
+                    prepared_job_id=job["id"])
+                if not finished.get("ok"):
+                    continue
+                self._handoff_log("info", "prepared", handoff,
+                                  job_ref=_hash(str(job["id"]))[:12])
+                results.append(job)
+            except (PrintError, PrintConflict) as exc:
+                self._try_finish_handoff(
+                    handoff, "REVIEW", error_code=exc.code)
+                self._handoff_log("warning", "preflight_review", handoff,
+                                  code=exc.code)
+            except Exception as exc:
+                attempt = int(handoff.get("attempt_count") or 0)
+                state = "FAILED" if attempt >= 8 else "RETRY"
+                code = type(exc).__name__.upper()[:100]
+                self._try_finish_handoff(
+                    handoff, state,
+                    error_code=code,
+                    retry_seconds=(self._handoff_retry_seconds(handoff)
+                                   if state == "RETRY" else None))
+                self._handoff_log("error", "recovery_failed", handoff,
+                                  state=state, code=code)
+        return results
+
     def enqueue_auto(self, order_id):
         """Durably prepare a committed order for asynchronous receiveTask."""
+        if not self.client.auto_enabled:
+            return {"status": "skipped", "reason": "AUTO_PRINT_DISABLED"}
         if not self.vendor_ready:
             return {"status": "skipped", "reason": "VENDOR_NOT_READY"}
         order = self._order(order_id)
@@ -315,15 +448,20 @@ class PrintService:
         response = request_row.get("response") or {}
         return bool(
             request_row.get("auto_print_v1") is True
+            and (request_row.get("auto_print_handoff_v1") or {}).get("version") == "auto-print-handoff-v1"
+            and str((request_row.get("auto_print_handoff_v1") or {}).get("order_id") or "") == str(order_id)
             and str(response.get("order_id") or "") == str(order_id)
         )
 
     def dispatch_auto_once(self):
         """Drain durable auto markers once; safe across retries and processes."""
-        if not self.vendor_ready:
+        if not self.auto_ready:
             return []
+        self.recover_auto_handoffs_once()
         results = []
         for job in self.store.auto_prepared_jobs():
+            if not self.auto_ready:
+                break
             try:
                 send_type = "send-recovery" if job.get("_auto_recovery") else "send"
                 results.append(self.send(job["id"], self._auto_key(send_type, job["id"])))
@@ -339,7 +477,13 @@ class PrintService:
         if dispatcher:
             dispatcher.wake()
 
+    def _assert_handoff_review_clear(self, order_id):
+        row = self.store.handoffs_for_orders([order_id]).get(str(order_id))
+        if row and (row.get("state") == "REVIEW" or row.get("marker_version") == "legacy-auto-print-v1"):
+            raise PrintError("HANDOFF_REVIEW_REQUIRED", "歷史漏單或交接需人工核對；一般準備／重推／送出已封鎖，不能直接補送")
+
     def _assert_no_prior_physical_activity(self, order_id):
+        self._assert_handoff_review_clear(order_id)
         """Ordinary prepare/retry/send cannot cross evidence of physical output."""
         for attempt in self.store.jobs_for_order(order_id):
             if (str(attempt.get("state") or "") in ("PRINTING", "COMPLETED")
@@ -388,6 +532,7 @@ class PrintService:
         )
 
     def prepare(self, order_id, key):
+        self._assert_handoff_review_clear(order_id)
         fingerprint = _payload_hash("prepare", order_id)
         prior = self.store.request(key)
         if prior:
@@ -665,7 +810,7 @@ class PrintService:
             base = (configured or request.host_url).strip().rstrip("/")
         return base
 
-    def send(self, job_id, key):
+    def send(self, job_id, key, manual_reprint=False):
         fingerprint = _payload_hash("send", job_id)
         replay = self._existing_operation(key, "send", job_id, fingerprint)
         if replay:
@@ -673,7 +818,8 @@ class PrintService:
         job = self.store.job(job_id)
         if not job:
             raise PrintError("JOB_NOT_FOUND", "找不到列印任務", 404)
-        self._assert_no_prior_physical_activity(job["order_id"])
+        if not manual_reprint:
+            self._assert_no_prior_physical_activity(job["order_id"])
         order = self._order(job["order_id"])
         self._assert_order_printable(order)
         if job["state"] == "UNKNOWN":
@@ -682,13 +828,14 @@ class PrintService:
             raise PrintError("BAD_PRINT_STATE", "目前任務狀態不可送到銳印")
         if not job.get("profile_complete"):
             raise PrintError("PROFILE_MISSING", "列印參數未設定，不可送到銳印")
-        self._assert_style_configured(order)
+        if not manual_reprint:
+            self._assert_style_configured(order)
         if not self.vendor_ready:
             raise PrintError("VENDOR_NOT_READY", "雲打印憑證、HTTPS public URL 或生產圖密鑰尚未完整設定", 503)
         # For operator-confirmed missing attempts, perform one more vendor
         # presence check just before the new vendor submission. An old task
         # can reappear after the operator's earlier check.
-        older_confirmed = [
+        older_confirmed = [] if manual_reprint else [
             attempt for attempt in self.store.jobs_for_order(job["order_id"])
             if int(attempt.get("attempt_no") or 0) < int(job.get("attempt_no") or 0)
             and attempt.get("ambiguous_operation") == "operator_confirmed_missing"
@@ -702,8 +849,10 @@ class PrintService:
             return self.store.job(job_id)
         nonce = secrets.token_urlsafe(18)
         expiry = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
-        decision = self.store.claim_send_if_safe(
-            job_id, nonce=nonce, expires_at=expiry, device_id=self.client.device_id)
+        claim = (self.store.claim_manual_reprint_send_if_safe if manual_reprint
+                 else self.store.claim_send_if_safe)
+        decision = claim(job_id, nonce=nonce, expires_at=expiry,
+                         device_id=self.client.device_id)
         if not decision.get("ok"):
             code = str(decision.get("code") or "CONCURRENT_OPERATION")
             self.store.finish_request(key, "FAILED", {"job_id": job_id, "code": code})
@@ -711,12 +860,19 @@ class PrintService:
                 raise PrintError("REPRINT_REQUIRED", "已有實體列印活動，禁止再次送出")
             if code == "JOB_NOT_FOUND":
                 raise PrintError("JOB_NOT_FOUND", "找不到列印任務", 404)
+            if code == "RECONCILE_REQUIRED":
+                raise PrintError("RECONCILE_REQUIRED", "送出狀態不明或有延遲回報，必須先查核，禁止重送")
+            if code == "STALE_PRINT_ATTEMPT":
+                raise PrintError("STALE_PRINT_ATTEMPT", "這筆訂單已有較新的列印嘗試")
+            if code == "MANUAL_REPRINT_AUTH_REQUIRED":
+                raise PrintError("MANUAL_REPRINT_AUTH_REQUIRED", "此任務缺少店員人工重印授權", 403)
             raise PrintError("CONCURRENT_OPERATION", "另一個列印操作正在執行")
         claimed = decision["job"]
         try:
             claimed_order = self._order(claimed["order_id"])
             self._assert_order_printable(claimed_order)
-            self._assert_style_configured(claimed_order)
+            if not manual_reprint:
+                self._assert_style_configured(claimed_order)
         except PrintError:
             self.store.patch_job(job_id, {"state": "PREPARED", "last_error": "送出前訂單或生產設定已失效"}, ("SENDING",))
             self.store.finish_request(key, "FAILED", {"job_id": job_id, "code": "SEND_PREFLIGHT_FAILED"})
@@ -1000,6 +1156,104 @@ class PrintService:
                 raise PrintError("INVALID_REPLAY", "printer callback 驗證資料已被重用", 403)
         return inserted
 
+    def _manual_reprint_seed(self, order_id):
+        """Build the first immutable print snapshot from the stored order image."""
+        order = self._order(order_id)
+        self._assert_order_printable(order)
+        self._assert_style_configured(order)
+        finance = self._finance(order_id)
+        sku_id = str(finance.get("sku_id") or "")
+        if not sku_id:
+            binding = self.store.binding(order_id)
+            sku_id = str((binding or {}).get("sku_id") or "")
+        if not sku_id:
+            raise PrintError("SKU_BINDING_REQUIRED", "舊訂單必須先明確補綁列印 SKU")
+        profile = self._materialize_sku_profile(order, sku_id)
+        if not profile:
+            raise PrintError("PROFILE_MISSING", "請先到「品牌及型號」儲存此型號的列印參數")
+        raw = self._download_artwork(order["print_path"])
+        return order, {
+            "sku_id": sku_id, "artwork_path": order["print_path"],
+            "artwork_sha256": hashlib.sha256(raw).hexdigest(),
+            "artwork_token_nonce": secrets.token_urlsafe(18),
+            "profile_complete": True,
+            **{name: profile.get(name) for name in (
+                "width_mm", "height_mm", "left_mm", "top_mm", "copies",
+                "spot_color", "channel", "angle")},
+        }
+
+    def manual_reprint(self, order_id, key, actor):
+        """One operator action: authorize an attempt and submit it at most once."""
+        if not self.vendor_ready:
+            raise PrintError(
+                "VENDOR_NOT_READY",
+                "銳印尚未啟用或連線設定不完整，這次沒有建立或送出重印任務",
+                503,
+            )
+        order = self._order(order_id)
+        self._assert_order_printable(order)
+        attempts = self.store.jobs_for_order(order_id)
+        if attempts:
+            seed = {"artwork_token_nonce": secrets.token_urlsafe(18)}
+        else:
+            order, seed = self._manual_reprint_seed(order_id)
+        handoff = self.store.handoffs_for_orders([order_id]).get(str(order_id))
+        review = bool(handoff and (
+            handoff.get("state") == "REVIEW"
+            or handoff.get("marker_version") == "legacy-auto-print-v1"))
+        fingerprint = _payload_hash("manual_reprint", order_id)
+        decision = self.store.authorize_manual_reprint(
+            order_id, key, fingerprint, str(actor or "authenticated_admin")[:100],
+            str(order.get("status") or ""), seed, handoff_review=review)
+        if not decision.get("ok") or not isinstance(decision.get("job"), dict):
+            code = str(decision.get("code") or "PRINT_UNAVAILABLE")
+            messages = {
+                "IDEMPOTENCY_CONFLICT": "同一操作識別已用於不同列印操作",
+                "RECONCILE_REQUIRED": "前次任務正在傳送、結果不明或有延遲回報；必須先查核，禁止盲目重送",
+                "ACTIVE_PRINT_JOB": "銳印已有待確認、列印中或取消中的任務，不能再建立重印",
+                "PROFILE_MISSING": "原列印任務沒有完整生產圖或列印參數",
+                "JOB_NOT_FOUND": "找不到已授權的重印任務",
+            }
+            status = 503 if code == "PRINT_UNAVAILABLE" else 409
+            raise PrintError(code, messages.get(code, "人工重印目前無法送出"), status)
+        job = decision["job"]
+        # A deterministic child key ties vendor submission to the same button
+        # operation. Replaying after a lost HTTP response returns the stored
+        # job and never invokes receiveTask a second time.
+        send_key = "manual-send-" + _hash(key)[:48]
+        return self.send(str(job["id"]), send_key, manual_reprint=True)
+
+    def check_order_resend(self, order_id):
+        """Read-only vendor check; queue absence never clears uncertain history."""
+        order = self._order(order_id)
+        self._assert_order_printable(order)
+        if order.get("status") in ("列印中", "已完成"):
+            raise PrintError("REPRINT_REQUIRED", "訂單已列印中或已完成，不能直接重推，請人工查核")
+        if not self.vendor_ready:
+            raise PrintError("VENDOR_NOT_READY", "銳印尚未啟用或連線設定不完整，不能重新送任務", 503)
+        try:
+            remote = self._strict_vendor_task_rows(self.client.get_all_tasks())
+        except (VendorAmbiguous, VendorDisabled, VendorError) as exc:
+            raise PrintError("RECONCILE_FAILED", "銳印查核失敗，未重新送出；請稍後再試", 502) from exc
+        if remote is None:
+            raise PrintError("RECONCILE_FAILED", "銳印清單格式無法確認，禁止重新送出", 503)
+        # Read again after the network request. Send still uses the existing
+        # DB-atomic claim, including sticky physical evidence/quarantine checks.
+        self._assert_no_prior_physical_activity(order_id)
+        attempts = self.store.jobs_for_order(order_id)
+        if any(j.get("vendor_taskid") for j in attempts):
+            raise PrintError("VENDOR_TASK_STILL_EXISTS", "此訂單已有銳印 Task ID，不能直接重推；請到列印中心人工查核")
+        identities = {order_id} | {vendor_order_identity(j) for j in attempts}
+        if any(str(row.get("order_id") or "") in identities
+               or re.fullmatch(re.escape(order_id) + r"-p\d+", str(row.get("order_id") or ""))
+               for row in remote):
+            raise PrintError("VENDOR_TASK_STILL_EXISTS", "銳印仍有此訂單的任務，禁止重複推送")
+        latest = max(attempts, key=lambda j: int(j.get("attempt_no") or 0), default=None)
+        if latest and (latest.get("ambiguous_operation") or latest["state"] not in ("PREPARED", "FAILED", "CANCELED")):
+            raise PrintError("RECONCILE_REQUIRED", "任務仍在處理中或結果不明；待列印清單查無資料不代表從未列印，請人工查核")
+        return {"action": "prepare" if not latest else ("send" if latest["state"] == "PREPARED" else "retry"),
+                "job_id": latest["id"] if latest else None}
+
     def order_summaries(self, order_ids):
         """Read-only batch overview for the order cards; no vendor requests."""
         ids = list(dict.fromkeys(str(value) for value in order_ids))
@@ -1097,8 +1351,20 @@ class PrintService:
                 "job": _public_job(latest.get(order_id)),
                 "prior_physical_activity": order_id in physical,
             })
+        handoffs = self.store.handoff_summary(include_order_ids=True)
+        handoff_by_order = self.store.handoffs_for_orders(
+            [row["order_id"] for row in result])
+        for row in result:
+            alert = handoff_by_order.get(str(row.get("order_id") or ""))
+            if alert:
+                row["handoff_alert"] = {
+                    "state": alert.get("state"),
+                    "error_code": alert.get("last_error_code"),
+                    "marker_version": alert.get("marker_version"),
+                }
         return {
             "rows": result,
+            "handoffs": handoffs,
             "vendor_ready": self.vendor_ready,
             "vendor_connected": self.client.ready,
             "vendor_enabled": self.client.enabled,
@@ -1123,18 +1389,21 @@ def install(app_module):
 
     @wraps(original_create_order)
     def create_order_with_auto_handoff(*args, **kwargs):
-        request_payload = request.get_json(silent=True)
-        checkout_key = str(request.headers.get("Idempotency-Key") or
-                           ((request_payload or {}).get("idempotency_key") if isinstance(request_payload, dict) else "") or "")
         response = app.make_response(original_create_order(*args, **kwargs))
         if response.status_code < 300:
             payload = response.get_json(silent=True)
             order_id = str((payload or {}).get("order_id") or "") if isinstance(payload, dict) else ""
-            if order_id and service.checkout_auto_eligible(order_id, checkout_key):
+            if order_id:
+                # The durable outbox was committed with the order. Waking is
+                # in-memory only and may be lost safely: the bounded periodic
+                # worker will claim the DB row after restart. Checkout never
+                # performs a second Supabase read or calls the vendor here.
                 try:
-                    service.enqueue_auto(order_id)
+                    service.wake_dispatcher()
                 except Exception:
-                    app.logger.exception("Post-commit automatic print preparation failed for %s", order_id)
+                    app.logger.exception(
+                        "Post-commit print worker wake failed order_ref=%s",
+                        service._handoff_ref(order_id))
         return response
 
     app.view_functions["create_order"] = create_order_with_auto_handoff
@@ -1176,6 +1445,16 @@ def install(app_module):
             raise PrintError("IDEMPOTENCY_REQUIRED", "缺少有效的列印操作識別", 400)
         return value
 
+    @app.route("/api/admin/print/handoffs")
+    @guarded
+    def print_handoffs():
+        try:
+            offset = max(0, int(request.args.get("offset", 0)))
+        except ValueError:
+            raise PrintError("BAD_REQUEST", "分頁格式錯誤", 400)
+        return app_module.no_cache_json({"status": "success", "handoffs":
+            service.store.handoff_summary(include_order_ids=True, offset=offset)})
+
     @app.route("/api/admin/print/jobs")
     @guarded
     def print_jobs():
@@ -1183,6 +1462,26 @@ def install(app_module):
         if order_id and not re.fullmatch(r'[A-Za-z0-9-]{1,100}', order_id):
             raise PrintError('BAD_REQUEST', '訂單編號格式錯誤', 400)
         return app_module.no_cache_json({"status": "success", **service.dashboard(order_id or None)})
+
+    @app.route("/api/admin/print/resend-check")
+    @guarded
+    def print_resend_check():
+        order_id = str(request.args.get("order_id") or "")
+        if not re.fullmatch(r"[A-Za-z0-9-]{1,100}", order_id):
+            raise PrintError("BAD_REQUEST", "訂單編號格式錯誤", 400)
+        return app_module.no_cache_json({"status": "success", **service.check_order_resend(order_id)})
+
+    @app.route("/api/admin/print/manual-reprint", methods=["POST"])
+    @guarded
+    def print_manual_reprint():
+        payload = body()
+        order_id = str(payload.get("order_id") or "")
+        if not re.fullmatch(r"[A-Za-z0-9-]{1,100}", order_id):
+            raise PrintError("BAD_REQUEST", "訂單編號格式錯誤", 400)
+        actor = (session.get("admin_user") or session.get("username")
+                 or session.get("employee_name") or "authenticated_admin")
+        job = service.manual_reprint(order_id, key(payload), str(actor))
+        return app_module.no_cache_json({"status": "success", "job": _public_job(job)})
 
     @app.route("/api/admin/print/order-summaries")
     @guarded
@@ -1302,9 +1601,9 @@ def install(app_module):
         if request.path == "/admin" and response.status_code == 200 and response.mimetype == "text/html":
             response.direct_passthrough = False
             html = response.get_data(as_text=True)
-            src = "/static/admin-print-center.js?v=20261010safety1"
+            src = "/static/admin-print-center.js?v=20261019handoff3"
             if src not in html:
-                response.set_data(html.replace("</body>", f'<link rel="stylesheet" href="/static/admin-print-center.css?v=20261002operations1"><script src="{src}"></script></body>'))
+                response.set_data(html.replace("</body>", f'<link rel="stylesheet" href="/static/admin-print-center.css?v=20261019handoff3"><script src="{src}"></script></body>'))
             response.headers["Cache-Control"] = "no-store"
         return response
 
@@ -1326,12 +1625,19 @@ class AutoPrintDispatcher:
         self._event.set()
 
     def _run(self):
+        failures = 0
+        delay = self.interval
         while True:
-            self._event.wait(self.interval)
+            self._event.wait(delay)
             self._event.clear()
             try:
                 self.service.dispatch_auto_once()
+                failures = 0
+                delay = self.interval
             except Exception:
+                failures += 1
+                base = min(300, self.interval * (2 ** min(failures, 6)))
+                delay = base + (int(time.monotonic() * 1000) % max(1, base // 4))
                 self.service.app.app.logger.exception("Automatic print dispatcher cycle failed")
 
 

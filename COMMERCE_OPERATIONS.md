@@ -13,6 +13,15 @@ ledger and idempotency receipt. A stale revision retries from fresh state; an
 administrator saving an old screen receives HTTP 409 without saving anything.
 No process lock or stale cache is used for commerce decisions.
 
+Issue #87 extends that same boundary with one `print_handoffs` outbox insert for
+newly marked checkouts. It does not create another order or inventory writer.
+If the handoff marker/outbox insert fails, the whole commerce transaction rolls
+back; after commit, worker recovery never rewrites finance, stock or the ledger.
+Pre-release receipts are review-only under the database release cutoff. See
+`PRINT_OPERATIONS.md` for the exact snapshot, migration, worker pause and
+rollback order; `20261019193000_print_handoff_outbox.sql` has not been applied to
+production by this PR.
+
 `inventory_ledger` is an append-only array in the private commerce record. Entries
 contain a unique transaction identity, SKU, signed quantity, resulting balance,
 reason, order reference, UTC timestamp and source (`admin` or `checkout`). The

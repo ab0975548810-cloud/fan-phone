@@ -17,19 +17,28 @@ production PNG, an immutable finance SKU, an active formal production profile,
 complete vendor/public artwork configuration, and no active or successful print
 attempt. Legacy bindings are never inferred or promoted by this flow.
 
-The checkout transaction stores `auto_print_v1: true` in the same commerce
-request record as its finance snapshot, inventory mutation, and idempotent
-response. Only that durable marker makes a replay eligible: historical checkout
-records without it can never trigger automatic handoff. After commit, checkout
-persists a deterministic `prepare` request in the existing `print_requests`
-table. If the process stops between commit and prepare, replaying the same
-checkout key sees the marker and safely finishes preparation. The Gunicorn worker
-then drains only request keys with the Phase 3.3 `auto-prepare-` marker and sends
-their `PREPARED` jobs with a second
-deterministic `send` request. This provides recovery after a process restart and
-prevents checkout replay, worker retry, or redeploy from creating another active
-job or calling `receiveTask` twice. It does not scan historical orders and needs
-no schema migration.
+The checkout transaction stores `auto_print_v1: true`, the release-specific
+`auto_print_handoff_v1` marker, and one `print_handoffs` outbox row in the same
+database transaction as its order, finance snapshot, inventory mutation, and
+idempotent response. A worker claims at most 20 due rows with a database lease,
+validates the exact immutable receipt/response, runs the canonical prepare
+preflight, and then drains the existing deterministic `auto-prepare-*` /
+`auto-send-*` requests. A crash after order commit, storage or Supabase outage,
+process restart, or competing worker therefore cannot lose the handoff or create
+a second job/vendor request.
+
+`YUN_PRINT_ENABLED=false` is a durable operational pause. New eligible orders
+remain `PENDING` with `attempt_count=0`; workers do not claim, age out, or mark
+them `REVIEW`. After a later process starts with complete vendor configuration,
+the same outbox rows resume through normal claim/preflight exactly once.
+
+The migration records a `release_cutoff`. Existing `auto_print_v1` receipts that
+predate the release and have no job are written as `legacy-auto-print-v1 /
+REVIEW`. Claim RPCs structurally exclude those rows. They appear only in the
+read-only Print Center alert and are never auto-prepared or auto-sent merely
+because code is deployed or a worker restarts. An operator must compare the
+order, Ruiyin history and physical output before deciding any separate manual
+recovery action.
 
 The vendor call is outside the checkout response path. A disabled vendor,
 missing profile, missing finance SKU, invalid artwork, storage failure, timeout,
@@ -38,13 +47,26 @@ vendor rejection leaves the job `PREPARED` with its reason so an operator may us
 the existing manual send action. A timeout, 5xx, malformed success, or unexpected
 disconnect leaves the job `UNKNOWN`; reconcile it before any further send.
 
-Durable preparation still validates and hashes the production PNG immediately
-after the commerce commit, so checkout may include private-storage read latency.
-It never includes the vendor's receive timeout. Moving artwork validation fully
-off-request would require another durable queue record or schema change and is
-outside this no-migration phase.
+Durable preparation validates and hashes the production PNG in the worker. The
+checkout response path only wakes the dispatcher and never contacts Ruiyin.
+Transient recovery failures use bounded exponential backoff with deterministic
+jitter; one bad row cannot stop the rest of a bounded cycle. After eight failed
+claims the row becomes `FAILED` for manual review instead of looping forever.
 
 The compatibility endpoint `/api/admin/print/start` always fails closed with `DESKTOP_MANUAL_CONFIRMATION`. The A5 flow does not call vendor `startPrint` or `pushPrint`.
+
+### Historical missed-handoff review runbook
+
+Rows labelled `legacy-auto-print-v1 / REVIEW` are evidence for an operator; they
+are not a retry queue. For each alert, an authorised operator must first match
+the customer order against Print Center history, Ruiyin's task history and any
+physical output already produced. Record the observed task ID/status and the
+physical check outside the automatic dispatcher. If any task or physical output
+may exist, leave the row in review and use the existing reconcile/escalation
+path; never create or send a replacement automatically. If all sources prove
+that no task was accepted, obtain the store owner's explicit approval before a
+separate audited manual recovery. This release intentionally provides no button
+that turns a historical review row into `PENDING`, `PREPARED`, or a vendor call.
 
 ## A5 Desktop production rules
 
@@ -91,14 +113,17 @@ Printer status code `6` remains raw-only until the vendor gives one consistent d
 
 ## Deployment order
 
-1. Keep `YUN_PRINT_ENABLED=false` and take a restorable Supabase database snapshot.
-2. Confirm the existing Print Phase 3.0 migration is present, then apply `20260921184801_print_order_bindings.sql`. Do not backfill bindings automatically.
-3. Verify RLS remains enabled and `anon` / `authenticated` have no privileges on all print tables; run Supabase security and performance advisors.
-4. Deploy the application with `YUN_PRINT_ENABLED=false` and the HTTPS/token settings present. Confirm the reverse proxy redacts `/api/print/artwork/*`; the repository Gunicorn config already omits request paths.
-5. Calibrate one model in **品牌及型號**, then explicitly save it and verify every active SKU for that model shows the same read-only profile in Print Center. Do not accept guessed values without physical measurement.
-6. Give the printer callback URL to the vendor for backend binding, then verify both callback endpoints and one job-scoped artwork URL with a vendor-approved sandbox or supervised device.
-7. Confirm angle, every model/style position, callback clock tolerance, `getAllTasks` retention, and printer status code `6`.
-8. Enable `YUN_PRINT_ENABLED=true` only in a supervised test window. Prepare and send one approved task, then perform the physical confirmation in Ruiyin.
+1. Keep `YUN_PRINT_ENABLED=false`, stop/hold checkout traffic and old application workers, then take and verify a restorable Supabase database snapshot. This pause prevents an old worker from committing an order between the migration cutoff and the new application release.
+2. Confirm the existing Print migrations are present. Apply `20261019193000_print_handoff_outbox.sql`; never run it from an application boot hook.
+3. Verify `print_handoff_control.release_cutoff`, `print_handoffs`, and both RPCs exist. Confirm RLS is enabled; `public`, `anon`, and `authenticated` have no table or function access; only `service_role` can select/write and execute. Run Supabase security/performance advisors.
+4. Verify pre-cutoff marker/no-job candidates are `REVIEW` and that `claim_print_handoffs(20,60)` never returns them. Do not change those rows to `PENDING` during deployment.
+5. Deploy the application with `YUN_PRINT_ENABLED=false`. Create one isolated post-cutoff order in a non-production environment and verify exactly one `PENDING` outbox row with zero attempts survives a worker restart and no job is created. Confirm no `receiveTask`, `startPrint`, or `pushPrint` call occurs while disabled. In the isolated environment only, enable the vendor fixture and verify that same row becomes one linked PREPARED job and is submitted at most once.
+6. Resume checkout only after every worker runs the new release. Confirm the reverse proxy redacts `/api/print/artwork/*`; the repository Gunicorn config already omits request paths.
+7. If rollback is required, disable the dispatcher/vendor first and roll the application back. Keep the new tables and RPCs in place so committed outbox evidence is not destroyed. Do not drop or rewrite handoff rows. Re-deploy the fixed release to resume; review any `PENDING/RETRY/CLAIMED` rows before re-enabling vendor handoff.
+8. Calibrate one model in **品牌及型號**, then explicitly save it and verify every active SKU for that model shows the same read-only profile in Print Center. Do not accept guessed values without physical measurement.
+9. Give the printer callback URL to the vendor for backend binding, then verify both callback endpoints and one job-scoped artwork URL with a vendor-approved sandbox or supervised device.
+10. Confirm angle, every model/style position, callback clock tolerance, `getAllTasks` retention, and printer status code `6`.
+11. Enable `YUN_PRINT_ENABLED=true` only in a supervised test window. Prepare and send one approved task, then perform the physical confirmation in Ruiyin.
 
 ## Cancel and ambiguous operations
 
@@ -109,3 +134,41 @@ If `receiveTask` or `cancelTask` times out, returns a server error, or gives an 
 Stale `SENDING` and `CANCELING` states remain reconcilable. Legacy `STARTING` rows may also be reconciled, but Phase 3.1 never creates a new `STARTING` operation.
 
 `pushPrint`, website-triggered `startPrint`, maintenance controls, and vendor channel stock are intentionally absent from the A5 active flow. Vendor channel stock is not store SKU inventory.
+
+### 歷史 REVIEW 的人工處置
+
+一般 prepare/retry/send/manual recovery 仍共用 DB-backed handoff guard：REVIEW 或 legacy-auto-print-v1 回 HANDOFF_REVIEW_REQUIRED。資料庫查詢失敗亦不放行。
+Dashboard 每筆訂單的 handoff 狀態採 exact/batched order lookup，不使用截斷告警判斷權限。告警每頁20筆、支援上一頁/下一頁，數字僅代表本頁。
+只有已登入店員按訂單卡「重新送任務」時，才可走獨立 `manual-reprint` 授權交易。它會寫入 `HANDOFF_REVIEW_MANUAL_REPRINT_AUTHORIZED` 稽核事件；REVIEW row 保持 REVIEW，不會改成可供 worker 自動補送的狀態。
+
+## 訂單卡固定重新送任務入口
+
+每張訂單卡（包含作廢及完成訂單）固定顯示「重新送任務」。已登入店員按一下即 POST `/api/admin/print/manual-reprint`，不顯示多重確認，也不先呼叫 `getAllTasks`。
+已完成、已印壞、FAILED、CANCELED 的訂單會建立新 attempt、新 vendor task；新 attempt 逐欄複製前一 attempt 的原生產圖 hash/path 與 width/height/left/top/copies/spot/channel/angle 快照，不重新建訂單、不重新排版、不調整庫存或金額。
+後端用按鈕操作 key 原子建立 attempt、request 與 `MANUAL_REPRINT_AUTHORIZED` 稽核事件，再以衍生的固定 send key 執行 `receiveTask`。雙擊、HTTP response 遺失或同 key replay 都只會對同一 attempt 回覆，不會再次呼叫 vendor。
+`SENDING`、`UNKNOWN`、QUEUED、STARTING、PRINTING、CANCELING 仍阻擋新 attempt。`receiveTask` 結果不明時維持 UNKNOWN，必須先查核，不能用新的按鈕操作繞過。
+此流程仍不呼叫 `startPrint` / `pushPrint`；店員需在銳印軟體人工確認實體打印。`YUN_PRINT_ENABLED` 未啟用時不建立 attempt，也不送出。
+
+## Independent automatic dispatch switch
+
+`YUN_PRINT_ENABLED` remains the vendor master switch. `YUN_AUTO_PRINT_ENABLED`
+ defaults to `false`; only explicit `true` (also `1`/`yes`) enables automatic
+handoff preparation and dispatch, and the master switch plus complete vendor
+and artwork credentials must also be ready.
+
+| Master | Auto | Manual order-card resend | Automatic worker |
+|---|---|---|---|
+| false | any | blocked | paused |
+| true | absent / false | allowed with complete credentials and safety checks | paused |
+| true | true | allowed with safety checks | eligible new handoffs only |
+
+A paused worker does not claim PENDING handoffs or consume retries, and does not
+send already PREPARED automatic jobs. Re-enabling auto intentionally resumes
+eligible pending work; historical REVIEW remains excluded. Manual one-click
+reprint retains original artwork/parameter snapshots and does not create an
+order or deduct stock. UNKNOWN/SENDING remain blocked by atomic send claims.
+
+For manual-only rollout keep `YUN_AUTO_PRINT_ENABLED=false`. Enabling the master
+switch alone no longer enables automatic dispatch. Existing deployments that
+intend automatic dispatch must explicitly opt in after review. No production
+environment variables are changed by this PR.

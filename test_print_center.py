@@ -3,6 +3,7 @@ import os
 import json
 import copy
 import tempfile
+import threading
 import unittest
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -58,6 +59,7 @@ class PrintCenterTests(unittest.TestCase):
         app.print_center.store.path = app.commerce.store.path
         self.fake = FakeVendor()
         self.vendor_env = {
+            "YUN_AUTO_PRINT_ENABLED": "true",
             "YUN_PRINT_ENABLED": "true", "YUN_PRINT_DEVICE_ID": "device-fixture",
             "YUN_PRINT_DEVICE_KEY": "fake-key-never-production", "YUN_PRINT_BASE_URL": "https://fixture.invalid",
             "CI": "true",
@@ -75,6 +77,15 @@ class PrintCenterTests(unittest.TestCase):
         data["skus"][0].update(cost_price=100, stock_qty=20, track_stock=True)
         self.assertEqual(self.client.post("/api/admin/save_commerce_data", json=data).status_code, 200)
         self.order_id = self.create_order()
+        # Baseline is a legitimate manual order with no historical handoff.
+        # REVIEW cases are explicit fixtures and must not be prepared manually.
+        data = app.commerce.read()
+        for receipt in data["requests"].values():
+            receipt.pop("auto_print_v1", None)
+            receipt.pop("auto_print_handoff_v1", None)
+        self.assertTrue(app.commerce.store.commit(data["revision"], data))
+        with app.print_center.store.connection(True) as db:
+            db.execute("DELETE FROM print_handoffs WHERE order_id=?", (self.order_id,))
 
     def tearDown(self):
         for name, value in self._old_print_env.items():
@@ -98,7 +109,12 @@ class PrintCenterTests(unittest.TestCase):
     def remove_auto_marker(self, key):
         data = app.commerce.read()
         data["requests"][key].pop("auto_print_v1", None)
+        data["requests"][key].pop("auto_print_handoff_v1", None)
         self.assertTrue(app.commerce.store.commit(int(data.get("revision", 0)), data))
+        with app.print_center.store.connection(True) as db:
+            db.execute("""UPDATE print_handoffs SET marker_version='legacy-auto-print-v1',
+                state='REVIEW',next_attempt_at=NULL,last_error_code='LEGACY_CUTOFF_REVIEW'
+                WHERE request_key=?""", (key,))
 
     def make_legacy(self, order_id=None):
         order_id = order_id or self.order_id
@@ -115,6 +131,182 @@ class PrintCenterTests(unittest.TestCase):
         if state != "PREPARED":
             job = app.print_center.store.patch_job(job["id"], {"state": state})
         return order_id, finance["sku_id"], job
+
+    def test_order_resend_check_is_read_only_and_fails_closed(self):
+        self.fake.responses["/api/Device/getAllTasks"] = {"code": 0, "data": {"list": []}}
+        before = copy.deepcopy(app.commerce.read())
+        endpoint = "/api/admin/print/resend-check?order_id=" + self.order_id
+        self.assertEqual(self.client.get(endpoint).get_json()["action"], "prepare")
+        self.save_profile()
+        job = self.prepare()
+        self.assertEqual(self.client.get(endpoint).get_json()["action"], "send")
+        for state in ("FAILED", "CANCELED"):
+            app.print_center.store.patch_job(job["id"], {"state": state})
+            self.assertEqual(self.client.get(endpoint).get_json()["action"], "retry")
+        for state in ("UNKNOWN", "QUEUED", "SENDING", "STARTING", "CANCELING"):
+            app.print_center.store.patch_job(job["id"], {"state": state})
+            self.assertEqual(self.client.get(endpoint).get_json()["code"], "RECONCILE_REQUIRED")
+        app.print_center.store.patch_job(job["id"], {"state": "FAILED", "vendor_taskid": "existing-task"})
+        self.assertEqual(self.client.get(endpoint).get_json()["code"], "VENDOR_TASK_STILL_EXISTS")
+        app.print_center.store.patch_job(job["id"], {"vendor_taskid": None, "started_at": "2026-10-19T00:00:00+00:00"})
+        self.assertEqual(self.client.get(endpoint).get_json()["code"], "REPRINT_REQUIRED")
+        self.assertEqual(app.commerce.read(), before)
+        self.assertFalse(any(path.endswith("receiveTask") for path, _ in self.fake.calls))
+        with self.client.session_transaction() as session:
+            session.pop("logged_in", None)
+        self.assertEqual(self.client.get(endpoint).status_code, 401)
+
+    def test_order_resend_check_vendor_failure_or_existing_task_blocks(self):
+        endpoint = "/api/admin/print/resend-check?order_id=" + self.order_id
+        for data, code in (({"list": [{"order_id": self.order_id, "taskid": "existing"}]}, "VENDOR_TASK_STILL_EXISTS"),
+                           ({"list": [{"order_id": self.order_id + "-p1", "taskid": "orphan"}]}, "VENDOR_TASK_STILL_EXISTS"),
+                           ({"unexpected": True}, "RECONCILE_FAILED")):
+            self.fake.responses["/api/Device/getAllTasks"] = {"code": 0, "data": data}
+            self.assertEqual(self.client.get(endpoint).get_json()["code"], code)
+        self.fake.timeout_paths.add("/api/Device/getAllTasks")
+        self.assertEqual(self.client.get(endpoint).get_json()["code"], "RECONCILE_FAILED")
+        self.assertIsNone(app.print_center.store.latest_job(self.order_id))
+        self.assertFalse(any(path.endswith("receiveTask") for path, _ in self.fake.calls))
+
+    def test_manual_reprint_completed_order_is_one_click_audited_and_idempotent(self):
+        self.save_profile()
+        old = self.prepare("manual-reprint-old-prepare-0001")
+        sent = self.send(old["id"], key="manual-reprint-old-send-0001",
+                         taskid="manual-old-task")
+        self.assertEqual(sent.status_code, 200, sent.get_data(as_text=True))
+        self.assertEqual(self.callback("manual-old-task", "2").status_code, 200)
+        old = app.print_center.store.job(old["id"])
+        self.assertEqual(old["state"], "COMPLETED")
+        before_order = copy.deepcopy(app.commerce.store.order(self.order_id))
+        before_commerce = copy.deepcopy(app.commerce.read())
+        self.fake.responses["/api/Device/receiveTask"] = {
+            "code": 0, "data": {"taskid": "manual-new-task", "status": 0}}
+        with self.client.session_transaction() as session:
+            session["admin_user"] = "fixture-clerk"
+        key = "manual-reprint-click-00000001"
+        first = self.post("manual-reprint", {"order_id": self.order_id}, key=key)
+        second = self.post("manual-reprint", {"order_id": self.order_id}, key=key)
+        self.assertEqual(first.status_code, 200, first.get_data(as_text=True))
+        self.assertEqual(second.status_code, 200, second.get_data(as_text=True))
+        new = first.get_json()["job"]
+        self.assertEqual((new["id"], new["attempt_no"], new["vendor_taskid"]),
+                         (second.get_json()["job"]["id"], 2, "manual-new-task"))
+        stored = app.print_center.store.job(new["id"])
+        for name in ("artwork_path", "artwork_sha256", "sku_id", "width_mm",
+                     "height_mm", "left_mm", "top_mm", "copies", "spot_color",
+                     "channel", "angle"):
+            self.assertEqual(stored[name], old[name], name)
+        event = app.print_center.store.event("print_events", "manual-reprint:" + key)
+        self.assertEqual(event["event_type"], "MANUAL_REPRINT_AUTHORIZED")
+        self.assertEqual(event["payload_json"]["actor"], "fixture-clerk")
+        self.assertEqual(event["payload_json"]["source_job_id"], old["id"])
+        self.assertEqual(len([p for p, _ in self.fake.calls
+                             if p == "/api/Device/receiveTask"]), 2)
+        self.assertFalse(any(p in ("/api/Device/startPrint", "/api/Device/pushPrint")
+                             for p, _ in self.fake.calls))
+        self.assertEqual(app.commerce.store.order(self.order_id), before_order)
+        self.assertEqual(app.commerce.read(), before_commerce)
+
+    def test_manual_reprint_lost_response_locks_unknown_and_never_resends(self):
+        self.save_profile()
+        self.fake.timeout_paths.add("/api/Device/receiveTask")
+        key = "manual-reprint-timeout-000001"
+        first = self.post("manual-reprint", {"order_id": self.order_id}, key=key)
+        self.assertEqual((first.status_code, first.get_json()["code"]),
+                         (503, "RECONCILE_REQUIRED"))
+        job = app.print_center.store.latest_job(self.order_id)
+        self.assertEqual((job["state"], job["ambiguous_operation"]),
+                         ("UNKNOWN", "receiveTask"))
+        # Browser/network replay uses the same authorization and child send
+        # key. It returns the locked attempt without another receiveTask.
+        replay = self.post("manual-reprint", {"order_id": self.order_id}, key=key)
+        self.assertEqual(replay.status_code, 200, replay.get_data(as_text=True))
+        self.assertEqual(replay.get_json()["job"]["state"], "UNKNOWN")
+        blocked = self.post("manual-reprint", {"order_id": self.order_id},
+                            key="manual-reprint-after-unknown-0001")
+        self.assertEqual((blocked.status_code, blocked.get_json()["code"]),
+                         (409, "RECONCILE_REQUIRED"))
+        self.assertEqual(len([p for p, _ in self.fake.calls
+                             if p == "/api/Device/receiveTask"]), 1)
+
+    def test_historical_review_has_separate_audited_manual_path_only(self):
+        self.save_profile()
+        checkout_key = "checkout-review-manual-reprint-0001"
+        order_id = self.create_order(key=checkout_key)
+        self.remove_auto_marker(checkout_key)
+        self.fake.responses["/api/Device/receiveTask"] = {
+            "code": 0, "data": {"taskid": "review-manual-task", "status": 0}}
+        key = "manual-reprint-review-00000001"
+        response = self.post("manual-reprint", {"order_id": order_id}, key=key)
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        event = app.print_center.store.event("print_events", "manual-reprint:" + key)
+        self.assertEqual(event["event_type"],
+                         "HANDOFF_REVIEW_MANUAL_REPRINT_AUTHORIZED")
+        self.assertTrue(event["payload_json"]["handoff_review"])
+        handoff = app.print_center.store.handoffs_for_orders([order_id])[order_id]
+        self.assertEqual(handoff["state"], "REVIEW")
+        before = len([p for p, _ in self.fake.calls if p == "/api/Device/receiveTask"])
+        app.print_center.dispatch_auto_once()
+        self.assertEqual(len([p for p, _ in self.fake.calls
+                             if p == "/api/Device/receiveTask"]), before)
+
+    def test_manual_reprint_disabled_vendor_creates_nothing(self):
+        self.save_profile()
+        app.print_center.client = YunPrintClient(
+            transport=self.fake,
+            env={**self.vendor_env, "YUN_PRINT_ENABLED": "false"})
+        response = self.post("manual-reprint", {"order_id": self.order_id},
+                             key="manual-reprint-disabled-000001")
+        self.assertEqual((response.status_code, response.get_json()["code"]),
+                         (503, "VENDOR_NOT_READY"))
+        self.assertIsNone(app.print_center.store.latest_job(self.order_id))
+        self.assertFalse(any(p == "/api/Device/receiveTask" for p, _ in self.fake.calls))
+
+    def test_auto_switch_defaults_off_without_disabling_manual_reprint(self):
+        self.save_profile()
+        env = dict(self.vendor_env)
+        env.pop("YUN_AUTO_PRINT_ENABLED")
+        app.print_center.client = YunPrintClient(transport=self.fake, env=env)
+        self.assertTrue(app.print_center.vendor_ready)
+        self.assertFalse(app.print_center.auto_ready)
+        order_id = self.create_order(key="manual-only-checkout-0001")
+        before = copy.deepcopy(app.commerce.read())
+        for _ in range(12):
+            self.assertEqual(app.print_center.dispatch_auto_once(), [])
+            self.assertEqual(app.print_center.recover_auto_handoffs_once(), [])
+        self.assertEqual(app.print_center.enqueue_auto(order_id)["reason"], "AUTO_PRINT_DISABLED")
+        row = app.print_center.store.handoffs_for_orders([order_id])[order_id]
+        self.assertEqual((row["state"], row["attempt_count"]), ("PENDING", 0))
+        self.assertIsNone(app.print_center.store.latest_job(order_id))
+        self.fake.responses["/api/Device/receiveTask"] = {
+            "code": 0, "data": {"taskid": "manual-only-task", "status": 0}}
+        key = "manual-only-reprint-0001"
+        response = self.post("manual-reprint", {"order_id": order_id}, key)
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json()["job"]["state"], "QUEUED")
+        self.assertEqual(self.post("manual-reprint", {"order_id": order_id}, key).status_code, 200)
+        self.assertEqual(app.commerce.read(), before)
+        self.assertEqual(len([p for p, _ in self.fake.calls if p.endswith("receiveTask")]), 1)
+
+    def test_auto_switch_pauses_already_prepared_jobs_and_resumes_once(self):
+        self.save_profile()
+        order_id = self.create_order(key="auto-switch-resume-checkout-0001")
+        job = app.print_center.enqueue_auto(order_id)["job"]
+        app.print_center.client.auto_enabled = False
+        self.assertEqual(app.print_center.dispatch_auto_once(), [])
+        self.assertEqual(app.print_center.store.job(job["id"])["state"], "PREPARED")
+        self.assertEqual(self.fake.calls, [])
+        app.print_center.client.auto_enabled = True
+        app.print_center.client.enabled = False
+        self.assertEqual(app.print_center.dispatch_auto_once(), [])
+        self.assertEqual(self.fake.calls, [])
+        app.print_center.client.enabled = True
+        self.fake.responses["/api/Device/receiveTask"] = {
+            "code": 0, "data": {"taskid": "auto-switch-resumed", "status": 0}}
+        app.print_center.dispatch_auto_once()
+        app.print_center.dispatch_auto_once()
+        self.assertEqual(app.print_center.store.job(job["id"])["state"], "QUEUED")
+        self.assertEqual(len([p for p, _ in self.fake.calls if p.endswith("receiveTask")]), 1)
 
     def test_order_history_filters_pagination_and_exact_print_lookup(self):
         # Rows beyond the recent 200 must remain reachable without changing commerce state.
@@ -1318,6 +1510,7 @@ class PrintCenterTests(unittest.TestCase):
         sku = self.add_color_sku("自動色")
         self.assertIsNone(app.print_center.store.profile(sku["id"]))
         self.order_id = self.create_order(color_name="自動色")
+        app.print_center.recover_auto_handoffs_once()
         profile = app.print_center.store.profile(sku["id"])
         job = app.print_center.store.active_job(self.order_id)
         self.assertIsNotNone(profile)
@@ -1462,6 +1655,7 @@ class PrintCenterTests(unittest.TestCase):
     def test_auto_prepared_paging_skips_many_manual_jobs(self):
         self.save_profile()
         auto_order_id = self.create_order()
+        app.print_center.recover_auto_handoffs_once()
         auto_job = app.print_center.store.latest_job(auto_order_id)
         fields = list(auto_job)
         marks = ",".join("?" for _ in fields)
@@ -1482,6 +1676,7 @@ class PrintCenterTests(unittest.TestCase):
     def test_stale_auto_recovery_is_disabled_without_operator_opt_in(self):
         self.save_profile()
         order_id = self.create_order()
+        app.print_center.recover_auto_handoffs_once()
         job = app.print_center.store.latest_job(order_id)
         with mock.patch.object(app.print_center.store, "claim_send_if_safe",
                                side_effect=RuntimeError("missing preclaim RPC")):
@@ -1509,6 +1704,7 @@ class PrintCenterTests(unittest.TestCase):
         self.fake.responses["/api/Device/receiveTask"] = {
             "code": 0, "data": {"taskid": "recovered-stale-auto", "status": 0}}
         order_id = self.create_order()
+        app.print_center.recover_auto_handoffs_once()
         job = app.print_center.store.latest_job(order_id)
         with mock.patch.object(app.print_center.store, "claim_send_if_safe",
                                side_effect=RuntimeError("missing preclaim RPC")):
@@ -1541,6 +1737,7 @@ class PrintCenterTests(unittest.TestCase):
         self.enterContext(mock.patch.dict(os.environ, {"PRINT_AUTO_RECOVER_STALE_SENDS": "1"}))
         self.save_profile()
         order_id = self.create_order()
+        app.print_center.recover_auto_handoffs_once()
         job = app.print_center.store.latest_job(order_id)
         with mock.patch.object(app.print_center.store, "claim_send_if_safe",
                                side_effect=RuntimeError("missing preclaim RPC")):
@@ -1580,6 +1777,8 @@ class PrintCenterTests(unittest.TestCase):
         self.fake.responses["/api/Device/receiveTask"] = {
             "code": 0, "data": {"taskid": "auto-task-one", "status": 0}}
         order_id = self.create_order()
+        self.assertIsNone(app.print_center.store.latest_job(order_id))
+        app.print_center.recover_auto_handoffs_once()
         job = app.print_center.store.latest_job(order_id)
         self.assertEqual(job["state"], "PREPARED")
         self.assertEqual([path for path, _ in self.fake.calls if path == "/api/Device/receiveTask"], [])
@@ -1608,6 +1807,7 @@ class PrintCenterTests(unittest.TestCase):
         self.assertEqual((first_response.status_code, second_response.status_code), (200, 200))
         order_id = first_response.get_json()["order_id"]
         self.assertEqual(second_response.get_json()["order_id"], order_id)
+        app.print_center.recover_auto_handoffs_once()
         first = app.print_center.store.latest_job(order_id)
         second = app.print_center.enqueue_auto(order_id)["job"]
         self.assertEqual(first["id"], second["id"])
@@ -1633,20 +1833,325 @@ class PrintCenterTests(unittest.TestCase):
     def test_committed_marker_recovers_after_post_commit_enqueue_crash(self):
         self.save_profile()
         key = "recover-auto-checkout-001"
-        with mock.patch.object(app.print_center, "enqueue_auto", side_effect=RuntimeError("fixture crash")):
-            order_id = self.create_order(key=key)
+        order_id = self.create_order(key=key)
+        with mock.patch.object(app.print_center, "enqueue_auto", side_effect=TimeoutError("fixture outage")):
+            app.print_center.recover_auto_handoffs_once()
         self.assertIsNone(app.print_center.store.latest_job(order_id))
         self.assertTrue(app.commerce.read()["requests"][key]["auto_print_v1"])
+        with app.print_center.store.connection(True) as db:
+            row = db.execute("SELECT state FROM print_handoffs WHERE order_id=?", (order_id,)).fetchone()
+            self.assertEqual(row[0], "RETRY")
+            db.execute("UPDATE print_handoffs SET next_attempt_at='2000-01-01T00:00:00+00:00' WHERE order_id=?", (order_id,))
 
         self.fake.responses["/api/Device/receiveTask"] = {
             "code": 0, "data": {"taskid": "recovered-auto-task", "status": 0}}
-        self.assertEqual(self.create_order(key=key), order_id)
+        # Simulate restart recovery without replaying checkout.
+        app.print_center.recover_auto_handoffs_once()
         self.assertEqual(app.print_center.store.latest_job(order_id)["state"], "PREPARED")
         app.print_center.dispatch_auto_once()
         app.print_center.dispatch_auto_once()
         job = app.print_center.store.latest_job(order_id)
         self.assertEqual((job["state"], job["vendor_taskid"]), ("QUEUED", "recovered-auto-task"))
         self.assertEqual(len([path for path, _ in self.fake.calls if path == "/api/Device/receiveTask"]), 1)
+
+    def test_committed_checkout_survives_auto_eligibility_read_failure(self):
+        self.save_profile()
+        key = 'post-commit-eligibility-outage-0001'
+        before = app.commerce.read()
+        with mock.patch.object(app.print_center, 'wake_dispatcher',
+                               side_effect=TimeoutError('post-commit wake failure')):
+            order_id = self.create_order(key=key)
+        committed = app.commerce.read()
+        self.assertEqual(len(committed['order_finance']), len(before['order_finance']) + 1)
+        sku = next(s for s in committed['skus'] if s['id'] == self.sku_id)
+        self.assertEqual(sku['stock_qty'], next(s for s in before['skus'] if s['id'] == self.sku_id)['stock_qty'] - 1)
+        self.assertEqual(app.commerce.read(), committed)
+        self.assertEqual(self.fake.calls, [])
+        self.fake.responses['/api/Device/receiveTask'] = {
+            'code': 0, 'data': {'taskid': 'eligibility-recovery-task', 'status': 0}}
+        app.print_center.dispatch_auto_once()
+        app.print_center.dispatch_auto_once()
+        self.assertEqual(app.print_center.store.latest_job(order_id)['state'], 'QUEUED')
+        self.assertEqual(len([path for path, _ in self.fake.calls
+                              if path == '/api/Device/receiveTask']), 1)
+
+    def test_outbox_multi_worker_recovery_is_unique_and_does_not_repeat_commerce(self):
+        self.save_profile()
+        key = "outbox-workers-00000001"
+        order_id = self.create_order(key=key)
+        committed = copy.deepcopy(app.commerce.read())
+        finance = copy.deepcopy(committed["order_finance"][order_id])
+        stock = next(row for row in committed["skus"] if row["id"] == self.sku_id)["stock_qty"]
+
+        with ThreadPoolExecutor(max_workers=20) as pool:
+            list(pool.map(lambda _index: app.print_center.recover_auto_handoffs_once(),
+                          range(20)))
+        jobs = [row for row in app.print_center.store.list_jobs()
+                if row["order_id"] == order_id]
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0]["state"], "PREPARED")
+        after = app.commerce.read()
+        self.assertEqual(after["order_finance"][order_id], finance)
+        self.assertEqual(next(row for row in after["skus"]
+                              if row["id"] == self.sku_id)["stock_qty"], stock)
+        self.assertEqual(after["requests"][key], committed["requests"][key])
+
+        self.fake.responses["/api/Device/receiveTask"] = {
+            "code": 0, "data": {"taskid": "outbox-worker-task", "status": 0}}
+        with ThreadPoolExecutor(max_workers=20) as pool:
+            list(pool.map(lambda _index: app.print_center.dispatch_auto_once(),
+                          range(20)))
+        self.assertEqual(len([path for path, _ in self.fake.calls
+                              if path == "/api/Device/receiveTask"]), 1)
+        self.assertFalse(any(path in ("/api/Device/startPrint", "/api/Device/pushPrint")
+                             for path, _ in self.fake.calls))
+
+    def test_outbox_supabase_style_read_outage_retries_without_client_replay(self):
+        self.save_profile()
+        order_id = self.create_order(key="outbox-read-outage-0001")
+        with mock.patch.object(app.commerce, "read", side_effect=TimeoutError("db unavailable")):
+            with self.assertRaises(TimeoutError):
+                app.print_center.recover_auto_handoffs_once()
+        with app.print_center.store.connection(True) as db:
+            row = db.execute("SELECT state,last_error_code FROM print_handoffs WHERE order_id=?",
+                             (order_id,)).fetchone()
+            self.assertEqual(tuple(row), ("RETRY", "COMMERCE_UNAVAILABLE"))
+            db.execute("UPDATE print_handoffs SET next_attempt_at='2000-01-01T00:00:00+00:00' WHERE order_id=?",
+                       (order_id,))
+        app.print_center.recover_auto_handoffs_once()
+        self.assertEqual(app.print_center.store.latest_job(order_id)["state"], "PREPARED")
+
+    def test_outbox_item_failure_isolated_and_storage_recovery_is_bounded(self):
+        self.save_profile()
+        first = self.create_order(key="outbox-storage-first-0001")
+        second = self.create_order(key="outbox-storage-second-001")
+        original = app.print_center.enqueue_auto
+        calls = {"count": 0}
+
+        def flaky(order_id):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise TimeoutError("private storage temporarily unavailable")
+            return original(order_id)
+
+        with mock.patch.object(app.print_center, "enqueue_auto", side_effect=flaky):
+            recovered = app.print_center.recover_auto_handoffs_once(limit=20)
+        self.assertEqual(len(recovered), 1)
+        with app.print_center.store.connection() as db:
+            states = {row["order_id"]: row["state"] for row in db.execute(
+                "SELECT order_id,state FROM print_handoffs WHERE order_id IN (?,?)", (first, second))}
+        self.assertEqual(sorted(states.values()), ["PREPARED", "RETRY"])
+        failed_order = next(order for order, state in states.items() if state == "RETRY")
+        with app.print_center.store.connection(True) as db:
+            db.execute("UPDATE print_handoffs SET next_attempt_at='2000-01-01T00:00:00+00:00' WHERE order_id=?",
+                       (failed_order,))
+        app.print_center.recover_auto_handoffs_once()
+        self.assertEqual(app.print_center.store.latest_job(failed_order)["state"], "PREPARED")
+
+    def test_outbox_state_write_failure_isolated_and_lease_recovers(self):
+        self.save_profile()
+        first = self.create_order(key="outbox-finish-first-00001")
+        second = self.create_order(key="outbox-finish-second-0001")
+        original = app.print_center.store.finish_handoff
+        failed_once = {"value": False}
+
+        def flaky(handoff_id, lease_token, state, **fields):
+            if state == "PREPARED" and not failed_once["value"]:
+                failed_once["value"] = True
+                raise TimeoutError("finish RPC response lost")
+            return original(handoff_id, lease_token, state, **fields)
+
+        with mock.patch.object(app.print_center.store, "finish_handoff", side_effect=flaky):
+            app.print_center.recover_auto_handoffs_once(limit=20)
+        self.assertIsNotNone(app.print_center.store.latest_job(first))
+        self.assertIsNotNone(app.print_center.store.latest_job(second))
+        with app.print_center.store.connection(True) as db:
+            rows = {row["order_id"]: row["state"] for row in db.execute(
+                "SELECT order_id,state FROM print_handoffs WHERE order_id IN (?,?)", (first, second))}
+            self.assertEqual(sorted(rows.values()), ["CLAIMED", "PREPARED"])
+            db.execute("""UPDATE print_handoffs SET lease_expires_at='2000-01-01T00:00:00+00:00'
+                WHERE state='CLAIMED' AND order_id IN (?,?)""", (first, second))
+        app.print_center.recover_auto_handoffs_once()
+        with app.print_center.store.connection() as db:
+            final = {row["order_id"]: row["state"] for row in db.execute(
+                "SELECT order_id,state FROM print_handoffs WHERE order_id IN (?,?)", (first, second))}
+        self.assertEqual(set(final.values()), {"PREPARED"})
+        self.assertEqual(len([row for row in app.print_center.store.list_jobs()
+                              if row["order_id"] in (first, second)]), 2)
+
+    def test_disabled_vendor_keeps_new_order_pending_until_reenabled(self):
+        self.save_profile()
+        enabled_client = app.print_center.client
+        app.print_center.client = YunPrintClient(env={"CI": "true"})
+        before = app.commerce.read()
+        before_stock = next(row for row in before["skus"]
+                            if row["id"] == self.sku_id)["stock_qty"]
+        order_id = self.create_order(key="vendor-pause-resume-0001")
+        committed = copy.deepcopy(app.commerce.read())
+        for _ in range(12):
+            self.assertEqual(app.print_center.dispatch_auto_once(), [])
+            self.assertEqual(app.print_center.recover_auto_handoffs_once(), [])
+        with app.print_center.store.connection() as db:
+            row = db.execute("""SELECT state,attempt_count,prepared_job_id
+                FROM print_handoffs WHERE order_id=?""", (order_id,)).fetchone()
+        self.assertEqual(tuple(row), ("PENDING", 0, None))
+        self.assertIsNone(app.print_center.store.latest_job(order_id))
+        self.assertEqual(next(row for row in committed["skus"]
+                              if row["id"] == self.sku_id)["stock_qty"], before_stock - 1)
+
+        app.print_center.client = enabled_client
+        self.fake.responses["/api/Device/receiveTask"] = {
+            "code": 0, "data": {"taskid": "vendor-resumed-once", "status": 0}}
+        for _ in range(4):
+            app.print_center.dispatch_auto_once()
+        jobs = [row for row in app.print_center.store.list_jobs()
+                if row["order_id"] == order_id]
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual((jobs[0]["state"], jobs[0]["vendor_taskid"]),
+                         ("QUEUED", "vendor-resumed-once"))
+        self.assertEqual(len([path for path, _ in self.fake.calls
+                              if path == "/api/Device/receiveTask"]), 1)
+        after = app.commerce.read()
+        self.assertEqual(after["order_finance"][order_id], committed["order_finance"][order_id])
+        self.assertEqual(next(row for row in after["skus"]
+                              if row["id"] == self.sku_id)["stock_qty"], before_stock - 1)
+
+    def test_finish_handoff_requires_real_same_order_job(self):
+        self.save_profile()
+        first = self.create_order(key="finish-handoff-first-0001")
+        second = self.create_order(key="finish-handoff-second-001")
+        claimed = {row["order_id"]: row for row in
+                   app.print_center.store.claim_handoffs(limit=20, lease_seconds=90)}
+        first_claim = claimed[first]
+        first_job = app.print_center.prepare(
+            first, "finish-handoff-first-job-0001")
+        second_job = app.print_center.prepare(
+            second, "finish-handoff-second-job-001")
+
+        missing = app.print_center.store.finish_handoff(
+            first_claim["id"], first_claim["lease_token"], "PREPARED")
+        self.assertEqual(missing["code"], "PREPARED_JOB_REQUIRED")
+        wrong = app.print_center.store.finish_handoff(
+            first_claim["id"], first_claim["lease_token"], "PREPARED",
+            prepared_job_id=second_job["id"])
+        self.assertEqual(wrong["code"], "PREPARED_JOB_MISMATCH")
+        with app.print_center.store.connection() as db:
+            unchanged = db.execute("""SELECT state,prepared_job_id,lease_token
+                FROM print_handoffs WHERE id=?""", (first_claim["id"],)).fetchone()
+        self.assertEqual((unchanged["state"], unchanged["prepared_job_id"],
+                          unchanged["lease_token"]),
+                         ("CLAIMED", None, first_claim["lease_token"]))
+        accepted = app.print_center.store.finish_handoff(
+            first_claim["id"], first_claim["lease_token"], "PREPARED",
+            prepared_job_id=first_job["id"])
+        self.assertTrue(accepted["ok"])
+
+    def test_expired_lease_two_workers_still_create_and_send_once(self):
+        self.save_profile()
+        key = "lease-expiry-workers-0001"
+        before = app.commerce.read()
+        before_stock = next(row for row in before["skus"]
+                            if row["id"] == self.sku_id)["stock_qty"]
+        order_id = self.create_order(key=key)
+        committed = copy.deepcopy(app.commerce.read())
+        original = app.print_center.enqueue_auto
+        first_started = threading.Event()
+        release_first = threading.Event()
+        counter_lock = threading.Lock()
+        calls = {"value": 0}
+
+        def slow_first(current_order_id):
+            with counter_lock:
+                calls["value"] += 1
+                number = calls["value"]
+            if number == 1:
+                first_started.set()
+                self.assertTrue(release_first.wait(10))
+            return original(current_order_id)
+
+        with mock.patch.object(app.print_center, "enqueue_auto", side_effect=slow_first):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                first_worker = pool.submit(app.print_center.recover_auto_handoffs_once)
+                self.assertTrue(first_started.wait(10))
+                with app.print_center.store.connection(True) as db:
+                    db.execute("""UPDATE print_handoffs
+                        SET lease_expires_at='2000-01-01T00:00:00+00:00'
+                        WHERE order_id=? AND state='CLAIMED'""", (order_id,))
+                second_worker = pool.submit(app.print_center.recover_auto_handoffs_once)
+                second_worker.result(timeout=10)
+                release_first.set()
+                first_worker.result(timeout=10)
+
+        jobs = [row for row in app.print_center.store.list_jobs()
+                if row["order_id"] == order_id]
+        self.assertEqual(len(jobs), 1)
+        with app.print_center.store.connection() as db:
+            handoff = db.execute("""SELECT state,prepared_job_id
+                FROM print_handoffs WHERE order_id=?""", (order_id,)).fetchone()
+        self.assertEqual((handoff["state"], handoff["prepared_job_id"]),
+                         ("PREPARED", jobs[0]["id"]))
+        self.fake.responses["/api/Device/receiveTask"] = {
+            "code": 0, "data": {"taskid": "lease-recovered-once", "status": 0}}
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(lambda _index: app.print_center.dispatch_auto_once(), range(8)))
+        self.assertEqual(len([path for path, _ in self.fake.calls
+                              if path == "/api/Device/receiveTask"]), 1)
+        after = app.commerce.read()
+        self.assertEqual(after["order_finance"][order_id], committed["order_finance"][order_id])
+        self.assertEqual(next(row for row in after["skus"]
+                              if row["id"] == self.sku_id)["stock_qty"], before_stock - 1)
+
+    def test_historical_review_blocks_every_manual_path_beyond_alert_page(self):
+        self.save_profile()
+        job = self.prepare()
+        with app.print_center.store.connection(True) as db:
+            for i in range(25):
+                db.execute("""INSERT INTO print_handoffs
+                    (id,order_id,request_key,marker_version,state,created_at,updated_at)
+                    VALUES (?,?,?,'legacy-auto-print-v1','REVIEW',?,?)""",
+                    (str(uuid.uuid4()), self.order_id if i == 0 else f"REVIEW-{i}",
+                     f"review-request-{i}", f"2026-01-{i+1:02d}", f"2026-01-{i+1:02d}"))
+        before = copy.deepcopy(app.commerce.read())
+        for state in ("PREPARED", "FAILED", "UNKNOWN"):
+            app.print_center.store.patch_job(job["id"], {"state": state})
+            for action, payload in (("prepare", {"order_id": self.order_id}),
+                                    ("send", {"job_id": job["id"]})):
+                response = self.post(action, payload)
+                self.assertEqual(response.get_json()["code"], "HANDOFF_REVIEW_REQUIRED")
+        app.print_center.store.patch_job(job["id"], {"state": "FAILED"})
+        self.assertEqual(self.post("retry", {"job_id": job["id"]}).get_json()["code"], "HANDOFF_REVIEW_REQUIRED")
+        exact = self.client.get("/api/admin/print/jobs?order_id=" + self.order_id).get_json()
+        self.assertEqual(exact["rows"][0]["handoff_alert"]["state"], "REVIEW")
+        self.assertNotIn(self.order_id, [a["order_id"] for a in exact["handoffs"]["alerts"]])
+        self.assertTrue(exact["handoffs"]["truncated"])
+        page2 = self.client.get("/api/admin/print/handoffs?offset=20").get_json()
+        self.assertIn(self.order_id, [a["order_id"] for a in page2["handoffs"]["alerts"]])
+        self.assertEqual(app.commerce.read(), before)
+        self.assertEqual(self.fake.calls, [])
+        self.assertEqual(len(app.print_center.store.jobs_for_order(self.order_id)), 1)
+
+    def test_legacy_cutoff_candidate_is_alert_only_and_never_auto_sent(self):
+        self.save_profile()
+        key = "legacy-cutoff-review-0001"
+        order_id = self.create_order(key=key)
+        self.remove_auto_marker(key)
+        for _ in range(3):
+            app.print_center.dispatch_auto_once()
+        self.assertIsNone(app.print_center.store.latest_job(order_id))
+        self.assertEqual(self.fake.calls, [])
+        payload = self.client.get("/api/admin/print/jobs").get_json()
+        alert = next(row for row in payload["handoffs"]["alerts"]
+                     if row["state"] == "REVIEW")
+        self.assertEqual(alert["order_id"], order_id)
+        self.assertEqual(len(alert["order_ref"]), 12)
+        self.assertNotIn(order_id, json.dumps(app.print_center.store.handoff_summary()))
+        exact = self.client.get("/api/admin/print/jobs?order_id=" + order_id).get_json()
+        self.assertEqual(exact["rows"][0]["handoff_alert"]["state"], "REVIEW")
+        with self.client.session_transaction() as session:
+            session.pop("logged_in", None)
+        self.assertEqual(self.client.get("/api/admin/print/jobs").status_code, 401)
+        with self.client.session_transaction() as session:
+            session["logged_in"] = True
 
     def test_historical_replay_never_retries_terminal_failed_or_completed_job(self):
         self.save_profile()
@@ -1655,9 +2160,9 @@ class PrintCenterTests(unittest.TestCase):
                 key = f"historical-terminal-{index:04d}"
                 with mock.patch.object(app.print_center, "enqueue_auto"):
                     order_id = self.create_order(key=key)
-                self.remove_auto_marker(key)
                 self.order_id = order_id
                 job = self.prepare(f"manual-historical-{index:04d}")
+                self.remove_auto_marker(key)
                 app.print_center.store.patch_job(job["id"], {"state": state})
                 count_before = len(app.print_center.store.list_jobs())
 
@@ -1717,6 +2222,8 @@ class PrintCenterTests(unittest.TestCase):
         self.assertIn('列印嘗試：#', source)
         self.assertIn("prior_attempt_activity", source)
         self.assertIn("舊列印嘗試回報可能已列印", source)
+        self.assertIn('data-pc="handoff-order"', source)
+        self.assertIn("!reviewHold", source)
         self.assertNotIn("id='pc-modal'", source)
         self.assertNotIn('id="pc-modal"', source)
         self.assertIn("請到「品牌及型號」設定列印參數", source)

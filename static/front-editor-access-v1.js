@@ -41,17 +41,44 @@
     try{
       const workspace=document.querySelector('#page-editor>.workspace'),shell=document.getElementById('canvas-shell');
       if(!workspace||!shell||typeof canvas==='undefined'||!canvas)return;
-      const logicalW=Number(canvas.lowerCanvasEl?.width||canvas.width||0),logicalH=Number(canvas.lowerCanvasEl?.height||canvas.height||0);
+      if(!document.getElementById('page-editor')?.classList.contains('active'))return;
+      const logicalW=Number(canvas.width||0),logicalH=Number(canvas.height||0);
       if(!(logicalW>0&&logicalH>0))return;
-      const maxW=Math.max(120,workspace.clientWidth-20),maxH=Math.max(180,workspace.clientHeight-16);
-      const ratio=Math.min(1,maxW/logicalW,maxH/logicalH);
-      const displayW=Math.max(1,Math.floor(logicalW*ratio)),displayH=Math.max(1,Math.floor(logicalH*ratio));
+      const model=(shopData.models||[]).find(m=>String(m.id)===String(ctx.modelId));
+      const film=window.BenfuwanModelProfile?.isFilm(model);
+      const padding=film?48:32;
+      const maxW=Math.max(1,workspace.clientWidth-padding),maxH=Math.max(1,workspace.clientHeight-padding);
+      // Display-only fit: allow a physically small landscape film to grow to a usable size.
+      // Both axes share one scale; Fabric's logical pixels and print dimensions are unchanged.
+      const ratio=Math.min(maxW/logicalW,maxH/logicalH);
+      const displayW=logicalW*ratio,displayH=logicalH*ratio;
+      if(film){
+        // Fabric 5 normally allocates logical pixels * DPR, although cssOnly
+        // fit can enlarge this film. Keep this override on this canvas only;
+        // toCanvasElement disables retina while exporting production artwork.
+        if(!canvas.__bfFilmRetina){
+          canvas.__bfFilmRetina=true;
+          canvas.getRetinaScaling=function(){return this.enableRetinaScaling?this.__bfFilmPixelRatio:1};
+          canvas._isRetinaScaling=function(){return this.enableRetinaScaling&&this.__bfFilmPixelRatio!==1};
+          canvas._initRetinaScaling=function(){
+            if(!this.enableRetinaScaling)return;
+            const density=this.getRetinaScaling();
+            this.__initRetinaScaling(density,this.lowerCanvasEl,this.contextContainer);
+            if(this.upperCanvasEl)this.__initRetinaScaling(density,this.upperCanvasEl,this.contextTop);
+            this.contextContainer.imageSmoothingEnabled=true;
+            this.contextContainer.imageSmoothingQuality='high';
+          };
+        }
+        canvas.__bfFilmDisplayScale=ratio;
+        canvas.__bfFilmPixelRatio=ratio*Math.max(1,Math.min(Number(window.devicePixelRatio)||1,3));
+      }
       shell.style.width=displayW+'px';shell.style.height=displayH+'px';
       // initCanvas applies its own transform scale. Once this responsive fit
       // takes over, leaving that transform in place scales Fabric a second
       // time while the shell and mask keep the cssOnly dimensions.
       if(canvas.wrapperEl){canvas.wrapperEl.style.transform='none';canvas.wrapperEl.style.transformOrigin=''}
       if(typeof canvas.setDimensions==='function')canvas.setDimensions({width:displayW+'px',height:displayH+'px'},{cssOnly:true});
+      if(film)window.BenfuwanPrintMask?.refreshFilmDisplay(canvas);
       canvas.calcOffset?.();canvas.requestRenderAll?.();
     }catch(e){console.warn('[FRONT UX] canvas fit warning',e)}
   }
@@ -108,6 +135,8 @@
 
   function boot(){
     bind();
+    const workspace=document.querySelector('#page-editor>.workspace');
+    if(workspace)new ResizeObserver(()=>requestAnimationFrame(fitCanvasToWorkspace)).observe(workspace);
     const obs=new MutationObserver(bind);obs.observe(document.documentElement,{childList:true,subtree:true});setTimeout(()=>{try{obs.disconnect()}catch(e){}},30000);
     window.addEventListener('resize',()=>requestAnimationFrame(fitCanvasToWorkspace),{passive:true});
     window.addEventListener('orientationchange',()=>setTimeout(fitCanvasToWorkspace,80),{passive:true});
