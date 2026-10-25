@@ -32,7 +32,7 @@ def install(app_module):
                     '/static/admin-shell-v1.js?v=20261001a',
                     '/static/admin-product-workspace-v1.js?v=20261010modelsave1',
                     '/static/admin-library-workspace-v1.js?v=20261012lazyfix1',
-                    '/static/editable-sticker-core-v1.js?v=20261006multi1',
+                    '/static/editable-sticker-core-v1.js?v=20261025lifecycle1',
                     '/static/admin-editable-stickers-v1.js?v=20261006a',
                     '/static/multilayer-template-core-v1.js?v=20261019a',
                     '/static/admin-multilayer-template-v1.js?v=20261019review1',

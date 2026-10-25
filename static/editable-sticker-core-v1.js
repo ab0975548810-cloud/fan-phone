@@ -56,7 +56,7 @@
       if(o.role==='editable-sticker-text')await font(family,o.text);
       o.set('fontFamily',family);o.initDimensions();o.setCoords();
     }await Promise.all((o._objects||[]).map(visit));}
-    await Promise.all(c.getObjects().map(visit));c.requestRenderAll();
+    await Promise.all(c.getObjects().map(visit));if(c.contextContainer)c.requestRenderAll();
   }
   function members(c,o){const id=typeof o==='string'?o:o?.editableStickerInstanceId;return c.getObjects().filter(x=>x.editableStickerInstanceId===id);}
   function pair(c,o){const list=members(c,o);return {bg:list.find(x=>x.role==='editable-sticker-bg'),text:list.find(x=>x.role==='editable-sticker-text')};}
@@ -83,10 +83,14 @@
     t.setCoords();bg.setCoords();
   }
   async function rehydrate(c){
+    if(!c.contextContainer)return;
     await textFonts(c);
+    // A template/model switch may dispose this canvas while fonts load.
+    if(!c.contextContainer)return;
     for(const o of c.getObjects().filter(isMember))o.role=o.type==='image'?'editable-sticker-bg':'editable-sticker-text';
     const texts=c.getObjects().filter(o=>o.role==='editable-sticker-text');
     await Promise.all(texts.map(o=>font(o.fontFamily,o.text)));
+    if(!c.contextContainer)return;
     for(const t of texts){const {bg}=pair(c,t);sync(bg,t);t.__lastValid=t.text;}
     bind(c);c.requestRenderAll();
   }

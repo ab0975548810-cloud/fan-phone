@@ -148,7 +148,8 @@ def multilayer_browser_test(browser,base,poll):
             admin.close()
             page=browser.new_page(viewport={'width':390,'height':844},has_touch=True,is_mobile=True)
             page.on('dialog',lambda dialog:dialog.accept())
-            page.on('pageerror',lambda e:print('MULTILAYER_FRONT_ERROR',str(e),flush=True))
+            front_errors=[]
+            page.on('pageerror',lambda e:(front_errors.append(str(e)),print('MULTILAYER_FRONT_ERROR',str(e),flush=True)))
             page.on('console',lambda m:print('MULTILAYER_CONSOLE_ERROR',m.text,flush=True) if m.type=='error' else None)
             page.goto(base);poll(page,"() => !!window.BenfuwanMultilayer && typeof shopData!=='undefined' && shopData.models.length===3")
             # An image-only template still needs a font manifest without having
@@ -324,6 +325,8 @@ def multilayer_browser_test(browser,base,poll):
             page.evaluate("""()=>new Promise(resolve=>applyTemplate({id:'legacy-v1',model_id:ctx.modelId,template_version:1,slots:[],objects_json:{version:'5.3.1',objects:[{type:'rect',left:25,top:35,width:40,height:30,fill:'#79bcde',strokeWidth:0,role:'sticker'}]}},resolve))""")
             assert page.evaluate("!canvas.templateState && !canvas.layer_contract_version && canvas.getObjects().every(o=>!o.templateLayerId)")
             legacy_lock_and_proxy_test(page,browser,poll,asset_url,ids[0],style_id)
+            disposed_canvas_hydration_test(page)
+            assert not front_errors,front_errors
             page.close()
             print('MULTILAYER_30_LAYERS_AUTHORING_LOCK_HIT_THROUGH_TOUCH_DUPLICATE_RESET_PHOTO_DRAFT_NORMALIZED_ORDER_RESPONSIVE_OK')
         finally:
@@ -342,6 +345,20 @@ def move_handle_test(page,admin=False):
     assert abs(end['left']-start['left'])>3,(start,end)
     assert all(end[k]==start[k] for k in ('width','height','sx','sy')),(start,end)
     print('REAL_MOVE_CORNER_NO_RESIZE_OK',symbol)
+
+
+def disposed_canvas_hydration_test(page):
+    result=page.evaluate("""async()=>{
+      const c=new fabric.StaticCanvas(null,{width:100,height:100});
+      const pending=BenfuwanEditableSticker.rehydrate(c);
+      c.dispose();let requested=0;
+      c.requestRenderAll=()=>{requested++;return c;};
+      await pending;
+      await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+      return {requested,disposed:!c.contextContainer};
+    }""")
+    assert result=={'requested':0,'disposed':True},result
+    print('DISPOSED_CANVAS_ASYNC_HYDRATION_NO_RENDER_OK')
 
 
 def legacy_lock_and_proxy_test(page,browser,poll,asset_url,model,style):
