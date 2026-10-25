@@ -33,8 +33,9 @@
       const text=document.createElement('span');text.textContent='字型載入中…';button.append(label,text);previews.append(button);
       button.onclick=()=>{fontSelect.value=option.value;refreshFontSelection();};
       try{
-        if(core.FONTS[option.value])await core.font(option.value,sample);else await core.ordinaryFont(option.value,sample);
-        text.style.fontFamily=option.value;text.textContent=sample;button.disabled=false;
+        let family=option.value;
+        if(core.FONTS[family])await core.font(family,sample);else family=await core.ordinaryFont(family,sample);
+        text.style.fontFamily=family;text.textContent=sample;button.disabled=false;
       }catch(error){text.textContent='暫時無法載入';console.warn('Font preview unavailable',error);}
     }));
     refreshFontSelection();return previewPromise;

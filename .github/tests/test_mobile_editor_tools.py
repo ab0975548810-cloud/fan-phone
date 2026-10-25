@@ -89,6 +89,12 @@ def mobile_editor_tools_test(browser, base, poll):
         assert page.evaluate("canvas.getObjects().filter(o=>o.type==='rect').length") == 1
         # Font cards use the same hash-checked font loader as production, and
         # simply opening the UI must not change existing text layout or family.
+        legacy = page.evaluate("() => {const o=new fabric.Textbox('Legacy Arial',{fontFamily:'Arial',fontSize:18,width:140,role:'text'});canvas.add(o);canvas.setActiveObject(o);const saved=o.toObject();openTextSheet();return saved}")
+        assert page.locator('#text-font').input_value()=='Arial'
+        assert page.evaluate('canvas.getActiveObject().toObject()')==legacy
+        poll(page,"() => document.querySelector('#bf-font-previews button[data-family=Arial]')?.disabled===false")
+        assert 'BF-Arimo' in page.locator('#bf-font-previews button[data-family="Arial"] span').evaluate('e=>e.style.fontFamily')
+        page.evaluate('() => {closeSheets();deleteActive()}')
         page.evaluate("() => {canvas.discardActiveObject();openTextSheet()}")
         assert page.evaluate("document.querySelector('.app').scrollTop") == 0
         assert page.locator('#text-font').input_value() == 'NotoSansTC'
