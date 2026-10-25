@@ -11,6 +11,7 @@ import re
 import secrets
 import threading
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlsplit
@@ -1581,6 +1582,10 @@ def install(app_module):
 
     @app.route("/api/print/artwork/<job_id>/<token>")
     def print_artwork(job_id, token):
+        try:
+            uuid.UUID(job_id)
+        except (ValueError, AttributeError):
+            return app_module.no_cache_json({"status": "error", "msg": "生產圖連結無效"}, 404)
         job = service.store.job(job_id)
         if not service.verify_artwork_token(job, token):
             return app_module.no_cache_json({"status": "error", "msg": "生產圖連結無效"}, 404)

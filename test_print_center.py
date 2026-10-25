@@ -783,6 +783,10 @@ class PrintCenterTests(unittest.TestCase):
         self.assertFalse(any(path in ("/api/Device/receiveTask", "/api/Device/startPrint") for path, _ in self.fake.calls))
 
     def test_vendor_artwork_token_is_job_scoped_png_and_revoked_terminal(self):
+        self.assertEqual(
+            self.client.get("/api/print/artwork/not-a-uuid/not-a-token").status_code,
+            404,
+        )
         self.save_profile();job = self.prepare()
         expiry = (print_center.datetime.now(print_center.timezone.utc) + print_center.timedelta(hours=1)).isoformat()
         stored = app.print_center.store.patch_job(job["id"], {"artwork_token_expires_at": expiry})
