@@ -2,7 +2,7 @@
 
 The storefront CSP intentionally limits browser network access to self.  Serving
 MediaPipe's ESM, WASM loader/binary and MagicTouch model through Flask keeps the
-browser on fanphone.zeabur.app while the server fetches pinned upstream assets.
+browser on the production origin while the server fetches pinned upstream assets.
 """
 from __future__ import annotations
 

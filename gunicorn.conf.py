@@ -5,7 +5,7 @@ os.environ.setdefault('BENFUWAN_PRODUCTION', '1')
 
 # These run before app.py is imported by Gunicorn.
 # A random fallback secret is safer than a known hard-coded development secret;
-# set FLASK_SECRET_KEY in Zeabur for stable sessions across redeploys.
+# set FLASK_SECRET_KEY in Railway for stable sessions across redeploys.
 if not (os.environ.get('FLASK_SECRET_KEY') or '').strip():
     os.environ['FLASK_SECRET_KEY'] = secrets.token_urlsafe(48)
     os.environ['BENFUWAN_GENERATED_SECRET'] = '1'

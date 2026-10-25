@@ -315,7 +315,7 @@
 
 目前已確認文件描述的是 cloud HTTPS API，目標連線應為：
 
-**fanphone Zeabur backend → `open.yunweiyin.com` → vendor cloud / 已綁定設備 → A5 UV / 銳印**
+**fanphone Railway backend → `open.yunweiyin.com` → vendor cloud / 已綁定設備 → A5 UV / 銳印**
 
 若廠商確認現有機台/銳印已綁定雲平台，就不需要另外做 Windows localhost Print Agent。
 
@@ -336,7 +336,7 @@
 
 即使 MD5 本身不是現代安全雜湊，仍需按照廠商協議實作；設備 key 僅能放 server-side environment variable，不得進前端 JS / Git。
 
-建議 Zeabur secrets：
+建議 Railway secrets：
 
 - `YUN_PRINT_DEVICE_ID`
 - `YUN_PRINT_DEVICE_KEY`
@@ -428,7 +428,7 @@ Callback 必須：
 
 ## 14. Data / Persistence 原則
 
-這套系統會管理真實訂單、成本、庫存與打印，因此正式資料不可依賴 ephemeral Zeabur filesystem。
+這套系統會管理真實訂單、成本、庫存與打印，因此正式資料不可依賴 ephemeral Railway filesystem。
 
 長期資料應存 durable database/storage，例如 Supabase/Postgres + 適合的 object storage。
 

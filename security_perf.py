@@ -156,9 +156,9 @@ def install(app_module):
     admin_pw = (os.environ.get('ADMIN_PASSWORD') or '').strip()
     generated_secret = os.environ.get('BENFUWAN_GENERATED_SECRET') == '1'
     if not admin_pw or admin_pw == 'fan123' or len(admin_pw) < 12:
-        print('[SECURITY] WARNING: set ADMIN_PASSWORD in Zeabur to a unique password of at least 12 characters.', flush=True)
+        print('[SECURITY] WARNING: set ADMIN_PASSWORD in Railway to a unique password of at least 12 characters.', flush=True)
     if generated_secret:
-        print('[SECURITY] FLASK_SECRET_KEY is using a safe random per-boot fallback. Set a stable secret in Zeabur to keep sessions across redeploys.', flush=True)
+        print('[SECURITY] FLASK_SECRET_KEY is using a safe random per-boot fallback. Set a stable secret in Railway to keep sessions across redeploys.', flush=True)
 
     @app.before_request
     def _before():
