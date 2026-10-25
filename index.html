@@ -10,7 +10,7 @@
 <script>
 (async()=>{
   try{
-    const r=await fetch('/static/index-base-20260913.html?v=20261019review1',{cache:'no-store'});
+    const r=await fetch('/static/index-base-20260913.html?v=20261025mobile1',{cache:'no-store'});
     if(!r.ok)throw new Error('HTTP '+r.status);
     let html=await r.text();
     const fixes=[
@@ -23,7 +23,7 @@
       '<script src="/static/front-outline-styles.js?v=20261019review1"><\/script>',
       '<script src="/static/front-outline-slider-fix.js?v=20260913g"><\/script>',
       '<script src="/static/front-outline-no-flash.js?v=20260913h"><\/script>',
-      '<script src="/static/front-sticker-categories.js?v=20260913i"><\/script>',
+      '<script src="/static/front-sticker-categories.js?v=20261025mobile1"><\/script>',
       '<script src="/static/front-print-mask.js?v=20261021filmretina1"><\/script>',
       '<script src="/static/front-universal-templates.js?v=20261001fallback1"><\/script>',
       '<script src="/static/front-template-precision.js?v=20260929style1"><\/script>',
@@ -38,14 +38,14 @@
       '<script src="/static/design-source-upload-v1.js?v=20261006multi1"><\/script>',
       '<script src="/static/front-order-payload-v1.js?v=20261006b"><\/script>',
       '<script src="/static/editable-sticker-core-v1.js?v=20261025lifecycle1"><\/script>',
-      '<script src="/static/front-editable-stickers-v1.js?v=20261006b"><\/script>',
+      '<script src="/static/front-editable-stickers-v1.js?v=20261025mobile1"><\/script>',
       '<script src="/static/multilayer-template-core-v1.js?v=20261019review1"><\/script>',
       '<link rel="stylesheet" href="/static/multilayer-template-v1.css?v=20261006a">',
       '<script src="/static/front-multilayer-template-v1.js?v=20261019review1"><\/script>',
       '<script src="/static/front-design-draft-v1.js?v=20261019review1"><\/script>',
       '<script src="/static/front-home-v1.js?v=20261001a"><\/script>',
       '<script src="/static/front-template-alignment-v6.js?v=20261019review1"><\/script>',
-      '<script src="/static/front-editor-controls-v1.js?v=20261019review1"><\/script>'
+      '<script src="/static/front-editor-controls-v1.js?v=20261025mobile1"><\/script>'
     ].join('');
     html=html.replace('</body>',fixes+'</body>');
     document.open();document.write(html);document.close();

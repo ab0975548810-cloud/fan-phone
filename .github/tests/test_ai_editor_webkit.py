@@ -3041,6 +3041,7 @@ def main():
             try:
                 base=f'http://127.0.0.1:{BROWSER_TEST_PORT}';passkey_login_test(browser,base);front_test(browser,base);home_draft_catalog_race_test(browser,base);design_draft_test(browser,base);checkout_test(browser,base);admin_test(browser,base);order_print_workspace_test(browser,base,poll)
                 import runpy
+                runpy.run_path(str(ROOT / '.github/tests/test_mobile_editor_tools.py'))['mobile_editor_tools_test'](browser,base,poll)
                 runpy.run_path(str(ROOT / '.github/tests/test_pos_dashboard.py'))['dashboard_test'](browser,base,poll)
                 runpy.run_path(str(ROOT / '.github/tests/test_launch_acceptance.py'))['launch_acceptance_test'](browser,base,poll)
                 runpy.run_path(str(ROOT / '.github/tests/test_model_cat_icon.py'))['model_cat_icon_test'](browser,base,poll)
