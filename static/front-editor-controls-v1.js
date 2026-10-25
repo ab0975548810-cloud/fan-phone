@@ -9,6 +9,7 @@
   const multi=()=>window.BenfuwanMultilayer;
   const bound=new WeakSet();
   let scaleGesture=null;
+  let scaleRangeObject=null;
   function mayAdjust(c,o,permission){
     if(!c||!allowed(o)||o.bfUserLocked||o.locked||o.selectable===false)return false;
     const policy=multi();
@@ -22,13 +23,18 @@
     }
     syncAdjust();
   }
-  function syncAdjust(){
+  function syncAdjust(resetRange=false){
     const c=current(),o=c?.getActiveObject(),range=by('object-scale-range');
     if(!range)return;
     range.disabled=!mayScale(c,o);
     if(!scaleGesture){
       const percent=Math.abs(o?.scaleX||1)*100;
-      range.max=String(Math.max(400,Math.ceil(percent*2)));range.value=String(percent);
+      // A 4K photo can start at 3% of its source size. Keep thumb travel useful
+      // at that scale instead of jumping straight towards an intrinsic 400%.
+      if(resetRange||scaleRangeObject!==o||percent>Number(range.max)||percent<Number(range.min)){
+        range.min=String(Math.max(.001,percent/10));range.max=String(Math.max(.01,percent*3));scaleRangeObject=o;
+      }
+      range.value=String(percent);
     }
     by('object-scale-value').textContent=o?`${Math.round(Math.abs(o.scaleX)*1000)/10}%`:'—';
     const shapes=by('bf-shape-tools'),shape=o&&['rect','circle','triangle','polygon','path','line'].includes(o.type);
@@ -44,7 +50,7 @@
   function adjustUi(){
     const opacity=by('opacity-range');if(!opacity||by('object-scale-range'))return;
     const row=document.createElement('div');row.className='range-row';
-    row.innerHTML='<div class="head"><label for="object-scale-range">放大／縮小</label><output id="object-scale-value" for="object-scale-range"></output></div><input id="object-scale-range" type="range" min="0.1" max="400" step="0.1">';
+    row.innerHTML='<div class="head"><label for="object-scale-range">放大／縮小</label><output id="object-scale-value" for="object-scale-range"></output></div><input id="object-scale-range" type="range" min="0.001" max="300" step="any">';
     opacity.closest('.range-row').before(row);
     const range=by('object-scale-range');
     range.addEventListener('input',()=>{
@@ -79,7 +85,7 @@
       o.setPositionByOrigin(center,'center','center');o.setCoords();c.requestRenderAll();recordHistory();syncAdjust();
     });
     const open=window.openAdjustSheet;
-    window.openAdjustSheet=function(){syncAdjust();return open.apply(this,arguments);};
+    window.openAdjustSheet=function(){syncAdjust(true);return open.apply(this,arguments);};
     syncAdjust();
   }
   if(typeof CUSTOM_PROPS!=='undefined')for(const key of ['bfUserLocked','stickerId','originalPublicSrc','aiOutlineViewport'])if(!CUSTOM_PROPS.includes(key))CUSTOM_PROPS.push(key);

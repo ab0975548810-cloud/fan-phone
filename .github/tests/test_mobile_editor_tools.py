@@ -1,9 +1,11 @@
 """Real pointer interactions; isolated catalog, no order or vendor writes."""
 import base64
+import io
 import json
 import os
 import runpy
 from pathlib import Path
+from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -48,7 +50,8 @@ def mobile_editor_tools_test(browser, base, poll):
         slider = page.locator('#object-scale-range')
         slider.hover()
         box = slider.bounding_box()
-        x = box['x'] + 14 + (box['width']-28)*(.5-.001)/(4-.001)
+        minimum, maximum = slider.evaluate('e=>[+e.min,+e.max]')
+        x = box['x'] + 14 + (box['width']-28)*(50-minimum)/(maximum-minimum)
         y = box['y'] + box['height']/2
         page.mouse.move(x,y);page.mouse.down();page.mouse.move(x+35,y,steps=12)
         live = page.evaluate("() => ({scale:canvas.getActiveObject().scaleX,history:historyStack.length})")
@@ -71,6 +74,22 @@ def mobile_editor_tools_test(browser, base, poll):
         page.evaluate("() => {const o=canvas.getActiveObject();o.bfUserLocked=false;o.templateLayerId='locked';canvas.layer_contract_version='multilayer-v1';canvas.templateState={initial:[{templateLayerId:'locked',canScale:false,canMove:true,canEdit:true}]};BenfuwanEditorControls.applyUserLock(o);openAdjustSheet()}")
         assert slider.is_disabled()
         page.evaluate("() => {const o=canvas.getActiveObject();delete o.templateLayerId;delete canvas.templateState;delete canvas.layer_contract_version;BenfuwanEditorControls.applyUserLock(o);closeSheets()}")
+        # Large photos start at a small intrinsic percentage. The slider travel
+        # remains useful while its label/value still show the true Fabric scale.
+        photo=io.BytesIO();Image.new('RGB',(2400,1800),'#de84a0').save(photo,'PNG')
+        page.locator('#photo-input').set_input_files(dict(name='mobile-large.png',mimeType='image/png',buffer=photo.getvalue()))
+        poll(page,"() => canvas.getObjects().some(o=>o.originalName==='mobile-large.png') && !document.getElementById('busy')?.classList.contains('show')")
+        page.evaluate("() => {canvas.setActiveObject(canvas.getObjects().find(o=>o.originalName==='mobile-large.png'));openAdjustSheet()}")
+        slider.hover();box=slider.bounding_box()
+        size=page.evaluate("() => {const o=canvas.getActiveObject();return [o.width,o.height,o.scaleX,o.scaleY]}")
+        minimum,maximum,value=slider.evaluate('e=>[+e.min,+e.max,+e.value]')
+        assert size[:2]==[2400,1800] and abs(value-size[2]*100)<.001
+        assert abs(maximum-value*3)<.001
+        x=box['x']+14+(box['width']-28)*(value-minimum)/(maximum-minimum);y=box['y']+box['height']/2
+        page.mouse.move(x,y);page.mouse.down();page.mouse.move(x+25,y,steps=10);page.mouse.up()
+        after=page.evaluate("() => {const o=canvas.getActiveObject();return [o.width,o.height,o.scaleX,o.scaleY]}")
+        assert after[:2]==size[:2] and size[2]<after[2]<size[2]*2 and abs(after[2]/after[3]-size[2]/size[3])<1e-8
+        page.evaluate('closeSheets()')
         # Shape controls are scoped to vectors, with normal duplicate/delete.
         page.locator('[onclick="openMaterialSheet()"]' ).click()
         page.locator('#material-cats button', has_text='基本形狀').click()

@@ -110,8 +110,15 @@ def film_density_test(browser, base, poll, dpr):
         }""")
     for width, height in ((390,844),(390,600),(768,1024),(1180,900)):
         page.set_viewport_size(dict(width=width,height=height))
-        poll(page, "() => Math.abs(document.getElementById('canvas-shell').getBoundingClientRect().width-canvas.upperCanvasEl.getBoundingClientRect().width)<1")
-        page.wait_for_timeout(100)
+        # Shell and Fabric can still agree at the previous viewport size while
+        # ResizeObserver's fit is queued. Wait for the actual required padding,
+        # not a fixed sleep; all geometry assertions below stay unchanged.
+        poll(page, """() => {
+          const s=document.getElementById('canvas-shell').getBoundingClientRect();
+          const w=document.querySelector('#page-editor>.workspace').getBoundingClientRect();
+          return Math.abs(s.width-canvas.upperCanvasEl.getBoundingClientRect().width)<1
+            && s.width<=w.width-47 && s.height<=w.height-47;
+        }""")
         result=geometry(); shell=result['shell']; workspace=result['workspace']
         assert result['logical'][0]==201 and abs(result['logical'][1]-201*827/1530)<1e-8,result
         assert abs(shell['w']/shell['h']-1530/827)<.001,result
