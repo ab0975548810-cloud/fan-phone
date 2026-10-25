@@ -175,6 +175,34 @@ class PasskeyTests(unittest.TestCase):
         finally:
             service.config = original
 
+    def test_rp_change_uses_isolated_store_without_overwriting_legacy_credentials(self):
+        legacy = {
+            "version": 1,
+            "owner_id": "legacy-owner",
+            "credentials": [{"credential_id": "legacy-credential"}],
+        }
+        app_module.local_save_json(PASSKEY_FILE, legacy)
+        original = service.config
+        migrated = PasskeyConfig(
+            rp_id="fanphone.tw",
+            origin="https://fanphone.tw",
+            rp_name=original.rp_name,
+            owner_id="new-owner",
+            configured=True,
+        )
+        scoped_file = Path(f"{PASSKEY_FILE}.{migrated.owner_id}")
+        scoped_version = Path(str(scoped_file) + ".version")
+        service.config = migrated
+        try:
+            self.assertEqual(service._load(), service._default_document())
+            service._save(service._default_document())
+            self.assertEqual(app_module.local_load_json(PASSKEY_FILE, {}), legacy)
+            self.assertEqual(app_module.local_load_json(str(scoped_file), {}), service._default_document())
+        finally:
+            service.config = original
+            scoped_file.unlink(missing_ok=True)
+            scoped_version.unlink(missing_ok=True)
+
     def test_registration_requires_password_login_and_is_durable_single_use(self):
         client = self.client()
         self.assertEqual(client.post("/api/admin/passkey/register/options", json={}).status_code, 401)
