@@ -12,6 +12,7 @@ import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from commerce_store import Store, CommerceError
+from catalog_products import compatible, film_ready
 import time
 from flask import g, request
 
@@ -182,7 +183,7 @@ def _sync_skus(app_module, data):
             continue
         for style in styles:
             style_id = str(style.get('id') or '').strip()
-            if not style_id:
+            if not style_id or not compatible(model, style):
                 continue
             default = _normalize_default((data.get('style_defaults') or {}).get(style_id))
             for color in _allowed_colors(style, model_id):
@@ -545,6 +546,9 @@ def install(app_module):
                 return reply(prior)
             shop = _shop(app_module)
             style = next((s for s in shop['styles'] if str(s['id']) == str(req.get('style_id'))), None)
+            model = next((m for m in shop['models'] if str(m['id']) == str(req.get('model_id'))), None)
+            if not film_ready(model, style):
+                raise CommerceError('PRODUCT_NOT_CONFIGURED', '此商品尚未完成獨立商品與生產設定，請聯絡店家', 400)
             if style:
                 allowed = _allowed_colors(style, str(req.get('model_id')))
                 color = str(req.get('color_name') or '').strip()

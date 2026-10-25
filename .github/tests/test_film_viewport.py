@@ -9,8 +9,60 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def film_viewport_test(browser, base, poll):
+    film_admin_test(browser, base, poll)
     for dpr in (1,2,3):
         film_density_test(browser,base,poll,dpr)
+
+
+def film_admin_test(browser, base, poll):
+    page = browser.new_page(viewport={'width':390,'height':844})
+    profile = dict(preview_mask_img='/static/images/benfuwan-cat-peek.png',
+                   print_line_img='/static/images/benfuwan-cat-peek.png',
+                   print_w=67,print_h=37,print_x=66,print_y=30,print_angle=0)
+    catalog = dict(brands=['鏡頭底膜','Apple'], models=[dict(id='m_1792558304007',
+        brand='鏡頭底膜',name='底膜型號',status=True,case_profiles={'crystal':profile})],
+        styles=[dict(id='crystal',name='晶彩',status=True,price=790,colors=['白','黑'])])
+    writes=[]
+    def catalog_response(route):
+        route.fulfill(status=200,content_type='application/json',body=json.dumps(dict(status='success',version='v1',data=catalog)))
+    def save(route):
+        data=route.request.post_data_json
+        writes.append(data)
+        catalog.clear();catalog.update(data['shop_data'])
+        route.fulfill(status=200,content_type='application/json',body=json.dumps(dict(status='success',version='v2',synced_skus=1)))
+    page.route('**/api/shop_data*',catalog_response)
+    page.route('**/api/admin/print/model-profiles',save)
+    page.on('dialog',lambda d:d.accept())
+    page.goto(base+'/login',wait_until='load')
+    if page.locator('#password-toggle').is_visible():
+        page.locator('#password-toggle').click()
+    page.locator('input[name="password"]').fill('fan123')
+    page.locator('button[type="submit"]').click()
+    page.wait_for_url('**/admin')
+    poll(page,"() => !!window.BenfuwanModelProfilesAdmin && !!window.BenfuwanProducts")
+    page.evaluate("async () => {await loadShop(true);openModelEditor('m_1792558304007')}")
+    assert page.locator('#model-product-type').input_value()=='camera_film'
+    assert page.locator('#model-film-price').input_value()=='490'
+    assert page.locator('#model-profile-w').input_value()==''  # No silent inheritance.
+    page.get_by_role('button',name='確認帶入本型號的「晶彩」刀模').click()
+    assert page.locator('#model-profile-w').input_value()=='67'
+    for width,height in ((390,844),(768,1024),(1180,900)):
+        page.set_viewport_size(dict(width=width,height=height))
+        assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+2')
+    page.locator('#model-save').click()
+    poll(page,"() => !document.getElementById('model-modal').classList.contains('show')")
+    assert len(writes)==1,writes
+    model=catalog['models'][0]; style=next(s for s in catalog['styles'] if s['id']==model['direct_style_id'])
+    assert model['product_type']=='camera_film' and style['product_type']=='camera_film'
+    assert style['price']==490 and style['colors']==[] and style['model_colors']=={}
+    assert model['case_profiles'][style['id']]==profile
+    assert model['case_profiles']['crystal']==profile
+    assert catalog['styles'][0]['price']==790 and catalog['styles'][0]['colors']==['白','黑']
+    page.evaluate("async () => {await loadShop(true);openModelEditor('m_1792558304007')}")
+    assert page.locator('#model-profile-w').input_value()=='67'
+    assert page.locator('#model-film-price').input_value()=='490'
+    print('FILM_ADMIN_EXPLICIT_IMPORT_490_INDEPENDENT_PRODUCT_OK',flush=True)
+    page.close()
 
 
 def film_density_test(browser, base, poll, dpr):
@@ -19,17 +71,38 @@ def film_density_test(browser, base, poll, dpr):
     pair = {key: 'data:image/png;base64,' + base64.b64encode(
         (ROOT / '.github/tests/fixtures/film' / (key + '.png')).read_bytes()).decode()
         for key in ('preview', 'print')}
-    catalog={'brands':['鏡頭底膜'],'models':[{'id':'film-fixture','name':'iPhone 17 Pro Max','brand':'鏡頭底膜','status':True,'case_profiles':{'film':{'preview_mask_img':pair['preview'],'print_line_img':pair['print'],'print_w':67,'print_h':47,'print_x':68,'print_y':30,'print_angle':0}}}],
-             'styles':[{'id':'film','name':'背膜','status':True,'colors':['白']}]}
+    catalog={'brands':['鏡頭底膜'],'models':[{'id':'film-fixture','name':'iPhone 17 Pro Max','brand':'鏡頭底膜','product_type':'camera_film','direct_style_id':'film','status':True,'case_profiles':{'film':{'preview_mask_img':pair['preview'],'print_line_img':pair['print'],'print_w':67,'print_h':47,'print_x':68,'print_y':30,'print_angle':0}}}],
+             'styles':[{'id':'film','name':'背膜','product_type':'camera_film','price':490,'status':True,'colors':[]}]}
+    catalog['brands'].append('Apple')
+    catalog['models'].append(dict(id='case-fixture',name='名字含底膜也仍是手機殼',brand='Apple',product_type='phone_case',status=True,case_profiles={'crystal':catalog['models'][0]['case_profiles']['film']}))
+    catalog['styles'].append(dict(id='crystal',name='晶彩手機殼',status=True,price=790,colors=['白','黑']))
     page.route('**/api/shop_data',lambda route:route.fulfill(status=200,content_type='application/json',body=json.dumps({'status':'success','version':'fixture','data':catalog})))
     page.goto(base + '/', wait_until='domcontentloaded')
     poll(page, "() => !!window.BenfuwanModelProfile?.prepareEditorGeometry && !!window.BenfuwanEditorAccess && !!window.BenfuwanDesignDraft")
-    page.evaluate("""async pair => {
-      shopData.models=[{id:'film-fixture',name:'iPhone 17 Pro Max',brand:'鏡頭底膜',status:true,case_profiles:{film:{preview_mask_img:pair.preview,print_line_img:pair.print,print_w:67,print_h:47,print_x:68,print_y:30,print_angle:0}}}];
-      shopData.styles=[{id:'film',name:'背膜',status:true,colors:['白']}];
-      selectModel(shopData.models[0]);selectStyle(shopData.styles[0]);ctx.colorName='白';
-      await startEditor(false);await BenfuwanPrintMask.ensureClip(canvas,ctx.printLineUrl);
-    }""", pair)
+    # Real model-next click must go directly to a blank editor, never styles/templates.
+    poll(page, "() => catalogState==='ready'")
+    page.evaluate("async () => {await startNewDesign();selectModel(shopData.models[1])}")
+    page.locator('#model-next').click()
+    assert page.locator('#page-style').is_visible()
+    assert page.locator('#style-grid .style-card').count()==1
+    assert '晶彩手機殼' in page.locator('#style-grid').inner_text()
+    page.locator('#style-grid .style-card').click()
+    page.locator('.bf-color-chip').first.click()
+    page.locator('#style-next').click()
+    assert page.locator('#page-template').is_visible()
+    # Known legacy film cannot accidentally continue using the old crystal SKU.
+    page.evaluate("async () => {await startNewDesign();shopData.models[0].direct_style_id='';selectModel(shopData.models[0])}")
+    page.locator('#model-next').click()
+    assert page.locator('#page-model').is_visible() and not page.locator('#page-style').is_visible()
+    page.evaluate("() => {shopData.models[0].direct_style_id='film';selectModel(shopData.models[0])}")
+    page.locator('#model-next').click()
+    poll(page, "() => editorHasSession && canvas && document.getElementById('page-editor').classList.contains('active')")
+    assert page.evaluate("() => ctx.styleId==='film' && ctx.price===490 && ctx.colorName==='' && !selectedTpl")
+    assert not page.locator('[onclick="openTemplatesInEditor()"]').is_visible()
+    assert not page.locator('#page-style').is_visible()
+    assert not page.locator('#page-template').is_visible()
+    assert page.evaluate("() => {openTemplatesInEditor();return !document.getElementById('page-template').classList.contains('active')}")
+    page.evaluate("async () => await BenfuwanPrintMask.ensureClip(canvas,ctx.printLineUrl)")
     def geometry():
         return page.evaluate("""() => {
           const box=el=>{const r=el.getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height}};
@@ -139,11 +212,11 @@ def film_density_test(browser, base, poll, dpr):
       finally {Object.assign(canvas,own)}
     }"""),'display density changed production PNG'
     # Switching back to an ordinary phone case must not reuse the film aspect.
-    regular=page.evaluate("""() => {shopData.models[0].brand='Apple';resetDesignState(true);selectModel(shopData.models[0]);selectStyle(shopData.styles[0]);ctx.colorName='白';startEditor(false);return [canvas.width,canvas.height]}""")
+    regular=page.evaluate("""() => {shopData.models[0].product_type='phone_case';shopData.styles[0].product_type='phone_case';shopData.models[0].brand='Apple';resetDesignState(true);selectModel(shopData.models[0]);selectStyle(shopData.styles[0]);ctx.colorName='白';startEditor(false);return [canvas.width,canvas.height]}""")
     assert regular==[201,141],regular
     assert page.evaluate("() => !canvas.__bfFilmRetina && canvas.getRetinaScaling()===fabric.devicePixelRatio")
     page.route('**/fixture-missing-film.png',lambda route:route.fulfill(status=404,body='missing'))
-    failed=page.evaluate("""async () => {resetDesignState(true);shopData.models[0].brand='鏡頭底膜';shopData.models[0].case_profiles.film.print_line_img='/fixture-missing-film.png';selectModel(shopData.models[0]);selectStyle(shopData.styles[0]);ctx.colorName='白';const result=await startEditor(false);return {result,session:editorHasSession}}""")
+    failed=page.evaluate("""async () => {resetDesignState(true);shopData.models[0].product_type='camera_film';shopData.styles[0].product_type='camera_film';shopData.models[0].brand='鏡頭底膜';shopData.models[0].case_profiles.film.print_line_img='/fixture-missing-film.png';selectModel(shopData.models[0]);selectStyle(shopData.styles[0]);ctx.colorName='白';const result=await startEditor(false);return {result,session:editorHasSession}}""")
     assert failed=={'result':False,'session':False},failed
     print('FILM_RETINA_DRAG_SCALE_DRAFT_HQ_OK',browser.browser_type.name,'DPR',dpr,json.dumps(meta),flush=True)
     context.close()

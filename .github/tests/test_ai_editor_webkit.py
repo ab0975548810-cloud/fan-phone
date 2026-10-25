@@ -1714,9 +1714,9 @@ def admin_test(browser, base):
     model_color_src = page.locator('script[src*="admin-model-colors.js"]').get_attribute('src')
     assert model_color_src and 'v=20260926audit1' in model_color_src, model_color_src
     model_profile_src = page.locator('script[src*="admin-model-profiles.js"]').get_attribute('src')
-    assert model_profile_src and 'v=20261010modelsave1' in model_profile_src, model_profile_src
+    assert model_profile_src and 'v=20261025filmflow1' in model_profile_src, model_profile_src
     product_workspace_src = page.locator('script[src*="admin-product-workspace-v1.js"]').get_attribute('src')
-    assert product_workspace_src and 'v=20261010modelsave1' in product_workspace_src, product_workspace_src
+    assert product_workspace_src and 'v=20261025filmflow1' in product_workspace_src, product_workspace_src
     asset_category_src = page.locator('script[src*="admin-asset-categories.js"]').get_attribute('src')
     assert asset_category_src and 'v=20261012lazyfix1' in asset_category_src, asset_category_src
     template_loader_src = page.locator('script[src*="admin-template-loader.js"]').get_attribute('src')
