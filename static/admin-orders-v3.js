@@ -89,6 +89,7 @@
     document.getElementById('bf-order-manager').addEventListener('click',ev=>{
       const btn=ev.target.closest('[data-order-action]');if(!btn)return;
       if(btn.dataset.orderAction==='print')return window.BenfuwanPrintCenter?.openOrder(btn.dataset.orderId);
+      if(btn.dataset.orderAction==='print-resend'&&ev.detail>1)return;
       if(btn.dataset.orderAction.startsWith('print-'))return runPrintAction(btn.dataset.orderId,btn.dataset.orderAction);
       window.bfOrderAction(btn.dataset.orderId,btn.dataset.orderAction);
     });
@@ -178,11 +179,11 @@
     </article>`;
   }
 
-  async function printApi(url,payload=null,operation='',identity=''){
+  async function printApi(url,payload=null,operation='',identity='',newClick=false){
     const slot=operation?`bf-print:${operation}:${identity}`:'';
     let key='';
     if(slot){
-      key=sessionStorage.getItem(slot)||crypto.randomUUID();
+      key=(!newClick&&sessionStorage.getItem(slot))||crypto.randomUUID();
       sessionStorage.setItem(slot,key);
     }
     const opts=payload?{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':key},body:JSON.stringify({...payload,idempotency_key:key})}:{cache:'no-store'};
@@ -237,11 +238,12 @@
         printMessages.set(orderId,'正在把原生產圖重新送到銳印，請勿重複操作…');render();
         const sent=(await printApi('/api/admin/print/manual-reprint',{
           order_id:orderId
-        },'manual-reprint',orderId)).job;
+        },'manual-reprint',orderId,true)).job;
         if(!sent?.vendor_taskid&&!['SENDING','QUEUED','PRINTING','COMPLETED','UNKNOWN'].includes(sent?.state))
           throw new Error('重印任務狀態未確認，請前往列印中心查核');
         printMessages.set(orderId,sent?.state==='UNKNOWN'
-          ?'傳送結果不明，已鎖定防止重送；請到列印中心查核。'
+          ?'UNKNOWN：本次傳送結果不明，不會自動重試。再次點擊會新增獨立重印任務，請留意銳印可能已有原任務。'
+          :sent?.state==='SENDING'?'本次任務仍在傳送中，不會自動重複送出。再次點擊會建立新的獨立任務。'
           :'任務已送到銳印 ✓；仍須在銳印軟體人工確認打印。');
         await refreshOrders(true);
         return;
@@ -289,7 +291,9 @@
       printMessages.set(orderId,'任務已送到銳印 ✓；仍須在銳印軟體人工確認打印。');
       await refreshOrders(true);
     }catch(err){
-      printMessages.set(orderId,'操作未完成：'+(err.message||'請到列印中心查核'));
+      printMessages.set(orderId,action==='print-resend'&&(!err.code||err.code==='RECONCILE_REQUIRED'||err.code==='PRINT_UNAVAILABLE')
+        ?'本次傳送未確認（UNKNOWN）；不會自動重試。再次點擊會新增獨立任務，可能重複，請在銳印核對。 '+(err.message||'')
+        :'操作未完成：'+(err.message||'請到列印中心查核'));
       try{await refreshOrders(true)}catch(ignore){}
       alert((err.code==='REPRINT_REQUIRED'?'禁止重複列印：':'列印操作未完成：')+(err.message||'請前往列印中心查核最新狀態，勿連續重送'));
     }finally{

@@ -222,12 +222,15 @@ class PrintCenterTests(unittest.TestCase):
         replay = self.post("manual-reprint", {"order_id": self.order_id}, key=key)
         self.assertEqual(replay.status_code, 200, replay.get_data(as_text=True))
         self.assertEqual(replay.get_json()["job"]["state"], "UNKNOWN")
-        blocked = self.post("manual-reprint", {"order_id": self.order_id},
-                            key="manual-reprint-after-unknown-0001")
-        self.assertEqual((blocked.status_code, blocked.get_json()["code"]),
-                         (409, "RECONCILE_REQUIRED"))
+        self.fake.timeout_paths.clear()
+        self.fake.responses["/api/Device/receiveTask"] = {"code": 0, "data": {"taskid": "after-unknown", "status": 0}}
+        fresh = self.post("manual-reprint", {"order_id": self.order_id},
+                          key="manual-reprint-after-unknown-0001")
+        self.assertEqual(fresh.status_code, 200, fresh.get_json())
+        self.assertEqual(app.print_center.store.job(job["id"])["state"], "UNKNOWN")
+        self.assertEqual(fresh.get_json()["job"]["attempt_no"], 2)
         self.assertEqual(len([p for p, _ in self.fake.calls
-                             if p == "/api/Device/receiveTask"]), 1)
+                             if p == "/api/Device/receiveTask"]), 2)
 
     def test_historical_review_has_separate_audited_manual_path_only(self):
         self.save_profile()
@@ -286,6 +289,90 @@ class PrintCenterTests(unittest.TestCase):
         self.assertEqual(response.get_json()["job"]["state"], "QUEUED")
         self.assertEqual(self.post("manual-reprint", {"order_id": order_id}, key).status_code, 200)
         self.assertEqual(app.commerce.read(), before)
+        self.assertEqual(len([p for p, _ in self.fake.calls if p.endswith("receiveTask")]), 1)
+
+    def test_independent_manual_reprints_all_states_preserve_original_and_business(self):
+        self.save_profile()
+        for state in ("PREPARED", "SENDING", "QUEUED", "STARTING", "PRINTING",
+                      "CANCELING", "UNKNOWN", "COMPLETED", "FAILED", "CANCELED"):
+            with self.subTest(state=state):
+                self.order_id = self.create_order()
+                old = self.prepare()
+                old = app.print_center.store.patch_job(old["id"], {
+                    "state": state, "vendor_taskid": "original-" + state})
+                before = copy.deepcopy(app.commerce.read())
+                before_order = copy.deepcopy(app.commerce.store.order(self.order_id))
+                self.fake.responses["/api/Device/receiveTask"] = {
+                    "code": 0, "data": {"taskid": "independent-" + state, "status": 0}}
+                result = self.post("manual-reprint", {"order_id": self.order_id})
+                self.assertEqual(result.status_code, 200, result.get_json())
+                new = app.print_center.store.latest_job(self.order_id)
+                self.assertTrue(new["manual_independent"])
+                self.assertEqual(new["attempt_no"], 2)
+                self.assertEqual(app.print_center.store.job(old["id"]), old)
+                for field in ("artwork_path", "artwork_sha256", "width_mm", "height_mm",
+                              "left_mm", "top_mm", "angle", "copies", "channel"):
+                    self.assertEqual(new[field], old[field])
+                self.assertEqual(app.commerce.read(), before)
+                self.assertEqual(app.commerce.store.order(self.order_id), before_order)
+                # Late original callback must neither quarantine nor cancel a
+                # deliberately independent new task.
+                self.assertEqual(self.callback("original-" + state, "2").status_code, 200)
+                self.assertEqual(app.print_center.store.job(new["id"])["state"], "QUEUED")
+                # A manual task's callback never changes commerce/order status.
+                after_original = copy.deepcopy(app.commerce.store.order(self.order_id))
+                commerce_after_original = copy.deepcopy(app.commerce.read())
+                self.assertEqual(self.callback("independent-" + state, "1").status_code, 200)
+                self.assertEqual(app.commerce.store.order(self.order_id), after_original)
+                self.assertEqual(app.commerce.read(), commerce_after_original)
+                for field in ("print_path", "mockup_path", "total", "quantity"):
+                    self.assertEqual(after_original[field], before_order[field])
+        self.assertFalse(any(p.endswith(("cancelTask", "startPrint", "pushPrint"))
+                             for p, _ in self.fake.calls))
+
+    def test_independent_manual_authorization_concurrent_keys(self):
+        self.save_profile()
+        old = self.prepare()
+        source = app.print_center.store.job(old["id"])
+        def authorize(key):
+            return app.print_center.store.authorize_manual_reprint(
+                self.order_id, key, "same-order-hash", "fixture", "待處理",
+                {"artwork_token_nonce": uuid.uuid4().hex})
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            same = list(pool.map(authorize, ["independent-same-key-0001"] * 6))
+        self.assertEqual(len({r["job"]["id"] for r in same}), 1)
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            distinct = list(pool.map(authorize, [f"independent-distinct-{i:04}" for i in range(6)]))
+        self.assertEqual(len({r["job"]["id"] for r in distinct}), 6)
+        self.assertEqual(len({r["job"]["attempt_no"] for r in distinct}), 6)
+        self.assertEqual(app.print_center.store.job(old["id"]), source)
+
+    def test_independent_manual_same_click_concurrent_send_once(self):
+        self.save_profile()
+        entered, release = threading.Event(), threading.Event()
+        original = self.fake
+        def transport(path, payload):
+            if path.endswith("receiveTask"):
+                entered.set()
+                self.assertTrue(release.wait(10))
+            return original(path, payload)
+        app.print_center.client.transport = transport
+        self.fake.responses["/api/Device/receiveTask"] = {
+            "code": 0, "data": {"taskid": "same-click-concurrent", "status": 0}}
+        def click():
+            with app.app.test_request_context():
+                return app.print_center.manual_reprint(
+                    self.order_id, "independent-concurrent-click-0001", "fixture")
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(click)
+            self.assertTrue(entered.wait(10))
+            try:
+                replay = pool.submit(click).result(timeout=10)
+                self.assertEqual(replay["state"], "SENDING")
+            finally:
+                release.set()
+            completed = first.result(timeout=10)
+        self.assertEqual(replay["id"], completed["id"])
         self.assertEqual(len([p for p, _ in self.fake.calls if p.endswith("receiveTask")]), 1)
 
     def test_auto_switch_pauses_already_prepared_jobs_and_resumes_once(self):
