@@ -6,7 +6,7 @@
 
   const STACK=[
     '/static/admin-universal-templates.js?v=20260929style1',
-    '/static/admin-template-editor-v2.js?v=20260929style1',
+    '/static/admin-template-editor-v2.js?v=20261017picker1',
     '/static/admin-template-editor-v3.js?v=20260914h',
     '/static/admin-template-editor-v4.js?v=20261006review1',
     '/static/admin-template-editor-v4-fix.js?v=20261006review1',
@@ -21,7 +21,8 @@
     '/static/ai-interactive-core-v1.js?v=20261004providers2',
     '/static/admin-ai-v5.js?v=20261006review1',
     '/static/admin-template-history-v1.js?v=20260915b',
-    '/static/admin-template-upload-fix-v1.js?v=20261006review1'
+    '/static/admin-template-upload-fix-v1.js?v=20261006review1',
+    '/static/admin-template-controls-v1.js?v=20261017a'
   ];
   let loading=null,loaded=false;
 
@@ -30,6 +31,10 @@
     if(loaded)return;
     if(loading)return loading;
     loading=(async()=>{
+      // The editor modules use Fabric during installation. Load the existing
+      // pinned local copy before them, still only when the editor is opened.
+      if(!window.fabric)await loadOne('/static/vendor/fabric-5.3.1.min.js');
+      if(!window.fabric)throw new Error('模板編輯器載入失敗，請重新開啟');
       for(const src of STACK)await loadOne(src);
       loaded=true;
       window.__benfuwanTemplateStackReady=true;

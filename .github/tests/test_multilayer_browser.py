@@ -28,12 +28,12 @@ def multilayer_browser_test(browser,base,poll):
         try:
             for name,file in (('DATA_FILE','shop.json'),('TEMPLATES_FILE','templates.json'),('ASSETS_FILE','assets.json')):setattr(app_module,name,str(Path(directory)/file))
             shop=copy.deepcopy(app_module.DEFAULT_SHOP_DATA);model=shop['models'][0];style=shop['styles'][0];style_id=style['id']
-            model['name']='iPhone 13';ids=[model['id'],'multilayer-17-pro','multilayer-17-pro-max'];shop['models']=[copy.deepcopy(model) for _ in ids]
+            model['name']='iPhone 13';ids=['multilayer-13','multilayer-17-pro','multilayer-17-pro-max'];shop['models']=[copy.deepcopy(model) for _ in ids]
             for m,identity,name,w,h in zip(shop['models'],ids,['iPhone 13','iPhone 17 Pro','iPhone 17 Pro Max'],[70,71.63,77.6],[140,149.61,160.7]):
                 m.update(id=identity,name=name,status=True,case_profiles={style_id:{'preview_mask_img':mask_url,'print_line_img':mask_url,'print_w':w,'print_h':h,'print_x':12,'print_y':13,'print_angle':90}})
             shop['styles']=[style];app_module.local_save_json(app_module.DATA_FILE,shop)
             app_module.local_save_json(app_module.TEMPLATES_FILE,{'templates':[],'categories':['全部','熱門']})
-            assets=copy.deepcopy(app_module.DEFAULT_ASSETS);assets['editable_stickers']=[{'id':'multilayer-dialog','name':'圖層對話框','imageSrc':asset_url,'textArea':{'x':.15,'y':.2,'width':.7,'height':.45},'defaultTextStyle':{'text':'模板文字','fontFamily':'jf-openhuninn','fontSize':80,'minFontSize':18,'fontWeight':'400','fontStyle':'normal','fill':'#603c48','stroke':None,'strokeWidth':0,'textAlign':'center','charSpacing':0,'lineHeight':1.2}}]
+            assets=copy.deepcopy(app_module.DEFAULT_ASSETS);assets['stickers']=[{'id':'fixture-sticker','url':asset_url,'category':'測試'}];assets['categories']=['全部','測試'];assets['editable_stickers']=[{'id':'multilayer-dialog','name':'圖層對話框','imageSrc':asset_url,'textArea':{'x':.15,'y':.2,'width':.7,'height':.45},'defaultTextStyle':{'text':'模板文字','fontFamily':'jf-openhuninn','fontSize':80,'minFontSize':18,'fontWeight':'400','fontStyle':'normal','fill':'#603c48','stroke':None,'strokeWidth':0,'textAlign':'center','charSpacing':0,'lineHeight':1.2}}]
             app_module.local_save_json(app_module.ASSETS_FILE,assets)
             # Public caches must follow fixture data, not the preceding test workspace.
             import security_perf
@@ -56,9 +56,44 @@ def multilayer_browser_test(browser,base,poll):
             files=[{'name':f'layer-{i}.png','mimeType':'image/png','buffer':png('#f47ea8' if i%2 else '#9ac8e5')} for i in range(14)]
             admin.locator('#multilayer-files').set_input_files(files)
             poll(admin,'() => visualCanvas.getObjects().filter(o=>o.type===\'image\').length===14',timeout=60000)
+            move_handle_test(admin,admin=True)
+            # Two actual picker clicks must keep the panel open.
+            admin.evaluate('() => pickSticker()')
+            poll(admin,"() => document.querySelectorAll('#bf-tpl-sticker-grid .bf-tpl-sticker').length===1")
+            for count in (15,16):
+                admin.locator('#bf-tpl-sticker-grid .bf-tpl-sticker').first.click()
+                poll(admin,f"() => visualCanvas.getObjects().filter(o=>o.type==='image').length==={count}")
+                assert admin.locator('#bf-tpl-sticker-panel').is_visible()
+            admin.locator('#bf-tpl-sticker-close').click()
+            assert not admin.locator('#bf-tpl-sticker-panel').is_visible()
+            admin.evaluate("()=>{const c=visualCanvas;c.getObjects().filter(o=>o.stickerId==='fixture-sticker').forEach(o=>c.remove(o));}")
+            print('ADMIN_CONTINUOUS_STICKER_PICKER_OK')
+            directional=admin.evaluate("""()=>{
+              const c=visualCanvas,o=c.getObjects().find(x=>x.type==='image');c.setActiveObject(o);
+              const start={center:o.getCenterPoint(),width:o.getScaledWidth(),height:o.getScaledHeight(),scaleX:o.scaleX,scaleY:o.scaleY};
+              const right=BenfuwanAdminTemplateControls.nudge('right');
+              const down=BenfuwanAdminTemplateControls.nudge('down');
+              const stop=o.getCenterPoint();
+              BenfuwanAdminTemplateControls.nudge('left');BenfuwanAdminTemplateControls.nudge('up');
+              return {right,down,dx:stop.x-start.center.x,dy:stop.y-start.center.y,
+                width:o.getScaledWidth(),height:o.getScaledHeight(),scaleX:o.scaleX,scaleY:o.scaleY,
+                before:start,moveCorner:o.controls.br?.actionName,
+                directionButtons:document.querySelectorAll('#bf-tpl-nudge [data-bf-nudge]').length};
+            }""")
+            assert directional['right'] and directional['down'] and directional['dx']==2 and directional['dy']==2,directional
+            assert directional['width']==directional['before']['width'] and directional['height']==directional['before']['height'],directional
+            assert directional['scaleX']==directional['before']['scaleX'] and directional['scaleY']==directional['before']['scaleY'],directional
+            assert directional['moveCorner']=='drag' and directional['directionButtons']==4,directional
+            print('ADMIN_NUDGE_NO_RESIZE_AND_BOTTOM_RIGHT_DRAG_OK')
             for _ in range(12):admin.locator('#bf-tpl-text-v3').click()
             poll(admin,"() => visualCanvas.getObjects().filter(o=>o.type==='textbox').length===12")
             admin.locator('#bf-tpl-slot-v3').click()
+            # A locked placeholder must still permit customer upload,
+            # without allowing the customer to change its dimensions.
+            admin.evaluate("""()=>{const s=visualCanvas.getObjects().find(o=>o.isSlot);
+              s.locked=true;BenfuwanMultilayer.decorate(s,visualCanvas);
+              BenfuwanMultilayer.permissions(visualCanvas,s,true);s.setCoords();
+            }""")
             admin.get_by_role('button',name='加入文字貼紙',exact=True).click();admin.get_by_role('button',name='圖層對話框',exact=True).click()
             poll(admin,'() => visualCanvas.getObjects().length===30')
             # Source authoring layout is deliberately spread across the canvas.
@@ -113,7 +148,9 @@ def multilayer_browser_test(browser,base,poll):
             admin.close()
             page=browser.new_page(viewport={'width':390,'height':844},has_touch=True,is_mobile=True)
             page.on('dialog',lambda dialog:dialog.accept())
-            page.on('pageerror',lambda e:print('MULTILAYER_FRONT_ERROR',str(e),flush=True))
+            front_errors=[]
+            page.on('pageerror',lambda e:(front_errors.append(str(e)),print('MULTILAYER_FRONT_ERROR',str(e),flush=True)))
+            page.on('console',lambda m:print('MULTILAYER_CONSOLE_ERROR',m.text,flush=True) if m.type=='error' else None)
             page.goto(base);poll(page,"() => !!window.BenfuwanMultilayer && typeof shopData!=='undefined' && shopData.models.length===3")
             # An image-only template still needs a font manifest without having
             # previously selected any text or loaded a FontFace.
@@ -123,7 +160,15 @@ def multilayer_browser_test(browser,base,poll):
             assert page.evaluate('canvas.getObjects().length')==30
             selected=page.evaluate("""()=>{const out=[];for(const o of canvas.getObjects()){if(!o.locked&&o.role!=='slot-guide'&&o.role!=='editable-sticker-text'){canvas.setActiveObject(o);out.push(canvas.getActiveObject().layerInstanceId)}}return out;}""")
             assert len(selected)>=25 and len(set(selected))==len(selected)
-            assert page.evaluate("canvas.getObjects().filter(o=>o.locked).every(o=>!o.selectable&&!o.evented)")
+            assert page.evaluate("canvas.getObjects().filter(o=>o.locked && o.role!=='slot-guide' && o.role!=='slot-photo').every(o=>!o.selectable&&!o.evented)")
+            photo_slot=page.evaluate("""()=>{
+              const s=canvas.getObjects().find(o=>o.role==='slot-guide'),btn=document.querySelector('#bf-front-slot-actions button');
+              return {exists:!!s,locked:s?.locked,evented:s?.evented,canEdit:s?BenfuwanMultilayer.allowed(canvas,s,'canEdit'):false,
+                button:btn?.textContent,disabled:btn?.disabled};
+            }""")
+            assert photo_slot['exists'] and photo_slot['locked'] and photo_slot['evented'] and photo_slot['canEdit'],photo_slot
+            assert '上傳照片' in photo_slot['button'] and not photo_slot['disabled'],photo_slot
+            print('FRONT_LOCKED_TEMPLATE_SLOT_STILL_HAS_UPLOAD_BUTTON_OK')
             page.evaluate("canvas.setActiveObject(canvas.getObjects().find(o=>o.text==='Layer 10'));openTextSheet()")
             assert not page.locator('#sheet-text').evaluate("e=>e.classList.contains('show')")
             rotation=page.evaluate("() => {const o=canvas.getObjects().find(o=>o.text==='Layer 11');canvas.setActiveObject(o);changeAngle(90);return o.angle;}")
@@ -140,6 +185,14 @@ def multilayer_browser_test(browser,base,poll):
             old=page.evaluate('({left:canvas.getActiveObject().left,top:canvas.getActiveObject().top})')
             page.mouse.move(point['x'],point['y']);page.mouse.down();page.mouse.move(point['x']+12,point['y']+10,steps=8);page.mouse.up()
             assert abs(page.evaluate('canvas.getActiveObject().left')-old['left'])>3
+            move_handle_test(page)
+            page.locator('#bf-object-lock').click()
+            locked=page.evaluate("({left:canvas.getActiveObject().left,top:canvas.getActiveObject().top,angle:canvas.getActiveObject().angle,scale:canvas.getActiveObject().scaleX})")
+            gesture_test(page,browser,locked=True)
+            page.evaluate("nudgeActive(10,10);centerActive('both');changeAngle(90)")
+            assert page.evaluate("({left:canvas.getActiveObject().left,top:canvas.getActiveObject().top,angle:canvas.getActiveObject().angle,scale:canvas.getActiveObject().scaleX})")==locked
+            page.locator('#bf-object-lock').click()
+            print('USER_LOCK_MULTILAYER_TOUCH_AND_NUMERIC_GUARD_OK')
             single_touch_drag_test(page,browser)
             gesture_test(page,browser)
             # Duplication and deletion operate on the selected layer only.
@@ -168,10 +221,55 @@ def multilayer_browser_test(browser,base,poll):
             # A customer-owned upload survives reset; filled slot returns to its placeholder.
             page.locator('#photo-input').set_input_files({'name':'customer.png','mimeType':'image/png','buffer':png('#92d0a4')})
             poll(page,"() => canvas.getObjects().some(o=>o.originalName==='customer.png')")
-            page.evaluate("() => {activeSlotGuide=canvas.getObjects().find(o=>o.role==='slot-guide');}")
-            page.locator('#slot-input').set_input_files({'name':'slot.png','mimeType':'image/png','buffer':png('#79bcde')})
+            with page.expect_file_chooser() as chooser:
+                page.locator('#bf-front-slot-actions button').first.click()
+            chooser.value.set_files({'name':'slot.png','mimeType':'image/png','buffer':png('#79bcde')})
             poll(page,"() => canvas.getObjects().some(o=>o.role==='slot-photo')")
             assert page.evaluate("canvas.getObjects().find(o=>o.role==='slot-photo').sourceSize.width")==512
+            assert page.evaluate("canvas.getObjects().find(o=>o.role==='slot-photo').lockMovementX") is True
+            with page.expect_file_chooser() as replacement:
+                page.locator('#replace-slot-btn').click()
+            replacement.value.set_files({'name':'slot-replacement.png','mimeType':'image/png','buffer':png('#6dacdf')})
+            poll(page,"() => canvas.getObjects().some(o=>o.role==='slot-photo'&&o.originalName==='slot-replacement.png')")
+            slot_before=page.evaluate("()=>{const o=canvas.getObjects().find(o=>o.role==='slot-photo');canvas.setActiveObject(o);return {g:BenfuwanMultilayer.geometry(o,canvas),center:o.getCenterPoint(),angle:o.angle};}")
+            page.route('**/api/ai/remove-background',lambda route:route.fulfill(status=200,content_type='image/png',body=png('#6dacdf')))
+            page.evaluate('openAiRemoveTools()')
+            poll(page,"() => canvas.getActiveObject()?.aiBackgroundRemoved && !document.getElementById('busy-overlay').classList.contains('show')")
+            page.unroute('**/api/ai/remove-background')
+            page.evaluate('openAiOutlineSheet()')
+            page.locator('#sheet-outline-v2 [data-style=white]').click()
+            poll(page,"() => canvas.getActiveObject()?.aiOutlineStyle==='white' && !document.getElementById('busy-overlay').classList.contains('show')")
+            page.evaluate('closeSheets()')
+            slot_after=page.evaluate("()=>{const o=canvas.getObjects().find(o=>o.role==='slot-photo');return {g:BenfuwanMultilayer.geometry(o,canvas),center:o.getCenterPoint(),angle:o.angle};}")
+            assert all(abs(slot_before['g'][k]-slot_after['g'][k])<.0002 for k in ('x','y','width','height')),(slot_before,slot_after)
+            page.evaluate('async()=>{recordHistory(true);await BenfuwanDesignDraft.saveNow()}')
+            page.reload();poll(page,"() => window.BenfuwanDesignDraft?.state().prompt==='ready'")
+            page.locator('#home-design-card').click()
+            poll(page,"() => document.getElementById('page-editor').classList.contains('active') && !BenfuwanDesignDraft.state().suspended && canvas?.getObjects().some(o=>o.role==='slot-photo'&&o.aiOutlineViewport)")
+            page.evaluate("()=>{canvas.setActiveObject(canvas.getObjects().find(o=>o.role==='slot-photo'));syncSelection()}")
+            outline_source=page.evaluate('canvas.getActiveObject().aiOutlineSource')
+            for style_name in ('pink','none','white'):
+                page.evaluate('openAiOutlineSheet()')
+                page.locator(f'#sheet-outline-v2 [data-style={style_name}]').click()
+                poll(page,f"() => canvas.getActiveObject()?.aiOutlineStyle==='{style_name}' && !document.getElementById('busy-overlay').classList.contains('show')")
+                assert page.evaluate('canvas.getActiveObject().aiOutlineSource')==outline_source
+                g=page.evaluate('BenfuwanMultilayer.geometry(canvas.getActiveObject(),canvas)')
+                assert all(abs(slot_before['g'][k]-g[k])<.0002 for k in ('x','y','width','height')),g
+                page.evaluate('closeSheets()')
+            # Validate the FILLED slot, not only the reset/empty placeholder.
+            filled=page.evaluate("async()=>BenfuwanDesignSources.prepare(await BenfuwanMultilayer.serialize(canvas,ctx))")
+            probe=page.evaluate("()=>({model_id:ctx.modelId,style_id:ctx.styleId,color_name:'透明',quantity:1,payment_method:'現金',customer_name:'filled slot fixture',print_file:canvas.toDataURL({format:'png'}),mockup_file:canvas.toDataURL({format:'png'})})")
+            probe.update(design_json=filled,idempotency_key='filled-slot-'+uuid.uuid4().hex)
+            accepted=page.request.post(base+'/api/create_order',data=probe)
+            assert accepted.status==200,accepted.text()
+            filled_job=app_module.print_center.prepare(accepted.json()['order_id'],'filled-slot-render-'+uuid.uuid4().hex)
+            with Image.open(io.BytesIO(app_module.print_center._download_artwork(filled_job['artwork_path']))) as rendered_slot:
+                assert rendered_slot.size==(round(70*720/25.4),round(140*720/25.4))
+                assert abs(rendered_slot.info['dpi'][0]-720)<.05
+            assert filled_job['state']=='PREPARED'
+            print('FILLED_SLOT_EFFECTS_DRAFT_RECOLOR_REMOVE_720_RENDER_OK')
+            print('FRONT_TEMPLATE_FILLED_PHOTO_SLOT_REPLACE_AI_OUTLINE_SERVER_ORDER_OK')
+            print('FRONT_TEMPLATE_PHOTO_UPLOAD_CLICK_FILECHOOSER_OK')
             page.evaluate("() => BenfuwanMultilayerFront.resetTemplate()")
             poll(page,"() => canvas.getObjects().some(o=>o.role==='slot-guide') && !canvas.getObjects().some(o=>o.role==='slot-photo')")
             assert page.evaluate("canvas.getObjects().filter(o=>o.originalName==='customer.png').length")==1
@@ -226,6 +324,9 @@ def multilayer_browser_test(browser,base,poll):
             assert job['artwork_path']!=order['print_path']
             page.evaluate("""()=>new Promise(resolve=>applyTemplate({id:'legacy-v1',model_id:ctx.modelId,template_version:1,slots:[],objects_json:{version:'5.3.1',objects:[{type:'rect',left:25,top:35,width:40,height:30,fill:'#79bcde',strokeWidth:0,role:'sticker'}]}},resolve))""")
             assert page.evaluate("!canvas.templateState && !canvas.layer_contract_version && canvas.getObjects().every(o=>!o.templateLayerId)")
+            legacy_lock_and_proxy_test(page,browser,poll,asset_url,ids[0],style_id)
+            disposed_canvas_hydration_test(page)
+            assert not front_errors,front_errors
             page.close()
             print('MULTILAYER_30_LAYERS_AUTHORING_LOCK_HIT_THROUGH_TOUCH_DUPLICATE_RESET_PHOTO_DRAFT_NORMALIZED_ORDER_RESPONSIVE_OK')
         finally:
@@ -234,6 +335,99 @@ def multilayer_browser_test(browser,base,poll):
             asset.unlink(missing_ok=True);mask.unlink(missing_ok=True)
             import security_perf
             security_perf._CACHE.clear()
+
+
+def move_handle_test(page,admin=False):
+    symbol='visualCanvas' if admin else 'canvas'
+    start=page.evaluate("""name=>{const c=window[name]||canvas,o=c.getActiveObject();o.setCoords();c.requestRenderAll();const p=o.oCoords.br,r=c.upperCanvasEl.getBoundingClientRect();return {x:r.x+p.x*r.width/c.width,y:r.y+p.y*r.height/c.height,left:o.left,top:o.top,width:o.width,height:o.height,sx:o.scaleX,sy:o.scaleY};}""",symbol)
+    page.mouse.move(start['x'],start['y']);page.mouse.down();page.mouse.move(start['x']-12,start['y']-10,steps=8);page.mouse.up()
+    end=page.evaluate("name=>{const o=(window[name]||canvas).getActiveObject();return {left:o.left,top:o.top,width:o.width,height:o.height,sx:o.scaleX,sy:o.scaleY}}",symbol)
+    assert abs(end['left']-start['left'])>3,(start,end)
+    assert all(end[k]==start[k] for k in ('width','height','sx','sy')),(start,end)
+    print('REAL_MOVE_CORNER_NO_RESIZE_OK',symbol)
+
+
+def disposed_canvas_hydration_test(page):
+    result=page.evaluate("""async()=>{
+      const c=new fabric.StaticCanvas(null,{width:100,height:100});
+      const pending=BenfuwanEditableSticker.rehydrate(c);
+      c.dispose();let requested=0;
+      c.requestRenderAll=()=>{requested++;return c;};
+      await pending;
+      await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+      return {requested,disposed:!c.contextContainer};
+    }""")
+    assert result=={'requested':0,'disposed':True},result
+    print('DISPOSED_CANVAS_ASYNC_HYDRATION_NO_RENDER_OK')
+
+
+def legacy_lock_and_proxy_test(page,browser,poll,asset_url,model,style):
+    # Same-model geometry stays identical while an external source uses the
+    # same-origin proxy. Export is the actual taint detector.
+    page.route('**/api/public/asset_proxy*',lambda route:route.fulfill(status=200,content_type='image/png',body=png()))
+    result=page.evaluate("""async a=>{
+      ctx.modelId=a.model;ctx.styleId=a.style;ctx.printW=70;ctx.printH=140;initCanvas();
+      const raw={type:'image',src:'https://fixtures.invalid/sticker.png',publicSrc:'https://fixtures.invalid/sticker.png',width:512,height:256,left:30,top:40,originX:'center',originY:'center',scaleX:.1,scaleY:.1,angle:17};
+      const t={template_version:2,universal:true,reference_model_id:a.model,reference_style_id:a.style,source_canvas_w:ctx.printW*2,source_canvas_h:ctx.printH*2,objects_json:{objects:[raw]},slots:[{id:'legacy-frame',x:10,y:20,w:30,h:40}]};
+      const adapted=BenfuwanTemplateAlignment.adapt(t),o=adapted.objects_json.objects[0];
+      const image=await new Promise(resolve=>fabric.Image.fromURL(o.src,resolve));
+      const c=new fabric.StaticCanvas(null,{width:100,height:100});c.add(image);const exported=c.toDataURL({format:'png'});c.dispose();
+      await new Promise(resolve=>applyTemplate(t,resolve));
+      const placed=canvas.getObjects().find(x=>x.type==='image'),slot=canvas.getObjects().find(x=>x.role==='slot-guide');
+      const same={left:placed.left,top:placed.top,scale:placed.scaleX,angle:placed.angle,slotX:slot.left,slotY:slot.top,slotW:slot.width};
+      ctx.modelId='multilayer-17-pro-max';ctx.printW=77.6;ctx.printH=160.7;initCanvas();
+      await new Promise(resolve=>applyTemplate(t,resolve));
+      const cross=canvas.getObjects().find(x=>x.type==='image'),crossSlot=canvas.getObjects().find(x=>x.role==='slot-guide');
+      const mapped={left:cross.left,top:cross.top,scale:cross.scaleX,angle:cross.angle,slotX:crossSlot.left,slotW:crossSlot.width};
+      canvas.toDataURL({format:'png'});
+      ctx.modelId=a.model;ctx.printW=70;ctx.printH=140;initCanvas();
+      return {src:o.src,left:o.left,top:o.top,scale:o.scaleX,angle:o.angle,exported:exported.startsWith('data:image/png'),same,mapped};
+    }""",dict(model=model,style=style))
+    assert result['src'].startswith('/api/public/asset_proxy') and result['exported'],result
+    assert (result['left'],result['top'],result['scale'],result['angle'])==(30,40,.1,17)
+    same=result['same'];assert same['left']==45 and same['top']==60 and abs(same['scale']-.15)<1e-9 and same['angle']==17,same
+    assert (same['slotX'],same['slotY'],same['slotW'])==(30,60,90),same
+    cross=result['mapped'];fit=min(77.6/70,160.7/140)
+    assert abs(cross['left']-30/140*(77.6*3))<1e-7 and abs(cross['top']-40/280*(160.7*3))<1e-7,cross
+    assert abs(cross['scale']-.1*fit*1.5)<1e-9 and cross['angle']==17,cross
+    assert abs(cross['slotW']-30*fit*3)<1e-7,cross
+    print('LEGACY_SAME_AND_CROSS_MODEL_SINGLE_MAPPING_IMAGE_AND_SLOT_OK')
+    page.evaluate("""()=>{canvas.clear();const o=new fabric.Rect({width:30,height:30,left:40,top:60,role:'sticker'});canvas.add(o);canvas.setActiveObject(o);syncSelection();}""")
+    page.evaluate("navigate('page-editor')")
+    page.locator('#bf-object-lock').click();gesture_test(page,browser,locked=True)
+    page.locator('#bf-object-lock').click();gesture_test(page,browser)
+    page.evaluate('recordHistory(true)')
+    page.locator('#bf-object-lock').click()
+    page.locator('#page-editor button[onclick*=undoCanvas]').click()
+    poll(page,"() => canvas.getObjects().filter(o=>o.role==='sticker').every(o=>!o.bfUserLocked)")
+    page.locator('#page-editor button[onclick*=redoCanvas]').click()
+    poll(page,"() => canvas.getObjects().some(o=>o.bfUserLocked && o.lockScalingX && o.lockRotation)")
+    page.evaluate('async()=>{await BenfuwanDesignDraft.saveNow()}')
+    print('USER_LOCK_UNDO_REDO_OK')
+    page.reload();poll(page,"() => window.BenfuwanDesignDraft?.state().prompt==='ready'")
+    page.locator('#home-design-card').click()
+    poll(page,"() => document.getElementById('page-editor').classList.contains('active') && canvas?.getObjects().some(o=>o.bfUserLocked)")
+    assert page.evaluate("canvas.getObjects().filter(o=>o.bfUserLocked).every(o=>o.lockMovementX&&o.lockScalingX&&o.lockRotation)")
+    print('USER_LOCK_DRAFT_RELOAD_OK')
+    # PNG and emoji outlines stay editable and survive JSON rehydration.
+    page.locator('#photo-input').set_input_files({'name':'outline.png','mimeType':'image/png','buffer':png()})
+    poll(page,"() => canvas.getActiveObject()?.originalName==='outline.png'")
+    page.evaluate("()=>{const o=canvas.getActiveObject();o.role='sticker';o.stickerId='outline-fixture';o.publicSrc='/old-source.png';}")
+    for style in ('white','pink','none'):
+        page.evaluate('openAiOutlineSheet()')
+        page.locator(f'#sheet-outline-v2 [data-style={style}]').click()
+        poll(page,f"() => canvas.getActiveObject()?.aiOutlineStyle==='{style}' && !document.getElementById('busy-overlay').classList.contains('show')")
+        assert page.evaluate("canvas.getActiveObject().stickerId")=='outline-fixture'
+        assert page.evaluate("!canvas.getActiveObject().publicSrc")
+        page.evaluate('closeSheets()')
+    page.evaluate("()=>{const o=new fabric.Text('♡',{left:50,top:70,fontSize:30,role:'sticker'});canvas.add(o);canvas.setActiveObject(o);syncSelection();openAiOutlineSheet();}")
+    page.locator('#sheet-outline-v2 [data-style=pink]').click()
+    assert page.evaluate("canvas.getActiveObject().stroke")=='#ff6f9a'
+    page.evaluate("()=>new Promise(resolve=>{const j=canvas.toDatalessJSON(CUSTOM_PROPS);canvas.loadFromJSON(j,()=>{rehydrateCanvas();resolve();});})")
+    assert page.evaluate("canvas.getObjects().some(o=>o.type==='text'&&o.stroke==='#ff6f9a')")
+    assert page.evaluate("canvas.getObjects().some(o=>o.stickerId==='outline-fixture'&&o.originalPublicSrc==='/old-source.png')")
+    print('PNG_EMOJI_OUTLINE_RELOAD_OK')
+    print('LEGACY_USER_LOCK_AND_SAME_MODEL_PROXY_EXPORT_OK')
 
 
 def single_touch_drag_test(page,browser):
@@ -315,14 +509,17 @@ def legacy_image_tools_regression(page,poll):
     finally:hooks.remove(capture)
 
 
-def gesture_test(page,browser):
-    before=page.evaluate('({scale:canvas.getActiveObject().scaleX,angle:canvas.getActiveObject().angle})')
+def gesture_test(page,browser,locked=False):
+    before=page.evaluate('()=>{window.__gestureTarget=canvas.getActiveObject();return {scale:__gestureTarget.scaleX,angle:__gestureTarget.angle}}')
     if browser.browser_type.name=='chromium':
         cdp=page.context.new_cdp_session(page)
-        box=page.locator('#main-canvas').bounding_box();x=box['x']+box['width']*.3;y=box['y']+box['height']*.3
+        anchor=page.evaluate('()=>{const p=__gestureTarget.getCenterPoint(),r=canvas.upperCanvasEl.getBoundingClientRect();return {x:r.x+p.x*r.width/canvas.width,y:r.y+p.y*r.height/canvas.height}}')
+        x=anchor['x']+15;y=anchor['y']
         points=lambda d,dy:[{'x':x-d,'y':y-dy,'id':1},{'x':x+d,'y':y+dy,'id':2}]
         cdp.send('Input.dispatchTouchEvent',{'type':'touchStart','touchPoints':points(15,0)})
+        page.evaluate('() => new Promise(requestAnimationFrame)')
         cdp.send('Input.dispatchTouchEvent',{'type':'touchMove','touchPoints':points(24,12)})
+        page.evaluate('() => new Promise(requestAnimationFrame)')
         cdp.send('Input.dispatchTouchEvent',{'type':'touchEnd','touchPoints':[]});cdp.detach()
     else:
         # WebKit Playwright has no CDP multi-touch transport. Dispatch native DOM
@@ -332,7 +529,11 @@ def gesture_test(page,browser):
           function emit(type,d,dy){const points=d?[{identifier:1,target:el,clientX:x-d,clientY:y-dy,pageX:x-d+scrollX,pageY:y-dy+scrollY},{identifier:2,target:el,clientX:x+d,clientY:y+dy,pageX:x+d+scrollX,pageY:y+dy+scrollY}]:[],event=new Event(type,{bubbles:true,cancelable:true});Object.defineProperties(event,{touches:{value:points},targetTouches:{value:points},changedTouches:{value:points}});el.dispatchEvent(event);}
           emit('touchstart',15,0);emit('touchmove',24,12);emit('touchend',0,0);
         }""")
-    after=page.evaluate('({scale:canvas.getActiveObject().scaleX,angle:canvas.getActiveObject().angle})')
+    after=page.evaluate('({scale:__gestureTarget.scaleX,angle:__gestureTarget.angle})')
+    page.evaluate('canvas.setActiveObject(__gestureTarget);syncSelection()')
+    if locked:
+        assert after==before,(before,after)
+        return
     assert after['scale']>before['scale']*1.3 and abs(after['angle']-before['angle'])>20,(before,after)
 
 

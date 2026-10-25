@@ -1720,7 +1720,7 @@ def admin_test(browser, base):
     asset_category_src = page.locator('script[src*="admin-asset-categories.js"]').get_attribute('src')
     assert asset_category_src and 'v=20261012lazyfix1' in asset_category_src, asset_category_src
     template_loader_src = page.locator('script[src*="admin-template-loader.js"]').get_attribute('src')
-    assert template_loader_src and 'v=20261006review1' in template_loader_src, template_loader_src
+    assert template_loader_src and 'v=20261019controls2' in template_loader_src, template_loader_src
     library_workspace_src = page.locator('script[src*="admin-library-workspace-v1.js"]').get_attribute('src')
     assert library_workspace_src and 'v=20261012lazyfix1' in library_workspace_src, library_workspace_src
     commerce_src = page.locator('script[src*="admin-commerce-v1.js"]').get_attribute('src')
@@ -2508,12 +2508,12 @@ def admin_test(browser, base):
     }""")
     assert template_fixture_profile, template_fixture_profile
     page.locator('#view-templates .titlebar .btn').click()
-    poll(page, "() => document.getElementById('template-modal')?.classList.contains('show')", timeout=30000)
+    poll(page, "() => document.getElementById('template-modal')?.classList.contains('show') && !!visualCanvas", timeout=30000)
     template_open_diag = page.evaluate("""() => ({canvas:!!visualCanvas,model:document.getElementById('tpl-model')?.value,style:document.getElementById('tpl-style')?.value,profile:!!window.benfuwanTemplateReferenceProfile?.(),dialogs:window.__templateOpenDialogs||[]})""")
     print('ADMIN_TEMPLATE_OPEN_DIAG', template_open_diag)
     assert template_open_diag['canvas'], template_open_diag
     template_editor_src = page.locator('script[src*="admin-template-editor-v2.js"]').get_attribute('src')
-    assert template_editor_src and 'v=20260929style1' in template_editor_src, template_editor_src
+    assert template_editor_src and 'v=20261017picker1' in template_editor_src, template_editor_src
     print('ADMIN_FABRIC_LAZY_OK')
 
     template_contract = page.evaluate("""async () => {

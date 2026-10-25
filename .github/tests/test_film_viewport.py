@@ -68,8 +68,8 @@ def film_density_test(browser, base, poll, dpr):
     page.mouse.move(x,y);page.mouse.down();page.mouse.move(x+12,y+9,steps=5);page.mouse.up()
     after=photo();assert abs(after['left']-before['left'])>2 and abs(after['top']-before['top'])>2,(before,after)
     # Scale using the Fabric corner handle, not a programmatic scale mutation.
-    corner=page.evaluate("() => {canvas.getActiveObject().setCoords();const p=canvas.getActiveObject().oCoords.br;const r=canvas.upperCanvasEl.getBoundingClientRect();return {x:r.x+p.x*r.width/canvas.width,y:r.y+p.y*r.height/canvas.height}}")
-    page.mouse.move(corner['x'],corner['y']);page.mouse.down();page.mouse.move(corner['x']+12,corner['y']+9,steps=5);page.mouse.up()
+    corner=page.evaluate("() => {canvas.getActiveObject().setCoords();const p=canvas.getActiveObject().oCoords.tr;const r=canvas.upperCanvasEl.getBoundingClientRect();return {x:r.x+p.x*r.width/canvas.width,y:r.y+p.y*r.height/canvas.height}}")
+    page.mouse.move(corner['x'],corner['y']);page.mouse.down();page.mouse.move(corner['x']+12,corner['y']-9,steps=5);page.mouse.up()
     scaled=photo();assert scaled['scaleX']>after['scaleX'],(after,scaled)
     # Draft restoration uses the source frame, not the old forced portrait size.
     saved=page.evaluate("async () => {await BenfuwanDesignDraft.saveNow();return await BenfuwanDesignDraft.readDraft()}")

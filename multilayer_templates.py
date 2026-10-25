@@ -82,7 +82,7 @@ def prepare_template(app,template,images=None):
         if isinstance(item.get('fill'),dict):validate_gradient(item['fill'])
         for flag in FLAGS:
             if not isinstance(item.get(flag),bool):raise ValueError('圖層權限需為 boolean')
-        if item['locked'] and any(item[f] for f in FLAGS[1:]):raise ValueError('鎖定圖層不可同時開放客人編輯')
+        if item['locked'] and any(item[f] for f in FLAGS[1:] if not (f=='canEdit' and item.get('templateSlot') is True)):raise ValueError('鎖定圖層不可同時開放客人編輯')
         if not isinstance(item.get('layerName'),str) or len(item['layerName'])>100:raise ValueError('圖層名稱無效')
         for k in ('angle','opacity'):
             n=item.get(k)
@@ -181,7 +181,8 @@ def verify_design(app,design):
         if not expected['canDelete'] and not any(o['layerInstanceId']==origin for o in rows):raise ValueError('固定圖層不可刪除')
         if len(rows)>1 and not expected['canDuplicate']:raise ValueError('固定圖層不可複製')
     actual_locked=[o['templateLayerId'] for o in objects if o.get('templateLayerId') and original[o['templateLayerId']]['locked']]
-    expected_locked=[o['layerId'] for o in data['objects'] if o['locked'] and not o.get('templateSlot')]
+    present={o.get('templateLayerId') for o in objects}
+    expected_locked=[o['layerId'] for o in data['objects'] if o['locked'] and (not o.get('templateSlot') or o['layerId'] in present)]
     if actual_locked!=expected_locked:raise ValueError('固定圖層順序不可修改')
     design['templateAuthority']={'id':template['id'],'hash':claim['hash'],'applicationId':app_id,'layers':original}
     return design
