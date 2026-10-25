@@ -87,6 +87,54 @@ class PrintCenterTests(unittest.TestCase):
         with app.print_center.store.connection(True) as db:
             db.execute("DELETE FROM print_handoffs WHERE order_id=?", (self.order_id,))
 
+    def test_camera_film_product_isolation_checkout_and_profile(self):
+        shop = copy.deepcopy(app.DEFAULT_SHOP_DATA)
+        case_model, case_style = shop['models'][0], shop['styles'][0]
+        film = dict(id='film-model', name='Unrelated display name', brand='Custom',
+                    product_type='camera_film', direct_style_id='film-product', status=True,
+                    case_profiles={'film-product': dict(preview_mask_img=PNG, print_line_img=PNG,
+                        print_w=67, print_h=37, print_x=66, print_y=30, print_angle=0)})
+        style = dict(id='film-product', name='鏡頭底膜', product_type='camera_film',
+                     status=True, price=490, colors=[], model_colors={})
+        shop['models'].append(film); shop['styles'].append(style)
+        before = copy.deepcopy(app.commerce.read()['skus'])
+        version = self.client.get('/api/shop_data').get_json()['version']
+        saved = self.client.post('/api/admin/print/model-profiles', json=dict(
+            model_id=film['id'], style_id=style['id'], shop_data=shop, expected_version=version))
+        self.assertEqual(saved.status_code, 200, saved.get_json())
+        skus = app.commerce.read()['skus']
+        self.assertEqual([s for s in skus if s['id'] in {r['id'] for r in before}], before)
+        film_skus = [s for s in skus if s['model_id']==film['id']]
+        self.assertEqual(len(film_skus), 1)
+        self.assertEqual((film_skus[0]['style_id'], film_skus[0]['color']), ('film-product',''))
+        self.assertFalse(any(s['model_id']==case_model['id'] and s['style_id']=='film-product' for s in skus))
+        profile = app.print_center.store.profile(film_skus[0]['id'])
+        self.assertEqual([profile[k] for k in ('width_mm','height_mm','left_mm','top_mm','angle')], [67,37,66,30,0])
+        payload = dict(idempotency_key='film-checkout-'+uuid.uuid4().hex, model_id=film['id'],
+            style_id=style['id'], print_file=PNG, mockup_file=PNG, design_json={},
+            quantity=1, customer_name='Isolated film', payment_method='現金')
+        with mock.patch.object(app.print_center, 'wake_dispatcher'):
+            response = self.client.post('/api/create_order', json=payload)
+            self.assertEqual(response.status_code, 200, response.get_json())
+            repeat = self.client.post('/api/create_order', json=payload)
+            self.assertEqual(repeat.get_json()['order_id'], response.get_json()['order_id'])
+        order = app.commerce.store.order(response.get_json()['order_id'])
+        self.assertEqual(order['unit_price'], 490)
+        self.assertEqual(order['style_id'], style['id'])
+        self.assertEqual(app.commerce.read()['order_finance'][order['id']]['sku_id'], film_skus[0]['id'])
+        for mid, sid in ((film['id'],case_style['id']), (case_model['id'],style['id'])):
+            bad = dict(payload, model_id=mid, style_id=sid, idempotency_key='bad-film-'+uuid.uuid4().hex)
+            response = self.client.post('/api/create_order',json=bad)
+            self.assertEqual(response.status_code,400,response.get_json())
+            self.assertEqual(response.get_json()['code'],'PRODUCT_NOT_CONFIGURED')
+        # Legacy stable IDs are recognized, but never inherit the crystal root.
+        from catalog_products import product_type, film_ready
+        self.assertEqual(product_type(dict(id='m_1792558304007',name='Renamed')), 'camera_film')
+        self.assertEqual(product_type(dict(id='new',name='鏡頭底膜')), 'phone_case')
+        self.assertFalse(film_ready(dict(film,direct_style_id=''),style))
+        self.assertFalse(film_ready(film,dict(style,price=None)))
+        self.assertFalse(film_ready(film,dict(style,colors=['白'])))
+
     def tearDown(self):
         for name, value in self._old_print_env.items():
             if value is None:

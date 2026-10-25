@@ -62,7 +62,7 @@
 
   function renderColorPanel(style){
     const panel=ensurePanel();if(!panel)return;
-    if(!style){hidePanel();return}
+    if(!style || style.product_type==='camera_film'){ctx.colorName='';hidePanel();return}
     const colors=colorsFor(style,ctx.modelId);
     const options=document.getElementById('bf-color-options'),req=document.getElementById('bf-color-required'),note=document.getElementById('bf-color-model-note');
     if(note)note.textContent=ctx.modelName||'';
