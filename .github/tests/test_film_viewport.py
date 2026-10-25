@@ -110,8 +110,15 @@ def film_density_test(browser, base, poll, dpr):
         }""")
     for width, height in ((390,844),(390,600),(768,1024),(1180,900)):
         page.set_viewport_size(dict(width=width,height=height))
-        poll(page, "() => Math.abs(document.getElementById('canvas-shell').getBoundingClientRect().width-canvas.upperCanvasEl.getBoundingClientRect().width)<1")
-        page.wait_for_timeout(100)
+        # Shell and Fabric can still agree at the previous viewport size while
+        # ResizeObserver's fit is queued. Wait for the actual required padding,
+        # not a fixed sleep; all geometry assertions below stay unchanged.
+        poll(page, """() => {
+          const s=document.getElementById('canvas-shell').getBoundingClientRect();
+          const w=document.querySelector('#page-editor>.workspace').getBoundingClientRect();
+          return Math.abs(s.width-canvas.upperCanvasEl.getBoundingClientRect().width)<1
+            && s.width<=w.width-47 && s.height<=w.height-47;
+        }""")
         result=geometry(); shell=result['shell']; workspace=result['workspace']
         assert result['logical'][0]==201 and abs(result['logical'][1]-201*827/1530)<1e-8,result
         assert abs(shell['w']/shell['h']-1530/827)<.001,result
@@ -121,8 +128,9 @@ def film_density_test(browser, base, poll, dpr):
         assert abs(shell['y']+shell['h']/2-workspace['y']-workspace['h']/2)<1,result
         for layer in ('mask','guide','canvas'):
             assert all(abs(result[layer][k]-shell[k])<1 for k in ('x','y','w','h')),result
-        poll(page,"""() => {const r=canvas.lowerCanvasEl.getBoundingClientRect(),g=document.getElementById('print-area-guide');return Math.abs(canvas.lowerCanvasEl.width-r.width*devicePixelRatio)<=1 && Math.abs(g.naturalWidth-r.width*devicePixelRatio)<=1}""")
-        density=page.evaluate("""() => {const r=canvas.lowerCanvasEl.getBoundingClientRect();return {css:[r.width,r.height],lower:[canvas.lowerCanvasEl.width,canvas.lowerCanvasEl.height],upper:[canvas.upperCanvasEl.width,canvas.upperCanvasEl.height],guide:[document.getElementById('print-area-guide').naturalWidth,document.getElementById('print-area-guide').naturalHeight],overlay:[document.getElementById('phone-mask').naturalWidth,document.getElementById('phone-mask').naturalHeight],checker:getComputedStyle(document.getElementById('canvas-shell')).backgroundSize}}""")
+        # Capture the validated frame together: a queued guide redraw may start
+        # another image decode between separate poll and evaluate calls.
+        density=poll(page,"""() => {const r=canvas.lowerCanvasEl.getBoundingClientRect();const snapshot={css:[r.width,r.height],lower:[canvas.lowerCanvasEl.width,canvas.lowerCanvasEl.height],upper:[canvas.upperCanvasEl.width,canvas.upperCanvasEl.height],guide:[document.getElementById('print-area-guide').naturalWidth,document.getElementById('print-area-guide').naturalHeight],overlay:[document.getElementById('phone-mask').naturalWidth,document.getElementById('phone-mask').naturalHeight],checker:getComputedStyle(document.getElementById('canvas-shell')).backgroundSize};return ['lower','upper','guide'].every(layer=>[0,1].every(i=>Math.abs(snapshot[layer][i]-snapshot.css[i]*devicePixelRatio)<=1))?snapshot:false}""")
         for layer in ('lower','upper','guide'):
             assert all(abs(density[layer][i]-density['css'][i]*dpr)<=1 for i in (0,1)),density
         assert density['overlay']==[1530,827],density

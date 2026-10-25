@@ -8,6 +8,93 @@
   const allowed=o=>!!o&&o.role!=='guide'&&o.role!=='slot-guide'&&o.role!=='template-bg'&&o.role!=='editable-sticker-text';
   const multi=()=>window.BenfuwanMultilayer;
   const bound=new WeakSet();
+  let scaleGesture=null;
+  let scaleRangeObject=null;
+  function mayAdjust(c,o,permission){
+    if(!c||!allowed(o)||o.bfUserLocked||o.locked||o.selectable===false)return false;
+    const policy=multi();
+    return !(o.templateLayerId&&policy&&c.layer_contract_version===policy.VERSION&&!policy.allowed(c,o,permission));
+  }
+  function mayScale(c,o){return mayAdjust(c,o,'canScale')&&!o.lockScalingX&&!o.lockScalingY;}
+  function finishScale(){
+    const g=scaleGesture;scaleGesture=null;
+    if(g&&g.c===current()&&g.c.getObjects().includes(g.o)&&(g.o.scaleX!==g.x||g.o.scaleY!==g.y)){
+      g.o.setCoords();g.c.requestRenderAll();recordHistory();
+    }
+    syncAdjust();
+  }
+  function syncAdjust(resetRange=false){
+    const c=current(),o=c?.getActiveObject(),range=by('object-scale-range');
+    if(!range)return;
+    range.disabled=!mayScale(c,o);
+    if(!scaleGesture){
+      const percent=Math.abs(o?.scaleX||1)*100;
+      // A 4K photo can start at 3% of its source size. Keep thumb travel useful
+      // at that scale instead of jumping straight towards an intrinsic 400%.
+      if(resetRange||scaleRangeObject!==o||percent>Number(range.max)||percent<Number(range.min)){
+        range.min=String(Math.max(.001,percent/10));range.max=String(Math.max(.01,percent*3));scaleRangeObject=o;
+      }
+      range.value=String(percent);
+    }
+    by('object-scale-value').textContent=o?`${Math.round(Math.abs(o.scaleX)*1000)/10}%`:'—';
+    const shapes=by('bf-shape-tools'),shape=o&&['rect','circle','triangle','polygon','path','line'].includes(o.type);
+    shapes.hidden=!shape;
+    if(!shape)return;
+    const editable=mayAdjust(c,o,'canEdit');
+    shapes.querySelectorAll('input').forEach(input=>input.disabled=!editable);
+    const color=v=>/^#[0-9a-f]{6}$/i.test(v||'')?v:'#000000';
+    by('shape-fill').value=color(o.fill);by('shape-transparent').checked=!o.fill||o.fill==='transparent';
+    by('shape-stroke').value=color(o.stroke);by('shape-stroke-width').value=o.strokeWidth||0;
+    by('shape-radius-label').hidden=o.type!=='rect';by('shape-radius').value=o.rx||0;
+  }
+  function adjustUi(){
+    const opacity=by('opacity-range');if(!opacity||by('object-scale-range'))return;
+    const row=document.createElement('div');row.className='range-row';
+    row.innerHTML='<div class="head"><label for="object-scale-range">放大／縮小</label><output id="object-scale-value" for="object-scale-range"></output></div><input id="object-scale-range" type="range" min="0.001" max="300" step="any">';
+    opacity.closest('.range-row').before(row);
+    const range=by('object-scale-range');
+    range.addEventListener('input',()=>{
+      const c=current(),o=c?.getActiveObject();
+      if(!mayScale(c,o)){finishScale();return;}
+      if(scaleGesture&&(scaleGesture.c!==c||scaleGesture.o!==o))finishScale();
+      if(!scaleGesture)scaleGesture={c,o,x:o.scaleX,y:o.scaleY,center:o.getCenterPoint(),width:o.getScaledWidth(),height:o.getScaledHeight()};
+      const g=scaleGesture;let factor=Number(range.value)/100/Math.abs(g.x);
+      if(!Number.isFinite(factor)||factor<=0)return;
+      if(o.templateLayerId&&c.layer_contract_version===multi()?.VERSION){
+        // Cap both axes by one factor BEFORE the existing per-axis template
+        // constraints run. Hitting a template boundary must not squash images.
+        const stroke=o.strokeUniform?(o.strokeWidth||0):0;
+        factor=Math.min(factor,(c.width-stroke)/Math.max(.001,g.width-stroke),(c.height-stroke)/Math.max(.001,g.height-stroke));
+        factor=Math.max(factor,.001/Math.abs(g.x),.001/Math.abs(g.y));
+      }
+      o.set({scaleX:g.x*factor,scaleY:g.y*factor});o.setPositionByOrigin(g.center,'center','center');
+      // Keep existing template bounds and paired editable text authoritative.
+      c.fire('object:scaling',{target:o});window.BenfuwanEditableSticker?.syncAll(c);
+      o.setCoords();c.requestRenderAll();by('object-scale-value').textContent=`${Math.round(Math.abs(o.scaleX)*1000)/10}%`;
+    });
+    for(const event of ['change','pointerup','pointercancel','blur'])range.addEventListener(event,finishScale);
+    const shapes=document.createElement('fieldset');shapes.id='bf-shape-tools';shapes.hidden=true;
+    shapes.innerHTML='<legend>形狀樣式</legend><label>填色<input id="shape-fill" type="color"></label><label><input id="shape-transparent" type="checkbox">透明填色</label><label>描邊<input id="shape-stroke" type="color"></label><label>線條粗細<input id="shape-stroke-width" type="number" min="0" max="50" step="0.5"></label><label id="shape-radius-label">圓角<input id="shape-radius" type="number" min="0" max="1000" step="1"></label>';
+    row.parentElement.append(shapes);
+    shapes.addEventListener('change',event=>{
+      const c=current(),o=c?.getActiveObject();if(!mayAdjust(c,o,'canEdit')){syncAdjust();return;}
+      const center=o.getCenterPoint(),id=event.target.id;
+      if(id==='shape-fill'||id==='shape-transparent')o.set('fill',by('shape-transparent').checked?'transparent':by('shape-fill').value);
+      if(id==='shape-stroke')o.set('stroke',event.target.value);
+      if(id==='shape-stroke-width'){
+        const width=Number(event.target.value);if(!Number.isFinite(width))return;
+        o.set({strokeWidth:Math.max(0,Math.min(50,width)),stroke:o.stroke||by('shape-stroke').value});
+      }
+      if(id==='shape-radius'&&o.type==='rect'){
+        const value=Number(event.target.value);if(!Number.isFinite(value))return;
+        const radius=Math.max(0,Math.min(value,o.width/2,o.height/2));o.set({rx:radius,ry:radius});
+      }
+      o.setPositionByOrigin(center,'center','center');o.setCoords();c.requestRenderAll();recordHistory();syncAdjust();
+    });
+    const open=window.openAdjustSheet;
+    window.openAdjustSheet=function(){syncAdjust(true);return open.apply(this,arguments);};
+    syncAdjust();
+  }
   if(typeof CUSTOM_PROPS!=='undefined')for(const key of ['bfUserLocked','stickerId','originalPublicSrc','aiOutlineViewport'])if(!CUSTOM_PROPS.includes(key))CUSTOM_PROPS.push(key);
 
   function styles(){
@@ -19,6 +106,14 @@
       #bf-front-slot-actions[hidden]{display:none}
       .bf-front-slot-btn{min-height:38px;padding:7px 10px;border-radius:999px;border:1px solid #eeb7ca;background:rgba(255,255,255,.96);color:#ad3667;font-size:11px;font-weight:900;box-shadow:0 3px 12px rgba(90,40,65,.12)}
       .bf-front-slot-btn:disabled{opacity:.5;cursor:not-allowed}
+      #object-scale-value{min-width:55px;text-align:right;font-variant-numeric:tabular-nums}
+      #bf-shape-tools{border:1px solid #f3d9e3;border-radius:14px;margin:14px 0;padding:12px;display:flex;flex-wrap:wrap;gap:12px}
+      #bf-shape-tools[hidden],#shape-radius-label[hidden]{display:none}
+      #bf-shape-tools label{display:flex;align-items:center;gap:7px;min-height:44px;font-size:13px}
+      #bf-shape-tools input[type=number]{width:68px;min-height:44px}#bf-shape-tools input[type=color]{width:44px;height:44px}
+      #material-cats{display:flex;gap:8px;overflow-x:auto;margin-bottom:12px}.material-hint{font-size:12px;color:#776570}
+      #material-grid button{min-height:96px;background:#fff;border:1px solid #f1dce5;border-radius:14px;color:#ad4770;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px}
+      #material-grid svg{width:42px;height:42px}#material-grid button span{font-size:13px}
     `;document.head.appendChild(s);
   }
   function control(){
@@ -76,6 +171,7 @@
     syncLockButton();
   }
   function syncLockButton(){
+    syncAdjust();
     const b=by('bf-object-lock'),o=current()?.getActiveObject();if(!b)return;
     b.hidden=!allowed(o);if(!allowed(o))return;
     const locked=!!o.bfUserLocked;
@@ -133,7 +229,7 @@
     const previous=window[name];if(typeof previous!=='function')continue;
     window[name]=function(){if(current()?.getActiveObject()?.bfUserLocked)return;return previous.apply(this,arguments);};
   }
-  function boot(){styles();lockUi();bind(current());slots();}
+  function boot(){styles();adjustUi();lockUi();bind(current());slots();}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
   window.BenfuwanEditorControls={bind,applyUserLock,refreshSlotActions:slots,openSlot};
 })();
