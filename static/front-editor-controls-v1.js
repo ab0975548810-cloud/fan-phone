@@ -57,9 +57,16 @@
       const c=current(),o=c?.getActiveObject();
       if(!mayScale(c,o)){finishScale();return;}
       if(scaleGesture&&(scaleGesture.c!==c||scaleGesture.o!==o))finishScale();
-      if(!scaleGesture)scaleGesture={c,o,x:o.scaleX,y:o.scaleY,center:o.getCenterPoint()};
-      const g=scaleGesture,factor=Number(range.value)/100/Math.abs(g.x);
+      if(!scaleGesture)scaleGesture={c,o,x:o.scaleX,y:o.scaleY,center:o.getCenterPoint(),width:o.getScaledWidth(),height:o.getScaledHeight()};
+      const g=scaleGesture;let factor=Number(range.value)/100/Math.abs(g.x);
       if(!Number.isFinite(factor)||factor<=0)return;
+      if(o.templateLayerId&&c.layer_contract_version===multi()?.VERSION){
+        // Cap both axes by one factor BEFORE the existing per-axis template
+        // constraints run. Hitting a template boundary must not squash images.
+        const stroke=o.strokeUniform?(o.strokeWidth||0):0;
+        factor=Math.min(factor,(c.width-stroke)/Math.max(.001,g.width-stroke),(c.height-stroke)/Math.max(.001,g.height-stroke));
+        factor=Math.max(factor,.001/Math.abs(g.x),.001/Math.abs(g.y));
+      }
       o.set({scaleX:g.x*factor,scaleY:g.y*factor});o.setPositionByOrigin(g.center,'center','center');
       // Keep existing template bounds and paired editable text authoritative.
       c.fire('object:scaling',{target:o});window.BenfuwanEditableSticker?.syncAll(c);

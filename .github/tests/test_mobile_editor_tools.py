@@ -73,6 +73,11 @@ def mobile_editor_tools_test(browser, base, poll):
         assert page.evaluate("canvas.getActiveObject().scaleX") == locked
         page.evaluate("() => {const o=canvas.getActiveObject();o.bfUserLocked=false;o.templateLayerId='locked';canvas.layer_contract_version='multilayer-v1';canvas.templateState={initial:[{templateLayerId:'locked',canScale:false,canMove:true,canEdit:true}]};BenfuwanEditorControls.applyUserLock(o);openAdjustSheet()}")
         assert slider.is_disabled()
+        page.evaluate("() => {const o=canvas.getActiveObject();o.canScale=true;openAdjustSheet()}")
+        assert slider.is_disabled(), 'client metadata must not override template policy'
+        page.evaluate("() => {const o=canvas.getActiveObject();o.set({scaleX:.5,scaleY:.75});Object.assign(canvas.templateState.initial[0],{locked:false,canScale:true,canRotate:true});BenfuwanEditorControls.applyUserLock(o);openAdjustSheet()}")
+        slider.press('End')
+        assert page.evaluate("() => {const o=canvas.getActiveObject();return Math.abs(o.scaleY/o.scaleX-1.5)<1e-8 && o.getScaledWidth()<=canvas.width+.001 && o.getScaledHeight()<=canvas.height+.001}"), 'template boundary must preserve scale ratio'
         page.evaluate("() => {const o=canvas.getActiveObject();delete o.templateLayerId;delete canvas.templateState;delete canvas.layer_contract_version;BenfuwanEditorControls.applyUserLock(o);closeSheets()}")
         # Large photos start at a small intrinsic percentage. The slider travel
         # remains useful while its label/value still show the true Fabric scale.
