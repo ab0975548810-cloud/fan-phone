@@ -119,7 +119,7 @@ def master_adaptation_browser_test(browser,base,poll):
                 current_targets.append(target)
                 model=current_models.setdefault(target['model_id'],dict(id=target['model_id'],name=target['model_name'],brand='Apple',status=True,case_profiles={}))
                 model['case_profiles'][target['style_id']]=target['profile']
-                current_styles[target['style_id']]=dict(id=target['style_id'],name=target['style_name'],status=True)
+                current_styles[target['style_id']]=dict(id=target['style_id'],name=target['style_name'],status=True,price=790,colors=['白'])
             current_catalog=dict(brands=['Apple'],models=list(current_models.values()),styles=list(current_styles.values()))
             app.local_save_json(app.DATA_FILE,current_catalog)
             assert len(page.request.get(base+'/api/admin/template-adaptation/targets').json()['targets'])==19
@@ -175,7 +175,7 @@ def master_adaptation_browser_test(browser,base,poll):
             # Fresh public browser receives the same authoritative result; batch versions
             # are exact model/style targets, the original master is not modified.
             front=browser.new_page(viewport=dict(width=390,height=844))
-            front.on('dialog',lambda d:d.accept());front.goto(base)
+            front.on('dialog',lambda d:d.accept());front.on('pageerror',lambda e:print('MASTER_FRONT_ERROR',str(e),flush=True));front.on('console',lambda m:print('MASTER_FRONT_CONSOLE',m.text,flush=True) if m.type=='error' else None);front.goto(base)
             poll(front,"() => !!window.BenfuwanMultilayer && catalogState==='ready'")
             variant=saved[-1];model=models[-1]
             applied=front.evaluate("""async data=>{
@@ -192,18 +192,32 @@ def master_adaptation_browser_test(browser,base,poll):
             app.commerce.sync_skus()
             import editable_stickers
             production=[]
-            for template in templates:
+            production_cases=[dict(template=t,model=models[-1],style_id='crystal',profile=models[-1]['case_profiles']['crystal'],current=False) for t in templates]
+            if browser.browser_type.name=='chromium':
+                production_cases += [dict(template=templates[-1],model=dict(id=t['model_id'],name=t['model_name']),style_id=t['style_id'],profile=t['profile'],current=True) for t in current_targets]
+            switched=False;current_customer_cases=0
+            for case in production_cases:
+                template=case['template']
+                if case['current'] and not switched:
+                    app.local_save_json(app.DATA_FILE,current_catalog);security_perf._CACHE.clear();app.commerce.sync_skus();front.evaluate('data=>{shopData=data;catalogState=\"ready\";}',current_catalog);switched=True
+                if case['current']:
+                    # Distinct isolated customers keep the real checkout burst
+                    # protection enabled while exercising the 19-profile matrix.
+                    if current_customer_cases%10==0:
+                        front.close();front=browser.new_page(viewport=dict(width=390,height=844));front.goto(base)
+                        poll(front,"() => !!window.BenfuwanMultilayer && catalogState==='ready'")
+                    current_customer_cases+=1
                 body=front.evaluate("""async data=>{
-                  const p=data.model.case_profiles.crystal;ctx={...ctx,modelId:data.model.id,styleId:'crystal',modelName:data.model.name,styleName:'晶彩',colorName:'白',printW:p.print_w,printH:p.print_h,printLineUrl:p.print_line_img,maskUrl:p.preview_mask_img};navigate('page-editor');initCanvas();
-                  await new Promise(resolve=>applyTemplate(data.template,resolve));await ensureCanvasFonts();
+                  const p=data.profile;ctx={...ctx,modelId:data.model.id,styleId:data.style_id,modelName:data.model.name,styleName:data.style_id,colorName:'白',printW:p.print_w,printH:p.print_h,printLineUrl:p.print_line_img,maskUrl:p.preview_mask_img};navigate('page-editor');initCanvas();
+                  await applyTemplate(data.template);if(canvas.templateState?.id!==data.template.id)throw Error('母版未成功套用：'+document.getElementById('toast')?.textContent);await ensureCanvasFonts();
                   const layouts=canvas.getObjects().filter(o=>['text','textbox','i-text'].includes(o.type)).map(o=>({lines:o._textLines.map(a=>a.join('')),left:o.left,top:o.top,fontSize:o.fontSize}));
                   await openPreview();if(!ctx.productionMeta)throw Error('HQ output missing');
                   const maskImage=await new Promise(resolve=>{const image=new Image();image.onload=()=>resolve(image);image.src=ctx.printLineUrl;});
                   return {maskSize:[maskImage.naturalWidth,maskImage.naturalHeight],maskBounds:ctx.productionMeta.maskBounds,layouts,print:ctx.printBase64,body:{idempotency_key:'master-production-'+crypto.randomUUID(),model_id:ctx.modelId,style_id:ctx.styleId,color_name:'白',customer_name:'isolated master QA',quantity:1,payment_method:'現金',print_file:ctx.printBase64,mockup_file:ctx.mockupBase64,design_json:await BenfuwanDesignSources.prepare(await BenfuwanMultilayer.serialize(canvas,ctx))}};
-                }""",dict(template=template,model=models[-1]))
+                }""",case)
                 response=front.request.post(base+'/api/create_order',data=body['body'])
                 if response.status!=200:
-                    expected=engine.resolve(app,template,catalog,models[-1]['id'],'crystal')['objects_json']['objects']
+                    expected=engine.resolve(app,template,current_catalog if case['current'] else catalog,case['model']['id'],case['style_id'])['objects_json']['objects']
                     for a in expected:
                         if not a['canEdit']:
                             b=next(o for o in body['body']['design_json']['objects'] if o.get('templateLayerId')==a['layerId'])
@@ -214,9 +228,12 @@ def master_adaptation_browser_test(browser,base,poll):
                     value=render(*args,**kwargs);captured.extend(value[2]);return value
                 with mock.patch('editable_stickers.render',side_effect=capture):
                     job=app.print_center.prepare(response.json()['order_id'],'master-QA-'+uuid.uuid4().hex)
+                for key,source in [('width_mm','print_w'),('height_mm','print_h'),('left_mm','print_x'),('top_mm','print_y'),('angle','print_angle')]:
+                    assert job[key]==case['profile'][source],(key,job[key],case['profile'][source])
                 rendered=Image.open(io.BytesIO(app.print_center._download_artwork(job['artwork_path']))).convert('RGBA')
                 preview=Image.open(io.BytesIO(base64.b64decode(body['print'].split(',')[1]))).convert('RGBA')
-                assert rendered.size==preview.size==(2030,4241)
+                expected_size=tuple(round(case['profile'][k]*720/25.4) for k in ('print_w','print_h'))
+                assert rendered.size==preview.size==expected_size
                 rendered.save(output/(template['name']+'-production.png'));preview.save(output/(template['name']+'-front-hq.png'))
                 diff=ImageStat.Stat(ImageChops.difference(rendered,preview))
                 for a,b in zip(body['layouts'],captured):
@@ -243,8 +260,8 @@ def master_adaptation_browser_test(browser,base,poll):
                     ink.polygon(px,fill=(0,0,0));ink.line(px+[px[0]],fill=(0,0,0),width=4)
                 nontext_error=ImageStat.Stat(nontext).mean
                 assert max(nontext_error)<.75 and diff.mean[3]<.75,(template['name'],visible.mean,nontext_error,diff.mean[3])
-                assert rendered.getpixel((1000,500))[3]==preview.getpixel((1000,500))[3]==0
-                production.append(dict(kind=template['name'],dimensions=list(rendered.size),rawChannelMeanAbsoluteError=diff.mean,visibleMeanAbsoluteError=visible.mean,nonTextMeanAbsoluteError=nontext_error,alphaMeanAbsoluteError=diff.mean[3],textLayouts=captured))
+                if not case['current']:assert rendered.getpixel((1000,500))[3]==preview.getpixel((1000,500))[3]==0
+                production.append(dict(kind=template['name'],model=case['model']['id'],style=case['style_id'],current=case['current'],dimensions=list(rendered.size),rawChannelMeanAbsoluteError=diff.mean,visibleMeanAbsoluteError=visible.mean,nonTextMeanAbsoluteError=nontext_error,alphaMeanAbsoluteError=diff.mean[3],textLayouts=captured))
             (output/'production.json').write_text(json.dumps(production,ensure_ascii=False,indent=2),encoding='utf-8')
             assert not errors,errors
             print('MASTER_ADAPTATION_BROWSER_OK',browser.browser_type.name,'5 designs x 4 real masks; batch/new-only; frontend exact geometry; 390/768/1180',flush=True)

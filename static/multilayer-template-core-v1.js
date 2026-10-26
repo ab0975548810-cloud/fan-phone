@@ -9,7 +9,11 @@
   const core=()=>window.BenfuwanEditableSticker;
   const freeze=v=>{if(v&&typeof v==='object'){Object.values(v).forEach(freeze);Object.freeze(v);}return v;};
   const dimensions=o=>({w:(Number(o.width)||0)+(o.strokeUniform?0:Number(o.strokeWidth)||0),h:(Number(o.height)||0)+(o.strokeUniform?0:Number(o.strokeWidth)||0)});
-  function geometry(o,c){const p=o.getCenterPoint();return {x:p.x/c.width,y:p.y/c.height,width:o.getScaledWidth()/c.width,height:o.getScaledHeight()/c.height};}
+  function geometry(o,c){const p=o.getCenterPoint();
+    // Exact boundary values can become 1 + 2e-16 after Fabric scale math.
+    // Canonicalize only floating-point noise, never clamp actual overflow.
+    const canonical=n=>Math.abs(n)<1e-12?0:Math.abs(n-1)<1e-12?1:n;
+    return {x:canonical(p.x/c.width),y:canonical(p.y/c.height),width:canonical(o.getScaledWidth()/c.width),height:canonical(o.getScaledHeight()/c.height)};}
   function validGeometry(g){if(!g||!['x','y','width','height'].every(k=>Number.isFinite(g[k])&&g[k]>=0&&g[k]<=1)||!g.width||!g.height)throw Error('圖層位置／尺寸需在模板畫布範圍內（0～1）');return g;}
   function map(o,g,c){validGeometry(g);const d=dimensions(o),stroke=o.strokeUniform?Number(o.strokeWidth)||0:0;
     o.set({originX:'center',originY:'center',left:g.x*c.width,top:g.y*c.height,scaleX:(g.width*c.width-stroke)/Math.max(.0001,d.w),scaleY:(g.height*c.height-stroke)/Math.max(.0001,d.h)});o.setCoords();}

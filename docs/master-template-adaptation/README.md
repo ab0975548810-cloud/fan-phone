@@ -100,6 +100,10 @@
 - [Chromium 20 組量測](chromium-metrics.json)
 - [WebKit 20 組量測](webkit-metrics.json)
 
+此外，以同一份 29 層母版逐一對目前正式 **19 組**設定完成隔離 source pre-upload、建單、Print Center 720 DPI 重建；各筆 Print Job 的 W/H/X/Y/angle 均與 fixture 保存的正式參數逐一相等。此 19 組生產矩陣使用 Chromium（正式 deterministic renderer 同引擎）；WebKit 對 19 組執行完整套版／量測，另測五種構圖的高解析前台→生產一致性。
+
+逐型號重建亦重現並修復 Fabric 的浮點邊界雜訊（1 + 2e-16）。只有距離 0／1 小於 1e-12 的值會被正規化；未放寬真正越界驗證。24 筆 Chromium 生產結果（五種構圖＋19 型號）列於下方 JSON。
+
 每種設計另實際走 #71 source pre-upload → 隔離 create_order → Print Center prepare → Chromium/Fabric 720 DPI 重建。iPhone 17 Pro 結果均為 **2030 × 4241 px / 720 DPI**；文字換行一致、位置誤差 <0.0002 logical px，相機孔中心兩份輸出 alpha 都是 0。
 
 比較前台原有 HQ PNG 與重新重建 PNG 時，透明 RGB 值在瀏覽器間未定義，因此分開比較白底合成色彩與 alpha。另因 Linux WebKit／Chromium 原生文字邊緣渲染不同，文字以相同站內字型 hash、精確 fontSize、逐行內容與位置驗證；非文字區維持平均通道誤差 <0.75 / 255、整圖 alpha 平均誤差 <0.75 / 255。完整色彩誤差仍原樣記錄，不隱藏 native text raster 差異。Windows 本機可見平均誤差 <0.16 / 255、alpha <0.59 / 255；Linux CI 數值會由同一測試重新驗證。完整逐設計結果：
