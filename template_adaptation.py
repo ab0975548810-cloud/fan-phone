@@ -58,6 +58,8 @@ def validate(template):
     for item in data['objects']:
         if item.get('adaptationRole', 'composition') not in ROLES:
             raise ValueError('母版元素適配策略無效')
+        if item.get('editableStickerInstanceId') and item.get('adaptationRole') in ('decoration','background-crop'):
+            raise ValueError('文字貼紙配對需共用構圖，不可單獨移動或裁切；請調整整體位置')
         # Skew/group geometry cannot be safely approximated by rotated rectangles.
         if item.get('objects') or number(item.get('skewX')) or number(item.get('skewY')):
             raise ValueError('母版尚不支援群組／斜切，請保留為一般舊模板')

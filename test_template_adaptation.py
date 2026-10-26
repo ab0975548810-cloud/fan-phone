@@ -136,6 +136,12 @@ class GeometryTests(unittest.TestCase):
         with mock.patch('editable_stickers.public_image',return_value=content.getvalue()):safe,_=engine.mask(None,'tiny-hole-fixture')
         self.assertEqual(safe.getpixel((safe.width//2,safe.height//2)),0)
 
+    def test_paired_text_sticker_cannot_be_split_by_an_adaptation_strategy(self):
+        m=master('subject-title');m['objects_json']['objects'][1]['editableStickerInstanceId']='paired'
+        for role in ('decoration','background-crop'):
+            m['objects_json']['objects'][1]['adaptationRole']=role
+            with self.assertRaisesRegex(ValueError,'配對需共用構圖'):engine.adapt(m,target(),full_mask(),'m')
+
 
 class ApiTests(unittest.TestCase):
     design=fixture.MultilayerTests.design

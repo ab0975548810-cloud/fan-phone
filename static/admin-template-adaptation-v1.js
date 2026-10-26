@@ -41,7 +41,7 @@
       const label=document.createElement('label');label.textContent=item.layerName||item.text?.slice(0,15)||'圖層 '+(index+1);
       const select=document.createElement('select');select.dataset.masterRole=String(index);
       for(const [value,text] of [['composition','保留構圖'],['subject','主視覺'],['important-text','重要文字'],['background-crop','可裁切背景'],['decoration','可移動裝飾']]){
-        const option=document.createElement('option');option.value=value;option.textContent=text;select.append(option);
+        const option=document.createElement('option');option.value=value;option.textContent=text;option.disabled=!!item.editableStickerInstanceId&&['background-crop','decoration'].includes(value);select.append(option);
       }
       select.value=item.adaptationRole||'composition';select.onchange=()=>{master.objects_json.objects[index].adaptationRole=select.value;generation++;const targets=rows.map(r=>r.target);rows.forEach(r=>r.surface?.dispose());by('master-targets').replaceChildren();rows=targets.map(card);notify('策略已改變，請重新產生預覽');};
       label.append(select);list.append(label);
