@@ -26,7 +26,7 @@
 - `scale = min(targetWidth / sourceWidth, targetHeight / sourceHeight)`；以來源／目標畫布中心建立一組仿射轉換。所有普通元素共用同一 scale 與 translation。
 - target logical canvas 精確對應現有 `Math.round(mm × 3)`；引擎回傳 admin units = customer units / 1.5，不更動 editor 或 720 DPI 的尺寸規則。
 - normalizedGeometry 為來源真值，避免再乘已被 Fabric 兩位小數截短的 raw scale。生成的新裁切欄位也遵守既有 Fabric 序列化精度，未放寬 locked-layer 驗證。
-- 背景只有明確標記 `background-crop` 才做 source viewport 的等比例 cover 裁切。未標記主體、文字、slot 與裝飾不拉伸、不逐物件亂搬。字型、fontSize、Textbox width、行距等保持原始內容，不重新排字來塞空間。
+- 背景只有明確標記 `background-crop` 才做 source viewport 的等比例 cover 裁切。未標記主體、文字、slot 與裝飾不拉伸、不逐物件亂搬。字型、fontSize、Textbox width、行距等保持原始內容，不重新排字來塞空間。新母版停用 Fabric 的中間 object bitmap cache，與既有 deterministic renderer 一樣直接繪製原始字型與素材；舊模板行為不變。
 - 舊 precision / normalized-v5 不再在前台下載／安裝；legacy v1/v2 仍由現有 alignment-v6 單次相容轉換。既有多圖層、沒有 master 契約的模板保持原路徑。
 
 策略欄位 `adaptationRole`：保留構圖、主視覺、重要文字、可裁切背景、可移動裝飾。裝飾可由店主逐型號單獨位移；其他元素維持整組比例。
@@ -34,7 +34,7 @@
 ## 刀模、安全區與失敗處理
 
 - 讀取 model × style 已配置的完整 print mask source frame，保留相機孔及所有透明區；不改 PNG、不用 alpha bbox 重定義 editor geometry。
-- bounded 分析 mask 長邊 384 sample pixels，alpha ≥224，向內保守縮 2 sample pixels。這是程式保守安全邊界，並非實體刀模校準或保證印刷公差。
+- bounded 分析 mask 長邊 384 sample pixels，alpha ≥224，以保守 min-pooling 確保高解析細孔不被平均掉，再向內保守縮 2 sample pixels。這是程式保守安全邊界，並非實體刀模校準或保證印刷公差。
 - 旋轉後完整物件矩形 footprint 做碰撞檢查；對透明裝飾採保守外接範圍，可能需要人工微調，避免誤判安全。
 - 預設先保持構圖；若有碰撞，依距離由小到大嘗試 1% 格點、最多各軸 4% 的整組位移。不拉伸、不自動改文字大小、不猜主體。
 - 超出可表示 geometry、碰孔、碰安全邊界皆為 `needs-adjustment`；缺檔／無法讀取為失敗，無 generic safe box fallback。

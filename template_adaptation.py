@@ -105,7 +105,17 @@ def mask(app, url):
         # Bounded analysis canvas, preserves source aspect; output pixels are unchanged.
         ratio = 384 / max(image.size)
         size = (max(16, round(image.width * ratio)), max(16, round(image.height * ratio)))
-        safe = alpha.resize(size, Image.Resampling.LANCZOS).point(lambda p: 255 if p >= 224 else 0)
+        binary = alpha.point(lambda p:255 if p>=224 else 0)
+        # Conservative min-pooling, not average interpolation: even a tiny hole
+        # in a high-resolution source must make its analysis cell unsafe.
+        safe = Image.new('L',size)
+        cells=[]
+        for y in range(size[1]):
+            top=math.floor(y*alpha.height/size[1]);bottom=math.ceil((y+1)*alpha.height/size[1])
+            for x in range(size[0]):
+                left=math.floor(x*alpha.width/size[0]);right=math.ceil((x+1)*alpha.width/size[0])
+                cells.append(binary.crop((left,top,right,bottom)).getextrema()[0])
+        safe.putdata(cells)
         safe = safe.filter(ImageFilter.MinFilter(5))
     result = (safe, hashlib.sha256(content).hexdigest())
     with _LOCK:

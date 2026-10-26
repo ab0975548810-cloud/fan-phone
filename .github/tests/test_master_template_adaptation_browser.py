@@ -179,6 +179,9 @@ def master_adaptation_browser_test(browser,base,poll):
                 assert rendered.size==preview.size==(2030,4241)
                 rendered.save(output/(template['name']+'-production.png'));preview.save(output/(template['name']+'-front-hq.png'))
                 diff=ImageStat.Stat(ImageChops.difference(rendered,preview))
+                for a,b in zip(body['layouts'],captured):
+                    assert a['lines']==b['lines'] and abs(a['left']-b['left'])<.0002 and abs(a['top']-b['top'])<.0002,(a,b)
+                assert len(body['layouts'])==len(captured)
                 # Browser engines differ at antialiased edges; require close raster output
                 # AND exact text line breaks/positions, not only image dimensions.
                 white=Image.new('RGBA',rendered.size,'white')
@@ -187,9 +190,6 @@ def master_adaptation_browser_test(browser,base,poll):
                 # Compare visible premultiplied color and alpha separately.
                 assert max(visible.mean)<.75 and diff.mean[3]<.75,(template['name'],visible.mean,diff.mean[3])
                 assert rendered.getpixel((1000,500))[3]==preview.getpixel((1000,500))[3]==0
-                for a,b in zip(body['layouts'],captured):
-                    assert a['lines']==b['lines'] and abs(a['left']-b['left'])<.0002 and abs(a['top']-b['top'])<.0002,(a,b)
-                assert len(body['layouts'])==len(captured)
                 production.append(dict(kind=template['name'],dimensions=list(rendered.size),rawChannelMeanAbsoluteError=diff.mean,visibleMeanAbsoluteError=visible.mean,alphaMeanAbsoluteError=diff.mean[3],textLayouts=captured))
             (output/'production.json').write_text(json.dumps(production,ensure_ascii=False,indent=2),encoding='utf-8')
             assert not errors,errors

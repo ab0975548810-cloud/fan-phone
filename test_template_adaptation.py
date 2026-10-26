@@ -130,6 +130,12 @@ class GeometryTests(unittest.TestCase):
         self.assertEqual(a['objects_json']['objects'][1],b['objects_json']['objects'][1])
         with self.assertRaises(ValueError):engine.adapt(m,target(),full_mask(),'m',{'layers':{'layer-1':{'x':.01}}})
 
+    def test_high_resolution_tiny_hole_is_not_averaged_away(self):
+        image=Image.new('RGBA',(2000,4000),'black');image.putpixel((1000,2000),(0,0,0,0))
+        content=io.BytesIO();image.save(content,'PNG');engine._MASKS.clear()
+        with mock.patch('editable_stickers.public_image',return_value=content.getvalue()):safe,_=engine.mask(None,'tiny-hole-fixture')
+        self.assertEqual(safe.getpixel((safe.width//2,safe.height//2)),0)
+
 
 class ApiTests(unittest.TestCase):
     design=fixture.MultilayerTests.design

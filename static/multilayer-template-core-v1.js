@@ -67,6 +67,9 @@
     const application=uid(),pairs=new Map();
     for(const [i,o] of objects.entries()){
       const saved=raw.objects[i];o.set({layerId:saved.layerId,templateLayerId:saved.layerId,layerInstanceId:(binding?.applicationId||application)+':'+saved.layerId,templateApplicationId:binding?.applicationId||application});Object.assign(o,defaults(saved));
+      // Match the deterministic renderer: master layers are drawn from their
+      // original vectors/fonts, not Fabric's intermediate bitmap object cache.
+      if(tpl.adaptation_contract_version==='master-v1')o.objectCaching=false;
       map(o,saved.normalizedGeometry,c);o.zIndex=i;
       if(o.editableStickerInstanceId){if(!pairs.has(o.editableStickerInstanceId))pairs.set(o.editableStickerInstanceId,uid());o.editableStickerInstanceId=pairs.get(o.editableStickerInstanceId);}
       if(!admin&&o.templateSlot){o.set({role:'slot-guide',fill:'rgba(255,255,255,.25)',stroke:'#ff6f9a',strokeWidth:1.5,strokeUniform:true,strokeDashArray:[5,4]});map(o,saved.normalizedGeometry,c);}
@@ -86,7 +89,7 @@
   }
   function hydrate(c){if(c.layer_contract_version!==VERSION)return;
     if(c.templateState)c.templateState=freeze(clone(c.templateState));
-    c.selection=false;c.getObjects().filter(o=>o.templateLayerId).forEach(o=>{map(o,o.normalizedGeometry,c);permissions(c,o);});
+    c.selection=false;c.getObjects().filter(o=>o.templateLayerId).forEach(o=>{if(c.templateState?.binding?.geometryHash)o.objectCaching=false;map(o,o.normalizedGeometry,c);permissions(c,o);});
   }
   async function serialize(c,ctx){update(c);const data=await core().serialize(c,ctx);data.layer_contract_version=VERSION;data.templateBinding=clone(c.templateState.binding);data.emptyTemplateSlots=c.getObjects().filter(o=>o.templateSlot&&o.role==='slot-guide').map(o=>o.toObject(PROPS));data.objects.forEach((o,i)=>o.zIndex=i);delete data.templateState;return data;}
   async function prepareRender(c,data){if(data.layer_contract_version!==VERSION)return;c._objects.sort((a,b)=>(a.zIndex??0)-(b.zIndex??0));for(const o of c.getObjects()){if(o.templateLayerId){map(o,o.normalizedGeometry,c);o.setCoords();}}await core()?.rehydrate(c);}
