@@ -1,0 +1,500 @@
+{
+  "captured_at": "2026-10-26 Asia/Taipei",
+  "source": "https://fanphone.tw/api/shop_data",
+  "pairs": [
+    {
+      "model_id": "model_apple_13",
+      "style_id": "style_1789287807818",
+      "model_name": "iPhone 13",
+      "style_name": "(晶彩)磁吸防摔殼",
+      "profile": {
+        "preview_mask_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/d5062cf5bd654788988faff52329d754.png",
+        "print_angle": 90,
+        "print_h": 142.92,
+        "print_line_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/18526b750862494dbead562bcf44fda5.png",
+        "print_w": 67.69,
+        "print_x": 15.3,
+        "print_y": 17.6
+      },
+      "fixture": "9f4b1ab92e7b6000.png",
+      "source_url": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/18526b750862494dbead562bcf44fda5.png",
+      "source_dimensions": [
+        1863,
+        3596
+      ],
+      "source_sha256": "471ac1f8e14c036be8e50170eb8c69517bbd95cbe383ec42423fb6e9d33b323d",
+      "fixture_dimensions": [
+        265,
+        512
+      ]
+    },
+    {
+      "model_id": "model_apple_13_pro",
+      "style_id": "style_1789287807818",
+      "model_name": "iPhone 13 Pro",
+      "style_name": "(晶彩)磁吸防摔殼",
+      "profile": {
+        "preview_mask_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/4a0d3e83900f4bcc9ff476106cf70ab8.png",
+        "print_angle": 90,
+        "print_h": 142.92,
+        "print_line_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/25891fb640a5481b927277ae70d64a2f.png",
+        "print_w": 69.69,
+        "print_x": 15.3,
+        "print_y": 17.6
+      },
+      "fixture": "7b881b3ed5aba462.png",
+      "source_url": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/25891fb640a5481b927277ae70d64a2f.png",
+      "source_dimensions": [
+        1863,
+        3596
+      ],
+      "source_sha256": "ddf8264c3d7512cc622a60eba83f18f8a45b1183677774f9d6c1a1827603f84a",
+      "fixture_dimensions": [
+        265,
+        512
+      ]
+    },
+    {
+      "model_id": "model_apple_13_pro_max",
+      "style_id": "style_1789287807818",
+      "model_name": "iPhone 13 Pro Max",
+      "style_name": "(晶彩)磁吸防摔殼",
+      "profile": {
+        "preview_mask_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/98a0b6b239984d0eaab574020dbb969b.png",
+        "print_angle": 90,
+        "print_h": 156.89,
+        "print_line_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/18cffc8f383743b0b649e2936d2c6a4c.png",
+        "print_w": 74.21,
+        "print_x": 15.3,
+        "print_y": 17.6
+      },
+      "fixture": "1d9b34d7f11351e0.png",
+      "source_url": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/18cffc8f383743b0b649e2936d2c6a4c.png",
+      "source_dimensions": [
+        2017,
+        3926
+      ],
+      "source_sha256": "46766f8583c686ab82afbc7e572a1fd567e7b447be2a95d3b417ac1cc2edc5d8",
+      "fixture_dimensions": [
+        263,
+        512
+      ]
+    },
+    {
+      "model_id": "model_apple_14",
+      "style_id": "style_1789287807818",
+      "model_name": "iPhone 14",
+      "style_name": "(晶彩)磁吸防摔殼",
+      "profile": {
+        "preview_mask_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/0dd63dc08d4643c08cd33ad03446d5c7.png",
+        "print_angle": 90,
+        "print_h": 142.92,
+        "print_line_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/1404e15ddf0341938ace0158009e0e4e.png",
+        "print_w": 67.69,
+        "print_x": 15.3,
+        "print_y": 17.6
+      },
+      "fixture": "8c2dccf857803593.png",
+      "source_url": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/1404e15ddf0341938ace0158009e0e4e.png",
+      "source_dimensions": [
+        1863,
+        3596
+      ],
+      "source_sha256": "471ac1f8e14c036be8e50170eb8c69517bbd95cbe383ec42423fb6e9d33b323d",
+      "fixture_dimensions": [
+        265,
+        512
+      ]
+    },
+    {
+      "model_id": "model_apple_14_pro",
+      "style_id": "style_1789287807818",
+      "model_name": "iPhone 14 Pro",
+      "style_name": "(晶彩)磁吸防摔殼",
+      "profile": {
+        "preview_mask_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/bccaa1cdcb40469c83ace6c7f0ec3901.png",
+        "print_angle": 90,
+        "print_h": 143.76,
+        "print_line_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/62306d76ee2d49caa1a688b5fe5984f5.png",
+        "print_w": 67.65,
+        "print_x": 15.3,
+        "print_y": 17.6
+      },
+      "fixture": "14415b5813631fa6.png",
+      "source_url": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/62306d76ee2d49caa1a688b5fe5984f5.png",
+      "source_dimensions": [
+        1862,
+        3616
+      ],
+      "source_sha256": "570e5584887d148164984c5d4c375ad121486e838dee516f4f55fab0c92fabb5",
+      "fixture_dimensions": [
+        264,
+        512
+      ]
+    },
+    {
+      "model_id": "model_apple_14_pro_max",
+      "style_id": "style_1789287807818",
+      "model_name": "iPhone 14 Pro Max",
+      "style_name": "(晶彩)磁吸防摔殼",
+      "profile": {
+        "preview_mask_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/c60559795f314a4e8556a2c871272421.png",
+        "print_angle": 90,
+        "print_h": 156.8,
+        "print_line_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/24ea5099b29349ed9bfa9ad94d1a2565.png",
+        "print_w": 73.74,
+        "print_x": 15.3,
+        "print_y": 17.6
+      },
+      "fixture": "56e95ee2a089defa.png",
+      "source_url": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/24ea5099b29349ed9bfa9ad94d1a2565.png",
+      "source_dimensions": [
+        2006,
+        3924
+      ],
+      "source_sha256": "f51ce763da3505cea22294b52876c1a0ea8a2f1d53d43642eaaba19c34652761",
+      "fixture_dimensions": [
+        262,
+        512
+      ]
+    },
+    {
+      "model_id": "model_apple_15",
+      "style_id": "style_1789287807818",
+      "model_name": "iPhone 15",
+      "style_name": "(晶彩)磁吸防摔殼",
+      "profile": {
+        "preview_mask_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/a5209e760c3f44f3abb68f215d2f0929.png",
+        "print_angle": 90,
+        "print_h": 143.76,
+        "print_line_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/deb828988b5347368f342d6dcb68a4b5.png",
+        "print_w": 67.82,
+        "print_x": 15.3,
+        "print_y": 17.6
+      },
+      "fixture": "898d4f872beaf78f.png",
+      "source_url": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/deb828988b5347368f342d6dcb68a4b5.png",
+      "source_dimensions": [
+        1866,
+        3616
+      ],
+      "source_sha256": "3f2d9114ad1198b01216e979b4010a6f81122ac7b5587fdc23b90a9bcc778f7d",
+      "fixture_dimensions": [
+        264,
+        512
+      ]
+    },
+    {
+      "model_id": "model_apple_15_pro",
+      "style_id": "style_1789287807818",
+      "model_name": "iPhone 15 Pro",
+      "style_name": "(晶彩)磁吸防摔殼",
+      "profile": {
+        "preview_mask_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/ce13a991352446ad9b26a7c5009d3f19.png",
+        "print_angle": 90,
+        "print_h": 142.83,
+        "print_line_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/2f01e04ea8af42dba9daae3c690b4e1b.png",
+        "print_w": 66.8,
+        "print_x": 15.3,
+        "print_y": 17.6
+      },
+      "fixture": "2fc408c31c8f223d.png",
+      "source_url": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/2f01e04ea8af42dba9daae3c690b4e1b.png",
+      "source_dimensions": [
+        1842,
+        3594
+      ],
+      "source_sha256": "cc28ab0df6ef7ddf0720fdaf14f6e6f0232562d59795bee23a4d5ca507333aa7",
+      "fixture_dimensions": [
+        262,
+        512
+      ]
+    },
+    {
+      "model_id": "model_apple_15_pro_max",
+      "style_id": "style_1789287807818",
+      "model_name": "iPhone 15 Pro Max",
+      "style_name": "(晶彩)磁吸防摔殼",
+      "profile": {
+        "preview_mask_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/85bd19d7e0794e44968c6449a0cb069a.png",
+        "print_angle": 90,
+        "print_h": 155.96,
+        "print_line_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/e2957ec599b646cdaa16f5939243d82f.png",
+        "print_w": 72.9,
+        "print_x": 15.6,
+        "print_y": 17.8
+      },
+      "fixture": "5563dd6133f69543.png",
+      "source_url": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/e2957ec599b646cdaa16f5939243d82f.png",
+      "source_dimensions": [
+        1986,
+        3904
+      ],
+      "source_sha256": "e0b069259e3b9fe492372dcaaa8f19642a59bc116f39b2b5a40b3cf5e3cf838f",
+      "fixture_dimensions": [
+        260,
+        512
+      ]
+    },
+    {
+      "model_id": "model_apple_16",
+      "style_id": "style_1789287807818",
+      "model_name": "iPhone 16",
+      "style_name": "(晶彩)磁吸防摔殼",
+      "profile": {
+        "preview_mask_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/83c5ccafb61c4c68bae2495232bd4924.png",
+        "print_angle": 90,
+        "print_h": 144.19,
+        "print_line_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/49ef9860dcca4b2ea7de4c8a37a03275.png",
+        "print_w": 68.16,
+        "print_x": 15.3,
+        "print_y": 17.6
+      },
+      "fixture": "3857d4f5e30d550c.png",
+      "source_url": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/49ef9860dcca4b2ea7de4c8a37a03275.png",
+      "source_dimensions": [
+        1862,
+        3620
+      ],
+      "source_sha256": "0ba174499e028d079d5e62be1ab34cee0f99d17b5f7fb38063d429ff0a0b1a49",
+      "fixture_dimensions": [
+        263,
+        512
+      ]
+    },
+    {
+      "model_id": "model_apple_16_pro",
+      "style_id": "style_1789287807818",
+      "model_name": "iPhone 16 Pro",
+      "style_name": "(晶彩)磁吸防摔殼",
+      "profile": {
+        "preview_mask_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/bdaa71849c97427c8588a068804ce296.png",
+        "print_angle": 90,
+        "print_h": 145.71,
+        "print_line_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/1c0e7ee3ce464734bef0d5137f4d6f99.png",
+        "print_w": 67.56,
+        "print_x": 15.3,
+        "print_y": 16.7
+      },
+      "fixture": "924c83a0040fbfe5.png",
+      "source_url": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/1c0e7ee3ce464734bef0d5137f4d6f99.png",
+      "source_dimensions": [
+        1857,
+        3664
+      ],
+      "source_sha256": "6c16c8830afc59a6912d769779b3cf4df7cf876da0644f9c37872ec106bff9af",
+      "fixture_dimensions": [
+        259,
+        512
+      ]
+    },
+    {
+      "model_id": "model_apple_16_pro_max",
+      "style_id": "style_1789287807818",
+      "model_name": "iPhone 16 Pro Max",
+      "style_name": "(晶彩)磁吸防摔殼",
+      "profile": {
+        "preview_mask_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/a09ca533215146a9a8935d7d415a89e2.png",
+        "print_angle": 90,
+        "print_h": 158.58,
+        "print_line_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/6ec657dc9cfa4526a7f85430720525e9.png",
+        "print_w": 73.15,
+        "print_x": 16,
+        "print_y": 18
+      },
+      "fixture": "af76832d73642d95.png",
+      "source_url": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/6ec657dc9cfa4526a7f85430720525e9.png",
+      "source_dimensions": [
+        2002,
+        3980
+      ],
+      "source_sha256": "1e0db1635f31ba5d05bd575c096bc293a75b998624f72e24c1d6fe753a3cd769",
+      "fixture_dimensions": [
+        258,
+        512
+      ]
+    },
+    {
+      "model_id": "model_apple_17",
+      "style_id": "style_1789287807818",
+      "model_name": "iPhone 17",
+      "style_name": "(晶彩)磁吸防摔殼",
+      "profile": {
+        "preview_mask_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/a22061cf04cd41a88fc85c290a795c43.png",
+        "print_angle": 90,
+        "print_h": 146.22,
+        "print_line_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/a9948b99892749edb6049a3a01a96be0.png",
+        "print_w": 68.11,
+        "print_x": 15.3,
+        "print_y": 17.6
+      },
+      "fixture": "d11dc8d7188ffd26.png",
+      "source_url": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/a9948b99892749edb6049a3a01a96be0.png",
+      "source_dimensions": [
+        1869,
+        3662
+      ],
+      "source_sha256": "bbc4cc7682a15d07d10f624b311100345a5f24365d2b093ae56261abc32041aa",
+      "fixture_dimensions": [
+        261,
+        512
+      ]
+    },
+    {
+      "model_id": "model_apple_17_pro",
+      "style_id": "style_1789287807818",
+      "model_name": "iPhone 17 Pro/iPhone 18 Pro",
+      "style_name": "(晶彩)磁吸防摔殼",
+      "profile": {
+        "preview_mask_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/c15f68393473448d9e1fed1dee305bf6.png",
+        "print_angle": 90,
+        "print_h": 149.61,
+        "print_line_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/17cc8ba816624b3684923b25356f6993.png",
+        "print_w": 71.63,
+        "print_x": 14.5,
+        "print_y": 16.6
+      },
+      "fixture": "7d0f189537837e21.png",
+      "source_url": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/17cc8ba816624b3684923b25356f6993.png",
+      "source_dimensions": [
+        897,
+        1754
+      ],
+      "source_sha256": "a1e65cbb231be41b55c355b0659969387877bd7d09365dc40d503cb96179dfdb",
+      "fixture_dimensions": [
+        262,
+        512
+      ]
+    },
+    {
+      "model_id": "model_apple_17_pro",
+      "style_id": "style_1789287853586",
+      "model_name": "iPhone 17 Pro/iPhone 18 Pro",
+      "style_name": "(鏡面)磁吸防摔殼",
+      "profile": {
+        "preview_mask_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/d759bf01192e44e0a77579e86074f644.png",
+        "print_angle": 90,
+        "print_h": 102.53,
+        "print_line_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/67cfa25b55c54a188433245b7d5fe012.png",
+        "print_w": 71.88,
+        "print_x": 60,
+        "print_y": 17
+      },
+      "fixture": "8c031e7622ab8b68.png",
+      "source_url": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/67cfa25b55c54a188433245b7d5fe012.png",
+      "source_dimensions": [
+        1701,
+        2426
+      ],
+      "source_sha256": "7b757af701744144567aed7f78b13e5215265296b4765ba21af4812ec7f196d8",
+      "fixture_dimensions": [
+        359,
+        512
+      ]
+    },
+    {
+      "model_id": "model_apple_17_pro_max",
+      "style_id": "style_1789287807818",
+      "model_name": "iPhone 17 Pro Max/iPhone 18 Pro Max",
+      "style_name": "(晶彩)磁吸防摔殼",
+      "profile": {
+        "preview_mask_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/452376640f304aadbe9c332d29a1b4d6.png",
+        "print_angle": 90,
+        "print_h": 162.39,
+        "print_line_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/1b2485f406fb49fd8dbe7150d81c0fa0.png",
+        "print_w": 77.09,
+        "print_x": 14.7,
+        "print_y": 16.5
+      },
+      "fixture": "1b9ea56f6d88c09b.png",
+      "source_url": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/1b2485f406fb49fd8dbe7150d81c0fa0.png",
+      "source_dimensions": [
+        2023,
+        3988
+      ],
+      "source_sha256": "c42b03d8b65ba4abd047279e7ea8a1035e33f32fffaf270909338811e39f5446",
+      "fixture_dimensions": [
+        260,
+        512
+      ]
+    },
+    {
+      "model_id": "model_apple_17_pro_max",
+      "style_id": "style_1789287853586",
+      "model_name": "iPhone 17 Pro Max/iPhone 18 Pro Max",
+      "style_name": "(鏡面)磁吸防摔殼",
+      "profile": {
+        "preview_mask_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/0fc48f8b94704795bf0e2f639f10272a.png",
+        "print_angle": 90,
+        "print_h": 115.99,
+        "print_line_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/1c2d070b5ecd4f6598004bc5e11fc480.png",
+        "print_w": 78.11,
+        "print_x": 62,
+        "print_y": 18
+      },
+      "fixture": "467b627f760d2738.png",
+      "source_url": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/1c2d070b5ecd4f6598004bc5e11fc480.png",
+      "source_dimensions": [
+        1845,
+        2740
+      ],
+      "source_sha256": "6440dd3b8fd6ce803565923070277ad4145978867b688d34a40773287c7f18ad",
+      "fixture_dimensions": [
+        345,
+        512
+      ]
+    },
+    {
+      "model_id": "m_1790675649972",
+      "style_id": "style_1789287807818",
+      "model_name": "iPhone 14 Plus /iPhone 15 Plus",
+      "style_name": "(晶彩)磁吸防摔殼",
+      "profile": {
+        "preview_mask_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/e925a0759cb44dfa9211dcbcd4dc8cf9.png",
+        "print_angle": 90,
+        "print_h": 156.8,
+        "print_line_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/549837ccd761402396a607ccb97ed78d.png",
+        "print_w": 73.91,
+        "print_x": 15.3,
+        "print_y": 17.6
+      },
+      "fixture": "57574c91cc49b5e1.png",
+      "source_url": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/549837ccd761402396a607ccb97ed78d.png",
+      "source_dimensions": [
+        1007,
+        1960
+      ],
+      "source_sha256": "9c577b64425d0c46c905e537d4cd107d089cc70d4654e967147357bfa579dfb3",
+      "fixture_dimensions": [
+        263,
+        512
+      ]
+    },
+    {
+      "model_id": "m_1790678127930",
+      "style_id": "style_1789287807818",
+      "model_name": "iPhone 16 Plus",
+      "style_name": "(晶彩)磁吸防摔殼",
+      "profile": {
+        "preview_mask_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/a7ee495c4d80422e9cbf82184e978ec2.png",
+        "print_angle": 90,
+        "print_h": 156.97,
+        "print_line_img": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/27967b09ea5e43d2a151a3ae521d1519.png",
+        "print_w": 73.83,
+        "print_x": 15.3,
+        "print_y": 17.6
+      },
+      "fixture": "ea11c53d8442a66d.png",
+      "source_url": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/materials/27967b09ea5e43d2a151a3ae521d1519.png",
+      "source_dimensions": [
+        2006,
+        3930
+      ],
+      "source_sha256": "43e2b09777120f0c26003d110c43d13681b74f25660b13adcd21eda15f5d48ff",
+      "fixture_dimensions": [
+        261,
+        512
+      ]
+    }
+  ]
+}

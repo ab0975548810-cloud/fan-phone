@@ -63,7 +63,25 @@
 
 ## 實際對照與量測
 
-四個 model 的素材來源、尺寸與原始公開 URL 由既有 `.github/tests/fixtures/production_shop_data_mask_contract.json` 記錄：iPhone 13、14、14 Pro Max、17 Pro。沒有用另一個型號代替 fixture。
+2026-10-26 唯讀查核正式公開 catalog，實際有 **19 組有效手機殼 model × style**（含晶彩／鏡面及 17/18 Pro Max）。已下載各組公開 print mask 並衍生離線 fixture；沒有登入或寫入 production DB。來源 URL、原始尺寸、SHA256 與完整 W/H/X/Y/angle 均保留於 [fixture catalog](../../.github/tests/fixtures/current_case_profiles/catalog.json)，production 數值原封不動。
+
+**目前正式 19 組 × 五種構圖 = 95 組／引擎**，WebKit、Chromium 都用真實 Fabric 繪製。這五份保守母版各 95 組均通過；額外負向測試仍會正確回「需要人工微調」。此結果不代表任意母版都能安全通過。
+
+每列五張圖，依正式 catalog 順序各呈現四組（最後三組），同頁為舊分軸映射／新統一引擎：
+
+| 構圖 | 1–4 | 5–8 | 9–12 | 13–16 | 17–19 |
+|---|---|---|---|---|---|
+| 單張滿版 | [對照 1](current-full-image-1.png) | [對照 2](current-full-image-2.png) | [對照 3](current-full-image-3.png) | [對照 4](current-full-image-4.png) | [對照 5](current-full-image-5.png) |
+| 多照片框 | [對照 1](current-photos-1.png) | [對照 2](current-photos-2.png) | [對照 3](current-photos-3.png) | [對照 4](current-photos-4.png) | [對照 5](current-photos-5.png) |
+| 文字＋貼紙 | [對照 1](current-text-sticker-1.png) | [對照 2](current-text-sticker-2.png) | [對照 3](current-text-sticker-3.png) | [對照 4](current-text-sticker-4.png) | [對照 5](current-text-sticker-5.png) |
+| 主視覺＋重要文字 | [對照 1](current-subject-title-1.png) | [對照 2](current-subject-title-2.png) | [對照 3](current-subject-title-3.png) | [對照 4](current-subject-title-4.png) | [對照 5](current-subject-title-5.png) |
+| 29 層＋可編輯文字貼紙 | [對照 1](current-mixed-1.png) | [對照 2](current-mixed-2.png) | [對照 3](current-mixed-3.png) | [對照 4](current-mixed-4.png) | [對照 5](current-mixed-5.png) |
+
+[Chromium 95 組逐層量測](chromium-current-metrics.json)／[WebKit 95 組逐層量測](webkit-current-metrics.json)。另外保留四款歷史公開素材的 20 組相容矩陣，避免更新 fixture 掩蓋先前案例。
+
+當前明顯比例差案例：17 Pro 晶彩 71.63 × 149.61 mm 與鏡面 71.88 × 102.53 mm，不能把 x/y 各自拉滿；新引擎維持整組比例，背景才使用明確裁切策略。
+
+以下歷史四個 model 的素材來源、尺寸與原始公開 URL 由既有 `.github/tests/fixtures/production_shop_data_mask_contract.json` 記錄：iPhone 13、14、14 Pro Max、17 Pro。沒有用另一個型號代替 fixture。
 
 下圖為**實際 Fabric 舊分軸映射／新統一適配**，非設計示意稿或人工修圖；五種構圖 × 四個真實 mask = 20 組，兩個 browser engine 都執行。測試照片使用合成圖形，未使用客戶照片。
 
@@ -84,7 +102,7 @@
 
 每種設計另實際走 #71 source pre-upload → 隔離 create_order → Print Center prepare → Chromium/Fabric 720 DPI 重建。iPhone 17 Pro 結果均為 **2030 × 4241 px / 720 DPI**；文字換行一致、位置誤差 <0.0002 logical px，相機孔中心兩份輸出 alpha 都是 0。
 
-比較前台原有 HQ PNG 與重新重建 PNG 時，透明 RGB 值在瀏覽器間未定義，因此分開比較白底合成的可見色彩與 alpha：可見通道平均誤差 <0.16 / 255、alpha 平均誤差 <0.59 / 255（不同引擎邊緣內插）。完整逐設計結果：
+比較前台原有 HQ PNG 與重新重建 PNG 時，透明 RGB 值在瀏覽器間未定義，因此分開比較白底合成色彩與 alpha。另因 Linux WebKit／Chromium 原生文字邊緣渲染不同，文字以相同站內字型 hash、精確 fontSize、逐行內容與位置驗證；非文字區維持平均通道誤差 <0.75 / 255、整圖 alpha 平均誤差 <0.75 / 255。完整色彩誤差仍原樣記錄，不隱藏 native text raster 差異。Windows 本機可見平均誤差 <0.16 / 255、alpha <0.59 / 255；Linux CI 數值會由同一測試重新驗證。完整逐設計結果：
 
 - [Chromium 生產一致性](chromium-production.json)
 - [WebKit 生產一致性](webkit-production.json)

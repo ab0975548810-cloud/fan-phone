@@ -16,6 +16,22 @@ from PIL import Image, ImageDraw, ImageChops, ImageStat
 ROOT=Path(__file__).resolve().parents[2]
 
 
+def comparison(page,template,adapted,model):
+    return page.evaluate("""async data=>{
+                      const {original,adapted,model}=data,box=document.getElementById('master-evidence'),row=document.createElement('section');row.style='display:inline-block;vertical-align:top;padding:10px;width:23%;box-sizing:border-box';const title=document.createElement('h3');title.textContent=model.id+' · '+adapted.adaptation_report.status;title.style='font-size:13px';row.append(title);box.append(row);
+                      const metrics=[];
+                      for(const [label,template] of [['舊：分軸映射',original],['新：整組等比例',adapted]]){
+                        const heading=document.createElement('p');heading.textContent=label;row.append(heading);
+                        const el=document.createElement('canvas');row.append(el);
+                        const c=new fabric.StaticCanvas(el,{width:Math.round(model.case_profiles.crystal.print_w*3),height:Math.round(model.case_profiles.crystal.print_h*3)});
+                        await BenfuwanMultilayer.apply(c,template,{},true);
+                        const image=await new Promise(resolve=>fabric.Image.fromURL(model.case_profiles.crystal.print_line_img,resolve));image.set({left:0,top:0,scaleX:c.width/image.width,scaleY:c.height/image.height,absolutePositioned:true});c.clipPath=image;c.renderAll();
+                        el.style='width:130px;max-width:100%;height:auto;background:repeating-conic-gradient(#eee 0 25%,white 0 50%) 0/12px 12px';
+                        metrics.push(c.getObjects().map(o=>({id:o.layerId,center:o.getCenterPoint(),width:o.getScaledWidth(),height:o.getScaledHeight(),angle:o.angle,scaleX:o.scaleX,scaleY:o.scaleY})));
+                      }return metrics;
+                    }""",dict(original=template,adapted=adapted,model=model))
+
+
 def master_adaptation_browser_test(browser,base,poll):
     import app
     import template_adaptation as engine
@@ -77,19 +93,7 @@ def master_adaptation_browser_test(browser,base,poll):
                     target=engine.target_for(catalog,model['id'],'crystal');safe,sha=engine.mask(app,target['profile']['print_line_img']);adapted=engine.adapt(template,target,safe,sha)
                     report=adapted['adaptation_report'];reports.append(dict(kind=kind,model=model['id'],**report))
                     assert report['maxAspectError']<1e-9 and report['relativeDistanceError']<1e-9,report
-                    actual=page.evaluate("""async data=>{
-                      const {original,adapted,model}=data,box=document.getElementById('master-evidence'),row=document.createElement('section');row.style='display:inline-block;vertical-align:top;padding:10px;width:23%;box-sizing:border-box';const title=document.createElement('h3');title.textContent=model.id+' · '+adapted.adaptation_report.status;title.style='font-size:13px';row.append(title);box.append(row);
-                      const metrics=[];
-                      for(const [label,template] of [['舊：分軸映射',original],['新：整組等比例',adapted]]){
-                        const heading=document.createElement('p');heading.textContent=label;row.append(heading);
-                        const el=document.createElement('canvas');row.append(el);
-                        const c=new fabric.StaticCanvas(el,{width:Math.round(model.case_profiles.crystal.print_w*3),height:Math.round(model.case_profiles.crystal.print_h*3)});
-                        await BenfuwanMultilayer.apply(c,template,{},true);
-                        const image=await new Promise(resolve=>fabric.Image.fromURL(model.case_profiles.crystal.print_line_img,resolve));image.set({left:0,top:0,scaleX:c.width/image.width,scaleY:c.height/image.height,absolutePositioned:true});c.clipPath=image;c.renderAll();
-                        el.style='width:130px;max-width:100%;height:auto;background:repeating-conic-gradient(#eee 0 25%,white 0 50%) 0/12px 12px';
-                        metrics.push(c.getObjects().map(o=>({id:o.layerId,center:o.getCenterPoint(),width:o.getScaledWidth(),height:o.getScaledHeight(),angle:o.angle,scaleX:o.scaleX,scaleY:o.scaleY})));
-                      }return metrics;
-                    }""",dict(original=template,adapted=adapted,model=model))
+                    actual=comparison(page,template,adapted,model)
                     report['fabricLayers']=actual[1]
                     # Compare actually enlivened/measured Fabric aspect to the immutable master.
                     for item in template['objects_json']['objects']:
@@ -103,6 +107,41 @@ def master_adaptation_browser_test(browser,base,poll):
                 page.locator('#master-evidence').screenshot(path=str(output/(kind+'.png')))
                 page.evaluate("document.getElementById('master-evidence').remove()")
             (output/'metrics.json').write_text(json.dumps(reports,ensure_ascii=False,indent=2),encoding='utf-8')
+            # Current production READ-ONLY capture: all 19 configured model/style
+            # pairs, including the much shorter mirror masks. CI stays offline.
+            current_dir=ROOT/'.github/tests/fixtures/current_case_profiles'
+            current=json.loads((current_dir/'catalog.json').read_text(encoding='utf-8'))['pairs']
+            current_models={};current_styles={};current_targets=[]
+            for index,item in enumerate(current):
+                target=copy.deepcopy(item);destination=assets/(prefix+'-current-'+str(index)+'.png');destination.write_bytes((current_dir/item['fixture']).read_bytes());paths.append(destination)
+                target['profile']['print_line_img']='/static/__pycache__/'+destination.name
+                target['profile']['preview_mask_img']=target['profile']['print_line_img']
+                current_targets.append(target)
+                model=current_models.setdefault(target['model_id'],dict(id=target['model_id'],name=target['model_name'],brand='Apple',status=True,case_profiles={}))
+                model['case_profiles'][target['style_id']]=target['profile']
+                current_styles[target['style_id']]=dict(id=target['style_id'],name=target['style_name'],status=True)
+            current_catalog=dict(brands=['Apple'],models=list(current_models.values()),styles=list(current_styles.values()))
+            app.local_save_json(app.DATA_FILE,current_catalog)
+            assert len(page.request.get(base+'/api/admin/template-adaptation/targets').json()['targets'])==19
+            current_results=[]
+            for template in templates:
+                for chunk in range(0,len(current_targets),4):
+                    page.evaluate("""title=>{document.getElementById('master-evidence')?.remove();const box=document.createElement('div');box.id='master-evidence';box.style='position:fixed;inset:0;background:#fff7fa;z-index:9999;overflow:auto;padding:18px;font:15px sans-serif;color:#563b46;box-sizing:border-box';const h=document.createElement('h2');h.textContent=title;box.append(h);document.body.append(box);}""",template['name']+' · 正式公開設定 '+str(chunk+1)+'–'+str(min(chunk+4,19)))
+                    for target in current_targets[chunk:chunk+4]:
+                        safe,sha=engine.mask(app,target['profile']['print_line_img']);adapted=engine.adapt(template,target,safe,sha)
+                        display=dict(id=target['model_name']+' '+target['style_name'],case_profiles={'crystal':target['profile']})
+                        measured=comparison(page,template,adapted,display)[1]
+                        report=adapted['adaptation_report'];assert report['maxAspectError']<1e-9 and report['relativeDistanceError']<1e-9
+                        # A collision is an explicit manual result, never silently successful.
+                        if report['status']=='success':assert not report['issues']
+                        else:assert report['status']=='needs-adjustment' and report['issues']
+                        current_results.append(dict(kind=template['name'],model=target['model_name'],style=target['style_name'],**report,fabricLayers=measured))
+                    page.locator('#master-evidence').screenshot(path=str(output/f"current-{template['name']}-{chunk//4+1}.png"))
+                    page.evaluate("document.getElementById('master-evidence').remove()")
+            (output/'current-metrics.json').write_text(json.dumps(current_results,ensure_ascii=False,indent=2),encoding='utf-8')
+            print('CURRENT_19_PROFILES_95_COMPOSITIONS_OK',browser.browser_type.name,
+                  {status:sum(r['status']==status for r in current_results) for status in ('success','needs-adjustment')},flush=True)
+            app.local_save_json(app.DATA_FILE,catalog);security_perf._CACHE.clear()
             app.local_save_json(app.TEMPLATES_FILE,dict(templates=templates,categories=['全部','熱門']));security_perf._CACHE.clear()
             # Exercise the actual batch UI, not only the engine API.
             template=templates[2]
@@ -159,7 +198,8 @@ def master_adaptation_browser_test(browser,base,poll):
                   await new Promise(resolve=>applyTemplate(data.template,resolve));await ensureCanvasFonts();
                   const layouts=canvas.getObjects().filter(o=>['text','textbox','i-text'].includes(o.type)).map(o=>({lines:o._textLines.map(a=>a.join('')),left:o.left,top:o.top,fontSize:o.fontSize}));
                   await openPreview();if(!ctx.productionMeta)throw Error('HQ output missing');
-                  return {layouts,print:ctx.printBase64,body:{idempotency_key:'master-production-'+crypto.randomUUID(),model_id:ctx.modelId,style_id:ctx.styleId,color_name:'白',customer_name:'isolated master QA',quantity:1,payment_method:'現金',print_file:ctx.printBase64,mockup_file:ctx.mockupBase64,design_json:await BenfuwanDesignSources.prepare(await BenfuwanMultilayer.serialize(canvas,ctx))}};
+                  const maskImage=await new Promise(resolve=>{const image=new Image();image.onload=()=>resolve(image);image.src=ctx.printLineUrl;});
+                  return {maskSize:[maskImage.naturalWidth,maskImage.naturalHeight],maskBounds:ctx.productionMeta.maskBounds,layouts,print:ctx.printBase64,body:{idempotency_key:'master-production-'+crypto.randomUUID(),model_id:ctx.modelId,style_id:ctx.styleId,color_name:'白',customer_name:'isolated master QA',quantity:1,payment_method:'現金',print_file:ctx.printBase64,mockup_file:ctx.mockupBase64,design_json:await BenfuwanDesignSources.prepare(await BenfuwanMultilayer.serialize(canvas,ctx))}};
                 }""",dict(template=template,model=models[-1]))
                 response=front.request.post(base+'/api/create_order',data=body['body'])
                 if response.status!=200:
@@ -180,7 +220,7 @@ def master_adaptation_browser_test(browser,base,poll):
                 rendered.save(output/(template['name']+'-production.png'));preview.save(output/(template['name']+'-front-hq.png'))
                 diff=ImageStat.Stat(ImageChops.difference(rendered,preview))
                 for a,b in zip(body['layouts'],captured):
-                    assert a['lines']==b['lines'] and abs(a['left']-b['left'])<.0002 and abs(a['top']-b['top'])<.0002,(a,b)
+                    assert a['lines']==b['lines'] and a['fontSize']==b['fontSize'] and abs(a['left']-b['left'])<.0002 and abs(a['top']-b['top'])<.0002,(a,b)
                 assert len(body['layouts'])==len(captured)
                 # Browser engines differ at antialiased edges; require close raster output
                 # AND exact text line breaks/positions, not only image dimensions.
@@ -188,9 +228,23 @@ def master_adaptation_browser_test(browser,base,poll):
                 visible=ImageStat.Stat(ImageChops.difference(Image.alpha_composite(white,rendered).convert('RGB'),Image.alpha_composite(white,preview).convert('RGB')))
                 # RGB underneath fully transparent pixels is unspecified across engines.
                 # Compare visible premultiplied color and alpha separately.
-                assert max(visible.mean)<.75 and diff.mean[3]<.75,(template['name'],visible.mean,diff.mean[3])
+                # Text antialiasing/hinting differs between native Linux WebKit and
+                # Chromium. Keep the original raster gate outside text bounds;
+                # require exact font size, line breaks and positions for each text.
+                nontext=ImageChops.difference(Image.alpha_composite(white,rendered).convert('RGB'),Image.alpha_composite(white,preview).convert('RGB'))
+                bounds=body['maskBounds'];sw,sh=body['maskSize'];ink=ImageDraw.Draw(nontext)
+                for obj in body['body']['design_json']['objects']:
+                    if obj['type'] not in ('text','textbox','i-text'):continue
+                    g=obj['normalizedGeometry'];frame=dict(x=g['x']*sw,y=g['y']*sh,width=g['width']*sw,height=g['height']*sh)
+                    points=engine.corners(frame,obj.get('angle',0))
+                    px=[((x-bounds['left'])/bounds['width']*rendered.width,(y-bounds['top'])/bounds['height']*rendered.height) for x,y in points]
+                    # Two production pixels are an explicit antialias fringe,
+                    # not an allowance for a shifted origin or changed layout.
+                    ink.polygon(px,fill=(0,0,0));ink.line(px+[px[0]],fill=(0,0,0),width=4)
+                nontext_error=ImageStat.Stat(nontext).mean
+                assert max(nontext_error)<.75 and diff.mean[3]<.75,(template['name'],visible.mean,nontext_error,diff.mean[3])
                 assert rendered.getpixel((1000,500))[3]==preview.getpixel((1000,500))[3]==0
-                production.append(dict(kind=template['name'],dimensions=list(rendered.size),rawChannelMeanAbsoluteError=diff.mean,visibleMeanAbsoluteError=visible.mean,alphaMeanAbsoluteError=diff.mean[3],textLayouts=captured))
+                production.append(dict(kind=template['name'],dimensions=list(rendered.size),rawChannelMeanAbsoluteError=diff.mean,visibleMeanAbsoluteError=visible.mean,nonTextMeanAbsoluteError=nontext_error,alphaMeanAbsoluteError=diff.mean[3],textLayouts=captured))
             (output/'production.json').write_text(json.dumps(production,ensure_ascii=False,indent=2),encoding='utf-8')
             assert not errors,errors
             print('MASTER_ADAPTATION_BROWSER_OK',browser.browser_type.name,'5 designs x 4 real masks; batch/new-only; frontend exact geometry; 390/768/1180',flush=True)
