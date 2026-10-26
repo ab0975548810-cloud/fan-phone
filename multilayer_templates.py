@@ -56,6 +56,8 @@ def raw_template(template):
 
 def prepare_template(app,template,images=None):
     """Validate only opted-in templates; legacy v1/v2/v3 remain untouched."""
+    from template_adaptation import validate
+    validate(template)
     if template.get('layer_contract_version')!=VERSION:
         raw=template.get('objects_json')
         if isinstance(raw,dict) and raw.get('layer_contract_version')==VERSION:raise ValueError('模板契約版本不一致')
@@ -120,9 +122,10 @@ def find_template(app,identity):
     return item
 
 
-def binding(app,template,model_id,style_id,application_id):
+def binding(app,template,model_id,style_id,application_id,resolved=None):
     from design_sources import owner
     claims={'id':template['id'],'hash':digest(template),'modelId':model_id,'styleId':style_id,'applicationId':application_id,'owner':owner(app)}
+    if resolved is not None:claims['geometryHash']=digest(resolved)
     return {k:v for k,v in claims.items() if k!='owner'}|{'ticket':signer(app).dumps(claims)}
 
 
@@ -135,6 +138,12 @@ def verify_design(app,design):
     if verified.get('owner')!=owner(app) or any(verified.get(k)!=claim.get(k) for k in ('id','hash','modelId','styleId','applicationId')) or verified['modelId']!=design.get('modelId') or verified['styleId']!=design.get('styleId'):raise ValueError('模板授權與目前設計不一致')
     template=find_template(app,claim['id'])
     if digest(template)!=claim['hash']:raise ValueError('模板已更新，請重新套用模板')
+    if template.get('adaptation_contract_version')=='master-v1':
+        from template_adaptation import resolve
+        shop=app.cloud_get_json('shop_data',app.DATA_FILE,app.DEFAULT_SHOP_DATA)
+        template=resolve(app,template,shop,design['modelId'],design['styleId'])
+        if not claim.get('geometryHash') or verified.get('geometryHash')!=claim['geometryHash'] or digest(template)!=claim['geometryHash']:
+            raise ValueError('母版適配設定已更新，請重新套用模板')
     data=raw_template(template);original={o['layerId']:o for o in data['objects']}
     app_id=claim['applicationId'];seen=set();members=defaultdict(list)
     objects=design.get('objects',[]);empty=design.get('emptyTemplateSlots',[])
@@ -204,6 +213,8 @@ def verify_seal(app,design,order_id):
 
 
 def install(app):
+    from template_adaptation import install as install_adaptation
+    install_adaptation(app)
     @app.app.route('/api/template_contract/<template_id>')
     def template_contract(template_id):
         try:
@@ -216,5 +227,9 @@ def install(app):
             uuid.UUID(application_id)
             template=find_template(app,template_id)
             if template.get('case_style_id') and template['case_style_id']!=style_id:raise ValueError('模板不適用此殼款')
-            return app.no_cache_json({'status':'success','template':template,'binding':binding(app,template,model_id,style_id,application_id)})
+            resolved=None
+            if template.get('adaptation_contract_version')=='master-v1':
+                from template_adaptation import resolve
+                resolved=resolve(app,template,shop,model_id,style_id)
+            return app.no_cache_json({'status':'success','template':resolved or template,'binding':binding(app,template,model_id,style_id,application_id,resolved)})
         except (ValueError,KeyError) as exc:return app.no_cache_json({'status':'error','msg':str(exc)},400)

@@ -1,0 +1,141 @@
+[
+  {
+    "kind": "full-image",
+    "dimensions": [
+      2030,
+      4241
+    ],
+    "rawChannelMeanAbsoluteError": [
+      3.327281650043035,
+      3.251443160422012,
+      3.348724566540794,
+      0.5866744180373854
+    ],
+    "visibleMeanAbsoluteError": [
+      0.09345748690649454,
+      0.15217191316761197,
+      0.12649075469002455
+    ],
+    "alphaMeanAbsoluteError": 0.5866744180373854,
+    "textLayouts": []
+  },
+  {
+    "kind": "photos",
+    "dimensions": [
+      2030,
+      4241
+    ],
+    "rawChannelMeanAbsoluteError": [
+      3.1355661307689537,
+      3.4278287372970637,
+      3.3809521873617037,
+      0.586827741853801
+    ],
+    "visibleMeanAbsoluteError": [
+      0.0,
+      0.054673762926533497,
+      0.03285682924024564
+    ],
+    "alphaMeanAbsoluteError": 0.586827741853801,
+    "textLayouts": []
+  },
+  {
+    "kind": "text-sticker",
+    "dimensions": [
+      2030,
+      4241
+    ],
+    "rawChannelMeanAbsoluteError": [
+      3.1434782204680327,
+      3.4389802572355483,
+      3.3913812268925327,
+      0.586827741853801
+    ],
+    "visibleMeanAbsoluteError": [
+      0.007881424935795652,
+      0.06579891581477089,
+      0.043242194714277586
+    ],
+    "alphaMeanAbsoluteError": 0.586827741853801,
+    "textLayouts": [
+      {
+        "id": "template-text",
+        "fontSize": 12,
+        "left": 107.5,
+        "top": 181.5,
+        "lines": [
+          "Happy cats"
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "subject-title",
+    "dimensions": [
+      2030,
+      4241
+    ],
+    "rawChannelMeanAbsoluteError": [
+      3.184556110128316,
+      3.468712416789887,
+      3.4172176838114443,
+      0.586827741853801
+    ],
+    "visibleMeanAbsoluteError": [
+      0.048768589060810316,
+      0.09550168830429667,
+      0.0690379975909576
+    ],
+    "alphaMeanAbsoluteError": 0.586827741853801,
+    "textLayouts": [
+      {
+        "id": "template-text",
+        "fontSize": 12,
+        "left": 107.5,
+        "top": 181.5,
+        "lines": [
+          "Happy cats"
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "mixed",
+    "dimensions": [
+      2030,
+      4241
+    ],
+    "rawChannelMeanAbsoluteError": [
+      3.1563307055334797,
+      3.4624370588310454,
+      3.410347963755179,
+      0.586827741853801
+    ],
+    "visibleMeanAbsoluteError": [
+      0.020624260241624396,
+      0.08917046007598821,
+      0.062171994475696435
+    ],
+    "alphaMeanAbsoluteError": 0.586827741853801,
+    "textLayouts": [
+      {
+        "id": "template-text",
+        "fontSize": 12,
+        "left": 107.5,
+        "top": 181.5,
+        "lines": [
+          "Happy cats"
+        ]
+      },
+      {
+        "id": "5e1c312e-785d-48d6-b2ac-3c27bc07567a",
+        "fontSize": 36,
+        "left": 107.5,
+        "top": 383.8236,
+        "lines": [
+          "Hello"
+        ]
+      }
+    ]
+  }
+]

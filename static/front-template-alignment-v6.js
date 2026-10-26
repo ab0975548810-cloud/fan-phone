@@ -27,7 +27,7 @@
     return{x:num(o.left)+dx*Math.cos(a)-dy*Math.sin(a),y:num(o.top)+dx*Math.sin(a)+dy*Math.cos(a)};
   }
   function adapt(t){
-    if(!universal(t)||t.layer_contract_version)return t;
+    if(!universal(t)||t.layer_contract_version||t.adaptation_contract_version)return t;
     const sameModel=String(t.reference_model_id||'')===String(ctx.modelId||'')
       &&(!t.reference_style_id||String(t.reference_style_id)===String(ctx.styleId||''));
     const g=geometry(t),out=clone(t);
@@ -70,7 +70,7 @@
     return out;
   }
   window.applyTemplate=function(tpl,done){
-    if(!universal(tpl)||tpl.layer_contract_version||typeof previous!=='function')
+    if(!universal(tpl)||tpl.layer_contract_version||tpl.adaptation_contract_version||typeof previous!=='function')
       return previous?.apply(this,arguments);
     try{return previous.call(this,adapt(tpl),done)}
     catch(e){console.error('[TEMPLATE ALIGNMENT]',e);window.toast?.('模板座標無法解析，請聯絡店家調整模板');}

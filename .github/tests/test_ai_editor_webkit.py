@@ -232,7 +232,7 @@ def front_test(browser, base):
     page.unroute('**/broken-template-thumb.png')
     print('FRONT_TEMPLATE_BROKEN_THUMB_USES_CASE_FALLBACK_OK', thumb_fallback)
     template_src = page.locator('script[src*="front-universal-templates.js"]').get_attribute('src')
-    assert template_src and 'v=20261001fallback1' in template_src, template_src
+    assert template_src and 'v=20261026master1' in template_src, template_src
 
     page.set_viewport_size({'width': 390, 'height': 600})
     upload_regression = page.evaluate("""async () => {
@@ -1720,7 +1720,7 @@ def admin_test(browser, base):
     asset_category_src = page.locator('script[src*="admin-asset-categories.js"]').get_attribute('src')
     assert asset_category_src and 'v=20261012lazyfix1' in asset_category_src, asset_category_src
     template_loader_src = page.locator('script[src*="admin-template-loader.js"]').get_attribute('src')
-    assert template_loader_src and 'v=20261019controls2' in template_loader_src, template_loader_src
+    assert template_loader_src and 'v=20261026master1' in template_loader_src, template_loader_src
     library_workspace_src = page.locator('script[src*="admin-library-workspace-v1.js"]').get_attribute('src')
     assert library_workspace_src and 'v=20261012lazyfix1' in library_workspace_src, library_workspace_src
     commerce_src = page.locator('script[src*="admin-commerce-v1.js"]').get_attribute('src')
@@ -3067,4 +3067,6 @@ if __name__ == '__main__':
     # broad editor suite. Any failure blocks this existing browser CI job.
     import subprocess
     subprocess.run([sys.executable, str(ROOT / '.github/tests/test_checkout_safety_browser.py')], check=True)
+    subprocess.run([sys.executable, str(ROOT / 'test_template_adaptation.py')], check=True)
+    subprocess.run([sys.executable, str(ROOT / '.github/tests/test_master_template_adaptation_browser.py')], check=True)
     main()
