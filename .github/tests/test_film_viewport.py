@@ -116,7 +116,9 @@ def film_density_test(browser, base, poll, dpr):
         poll(page, """() => {
           const s=document.getElementById('canvas-shell').getBoundingClientRect();
           const w=document.querySelector('#page-editor>.workspace').getBoundingClientRect();
-          return Math.abs(s.width-canvas.upperCanvasEl.getBoundingClientRect().width)<1
+          const overlay=document.getElementById('phone-mask');
+          return overlay.complete && overlay.naturalWidth>0 && getComputedStyle(overlay).display!=='none'
+            && Math.abs(s.width-canvas.upperCanvasEl.getBoundingClientRect().width)<1
             && s.width<=w.width-47 && s.height<=w.height-47;
         }""")
         result=geometry(); shell=result['shell']; workspace=result['workspace']

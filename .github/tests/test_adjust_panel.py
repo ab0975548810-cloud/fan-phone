@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def adjust_panel_test(browser, base, poll):
-    evidence = ROOT / 'docs/mobile-adjust'
+    evidence = Path(os.environ.get('ADJUST_EVIDENCE_DIR', ROOT / 'artifacts/mobile-adjust'))
     evidence.mkdir(parents=True, exist_ok=True)
     baseline = os.environ.get('ADJUST_BASELINE') == '1'
     for product in ('phone_case', 'camera_film'):
@@ -76,7 +76,10 @@ def adjust_panel_test(browser, base, poll):
         number('#angle-number',27);assert state()['angle']==27
         # Multiple actual pointer moves preview live and commit exactly once.
         before=state();slider=page.locator('#opacity-range');box=slider.bounding_box();y=box['y']+box['height']/2
+        page.wait_for_timeout(100)
+        pixels=page.evaluate('canvas.lowerCanvasEl.toDataURL()')
         page.mouse.move(box['x']+box['width']*.65,y);page.mouse.down();page.mouse.move(box['x']+box['width']*.35,y,steps=8)
+        poll(page,"() => canvas.lowerCanvasEl.toDataURL()!=="+json.dumps(pixels))
         live=state();assert live['opacity']<before['opacity'] and live['index']==before['index'],(before,live)
         page.mouse.up();assert state()['index']==before['index']+1
         page.locator('#bf-adjust-more summary').click()
