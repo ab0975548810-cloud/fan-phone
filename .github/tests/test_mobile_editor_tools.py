@@ -41,9 +41,9 @@ def mobile_editor_tools_test(browser, base, poll):
         assert page.evaluate("() => canvas.getObjects().at(-1)===canvas.getActiveObject()")
         # Uniform scale preserves a pre-existing unequal ratio, rotation, alpha,
         # center, clip and stack. Real pointer drag: live render, one history.
-        page.evaluate("() => {const o=canvas.getActiveObject();o.set({scaleX:.5,scaleY:.75,angle:19,opacity:.7});o.setCoords();window.__clip=o.clipPath;recordHistory();openAdjustSheet()}")
+        page.evaluate("() => {const o=canvas.getActiveObject();o.set({scaleX:.5,scaleY:.75,angle:19,opacity:.7,bfScaleBaseX:.5,bfScaleBaseY:.75});o.setCoords();window.__clip=o.clipPath;recordHistory();openAdjustSheet()}")
         page.wait_for_timeout(300)
-        assert float(page.locator('#object-scale-range').input_value()) == 50
+        assert float(page.locator('#object-scale-range').input_value()) == 100
         assert page.locator('[onclick^="cropActive("]').count() == 0
         assert page.evaluate("typeof cropActive==='function'")
         before = page.evaluate("() => ({center:canvas.getActiveObject().getCenterPoint(),history:historyStack.length})")
@@ -51,7 +51,7 @@ def mobile_editor_tools_test(browser, base, poll):
         slider.hover()
         box = slider.bounding_box()
         minimum, maximum = slider.evaluate('e=>[+e.min,+e.max]')
-        x = box['x'] + 14 + (box['width']-28)*(50-minimum)/(maximum-minimum)
+        x = box['x'] + 14 + (box['width']-28)*(100-minimum)/(maximum-minimum)
         y = box['y'] + box['height']/2
         page.mouse.move(x,y);page.mouse.down();page.mouse.move(x+35,y,steps=12)
         live = page.evaluate("() => ({scale:canvas.getActiveObject().scaleX,history:historyStack.length})")
@@ -75,12 +75,12 @@ def mobile_editor_tools_test(browser, base, poll):
         assert slider.is_disabled()
         page.evaluate("() => {const o=canvas.getActiveObject();o.canScale=true;openAdjustSheet()}")
         assert slider.is_disabled(), 'client metadata must not override template policy'
-        page.evaluate("() => {const o=canvas.getActiveObject();o.set({scaleX:.5,scaleY:.75});Object.assign(canvas.templateState.initial[0],{locked:false,canScale:true,canRotate:true});BenfuwanEditorControls.applyUserLock(o);openAdjustSheet()}")
+        page.evaluate("() => {const o=canvas.getActiveObject();o.set({scaleX:.2,scaleY:.3});Object.assign(canvas.templateState.initial[0],{locked:false,canScale:true,canRotate:true});BenfuwanEditorControls.applyUserLock(o);openAdjustSheet()}")
         slider.press('End')
-        assert page.evaluate("() => {const o=canvas.getActiveObject();return Math.abs(o.scaleY/o.scaleX-1.5)<1e-8 && o.getScaledWidth()<=canvas.width+.001 && o.getScaledHeight()<=canvas.height+.001}"), 'template boundary must preserve scale ratio'
+        assert page.evaluate("() => {const o=canvas.getActiveObject();return Math.abs(o.scaleY/o.scaleX-1.5)<1e-8 && o.getScaledWidth()<=canvas.width+.001 && o.getScaledHeight()<=canvas.height+.001}"), page.evaluate("() => {const o=canvas.getActiveObject(),r=document.getElementById('object-scale-range');return {x:o.scaleX,y:o.scaleY,w:o.getScaledWidth(),h:o.getScaledHeight(),cw:canvas.width,ch:canvas.height,value:r.value,min:r.min,max:r.max}}")
         page.evaluate("() => {const o=canvas.getActiveObject();delete o.templateLayerId;delete canvas.templateState;delete canvas.layer_contract_version;BenfuwanEditorControls.applyUserLock(o);closeSheets()}")
         # Large photos start at a small intrinsic percentage. The slider travel
-        # remains useful while its label/value still show the true Fabric scale.
+        # remains useful while its label/value show the persistent initial baseline.
         photo=io.BytesIO();Image.new('RGB',(2400,1800),'#de84a0').save(photo,'PNG')
         page.locator('#photo-input').set_input_files(dict(name='mobile-large.png',mimeType='image/png',buffer=photo.getvalue()))
         poll(page,"() => canvas.getObjects().some(o=>o.originalName==='mobile-large.png') && !document.getElementById('busy')?.classList.contains('show')")
@@ -88,13 +88,14 @@ def mobile_editor_tools_test(browser, base, poll):
         slider.hover();box=slider.bounding_box()
         size=page.evaluate("() => {const o=canvas.getActiveObject();return [o.width,o.height,o.scaleX,o.scaleY]}")
         minimum,maximum,value=slider.evaluate('e=>[+e.min,+e.max,+e.value]')
-        assert size[:2]==[2400,1800] and abs(value-size[2]*100)<.001
+        assert size[:2]==[2400,1800] and abs(value-100)<.001
         assert abs(maximum-value*3)<.001
         x=box['x']+14+(box['width']-28)*(value-minimum)/(maximum-minimum);y=box['y']+box['height']/2
         page.mouse.move(x,y);page.mouse.down();page.mouse.move(x+25,y,steps=10);page.mouse.up()
         after=page.evaluate("() => {const o=canvas.getActiveObject();return [o.width,o.height,o.scaleX,o.scaleY]}")
         assert after[:2]==size[:2] and size[2]<after[2]<size[2]*2 and abs(after[2]/after[3]-size[2]/size[3])<1e-8
         page.evaluate('closeSheets()')
+        page.evaluate("document.getElementById('bf-adjust-more').open=true")
         # Shape controls are scoped to vectors, with normal duplicate/delete.
         page.locator('[onclick="openMaterialSheet()"]' ).click()
         page.locator('#material-cats button', has_text='基本形狀').click()
