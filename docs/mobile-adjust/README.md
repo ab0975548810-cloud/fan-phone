@@ -53,6 +53,22 @@ BROWSER_ENGINE=chromium python .github/tests/test_ai_editor_webkit.py
 
 ## 邊界與剩餘驗收
 
+### 雙指旋轉追加修復
+
+手勢方向與物件原角度分開保存：`gestureStartAngle` / `objectStartAngle`。
+旋轉結果是原角度加上正規化至 ±180° 的手勢角度差；純縮放不改變原角度。
+取消手勢保留最後預覽並只提交一筆 Undo；取消選取、移除物件、Undo/Redo 會終止舊手勢，剩餘手指抬起前不啟動新的拖曳。
+單指轉雙指時，先記錄單指位移，再以雙指開始時狀態建立獨立 Undo；全部放開後恢復 Fabric 的單指事件處理。
+
+`.github/tests/adjust_gestures.py` 從既有雙引擎 CI 入口執行：
+- 手機殼／鏡頭底膜 × 375×667、390×844、844×390、1180×900。
+- 原角度 27°、起始方向 45°，只增加距離維持 27°，方向轉到 60° 得到 42°；等比例及單筆 Undo/Redo 精確驗證。
+- 179° → −179° 與反向跨界、取消、取消選取後重選、手勢中 Undo、單指／雙指切換及下一次單指拖曳。
+- 使用者鎖定、模板及照片框的獨立 canScale / canRotate 權限。
+- Chromium 使用 CDP 真實觸控輸入；WebKit 使用 DOM 觸控事件，並不宣稱實體 iPhone 手勢驗收。
+
+追加修復的最終 SHA 與 Smoke／Commerce／WebKit／Chromium CI 結果見 PR #103 最新說明。
+
 沒有修改 `front-production-hq.js`、`front-print-mask.js`、商品型號 profile、印刷 W/H/X/Y、刀模 PNG、訂單、庫存、Print Center 或銳印設定。PR #102 的母版分支沒有修改／合併。
 
 自動化 WebKit 並不等於實體 iPhone Safari；本輪沒有實機鍵盤／手感／實體 UV 印刷校準證據。實機確認仍需人工驗收。PR 保持 Draft，沒有合併或部署。

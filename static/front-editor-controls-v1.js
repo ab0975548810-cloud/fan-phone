@@ -251,22 +251,31 @@
   function bindGestures(c){
     const el=c.upperCanvasEl;let state=null,blocked=false;
     const stop=e=>{e.preventDefault();e.stopImmediatePropagation();};
+    // A terminated segment commits its last preview once; remaining fingers must
+    // lift before Fabric may begin another drag. Selection changes never resume it.
+    const finish=()=>{state=null;c._currentTransform=null;finishAdjustment();};
+    for(const event of ['selection:created','selection:updated','selection:cleared'])c.on(event,()=>{if(state)finish();});
+    c.on('object:removed',e=>{if(state?.o===e.target)finish();});
     const pair=e=>{const [a,b]=e.touches;return {distance:Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY),angle:Math.atan2(b.clientY-a.clientY,b.clientX-a.clientX)*180/Math.PI};};
     el.addEventListener('touchstart',e=>{
+      if(blocked){stop(e);if(e.touches.length!==2)finish();return;}
       if(e.touches.length!==2)return;stop(e);blocked=true;finishAdjustment();
       const o=c.getActiveObject();if(!o)return;
       // Finish the single-finger segment before taking over Fabric's transform.
       c._currentTransform=null;
       if(!mayAdjust(c,o,'canScale')&&!mayAdjust(c,o,'canRotate'))return;
-      beginAdjustment(c,o);state={o,...pair(e),scale:values(o).scale,angle:o.angle||0};
+      const start=pair(e);if(start.distance<1)return;
+      beginAdjustment(c,o);state={o,distance:start.distance,gestureStartAngle:start.angle,objectStartAngle:o.angle||0,scale:values(o).scale};
     },{capture:true,passive:false});
     el.addEventListener('touchmove',e=>{
-      if(!blocked)return;stop(e);if(!state||e.touches.length!==2||c!==current()||c.getActiveObject()!==state.o)return;
+      if(!blocked)return;stop(e);if(!state)return;
+      if(e.touches.length!==2||c!==current()||c.getActiveObject()!==state.o||restoringHistory){finish();return;}
       const now=pair(e),o=state.o;
       if(mayAdjust(c,o,'canScale')){const [min,max]=limits('scale',c,o);updateObject('scale',Math.max(min,Math.min(max,state.scale*now.distance/Math.max(1,state.distance))),true);}
-      if(mayAdjust(c,o,'canRotate'))updateObject('angle',normalAngle(state.angle+now.angle-state.angle),true);
+      const rotationDelta=normalAngle(now.angle-state.gestureStartAngle);
+      if(mayAdjust(c,o,'canRotate'))updateObject('angle',normalAngle(state.objectStartAngle+rotationDelta),true);
     },{capture:true,passive:false});
-    const end=e=>{if(!blocked)return;stop(e);if(e.touches.length<2){state=null;finishAdjustment();c._currentTransform=null;}if(!e.touches.length)blocked=false;};
+    const end=e=>{if(!blocked)return;stop(e);if(e.type==='touchcancel'||e.touches.length<2)finish();if(!e.touches.length){blocked=false;if(c.mainTouchId!=null)c._onTouchEnd(e);}};
     el.addEventListener('touchend',end,{capture:true,passive:false});el.addEventListener('touchcancel',end,{capture:true,passive:false});
   }
   function bind(c){
@@ -300,6 +309,10 @@
   window.changeOpacity=v=>updateObject('opacity',v,true);
   window.changeAngle=v=>updateObject('angle',v,true);
   window.commitObjectAdjustment=finishAdjustment;
+  for(const name of ['undoCanvas','redoCanvas']){
+    const previous=window[name];
+    window[name]=function(){finishAdjustment();return previous.apply(this,arguments);};
+  }
   window.nudgeActive=function(dx,dy){const o=current()?.getActiveObject();if(!o)return;const v=values(o);if(dx)updateObject('x',v.x+dx);if(dy)updateObject('y',v.y+dy);};
   for(const name of ['centerActive','flipActive','sendBackward','bringForward','moveToBottom','moveToTop','duplicateActive','deleteActive']){
     const previous=window[name];if(typeof previous!=='function')continue;

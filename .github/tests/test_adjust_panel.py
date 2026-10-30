@@ -42,6 +42,7 @@ def adjust_panel_test(browser, base, poll):
         page.screenshot(path=str(evidence/f"{'before' if baseline else 'after'}-{product}-{browser.browser_type.name}.png"))
         if baseline:
             context.close();continue
+        runpy.run_path(str(ROOT/'.github/tests/adjust_gestures.py'))['gesture_regression'](page,context,browser.browser_type.name,poll,product)
         def state():
             return page.evaluate("() => {const o=canvas.getActiveObject();return {x:o.getCenterPoint().x,y:o.getCenterPoint().y,sx:o.scaleX,sy:o.scaleY,angle:o.angle,opacity:o.opacity,index:historyIndex,base:o.bfScaleBaseX,w:canvas.width,h:canvas.height}}")
         def layout():
