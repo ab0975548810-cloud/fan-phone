@@ -9,7 +9,7 @@
   }
   async function refresh(c){if(!enabled(c)||!c.templateState)return;
     const state=c.templateState,data=await contract(state.id,state.applicationId);
-    if(state.binding.hash!==data.binding.hash)throw Error('此模板設定已更新，請重新套用模板');
+    if(state.binding.hash!==data.binding.hash||state.binding.geometryHash!==data.binding.geometryHash)throw Error('此模板設定已更新，請重新套用模板');
     c.templateState=multi.freeze({...multi.clone(state),binding:data.binding});
   }
   const oldApply=window.applyTemplate;

@@ -116,7 +116,7 @@ def _invalidate(path):
     keys = []
     if path in ('/api/admin/save_shop_data', '/api/admin/commerce_set_style_price', '/api/admin/print/model-profiles'):
         keys.append('/api/shop_data')
-    elif path == '/api/admin/save_templates':
+    elif path in ('/api/admin/save_templates', '/api/admin/template-adaptation/save'):
         keys.append('/api/templates')
     elif path in ('/api/admin/upload_image', '/api/admin/batch_upload_stickers', '/api/admin/delete_sticker', '/api/admin/sticker_category', '/api/admin/editable_sticker'):
         keys += ['/api/assets', '/api/templates']

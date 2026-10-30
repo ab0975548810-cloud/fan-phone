@@ -1,0 +1,1074 @@
+[
+  {
+    "kind": "full-image",
+    "model": "iphone17-pro",
+    "style": "crystal",
+    "current": false,
+    "dimensions": [
+      2030,
+      4241
+    ],
+    "rawChannelMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "visibleMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "nonTextMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "alphaMeanAbsoluteError": 0.0,
+    "textLayouts": []
+  },
+  {
+    "kind": "photos",
+    "model": "iphone17-pro",
+    "style": "crystal",
+    "current": false,
+    "dimensions": [
+      2030,
+      4241
+    ],
+    "rawChannelMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "visibleMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "nonTextMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "alphaMeanAbsoluteError": 0.0,
+    "textLayouts": []
+  },
+  {
+    "kind": "text-sticker",
+    "model": "iphone17-pro",
+    "style": "crystal",
+    "current": false,
+    "dimensions": [
+      2030,
+      4241
+    ],
+    "rawChannelMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "visibleMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "nonTextMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "alphaMeanAbsoluteError": 0.0,
+    "textLayouts": [
+      {
+        "id": "template-text",
+        "fontSize": 12,
+        "left": 107.5,
+        "top": 181.5,
+        "lines": [
+          "Happy cats"
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "subject-title",
+    "model": "iphone17-pro",
+    "style": "crystal",
+    "current": false,
+    "dimensions": [
+      2030,
+      4241
+    ],
+    "rawChannelMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "visibleMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "nonTextMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "alphaMeanAbsoluteError": 0.0,
+    "textLayouts": [
+      {
+        "id": "template-text",
+        "fontSize": 12,
+        "left": 107.5,
+        "top": 181.5,
+        "lines": [
+          "Happy cats"
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "mixed",
+    "model": "iphone17-pro",
+    "style": "crystal",
+    "current": false,
+    "dimensions": [
+      2030,
+      4241
+    ],
+    "rawChannelMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "visibleMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "nonTextMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "alphaMeanAbsoluteError": 0.0,
+    "textLayouts": [
+      {
+        "id": "template-text",
+        "fontSize": 12,
+        "left": 107.5,
+        "top": 181.5,
+        "lines": [
+          "Happy cats"
+        ]
+      },
+      {
+        "id": "396c9415-9578-4b87-a5f5-e4249c61c864",
+        "fontSize": 36,
+        "left": 107.5,
+        "top": 383.8236,
+        "lines": [
+          "Hello"
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "mixed",
+    "model": "model_apple_13",
+    "style": "style_1789287807818",
+    "current": true,
+    "dimensions": [
+      1919,
+      4051
+    ],
+    "rawChannelMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "visibleMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "nonTextMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "alphaMeanAbsoluteError": 0.0,
+    "textLayouts": [
+      {
+        "id": "template-text",
+        "fontSize": 12,
+        "left": 101.5,
+        "top": 173.9,
+        "lines": [
+          "Happy cats"
+        ]
+      },
+      {
+        "id": "34e050a1-3670-427c-80af-8eca3841edfe",
+        "fontSize": 36,
+        "left": 101.5,
+        "top": 364.93112,
+        "lines": [
+          "Hello"
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "mixed",
+    "model": "model_apple_13_pro",
+    "style": "style_1789287807818",
+    "current": true,
+    "dimensions": [
+      1975,
+      4051
+    ],
+    "rawChannelMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "visibleMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "nonTextMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "alphaMeanAbsoluteError": 0.0,
+    "textLayouts": [
+      {
+        "id": "template-text",
+        "fontSize": 12,
+        "left": 104.5,
+        "top": 172.7,
+        "lines": [
+          "Happy cats"
+        ]
+      },
+      {
+        "id": "05f8dcba-76f8-4c39-8896-d449470d8bfc",
+        "fontSize": 36,
+        "left": 104.5,
+        "top": 369.37736,
+        "lines": [
+          "Hello"
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "mixed",
+    "model": "model_apple_13_pro_max",
+    "style": "style_1789287807818",
+    "current": true,
+    "dimensions": [
+      2104,
+      4447
+    ],
+    "rawChannelMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "visibleMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "nonTextMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "alphaMeanAbsoluteError": 0.0,
+    "textLayouts": [
+      {
+        "id": "template-text",
+        "fontSize": 12,
+        "left": 111.5,
+        "top": 190.9,
+        "lines": [
+          "Happy cats"
+        ]
+      },
+      {
+        "id": "c08e9fde-ef76-4148-88a8-50939a3daadb",
+        "fontSize": 36,
+        "left": 111.5,
+        "top": 400.75192,
+        "lines": [
+          "Hello"
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "mixed",
+    "model": "model_apple_14",
+    "style": "style_1789287807818",
+    "current": true,
+    "dimensions": [
+      1919,
+      4051
+    ],
+    "rawChannelMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "visibleMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "nonTextMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "alphaMeanAbsoluteError": 0.0,
+    "textLayouts": [
+      {
+        "id": "template-text",
+        "fontSize": 12,
+        "left": 101.5,
+        "top": 173.9,
+        "lines": [
+          "Happy cats"
+        ]
+      },
+      {
+        "id": "0c5be318-8d19-406d-9ed0-40593a86c440",
+        "fontSize": 36,
+        "left": 101.5,
+        "top": 364.93112,
+        "lines": [
+          "Hello"
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "mixed",
+    "model": "model_apple_14_pro",
+    "style": "style_1789287807818",
+    "current": true,
+    "dimensions": [
+      1918,
+      4075
+    ],
+    "rawChannelMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "visibleMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "nonTextMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "alphaMeanAbsoluteError": 0.0,
+    "textLayouts": [
+      {
+        "id": "template-text",
+        "fontSize": 12,
+        "left": 101.5,
+        "top": 174.9,
+        "lines": [
+          "Happy cats"
+        ]
+      },
+      {
+        "id": "31c5db50-7b90-4e53-8c19-078fcf7e8965",
+        "fontSize": 36,
+        "left": 101.5,
+        "top": 365.9311200000001,
+        "lines": [
+          "Hello"
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "mixed",
+    "model": "model_apple_14_pro_max",
+    "style": "style_1789287807818",
+    "current": true,
+    "dimensions": [
+      2090,
+      4445
+    ],
+    "rawChannelMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "visibleMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "nonTextMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "alphaMeanAbsoluteError": 0.0,
+    "textLayouts": [
+      {
+        "id": "template-text",
+        "fontSize": 12,
+        "left": 110.5,
+        "top": 190.8,
+        "lines": [
+          "Happy cats"
+        ]
+      },
+      {
+        "id": "c8e97b4f-1fd2-4c46-8deb-279adc70d241",
+        "fontSize": 36,
+        "left": 110.5,
+        "top": 398.76984,
+        "lines": [
+          "Hello"
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "mixed",
+    "model": "model_apple_15",
+    "style": "style_1789287807818",
+    "current": true,
+    "dimensions": [
+      1922,
+      4075
+    ],
+    "rawChannelMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "visibleMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "nonTextMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "alphaMeanAbsoluteError": 0.0,
+    "textLayouts": [
+      {
+        "id": "template-text",
+        "fontSize": 12,
+        "left": 101.5,
+        "top": 174.9,
+        "lines": [
+          "Happy cats"
+        ]
+      },
+      {
+        "id": "9f054d36-b2ab-4e97-8f14-90d34cfd1f08",
+        "fontSize": 36,
+        "left": 101.5,
+        "top": 365.9311200000001,
+        "lines": [
+          "Hello"
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "mixed",
+    "model": "model_apple_15_pro",
+    "style": "style_1789287807818",
+    "current": true,
+    "dimensions": [
+      1894,
+      4049
+    ],
+    "rawChannelMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "visibleMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "nonTextMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "alphaMeanAbsoluteError": 0.0,
+    "textLayouts": [
+      {
+        "id": "template-text",
+        "fontSize": 12,
+        "left": 100,
+        "top": 174,
+        "lines": [
+          "Happy cats"
+        ]
+      },
+      {
+        "id": "6d068002-99b6-481a-8896-8eb380a13a74",
+        "fontSize": 36,
+        "left": 100,
+        "top": 362.2080000000001,
+        "lines": [
+          "Hello"
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "mixed",
+    "model": "model_apple_15_pro_max",
+    "style": "style_1789287807818",
+    "current": true,
+    "dimensions": [
+      2066,
+      4421
+    ],
+    "rawChannelMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "visibleMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "nonTextMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "alphaMeanAbsoluteError": 0.0,
+    "textLayouts": [
+      {
+        "id": "template-text",
+        "fontSize": 12,
+        "left": 109.5,
+        "top": 190.2,
+        "lines": [
+          "Happy cats"
+        ]
+      },
+      {
+        "id": "db95dfd0-01db-48de-945b-87ac268c7044",
+        "fontSize": 36,
+        "left": 109.5,
+        "top": 396.28776,
+        "lines": [
+          "Hello"
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "mixed",
+    "model": "model_apple_16",
+    "style": "style_1789287807818",
+    "current": true,
+    "dimensions": [
+      1932,
+      4087
+    ],
+    "rawChannelMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "visibleMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "nonTextMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "alphaMeanAbsoluteError": 0.0,
+    "textLayouts": [
+      {
+        "id": "template-text",
+        "fontSize": 12,
+        "left": 102,
+        "top": 175.7,
+        "lines": [
+          "Happy cats"
+        ]
+      },
+      {
+        "id": "2abaf30c-11f5-40bb-9110-a2d07495b2e3",
+        "fontSize": 36,
+        "left": 102,
+        "top": 367.6721600000001,
+        "lines": [
+          "Hello"
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "mixed",
+    "model": "model_apple_16_pro",
+    "style": "style_1789287807818",
+    "current": true,
+    "dimensions": [
+      1915,
+      4130
+    ],
+    "rawChannelMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "visibleMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "nonTextMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "alphaMeanAbsoluteError": 0.0,
+    "textLayouts": [
+      {
+        "id": "template-text",
+        "fontSize": 12,
+        "left": 101.5,
+        "top": 177.9,
+        "lines": [
+          "Happy cats"
+        ]
+      },
+      {
+        "id": "ba82458a-f4d8-483a-aa14-284757c5ce62",
+        "fontSize": 36,
+        "left": 101.5,
+        "top": 368.9311200000001,
+        "lines": [
+          "Hello"
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "mixed",
+    "model": "model_apple_16_pro_max",
+    "style": "style_1789287807818",
+    "current": true,
+    "dimensions": [
+      2074,
+      4495
+    ],
+    "rawChannelMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "visibleMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "nonTextMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "alphaMeanAbsoluteError": 0.0,
+    "textLayouts": [
+      {
+        "id": "template-text",
+        "fontSize": 12,
+        "left": 109.5,
+        "top": 194.20000000000002,
+        "lines": [
+          "Happy cats"
+        ]
+      },
+      {
+        "id": "59c90140-e549-460d-beff-6261dc8e1988",
+        "fontSize": 36,
+        "left": 109.5,
+        "top": 400.28775999999993,
+        "lines": [
+          "Hello"
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "mixed",
+    "model": "model_apple_17",
+    "style": "style_1789287807818",
+    "current": true,
+    "dimensions": [
+      1931,
+      4145
+    ],
+    "rawChannelMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "visibleMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "nonTextMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "alphaMeanAbsoluteError": 0.0,
+    "textLayouts": [
+      {
+        "id": "template-text",
+        "fontSize": 12,
+        "left": 102,
+        "top": 178.7,
+        "lines": [
+          "Happy cats"
+        ]
+      },
+      {
+        "id": "609d3dd5-14e9-4f31-9b5e-b5a39a7a4b00",
+        "fontSize": 36,
+        "left": 102,
+        "top": 370.6721600000001,
+        "lines": [
+          "Hello"
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "mixed",
+    "model": "model_apple_17_pro",
+    "style": "style_1789287807818",
+    "current": true,
+    "dimensions": [
+      2030,
+      4241
+    ],
+    "rawChannelMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "visibleMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "nonTextMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "alphaMeanAbsoluteError": 0.0,
+    "textLayouts": [
+      {
+        "id": "template-text",
+        "fontSize": 12,
+        "left": 107.5,
+        "top": 181.5,
+        "lines": [
+          "Happy cats"
+        ]
+      },
+      {
+        "id": "8fcbd701-c7ef-49dc-837b-044e8e9ded0e",
+        "fontSize": 36,
+        "left": 107.5,
+        "top": 383.8236,
+        "lines": [
+          "Hello"
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "mixed",
+    "model": "model_apple_17_pro",
+    "style": "style_1789287853586",
+    "current": true,
+    "dimensions": [
+      2038,
+      2906
+    ],
+    "rawChannelMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "visibleMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "nonTextMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "alphaMeanAbsoluteError": 0.0,
+    "textLayouts": [
+      {
+        "id": "template-text",
+        "fontSize": 12,
+        "left": 108,
+        "top": 123.2,
+        "lines": [
+          "Happy cats"
+        ]
+      },
+      {
+        "id": "642850b8-1476-4515-973f-67dd63d0051b",
+        "fontSize": 36,
+        "left": 108,
+        "top": 268.12016,
+        "lines": [
+          "Hello"
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "mixed",
+    "model": "model_apple_17_pro_max",
+    "style": "style_1789287807818",
+    "current": true,
+    "dimensions": [
+      2185,
+      4603
+    ],
+    "rawChannelMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "visibleMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "nonTextMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "alphaMeanAbsoluteError": 0.0,
+    "textLayouts": [
+      {
+        "id": "template-text",
+        "fontSize": 12,
+        "left": 115.5,
+        "top": 197.29999999999998,
+        "lines": [
+          "Happy cats"
+        ]
+      },
+      {
+        "id": "f3b9875d-5ed4-44ee-9f6e-eb0b988b80b8",
+        "fontSize": 36,
+        "left": 115.5,
+        "top": 414.68024,
+        "lines": [
+          "Hello"
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "mixed",
+    "model": "model_apple_17_pro_max",
+    "style": "style_1789287853586",
+    "current": true,
+    "dimensions": [
+      2214,
+      3288
+    ],
+    "rawChannelMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "visibleMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "nonTextMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "alphaMeanAbsoluteError": 0.0,
+    "textLayouts": [
+      {
+        "id": "template-text",
+        "fontSize": 12,
+        "left": 117,
+        "top": 139.2,
+        "lines": [
+          "Happy cats"
+        ]
+      },
+      {
+        "id": "f3ebf19c-b85e-4384-a09a-41d546b5ce5b",
+        "fontSize": 36,
+        "left": 117,
+        "top": 302.94096,
+        "lines": [
+          "Hello"
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "mixed",
+    "model": "m_1790675649972",
+    "style": "style_1789287807818",
+    "current": true,
+    "dimensions": [
+      2095,
+      4445
+    ],
+    "rawChannelMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "visibleMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "nonTextMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "alphaMeanAbsoluteError": 0.0,
+    "textLayouts": [
+      {
+        "id": "template-text",
+        "fontSize": 12,
+        "left": 111,
+        "top": 190.6,
+        "lines": [
+          "Happy cats"
+        ]
+      },
+      {
+        "id": "662a34e0-04ad-4c62-82f1-308e85e561d9",
+        "fontSize": 36,
+        "left": 111,
+        "top": 399.51088,
+        "lines": [
+          "Hello"
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "mixed",
+    "model": "m_1790678127930",
+    "style": "style_1789287807818",
+    "current": true,
+    "dimensions": [
+      2093,
+      4450
+    ],
+    "rawChannelMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "visibleMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "nonTextMeanAbsoluteError": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "alphaMeanAbsoluteError": 0.0,
+    "textLayouts": [
+      {
+        "id": "template-text",
+        "fontSize": 12,
+        "left": 110.5,
+        "top": 191.3,
+        "lines": [
+          "Happy cats"
+        ]
+      },
+      {
+        "id": "9854e16d-1706-4e95-afbe-3ad993aa4d89",
+        "fontSize": 36,
+        "left": 110.5,
+        "top": 399.26984,
+        "lines": [
+          "Hello"
+        ]
+      }
+    ]
+  }
+]

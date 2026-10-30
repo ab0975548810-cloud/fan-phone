@@ -3,13 +3,17 @@
   'use strict';if(window.BenfuwanMultilayer)return;
   const VERSION='multilayer-v1';
   const FLAGS=['locked','canMove','canScale','canRotate','canDelete','canDuplicate','canEdit'];
-  const PROPS=['role','layerId','templateLayerId','layerInstanceId','templateApplicationId','layerName','assetId','duplicateOf','normalizedGeometry','zIndex',...FLAGS,'sourceSize','cropX','cropY','templateSlot','slotId','slotMeta','isSlot','isTplBg','templateState','layer_contract_version'];
+  const PROPS=['role','layerId','templateLayerId','layerInstanceId','templateApplicationId','layerName','assetId','duplicateOf','normalizedGeometry','zIndex','adaptationRole',...FLAGS,'sourceSize','cropX','cropY','templateSlot','slotId','slotMeta','isSlot','isTplBg','templateState','layer_contract_version'];
   const uid=()=>crypto.randomUUID(),clone=v=>structuredClone(v);
   const text=o=>['text','textbox','i-text'].includes(o.type);
   const core=()=>window.BenfuwanEditableSticker;
   const freeze=v=>{if(v&&typeof v==='object'){Object.values(v).forEach(freeze);Object.freeze(v);}return v;};
   const dimensions=o=>({w:(Number(o.width)||0)+(o.strokeUniform?0:Number(o.strokeWidth)||0),h:(Number(o.height)||0)+(o.strokeUniform?0:Number(o.strokeWidth)||0)});
-  function geometry(o,c){const p=o.getCenterPoint();return {x:p.x/c.width,y:p.y/c.height,width:o.getScaledWidth()/c.width,height:o.getScaledHeight()/c.height};}
+  function geometry(o,c){const p=o.getCenterPoint();
+    // Exact boundary values can become 1 + 2e-16 after Fabric scale math.
+    // Canonicalize only floating-point noise, never clamp actual overflow.
+    const canonical=n=>Math.abs(n)<1e-12?0:Math.abs(n-1)<1e-12?1:n;
+    return {x:canonical(p.x/c.width),y:canonical(p.y/c.height),width:canonical(o.getScaledWidth()/c.width),height:canonical(o.getScaledHeight()/c.height)};}
   function validGeometry(g){if(!g||!['x','y','width','height'].every(k=>Number.isFinite(g[k])&&g[k]>=0&&g[k]<=1)||!g.width||!g.height)throw Error('圖層位置／尺寸需在模板畫布範圍內（0～1）');return g;}
   function map(o,g,c){validGeometry(g);const d=dimensions(o),stroke=o.strokeUniform?Number(o.strokeWidth)||0:0;
     o.set({originX:'center',originY:'center',left:g.x*c.width,top:g.y*c.height,scaleX:(g.width*c.width-stroke)/Math.max(.0001,d.w),scaleY:(g.height*c.height-stroke)/Math.max(.0001,d.h)});o.setCoords();}
@@ -72,6 +76,9 @@
     const application=uid(),pairs=new Map();
     for(const [i,o] of objects.entries()){
       const saved=raw.objects[i];o.set({layerId:saved.layerId,templateLayerId:saved.layerId,layerInstanceId:(binding?.applicationId||application)+':'+saved.layerId,templateApplicationId:binding?.applicationId||application});Object.assign(o,defaults(saved));
+      // Match the deterministic renderer: master layers are drawn from their
+      // original vectors/fonts, not Fabric's intermediate bitmap object cache.
+      if(tpl.adaptation_contract_version==='master-v1')o.objectCaching=false;
       map(o,saved.normalizedGeometry,c);o.zIndex=i;
       if(o.editableStickerInstanceId){if(!pairs.has(o.editableStickerInstanceId))pairs.set(o.editableStickerInstanceId,uid());o.editableStickerInstanceId=pairs.get(o.editableStickerInstanceId);}
       if(!admin&&o.templateSlot){o.set({role:'slot-guide',fill:'rgba(255,255,255,.25)',stroke:'#ff6f9a',strokeWidth:1.5,strokeUniform:true,strokeDashArray:[5,4]});map(o,saved.normalizedGeometry,c);}
@@ -91,7 +98,7 @@
   }
   function hydrate(c){if(c.layer_contract_version!==VERSION)return;
     if(c.templateState)c.templateState=freeze(clone(c.templateState));
-    c.selection=false;c.getObjects().filter(o=>o.templateLayerId).forEach(o=>{map(o,o.normalizedGeometry,c);permissions(c,o);});
+    c.selection=false;c.getObjects().filter(o=>o.templateLayerId).forEach(o=>{if(c.templateState?.binding?.geometryHash)o.objectCaching=false;map(o,o.normalizedGeometry,c);permissions(c,o);});
   }
   async function serialize(c,ctx){update(c);const data=await core().serialize(c,ctx);data.layer_contract_version=VERSION;data.templateBinding=clone(c.templateState.binding);data.emptyTemplateSlots=c.getObjects().filter(o=>o.templateSlot&&o.role==='slot-guide').map(o=>o.toObject(PROPS));data.objects.forEach((o,i)=>o.zIndex=i);delete data.templateState;return data;}
   async function prepareRender(c,data){if(data.layer_contract_version!==VERSION)return;c._objects.sort((a,b)=>(a.zIndex??0)-(b.zIndex??0));for(const o of c.getObjects()){if(o.templateLayerId){map(o,o.normalizedGeometry,c);o.setCoords();}}await core()?.rehydrate(c);}

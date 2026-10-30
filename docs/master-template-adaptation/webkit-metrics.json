@@ -1,0 +1,3654 @@
+[
+  {
+    "kind": "full-image",
+    "model": "iphone13",
+    "status": "success",
+    "issues": [],
+    "scale": 0.76,
+    "translation": {
+      "x": 3.0,
+      "y": 0.0
+    },
+    "autoShift": {
+      "x": 0,
+      "y": 0
+    },
+    "sourceCanvas": {
+      "width": 200.0,
+      "height": 400.0
+    },
+    "targetCanvas": {
+      "width": 158.0,
+      "height": 304.0
+    },
+    "maskHash": "31ac949c674ed97f473eb4db48e2eee3f2c8eeb6e516fa8b1a32787dad425bef",
+    "safetyPixels": 2,
+    "analysisSize": [
+      199,
+      384
+    ],
+    "maxAspectError": 0,
+    "relativeDistanceError": 0,
+    "layers": [
+      {
+        "layerId": "layer-1",
+        "source": {
+          "x": 100.0,
+          "y": 200.0,
+          "width": 200.0,
+          "height": 400.0
+        },
+        "target": {
+          "x": 79.0,
+          "y": 152.0,
+          "width": 158.0,
+          "height": 316.0
+        },
+        "angle": 0.0,
+        "strategy": "background-crop",
+        "aspectError": 0
+      }
+    ],
+    "masterHash": "047b90cf173fd57a98bfc149435cd035e0eab14f5a0923e49e4f0e57d7cf6002",
+    "engine": "master-v1"
+  },
+  {
+    "kind": "full-image",
+    "model": "iphone14",
+    "status": "success",
+    "issues": [],
+    "scale": 0.76,
+    "translation": {
+      "x": 3.0,
+      "y": 0.0
+    },
+    "autoShift": {
+      "x": 0,
+      "y": 0
+    },
+    "sourceCanvas": {
+      "width": 200.0,
+      "height": 400.0
+    },
+    "targetCanvas": {
+      "width": 158.0,
+      "height": 304.0
+    },
+    "maskHash": "ac0e63016355eb966862988a984e9c8d9cbdd28f0c80b22f9fcc45f5520853f9",
+    "safetyPixels": 2,
+    "analysisSize": [
+      199,
+      384
+    ],
+    "maxAspectError": 0,
+    "relativeDistanceError": 0,
+    "layers": [
+      {
+        "layerId": "layer-1",
+        "source": {
+          "x": 100.0,
+          "y": 200.0,
+          "width": 200.0,
+          "height": 400.0
+        },
+        "target": {
+          "x": 79.0,
+          "y": 152.0,
+          "width": 158.0,
+          "height": 316.0
+        },
+        "angle": 0.0,
+        "strategy": "background-crop",
+        "aspectError": 0
+      }
+    ],
+    "masterHash": "047b90cf173fd57a98bfc149435cd035e0eab14f5a0923e49e4f0e57d7cf6002",
+    "engine": "master-v1"
+  },
+  {
+    "kind": "full-image",
+    "model": "iphone14-pro-max",
+    "status": "success",
+    "issues": [],
+    "scale": 0.8316666666666667,
+    "translation": {
+      "x": 1.8333333333333286,
+      "y": 0.0
+    },
+    "autoShift": {
+      "x": 0,
+      "y": 0
+    },
+    "sourceCanvas": {
+      "width": 200.0,
+      "height": 400.0
+    },
+    "targetCanvas": {
+      "width": 170.0,
+      "height": 332.6666666666667
+    },
+    "maskHash": "553719d812277d2fb88b80cd31b79fd988e1d88b0b5d8825c16b5fadff47e6d8",
+    "safetyPixels": 2,
+    "analysisSize": [
+      197,
+      384
+    ],
+    "maxAspectError": 0,
+    "relativeDistanceError": 0,
+    "layers": [
+      {
+        "layerId": "layer-1",
+        "source": {
+          "x": 100.0,
+          "y": 200.0,
+          "width": 200.0,
+          "height": 400.0
+        },
+        "target": {
+          "x": 85.0,
+          "y": 166.33333333333334,
+          "width": 170.0,
+          "height": 340.0
+        },
+        "angle": 0.0,
+        "strategy": "background-crop",
+        "aspectError": 0
+      }
+    ],
+    "masterHash": "047b90cf173fd57a98bfc149435cd035e0eab14f5a0923e49e4f0e57d7cf6002",
+    "engine": "master-v1"
+  },
+  {
+    "kind": "full-image",
+    "model": "iphone17-pro",
+    "status": "success",
+    "issues": [],
+    "scale": 0.7166666666666667,
+    "translation": {
+      "x": 0.0,
+      "y": 6.333333333333314
+    },
+    "autoShift": {
+      "x": 0,
+      "y": 0
+    },
+    "sourceCanvas": {
+      "width": 200.0,
+      "height": 400.0
+    },
+    "targetCanvas": {
+      "width": 143.33333333333334,
+      "height": 299.3333333333333
+    },
+    "maskHash": "c3f60a187ffeaa3a23f94a611ab28105adff095bfeec892ffb69a35ec8eccec8",
+    "safetyPixels": 2,
+    "analysisSize": [
+      197,
+      384
+    ],
+    "maxAspectError": 0,
+    "relativeDistanceError": 0,
+    "layers": [
+      {
+        "layerId": "layer-1",
+        "source": {
+          "x": 100.0,
+          "y": 200.0,
+          "width": 200.0,
+          "height": 400.0
+        },
+        "target": {
+          "x": 71.66666666666667,
+          "y": 149.66666666666666,
+          "width": 149.66666666666666,
+          "height": 299.3333333333333
+        },
+        "angle": 0.0,
+        "strategy": "background-crop",
+        "aspectError": 0
+      }
+    ],
+    "masterHash": "047b90cf173fd57a98bfc149435cd035e0eab14f5a0923e49e4f0e57d7cf6002",
+    "engine": "master-v1"
+  },
+  {
+    "kind": "photos",
+    "model": "iphone13",
+    "status": "success",
+    "issues": [],
+    "scale": 0.76,
+    "translation": {
+      "x": 3.0,
+      "y": 0.0
+    },
+    "autoShift": {
+      "x": 0,
+      "y": 0
+    },
+    "sourceCanvas": {
+      "width": 200.0,
+      "height": 400.0
+    },
+    "targetCanvas": {
+      "width": 158.0,
+      "height": 304.0
+    },
+    "maskHash": "31ac949c674ed97f473eb4db48e2eee3f2c8eeb6e516fa8b1a32787dad425bef",
+    "safetyPixels": 2,
+    "analysisSize": [
+      199,
+      384
+    ],
+    "maxAspectError": 1.1102230246251565e-16,
+    "relativeDistanceError": 1.4210854715202004e-14,
+    "layers": [
+      {
+        "layerId": "layer-0",
+        "source": {
+          "x": 100.0,
+          "y": 200.0,
+          "width": 200.0,
+          "height": 400.0
+        },
+        "target": {
+          "x": 79.0,
+          "y": 152.0,
+          "width": 158.0,
+          "height": 316.0
+        },
+        "angle": 0.0,
+        "strategy": "background-crop",
+        "aspectError": 0
+      },
+      {
+        "layerId": "layer-1",
+        "source": {
+          "x": 60.0,
+          "y": 184.0,
+          "width": 52.0,
+          "height": 80.0
+        },
+        "target": {
+          "x": 48.6,
+          "y": 139.84,
+          "width": 39.52,
+          "height": 60.8
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 1.1102230246251565e-16
+      },
+      {
+        "layerId": "layer-2",
+        "source": {
+          "x": 140.0,
+          "y": 184.0,
+          "width": 52.0,
+          "height": 80.0
+        },
+        "target": {
+          "x": 109.4,
+          "y": 139.84,
+          "width": 39.52,
+          "height": 60.8
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 1.1102230246251565e-16
+      },
+      {
+        "layerId": "layer-3",
+        "source": {
+          "x": 100.0,
+          "y": 288.0,
+          "width": 64.0,
+          "height": 72.0
+        },
+        "target": {
+          "x": 79.0,
+          "y": 218.88,
+          "width": 48.64,
+          "height": 54.72
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 1.1102230246251565e-16
+      }
+    ],
+    "masterHash": "137849aa7e961f1d9f5002ba9e0a8d25ac558facb0b14d053322aea5b81a7453",
+    "engine": "master-v1"
+  },
+  {
+    "kind": "photos",
+    "model": "iphone14",
+    "status": "success",
+    "issues": [],
+    "scale": 0.76,
+    "translation": {
+      "x": 3.0,
+      "y": 0.0
+    },
+    "autoShift": {
+      "x": 0,
+      "y": 0
+    },
+    "sourceCanvas": {
+      "width": 200.0,
+      "height": 400.0
+    },
+    "targetCanvas": {
+      "width": 158.0,
+      "height": 304.0
+    },
+    "maskHash": "ac0e63016355eb966862988a984e9c8d9cbdd28f0c80b22f9fcc45f5520853f9",
+    "safetyPixels": 2,
+    "analysisSize": [
+      199,
+      384
+    ],
+    "maxAspectError": 1.1102230246251565e-16,
+    "relativeDistanceError": 1.4210854715202004e-14,
+    "layers": [
+      {
+        "layerId": "layer-0",
+        "source": {
+          "x": 100.0,
+          "y": 200.0,
+          "width": 200.0,
+          "height": 400.0
+        },
+        "target": {
+          "x": 79.0,
+          "y": 152.0,
+          "width": 158.0,
+          "height": 316.0
+        },
+        "angle": 0.0,
+        "strategy": "background-crop",
+        "aspectError": 0
+      },
+      {
+        "layerId": "layer-1",
+        "source": {
+          "x": 60.0,
+          "y": 184.0,
+          "width": 52.0,
+          "height": 80.0
+        },
+        "target": {
+          "x": 48.6,
+          "y": 139.84,
+          "width": 39.52,
+          "height": 60.8
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 1.1102230246251565e-16
+      },
+      {
+        "layerId": "layer-2",
+        "source": {
+          "x": 140.0,
+          "y": 184.0,
+          "width": 52.0,
+          "height": 80.0
+        },
+        "target": {
+          "x": 109.4,
+          "y": 139.84,
+          "width": 39.52,
+          "height": 60.8
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 1.1102230246251565e-16
+      },
+      {
+        "layerId": "layer-3",
+        "source": {
+          "x": 100.0,
+          "y": 288.0,
+          "width": 64.0,
+          "height": 72.0
+        },
+        "target": {
+          "x": 79.0,
+          "y": 218.88,
+          "width": 48.64,
+          "height": 54.72
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 1.1102230246251565e-16
+      }
+    ],
+    "masterHash": "137849aa7e961f1d9f5002ba9e0a8d25ac558facb0b14d053322aea5b81a7453",
+    "engine": "master-v1"
+  },
+  {
+    "kind": "photos",
+    "model": "iphone14-pro-max",
+    "status": "success",
+    "issues": [],
+    "scale": 0.8316666666666667,
+    "translation": {
+      "x": 1.8333333333333286,
+      "y": 0.0
+    },
+    "autoShift": {
+      "x": 0,
+      "y": 0
+    },
+    "sourceCanvas": {
+      "width": 200.0,
+      "height": 400.0
+    },
+    "targetCanvas": {
+      "width": 170.0,
+      "height": 332.6666666666667
+    },
+    "maskHash": "553719d812277d2fb88b80cd31b79fd988e1d88b0b5d8825c16b5fadff47e6d8",
+    "safetyPixels": 2,
+    "analysisSize": [
+      197,
+      384
+    ],
+    "maxAspectError": 0.0,
+    "relativeDistanceError": 1.4210854715202004e-14,
+    "layers": [
+      {
+        "layerId": "layer-0",
+        "source": {
+          "x": 100.0,
+          "y": 200.0,
+          "width": 200.0,
+          "height": 400.0
+        },
+        "target": {
+          "x": 85.0,
+          "y": 166.33333333333334,
+          "width": 170.0,
+          "height": 340.0
+        },
+        "angle": 0.0,
+        "strategy": "background-crop",
+        "aspectError": 0
+      },
+      {
+        "layerId": "layer-1",
+        "source": {
+          "x": 60.0,
+          "y": 184.0,
+          "width": 52.0,
+          "height": 80.0
+        },
+        "target": {
+          "x": 51.733333333333334,
+          "y": 153.02666666666667,
+          "width": 43.24666666666667,
+          "height": 66.53333333333333
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-2",
+        "source": {
+          "x": 140.0,
+          "y": 184.0,
+          "width": 52.0,
+          "height": 80.0
+        },
+        "target": {
+          "x": 118.26666666666667,
+          "y": 153.02666666666667,
+          "width": 43.24666666666667,
+          "height": 66.53333333333333
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-3",
+        "source": {
+          "x": 100.0,
+          "y": 288.0,
+          "width": 64.0,
+          "height": 72.0
+        },
+        "target": {
+          "x": 85.0,
+          "y": 239.52,
+          "width": 53.22666666666667,
+          "height": 59.88
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      }
+    ],
+    "masterHash": "137849aa7e961f1d9f5002ba9e0a8d25ac558facb0b14d053322aea5b81a7453",
+    "engine": "master-v1"
+  },
+  {
+    "kind": "photos",
+    "model": "iphone17-pro",
+    "status": "success",
+    "issues": [],
+    "scale": 0.7166666666666667,
+    "translation": {
+      "x": 0.0,
+      "y": 6.333333333333314
+    },
+    "autoShift": {
+      "x": 0,
+      "y": 0
+    },
+    "sourceCanvas": {
+      "width": 200.0,
+      "height": 400.0
+    },
+    "targetCanvas": {
+      "width": 143.33333333333334,
+      "height": 299.3333333333333
+    },
+    "maskHash": "c3f60a187ffeaa3a23f94a611ab28105adff095bfeec892ffb69a35ec8eccec8",
+    "safetyPixels": 2,
+    "analysisSize": [
+      197,
+      384
+    ],
+    "maxAspectError": 1.1102230246251565e-16,
+    "relativeDistanceError": 7.105427357601002e-15,
+    "layers": [
+      {
+        "layerId": "layer-0",
+        "source": {
+          "x": 100.0,
+          "y": 200.0,
+          "width": 200.0,
+          "height": 400.0
+        },
+        "target": {
+          "x": 71.66666666666667,
+          "y": 149.66666666666666,
+          "width": 149.66666666666666,
+          "height": 299.3333333333333
+        },
+        "angle": 0.0,
+        "strategy": "background-crop",
+        "aspectError": 0
+      },
+      {
+        "layerId": "layer-1",
+        "source": {
+          "x": 60.0,
+          "y": 184.0,
+          "width": 52.0,
+          "height": 80.0
+        },
+        "target": {
+          "x": 43.0,
+          "y": 138.2,
+          "width": 37.266666666666666,
+          "height": 57.333333333333336
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 1.1102230246251565e-16
+      },
+      {
+        "layerId": "layer-2",
+        "source": {
+          "x": 140.0,
+          "y": 184.0,
+          "width": 52.0,
+          "height": 80.0
+        },
+        "target": {
+          "x": 100.33333333333334,
+          "y": 138.2,
+          "width": 37.266666666666666,
+          "height": 57.333333333333336
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 1.1102230246251565e-16
+      },
+      {
+        "layerId": "layer-3",
+        "source": {
+          "x": 100.0,
+          "y": 288.0,
+          "width": 64.0,
+          "height": 72.0
+        },
+        "target": {
+          "x": 71.66666666666667,
+          "y": 212.73333333333332,
+          "width": 45.86666666666667,
+          "height": 51.6
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      }
+    ],
+    "masterHash": "137849aa7e961f1d9f5002ba9e0a8d25ac558facb0b14d053322aea5b81a7453",
+    "engine": "master-v1"
+  },
+  {
+    "kind": "text-sticker",
+    "model": "iphone13",
+    "status": "success",
+    "issues": [],
+    "scale": 0.76,
+    "translation": {
+      "x": 3.0,
+      "y": 0.0
+    },
+    "autoShift": {
+      "x": 0,
+      "y": 0
+    },
+    "sourceCanvas": {
+      "width": 200.0,
+      "height": 400.0
+    },
+    "targetCanvas": {
+      "width": 158.0,
+      "height": 304.0
+    },
+    "maskHash": "31ac949c674ed97f473eb4db48e2eee3f2c8eeb6e516fa8b1a32787dad425bef",
+    "safetyPixels": 2,
+    "analysisSize": [
+      199,
+      384
+    ],
+    "maxAspectError": 4.440892098500626e-16,
+    "relativeDistanceError": 2.842170943040401e-14,
+    "layers": [
+      {
+        "layerId": "layer-0",
+        "source": {
+          "x": 100.0,
+          "y": 200.0,
+          "width": 200.0,
+          "height": 400.0
+        },
+        "target": {
+          "x": 79.0,
+          "y": 152.0,
+          "width": 158.0,
+          "height": 316.0
+        },
+        "angle": 0.0,
+        "strategy": "background-crop",
+        "aspectError": 0
+      },
+      {
+        "layerId": "layer-1",
+        "source": {
+          "x": 100.0,
+          "y": 160.0,
+          "width": 96.0,
+          "height": 32.0
+        },
+        "target": {
+          "x": 79.0,
+          "y": 121.6,
+          "width": 72.96000000000001,
+          "height": 24.32
+        },
+        "angle": 0.0,
+        "strategy": "important-text",
+        "aspectError": 4.440892098500626e-16
+      },
+      {
+        "layerId": "layer-2",
+        "source": {
+          "x": 60.0,
+          "y": 240.0,
+          "width": 30.0,
+          "height": 32.0
+        },
+        "target": {
+          "x": 48.6,
+          "y": 182.4,
+          "width": 22.8,
+          "height": 24.32
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-3",
+        "source": {
+          "x": 136.0,
+          "y": 248.0,
+          "width": 36.0,
+          "height": 36.0
+        },
+        "target": {
+          "x": 106.36,
+          "y": 188.48000000000002,
+          "width": 27.36,
+          "height": 27.36
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      }
+    ],
+    "masterHash": "c81ec95c22ac6d2f2a3e69c4a3cf921adc01ca83c545e76d80656c73c5606641",
+    "engine": "master-v1"
+  },
+  {
+    "kind": "text-sticker",
+    "model": "iphone14",
+    "status": "success",
+    "issues": [],
+    "scale": 0.76,
+    "translation": {
+      "x": 3.0,
+      "y": 0.0
+    },
+    "autoShift": {
+      "x": 0,
+      "y": 0
+    },
+    "sourceCanvas": {
+      "width": 200.0,
+      "height": 400.0
+    },
+    "targetCanvas": {
+      "width": 158.0,
+      "height": 304.0
+    },
+    "maskHash": "ac0e63016355eb966862988a984e9c8d9cbdd28f0c80b22f9fcc45f5520853f9",
+    "safetyPixels": 2,
+    "analysisSize": [
+      199,
+      384
+    ],
+    "maxAspectError": 4.440892098500626e-16,
+    "relativeDistanceError": 2.842170943040401e-14,
+    "layers": [
+      {
+        "layerId": "layer-0",
+        "source": {
+          "x": 100.0,
+          "y": 200.0,
+          "width": 200.0,
+          "height": 400.0
+        },
+        "target": {
+          "x": 79.0,
+          "y": 152.0,
+          "width": 158.0,
+          "height": 316.0
+        },
+        "angle": 0.0,
+        "strategy": "background-crop",
+        "aspectError": 0
+      },
+      {
+        "layerId": "layer-1",
+        "source": {
+          "x": 100.0,
+          "y": 160.0,
+          "width": 96.0,
+          "height": 32.0
+        },
+        "target": {
+          "x": 79.0,
+          "y": 121.6,
+          "width": 72.96000000000001,
+          "height": 24.32
+        },
+        "angle": 0.0,
+        "strategy": "important-text",
+        "aspectError": 4.440892098500626e-16
+      },
+      {
+        "layerId": "layer-2",
+        "source": {
+          "x": 60.0,
+          "y": 240.0,
+          "width": 30.0,
+          "height": 32.0
+        },
+        "target": {
+          "x": 48.6,
+          "y": 182.4,
+          "width": 22.8,
+          "height": 24.32
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-3",
+        "source": {
+          "x": 136.0,
+          "y": 248.0,
+          "width": 36.0,
+          "height": 36.0
+        },
+        "target": {
+          "x": 106.36,
+          "y": 188.48000000000002,
+          "width": 27.36,
+          "height": 27.36
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      }
+    ],
+    "masterHash": "c81ec95c22ac6d2f2a3e69c4a3cf921adc01ca83c545e76d80656c73c5606641",
+    "engine": "master-v1"
+  },
+  {
+    "kind": "text-sticker",
+    "model": "iphone14-pro-max",
+    "status": "success",
+    "issues": [],
+    "scale": 0.8316666666666667,
+    "translation": {
+      "x": 1.8333333333333286,
+      "y": 0.0
+    },
+    "autoShift": {
+      "x": 0,
+      "y": 0
+    },
+    "sourceCanvas": {
+      "width": 200.0,
+      "height": 400.0
+    },
+    "targetCanvas": {
+      "width": 170.0,
+      "height": 332.6666666666667
+    },
+    "maskHash": "553719d812277d2fb88b80cd31b79fd988e1d88b0b5d8825c16b5fadff47e6d8",
+    "safetyPixels": 2,
+    "analysisSize": [
+      197,
+      384
+    ],
+    "maxAspectError": 0.0,
+    "relativeDistanceError": 2.842170943040401e-14,
+    "layers": [
+      {
+        "layerId": "layer-0",
+        "source": {
+          "x": 100.0,
+          "y": 200.0,
+          "width": 200.0,
+          "height": 400.0
+        },
+        "target": {
+          "x": 85.0,
+          "y": 166.33333333333334,
+          "width": 170.0,
+          "height": 340.0
+        },
+        "angle": 0.0,
+        "strategy": "background-crop",
+        "aspectError": 0
+      },
+      {
+        "layerId": "layer-1",
+        "source": {
+          "x": 100.0,
+          "y": 160.0,
+          "width": 96.0,
+          "height": 32.0
+        },
+        "target": {
+          "x": 85.0,
+          "y": 133.06666666666666,
+          "width": 79.84,
+          "height": 26.613333333333333
+        },
+        "angle": 0.0,
+        "strategy": "important-text",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-2",
+        "source": {
+          "x": 60.0,
+          "y": 240.0,
+          "width": 30.0,
+          "height": 32.0
+        },
+        "target": {
+          "x": 51.733333333333334,
+          "y": 199.60000000000002,
+          "width": 24.95,
+          "height": 26.613333333333333
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-3",
+        "source": {
+          "x": 136.0,
+          "y": 248.0,
+          "width": 36.0,
+          "height": 36.0
+        },
+        "target": {
+          "x": 114.94,
+          "y": 206.25333333333333,
+          "width": 29.94,
+          "height": 29.94
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      }
+    ],
+    "masterHash": "c81ec95c22ac6d2f2a3e69c4a3cf921adc01ca83c545e76d80656c73c5606641",
+    "engine": "master-v1"
+  },
+  {
+    "kind": "text-sticker",
+    "model": "iphone17-pro",
+    "status": "success",
+    "issues": [],
+    "scale": 0.7166666666666667,
+    "translation": {
+      "x": 0.0,
+      "y": 6.333333333333314
+    },
+    "autoShift": {
+      "x": 0,
+      "y": 0
+    },
+    "sourceCanvas": {
+      "width": 200.0,
+      "height": 400.0
+    },
+    "targetCanvas": {
+      "width": 143.33333333333334,
+      "height": 299.3333333333333
+    },
+    "maskHash": "c3f60a187ffeaa3a23f94a611ab28105adff095bfeec892ffb69a35ec8eccec8",
+    "safetyPixels": 2,
+    "analysisSize": [
+      197,
+      384
+    ],
+    "maxAspectError": 0.0,
+    "relativeDistanceError": 1.4210854715202004e-14,
+    "layers": [
+      {
+        "layerId": "layer-0",
+        "source": {
+          "x": 100.0,
+          "y": 200.0,
+          "width": 200.0,
+          "height": 400.0
+        },
+        "target": {
+          "x": 71.66666666666667,
+          "y": 149.66666666666666,
+          "width": 149.66666666666666,
+          "height": 299.3333333333333
+        },
+        "angle": 0.0,
+        "strategy": "background-crop",
+        "aspectError": 0
+      },
+      {
+        "layerId": "layer-1",
+        "source": {
+          "x": 100.0,
+          "y": 160.0,
+          "width": 96.0,
+          "height": 32.0
+        },
+        "target": {
+          "x": 71.66666666666667,
+          "y": 120.99999999999999,
+          "width": 68.8,
+          "height": 22.933333333333334
+        },
+        "angle": 0.0,
+        "strategy": "important-text",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-2",
+        "source": {
+          "x": 60.0,
+          "y": 240.0,
+          "width": 30.0,
+          "height": 32.0
+        },
+        "target": {
+          "x": 43.0,
+          "y": 178.33333333333331,
+          "width": 21.5,
+          "height": 22.933333333333334
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-3",
+        "source": {
+          "x": 136.0,
+          "y": 248.0,
+          "width": 36.0,
+          "height": 36.0
+        },
+        "target": {
+          "x": 97.46666666666667,
+          "y": 184.06666666666666,
+          "width": 25.8,
+          "height": 25.8
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      }
+    ],
+    "masterHash": "c81ec95c22ac6d2f2a3e69c4a3cf921adc01ca83c545e76d80656c73c5606641",
+    "engine": "master-v1"
+  },
+  {
+    "kind": "subject-title",
+    "model": "iphone13",
+    "status": "success",
+    "issues": [],
+    "scale": 0.76,
+    "translation": {
+      "x": 3.0,
+      "y": 0.0
+    },
+    "autoShift": {
+      "x": 0,
+      "y": 0
+    },
+    "sourceCanvas": {
+      "width": 200.0,
+      "height": 400.0
+    },
+    "targetCanvas": {
+      "width": 158.0,
+      "height": 304.0
+    },
+    "maskHash": "31ac949c674ed97f473eb4db48e2eee3f2c8eeb6e516fa8b1a32787dad425bef",
+    "safetyPixels": 2,
+    "analysisSize": [
+      199,
+      384
+    ],
+    "maxAspectError": 0.0,
+    "relativeDistanceError": 1.4210854715202004e-14,
+    "layers": [
+      {
+        "layerId": "layer-0",
+        "source": {
+          "x": 100.0,
+          "y": 200.0,
+          "width": 200.0,
+          "height": 400.0
+        },
+        "target": {
+          "x": 79.0,
+          "y": 152.0,
+          "width": 158.0,
+          "height": 316.0
+        },
+        "angle": 0.0,
+        "strategy": "background-crop",
+        "aspectError": 0
+      },
+      {
+        "layerId": "layer-1",
+        "source": {
+          "x": 100.0,
+          "y": 268.0,
+          "width": 80.0,
+          "height": 144.0
+        },
+        "target": {
+          "x": 79.0,
+          "y": 203.68,
+          "width": 60.8,
+          "height": 109.44
+        },
+        "angle": 0.0,
+        "strategy": "subject",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-2",
+        "source": {
+          "x": 100.0,
+          "y": 160.0,
+          "width": 100.0,
+          "height": 36.0
+        },
+        "target": {
+          "x": 79.0,
+          "y": 121.6,
+          "width": 76.0,
+          "height": 27.36
+        },
+        "angle": 0.0,
+        "strategy": "important-text",
+        "aspectError": 0.0
+      }
+    ],
+    "masterHash": "837c7c4e1e6d41490089524e3807378843c1c3d549955f4b0c866e4092a827b9",
+    "engine": "master-v1"
+  },
+  {
+    "kind": "subject-title",
+    "model": "iphone14",
+    "status": "success",
+    "issues": [],
+    "scale": 0.76,
+    "translation": {
+      "x": 3.0,
+      "y": 0.0
+    },
+    "autoShift": {
+      "x": 0,
+      "y": 0
+    },
+    "sourceCanvas": {
+      "width": 200.0,
+      "height": 400.0
+    },
+    "targetCanvas": {
+      "width": 158.0,
+      "height": 304.0
+    },
+    "maskHash": "ac0e63016355eb966862988a984e9c8d9cbdd28f0c80b22f9fcc45f5520853f9",
+    "safetyPixels": 2,
+    "analysisSize": [
+      199,
+      384
+    ],
+    "maxAspectError": 0.0,
+    "relativeDistanceError": 1.4210854715202004e-14,
+    "layers": [
+      {
+        "layerId": "layer-0",
+        "source": {
+          "x": 100.0,
+          "y": 200.0,
+          "width": 200.0,
+          "height": 400.0
+        },
+        "target": {
+          "x": 79.0,
+          "y": 152.0,
+          "width": 158.0,
+          "height": 316.0
+        },
+        "angle": 0.0,
+        "strategy": "background-crop",
+        "aspectError": 0
+      },
+      {
+        "layerId": "layer-1",
+        "source": {
+          "x": 100.0,
+          "y": 268.0,
+          "width": 80.0,
+          "height": 144.0
+        },
+        "target": {
+          "x": 79.0,
+          "y": 203.68,
+          "width": 60.8,
+          "height": 109.44
+        },
+        "angle": 0.0,
+        "strategy": "subject",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-2",
+        "source": {
+          "x": 100.0,
+          "y": 160.0,
+          "width": 100.0,
+          "height": 36.0
+        },
+        "target": {
+          "x": 79.0,
+          "y": 121.6,
+          "width": 76.0,
+          "height": 27.36
+        },
+        "angle": 0.0,
+        "strategy": "important-text",
+        "aspectError": 0.0
+      }
+    ],
+    "masterHash": "837c7c4e1e6d41490089524e3807378843c1c3d549955f4b0c866e4092a827b9",
+    "engine": "master-v1"
+  },
+  {
+    "kind": "subject-title",
+    "model": "iphone14-pro-max",
+    "status": "success",
+    "issues": [],
+    "scale": 0.8316666666666667,
+    "translation": {
+      "x": 1.8333333333333286,
+      "y": 0.0
+    },
+    "autoShift": {
+      "x": 0,
+      "y": 0
+    },
+    "sourceCanvas": {
+      "width": 200.0,
+      "height": 400.0
+    },
+    "targetCanvas": {
+      "width": 170.0,
+      "height": 332.6666666666667
+    },
+    "maskHash": "553719d812277d2fb88b80cd31b79fd988e1d88b0b5d8825c16b5fadff47e6d8",
+    "safetyPixels": 2,
+    "analysisSize": [
+      197,
+      384
+    ],
+    "maxAspectError": 1.1102230246251565e-16,
+    "relativeDistanceError": 2.842170943040401e-14,
+    "layers": [
+      {
+        "layerId": "layer-0",
+        "source": {
+          "x": 100.0,
+          "y": 200.0,
+          "width": 200.0,
+          "height": 400.0
+        },
+        "target": {
+          "x": 85.0,
+          "y": 166.33333333333334,
+          "width": 170.0,
+          "height": 340.0
+        },
+        "angle": 0.0,
+        "strategy": "background-crop",
+        "aspectError": 0
+      },
+      {
+        "layerId": "layer-1",
+        "source": {
+          "x": 100.0,
+          "y": 268.0,
+          "width": 80.0,
+          "height": 144.0
+        },
+        "target": {
+          "x": 85.0,
+          "y": 222.88666666666668,
+          "width": 66.53333333333333,
+          "height": 119.76
+        },
+        "angle": 0.0,
+        "strategy": "subject",
+        "aspectError": 1.1102230246251565e-16
+      },
+      {
+        "layerId": "layer-2",
+        "source": {
+          "x": 100.0,
+          "y": 160.0,
+          "width": 100.0,
+          "height": 36.0
+        },
+        "target": {
+          "x": 85.0,
+          "y": 133.06666666666666,
+          "width": 83.16666666666667,
+          "height": 29.94
+        },
+        "angle": 0.0,
+        "strategy": "important-text",
+        "aspectError": 0.0
+      }
+    ],
+    "masterHash": "837c7c4e1e6d41490089524e3807378843c1c3d549955f4b0c866e4092a827b9",
+    "engine": "master-v1"
+  },
+  {
+    "kind": "subject-title",
+    "model": "iphone17-pro",
+    "status": "success",
+    "issues": [],
+    "scale": 0.7166666666666667,
+    "translation": {
+      "x": 0.0,
+      "y": 6.333333333333314
+    },
+    "autoShift": {
+      "x": 0,
+      "y": 0
+    },
+    "sourceCanvas": {
+      "width": 200.0,
+      "height": 400.0
+    },
+    "targetCanvas": {
+      "width": 143.33333333333334,
+      "height": 299.3333333333333
+    },
+    "maskHash": "c3f60a187ffeaa3a23f94a611ab28105adff095bfeec892ffb69a35ec8eccec8",
+    "safetyPixels": 2,
+    "analysisSize": [
+      197,
+      384
+    ],
+    "maxAspectError": 0.0,
+    "relativeDistanceError": 1.4210854715202004e-14,
+    "layers": [
+      {
+        "layerId": "layer-0",
+        "source": {
+          "x": 100.0,
+          "y": 200.0,
+          "width": 200.0,
+          "height": 400.0
+        },
+        "target": {
+          "x": 71.66666666666667,
+          "y": 149.66666666666666,
+          "width": 149.66666666666666,
+          "height": 299.3333333333333
+        },
+        "angle": 0.0,
+        "strategy": "background-crop",
+        "aspectError": 0
+      },
+      {
+        "layerId": "layer-1",
+        "source": {
+          "x": 100.0,
+          "y": 268.0,
+          "width": 80.0,
+          "height": 144.0
+        },
+        "target": {
+          "x": 71.66666666666667,
+          "y": 198.39999999999998,
+          "width": 57.333333333333336,
+          "height": 103.2
+        },
+        "angle": 0.0,
+        "strategy": "subject",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-2",
+        "source": {
+          "x": 100.0,
+          "y": 160.0,
+          "width": 100.0,
+          "height": 36.0
+        },
+        "target": {
+          "x": 71.66666666666667,
+          "y": 120.99999999999999,
+          "width": 71.66666666666667,
+          "height": 25.8
+        },
+        "angle": 0.0,
+        "strategy": "important-text",
+        "aspectError": 0.0
+      }
+    ],
+    "masterHash": "837c7c4e1e6d41490089524e3807378843c1c3d549955f4b0c866e4092a827b9",
+    "engine": "master-v1"
+  },
+  {
+    "kind": "mixed",
+    "model": "iphone13",
+    "status": "success",
+    "issues": [],
+    "scale": 0.76,
+    "translation": {
+      "x": 3.0,
+      "y": 0.0
+    },
+    "autoShift": {
+      "x": 0,
+      "y": 0
+    },
+    "sourceCanvas": {
+      "width": 200.0,
+      "height": 400.0
+    },
+    "targetCanvas": {
+      "width": 158.0,
+      "height": 304.0
+    },
+    "maskHash": "31ac949c674ed97f473eb4db48e2eee3f2c8eeb6e516fa8b1a32787dad425bef",
+    "safetyPixels": 2,
+    "analysisSize": [
+      199,
+      384
+    ],
+    "maxAspectError": 0.0,
+    "relativeDistanceError": 2.842170943040401e-14,
+    "layers": [
+      {
+        "layerId": "layer-0",
+        "source": {
+          "x": 100.0,
+          "y": 200.0,
+          "width": 200.0,
+          "height": 400.0
+        },
+        "target": {
+          "x": 79.0,
+          "y": 152.0,
+          "width": 158.0,
+          "height": 316.0
+        },
+        "angle": 0.0,
+        "strategy": "background-crop",
+        "aspectError": 0
+      },
+      {
+        "layerId": "layer-1",
+        "source": {
+          "x": 100.0,
+          "y": 160.0,
+          "width": 90.0,
+          "height": 32.0
+        },
+        "target": {
+          "x": 79.0,
+          "y": 121.6,
+          "width": 68.4,
+          "height": 24.32
+        },
+        "angle": 0.0,
+        "strategy": "important-text",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-2",
+        "source": {
+          "x": 36.0,
+          "y": 212.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 30.36,
+          "y": 161.12,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-3",
+        "source": {
+          "x": 68.0,
+          "y": 212.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 54.68,
+          "y": 161.12,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-4",
+        "source": {
+          "x": 100.0,
+          "y": 212.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 79.0,
+          "y": 161.12,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-5",
+        "source": {
+          "x": 131.99999999999997,
+          "y": 212.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 103.31999999999998,
+          "y": 161.12,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-6",
+        "source": {
+          "x": 164.0,
+          "y": 212.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 127.64,
+          "y": 161.12,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-7",
+        "source": {
+          "x": 36.0,
+          "y": 244.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 30.36,
+          "y": 185.44,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-8",
+        "source": {
+          "x": 68.0,
+          "y": 244.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 54.68,
+          "y": 185.44,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-9",
+        "source": {
+          "x": 100.0,
+          "y": 244.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 79.0,
+          "y": 185.44,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-10",
+        "source": {
+          "x": 131.99999999999997,
+          "y": 244.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 103.31999999999998,
+          "y": 185.44,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-11",
+        "source": {
+          "x": 164.0,
+          "y": 244.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 127.64,
+          "y": 185.44,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-12",
+        "source": {
+          "x": 36.0,
+          "y": 276.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 30.36,
+          "y": 209.76,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-13",
+        "source": {
+          "x": 68.0,
+          "y": 276.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 54.68,
+          "y": 209.76,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-14",
+        "source": {
+          "x": 100.0,
+          "y": 276.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 79.0,
+          "y": 209.76,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-15",
+        "source": {
+          "x": 131.99999999999997,
+          "y": 276.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 103.31999999999998,
+          "y": 209.76,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-16",
+        "source": {
+          "x": 164.0,
+          "y": 276.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 127.64,
+          "y": 209.76,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-17",
+        "source": {
+          "x": 36.0,
+          "y": 308.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 30.36,
+          "y": 234.07999999999998,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-18",
+        "source": {
+          "x": 68.0,
+          "y": 308.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 54.68,
+          "y": 234.07999999999998,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-19",
+        "source": {
+          "x": 100.0,
+          "y": 308.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 79.0,
+          "y": 234.07999999999998,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-20",
+        "source": {
+          "x": 131.99999999999997,
+          "y": 308.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 103.31999999999998,
+          "y": 234.07999999999998,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-21",
+        "source": {
+          "x": 164.0,
+          "y": 308.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 127.64,
+          "y": 234.07999999999998,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-22",
+        "source": {
+          "x": 36.0,
+          "y": 340.00000000000006,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 30.36,
+          "y": 258.40000000000003,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-23",
+        "source": {
+          "x": 68.0,
+          "y": 340.00000000000006,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 54.68,
+          "y": 258.40000000000003,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-24",
+        "source": {
+          "x": 100.0,
+          "y": 340.00000000000006,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 79.0,
+          "y": 258.40000000000003,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-25",
+        "source": {
+          "x": 131.99999999999997,
+          "y": 340.00000000000006,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 103.31999999999998,
+          "y": 258.40000000000003,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-26",
+        "source": {
+          "x": 164.0,
+          "y": 340.00000000000006,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 127.64,
+          "y": 258.40000000000003,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "1f833806-68c4-458c-af81-950b5e952441",
+        "source": {
+          "x": 100.0,
+          "y": 350.0,
+          "width": 71.68,
+          "height": 35.84
+        },
+        "target": {
+          "x": 79.0,
+          "y": 266.0,
+          "width": 54.476800000000004,
+          "height": 27.238400000000002
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "5d37add7-a96f-4ad8-90dd-6eaef695c7ae",
+        "source": {
+          "x": 100.0,
+          "y": 348.208,
+          "width": 54.476800000000004,
+          "height": 5.6952
+        },
+        "target": {
+          "x": 79.0,
+          "y": 264.63808,
+          "width": 41.402368,
+          "height": 4.328352
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      }
+    ],
+    "masterHash": "ebe41a1ad88cfb6a89240bda9fcfab12548045b577202451dd966a84178292d3",
+    "engine": "master-v1"
+  },
+  {
+    "kind": "mixed",
+    "model": "iphone14",
+    "status": "success",
+    "issues": [],
+    "scale": 0.76,
+    "translation": {
+      "x": 3.0,
+      "y": 0.0
+    },
+    "autoShift": {
+      "x": 0,
+      "y": 0
+    },
+    "sourceCanvas": {
+      "width": 200.0,
+      "height": 400.0
+    },
+    "targetCanvas": {
+      "width": 158.0,
+      "height": 304.0
+    },
+    "maskHash": "ac0e63016355eb966862988a984e9c8d9cbdd28f0c80b22f9fcc45f5520853f9",
+    "safetyPixels": 2,
+    "analysisSize": [
+      199,
+      384
+    ],
+    "maxAspectError": 0.0,
+    "relativeDistanceError": 2.842170943040401e-14,
+    "layers": [
+      {
+        "layerId": "layer-0",
+        "source": {
+          "x": 100.0,
+          "y": 200.0,
+          "width": 200.0,
+          "height": 400.0
+        },
+        "target": {
+          "x": 79.0,
+          "y": 152.0,
+          "width": 158.0,
+          "height": 316.0
+        },
+        "angle": 0.0,
+        "strategy": "background-crop",
+        "aspectError": 0
+      },
+      {
+        "layerId": "layer-1",
+        "source": {
+          "x": 100.0,
+          "y": 160.0,
+          "width": 90.0,
+          "height": 32.0
+        },
+        "target": {
+          "x": 79.0,
+          "y": 121.6,
+          "width": 68.4,
+          "height": 24.32
+        },
+        "angle": 0.0,
+        "strategy": "important-text",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-2",
+        "source": {
+          "x": 36.0,
+          "y": 212.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 30.36,
+          "y": 161.12,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-3",
+        "source": {
+          "x": 68.0,
+          "y": 212.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 54.68,
+          "y": 161.12,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-4",
+        "source": {
+          "x": 100.0,
+          "y": 212.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 79.0,
+          "y": 161.12,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-5",
+        "source": {
+          "x": 131.99999999999997,
+          "y": 212.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 103.31999999999998,
+          "y": 161.12,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-6",
+        "source": {
+          "x": 164.0,
+          "y": 212.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 127.64,
+          "y": 161.12,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-7",
+        "source": {
+          "x": 36.0,
+          "y": 244.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 30.36,
+          "y": 185.44,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-8",
+        "source": {
+          "x": 68.0,
+          "y": 244.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 54.68,
+          "y": 185.44,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-9",
+        "source": {
+          "x": 100.0,
+          "y": 244.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 79.0,
+          "y": 185.44,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-10",
+        "source": {
+          "x": 131.99999999999997,
+          "y": 244.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 103.31999999999998,
+          "y": 185.44,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-11",
+        "source": {
+          "x": 164.0,
+          "y": 244.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 127.64,
+          "y": 185.44,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-12",
+        "source": {
+          "x": 36.0,
+          "y": 276.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 30.36,
+          "y": 209.76,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-13",
+        "source": {
+          "x": 68.0,
+          "y": 276.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 54.68,
+          "y": 209.76,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-14",
+        "source": {
+          "x": 100.0,
+          "y": 276.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 79.0,
+          "y": 209.76,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-15",
+        "source": {
+          "x": 131.99999999999997,
+          "y": 276.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 103.31999999999998,
+          "y": 209.76,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-16",
+        "source": {
+          "x": 164.0,
+          "y": 276.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 127.64,
+          "y": 209.76,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-17",
+        "source": {
+          "x": 36.0,
+          "y": 308.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 30.36,
+          "y": 234.07999999999998,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-18",
+        "source": {
+          "x": 68.0,
+          "y": 308.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 54.68,
+          "y": 234.07999999999998,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-19",
+        "source": {
+          "x": 100.0,
+          "y": 308.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 79.0,
+          "y": 234.07999999999998,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-20",
+        "source": {
+          "x": 131.99999999999997,
+          "y": 308.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 103.31999999999998,
+          "y": 234.07999999999998,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-21",
+        "source": {
+          "x": 164.0,
+          "y": 308.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 127.64,
+          "y": 234.07999999999998,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-22",
+        "source": {
+          "x": 36.0,
+          "y": 340.00000000000006,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 30.36,
+          "y": 258.40000000000003,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-23",
+        "source": {
+          "x": 68.0,
+          "y": 340.00000000000006,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 54.68,
+          "y": 258.40000000000003,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-24",
+        "source": {
+          "x": 100.0,
+          "y": 340.00000000000006,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 79.0,
+          "y": 258.40000000000003,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-25",
+        "source": {
+          "x": 131.99999999999997,
+          "y": 340.00000000000006,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 103.31999999999998,
+          "y": 258.40000000000003,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-26",
+        "source": {
+          "x": 164.0,
+          "y": 340.00000000000006,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 127.64,
+          "y": 258.40000000000003,
+          "width": 15.2,
+          "height": 12.16
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "1f833806-68c4-458c-af81-950b5e952441",
+        "source": {
+          "x": 100.0,
+          "y": 350.0,
+          "width": 71.68,
+          "height": 35.84
+        },
+        "target": {
+          "x": 79.0,
+          "y": 266.0,
+          "width": 54.476800000000004,
+          "height": 27.238400000000002
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "5d37add7-a96f-4ad8-90dd-6eaef695c7ae",
+        "source": {
+          "x": 100.0,
+          "y": 348.208,
+          "width": 54.476800000000004,
+          "height": 5.6952
+        },
+        "target": {
+          "x": 79.0,
+          "y": 264.63808,
+          "width": 41.402368,
+          "height": 4.328352
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      }
+    ],
+    "masterHash": "ebe41a1ad88cfb6a89240bda9fcfab12548045b577202451dd966a84178292d3",
+    "engine": "master-v1"
+  },
+  {
+    "kind": "mixed",
+    "model": "iphone14-pro-max",
+    "status": "success",
+    "issues": [],
+    "scale": 0.8316666666666667,
+    "translation": {
+      "x": 1.8333333333333286,
+      "y": 0.0
+    },
+    "autoShift": {
+      "x": 0,
+      "y": 0
+    },
+    "sourceCanvas": {
+      "width": 200.0,
+      "height": 400.0
+    },
+    "targetCanvas": {
+      "width": 170.0,
+      "height": 332.6666666666667
+    },
+    "maskHash": "553719d812277d2fb88b80cd31b79fd988e1d88b0b5d8825c16b5fadff47e6d8",
+    "safetyPixels": 2,
+    "analysisSize": [
+      197,
+      384
+    ],
+    "maxAspectError": 0.0,
+    "relativeDistanceError": 2.842170943040401e-14,
+    "layers": [
+      {
+        "layerId": "layer-0",
+        "source": {
+          "x": 100.0,
+          "y": 200.0,
+          "width": 200.0,
+          "height": 400.0
+        },
+        "target": {
+          "x": 85.0,
+          "y": 166.33333333333334,
+          "width": 170.0,
+          "height": 340.0
+        },
+        "angle": 0.0,
+        "strategy": "background-crop",
+        "aspectError": 0
+      },
+      {
+        "layerId": "layer-1",
+        "source": {
+          "x": 100.0,
+          "y": 160.0,
+          "width": 90.0,
+          "height": 32.0
+        },
+        "target": {
+          "x": 85.0,
+          "y": 133.06666666666666,
+          "width": 74.85,
+          "height": 26.613333333333333
+        },
+        "angle": 0.0,
+        "strategy": "important-text",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-2",
+        "source": {
+          "x": 36.0,
+          "y": 212.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 31.773333333333333,
+          "y": 176.31333333333333,
+          "width": 16.633333333333333,
+          "height": 13.306666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-3",
+        "source": {
+          "x": 68.0,
+          "y": 212.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 58.38666666666667,
+          "y": 176.31333333333333,
+          "width": 16.633333333333333,
+          "height": 13.306666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-4",
+        "source": {
+          "x": 100.0,
+          "y": 212.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 85.0,
+          "y": 176.31333333333333,
+          "width": 16.633333333333333,
+          "height": 13.306666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-5",
+        "source": {
+          "x": 131.99999999999997,
+          "y": 212.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 111.61333333333332,
+          "y": 176.31333333333333,
+          "width": 16.633333333333333,
+          "height": 13.306666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-6",
+        "source": {
+          "x": 164.0,
+          "y": 212.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 138.22666666666666,
+          "y": 176.31333333333333,
+          "width": 16.633333333333333,
+          "height": 13.306666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-7",
+        "source": {
+          "x": 36.0,
+          "y": 244.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 31.773333333333333,
+          "y": 202.92666666666668,
+          "width": 16.633333333333333,
+          "height": 13.306666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-8",
+        "source": {
+          "x": 68.0,
+          "y": 244.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 58.38666666666667,
+          "y": 202.92666666666668,
+          "width": 16.633333333333333,
+          "height": 13.306666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-9",
+        "source": {
+          "x": 100.0,
+          "y": 244.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 85.0,
+          "y": 202.92666666666668,
+          "width": 16.633333333333333,
+          "height": 13.306666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-10",
+        "source": {
+          "x": 131.99999999999997,
+          "y": 244.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 111.61333333333332,
+          "y": 202.92666666666668,
+          "width": 16.633333333333333,
+          "height": 13.306666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-11",
+        "source": {
+          "x": 164.0,
+          "y": 244.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 138.22666666666666,
+          "y": 202.92666666666668,
+          "width": 16.633333333333333,
+          "height": 13.306666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-12",
+        "source": {
+          "x": 36.0,
+          "y": 276.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 31.773333333333333,
+          "y": 229.54000000000002,
+          "width": 16.633333333333333,
+          "height": 13.306666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-13",
+        "source": {
+          "x": 68.0,
+          "y": 276.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 58.38666666666667,
+          "y": 229.54000000000002,
+          "width": 16.633333333333333,
+          "height": 13.306666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-14",
+        "source": {
+          "x": 100.0,
+          "y": 276.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 85.0,
+          "y": 229.54000000000002,
+          "width": 16.633333333333333,
+          "height": 13.306666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-15",
+        "source": {
+          "x": 131.99999999999997,
+          "y": 276.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 111.61333333333332,
+          "y": 229.54000000000002,
+          "width": 16.633333333333333,
+          "height": 13.306666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-16",
+        "source": {
+          "x": 164.0,
+          "y": 276.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 138.22666666666666,
+          "y": 229.54000000000002,
+          "width": 16.633333333333333,
+          "height": 13.306666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-17",
+        "source": {
+          "x": 36.0,
+          "y": 308.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 31.773333333333333,
+          "y": 256.1533333333333,
+          "width": 16.633333333333333,
+          "height": 13.306666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-18",
+        "source": {
+          "x": 68.0,
+          "y": 308.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 58.38666666666667,
+          "y": 256.1533333333333,
+          "width": 16.633333333333333,
+          "height": 13.306666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-19",
+        "source": {
+          "x": 100.0,
+          "y": 308.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 85.0,
+          "y": 256.1533333333333,
+          "width": 16.633333333333333,
+          "height": 13.306666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-20",
+        "source": {
+          "x": 131.99999999999997,
+          "y": 308.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 111.61333333333332,
+          "y": 256.1533333333333,
+          "width": 16.633333333333333,
+          "height": 13.306666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-21",
+        "source": {
+          "x": 164.0,
+          "y": 308.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 138.22666666666666,
+          "y": 256.1533333333333,
+          "width": 16.633333333333333,
+          "height": 13.306666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-22",
+        "source": {
+          "x": 36.0,
+          "y": 340.00000000000006,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 31.773333333333333,
+          "y": 282.7666666666667,
+          "width": 16.633333333333333,
+          "height": 13.306666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-23",
+        "source": {
+          "x": 68.0,
+          "y": 340.00000000000006,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 58.38666666666667,
+          "y": 282.7666666666667,
+          "width": 16.633333333333333,
+          "height": 13.306666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-24",
+        "source": {
+          "x": 100.0,
+          "y": 340.00000000000006,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 85.0,
+          "y": 282.7666666666667,
+          "width": 16.633333333333333,
+          "height": 13.306666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-25",
+        "source": {
+          "x": 131.99999999999997,
+          "y": 340.00000000000006,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 111.61333333333332,
+          "y": 282.7666666666667,
+          "width": 16.633333333333333,
+          "height": 13.306666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-26",
+        "source": {
+          "x": 164.0,
+          "y": 340.00000000000006,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 138.22666666666666,
+          "y": 282.7666666666667,
+          "width": 16.633333333333333,
+          "height": 13.306666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "1f833806-68c4-458c-af81-950b5e952441",
+        "source": {
+          "x": 100.0,
+          "y": 350.0,
+          "width": 71.68,
+          "height": 35.84
+        },
+        "target": {
+          "x": 85.0,
+          "y": 291.08333333333337,
+          "width": 59.613866666666674,
+          "height": 29.806933333333337
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "5d37add7-a96f-4ad8-90dd-6eaef695c7ae",
+        "source": {
+          "x": 100.0,
+          "y": 348.208,
+          "width": 54.476800000000004,
+          "height": 5.6952
+        },
+        "target": {
+          "x": 85.0,
+          "y": 289.5929866666667,
+          "width": 45.30653866666667,
+          "height": 4.736508
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      }
+    ],
+    "masterHash": "ebe41a1ad88cfb6a89240bda9fcfab12548045b577202451dd966a84178292d3",
+    "engine": "master-v1"
+  },
+  {
+    "kind": "mixed",
+    "model": "iphone17-pro",
+    "status": "success",
+    "issues": [],
+    "scale": 0.7166666666666667,
+    "translation": {
+      "x": 0.0,
+      "y": 6.333333333333314
+    },
+    "autoShift": {
+      "x": 0,
+      "y": 0
+    },
+    "sourceCanvas": {
+      "width": 200.0,
+      "height": 400.0
+    },
+    "targetCanvas": {
+      "width": 143.33333333333334,
+      "height": 299.3333333333333
+    },
+    "maskHash": "c3f60a187ffeaa3a23f94a611ab28105adff095bfeec892ffb69a35ec8eccec8",
+    "safetyPixels": 2,
+    "analysisSize": [
+      197,
+      384
+    ],
+    "maxAspectError": 1.7763568394002505e-15,
+    "relativeDistanceError": 2.842170943040401e-14,
+    "layers": [
+      {
+        "layerId": "layer-0",
+        "source": {
+          "x": 100.0,
+          "y": 200.0,
+          "width": 200.0,
+          "height": 400.0
+        },
+        "target": {
+          "x": 71.66666666666667,
+          "y": 149.66666666666666,
+          "width": 149.66666666666666,
+          "height": 299.3333333333333
+        },
+        "angle": 0.0,
+        "strategy": "background-crop",
+        "aspectError": 0
+      },
+      {
+        "layerId": "layer-1",
+        "source": {
+          "x": 100.0,
+          "y": 160.0,
+          "width": 90.0,
+          "height": 32.0
+        },
+        "target": {
+          "x": 71.66666666666667,
+          "y": 120.99999999999999,
+          "width": 64.5,
+          "height": 22.933333333333334
+        },
+        "angle": 0.0,
+        "strategy": "important-text",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-2",
+        "source": {
+          "x": 36.0,
+          "y": 212.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 25.800000000000004,
+          "y": 158.26666666666665,
+          "width": 14.333333333333334,
+          "height": 11.466666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-3",
+        "source": {
+          "x": 68.0,
+          "y": 212.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 48.733333333333334,
+          "y": 158.26666666666665,
+          "width": 14.333333333333334,
+          "height": 11.466666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-4",
+        "source": {
+          "x": 100.0,
+          "y": 212.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 71.66666666666667,
+          "y": 158.26666666666665,
+          "width": 14.333333333333334,
+          "height": 11.466666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-5",
+        "source": {
+          "x": 131.99999999999997,
+          "y": 212.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 94.59999999999998,
+          "y": 158.26666666666665,
+          "width": 14.333333333333334,
+          "height": 11.466666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-6",
+        "source": {
+          "x": 164.0,
+          "y": 212.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 117.53333333333333,
+          "y": 158.26666666666665,
+          "width": 14.333333333333334,
+          "height": 11.466666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-7",
+        "source": {
+          "x": 36.0,
+          "y": 244.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 25.800000000000004,
+          "y": 181.2,
+          "width": 14.333333333333334,
+          "height": 11.466666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-8",
+        "source": {
+          "x": 68.0,
+          "y": 244.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 48.733333333333334,
+          "y": 181.2,
+          "width": 14.333333333333334,
+          "height": 11.466666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-9",
+        "source": {
+          "x": 100.0,
+          "y": 244.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 71.66666666666667,
+          "y": 181.2,
+          "width": 14.333333333333334,
+          "height": 11.466666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-10",
+        "source": {
+          "x": 131.99999999999997,
+          "y": 244.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 94.59999999999998,
+          "y": 181.2,
+          "width": 14.333333333333334,
+          "height": 11.466666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-11",
+        "source": {
+          "x": 164.0,
+          "y": 244.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 117.53333333333333,
+          "y": 181.2,
+          "width": 14.333333333333334,
+          "height": 11.466666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-12",
+        "source": {
+          "x": 36.0,
+          "y": 276.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 25.800000000000004,
+          "y": 204.13333333333333,
+          "width": 14.333333333333334,
+          "height": 11.466666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-13",
+        "source": {
+          "x": 68.0,
+          "y": 276.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 48.733333333333334,
+          "y": 204.13333333333333,
+          "width": 14.333333333333334,
+          "height": 11.466666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-14",
+        "source": {
+          "x": 100.0,
+          "y": 276.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 71.66666666666667,
+          "y": 204.13333333333333,
+          "width": 14.333333333333334,
+          "height": 11.466666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-15",
+        "source": {
+          "x": 131.99999999999997,
+          "y": 276.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 94.59999999999998,
+          "y": 204.13333333333333,
+          "width": 14.333333333333334,
+          "height": 11.466666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-16",
+        "source": {
+          "x": 164.0,
+          "y": 276.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 117.53333333333333,
+          "y": 204.13333333333333,
+          "width": 14.333333333333334,
+          "height": 11.466666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-17",
+        "source": {
+          "x": 36.0,
+          "y": 308.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 25.800000000000004,
+          "y": 227.06666666666666,
+          "width": 14.333333333333334,
+          "height": 11.466666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-18",
+        "source": {
+          "x": 68.0,
+          "y": 308.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 48.733333333333334,
+          "y": 227.06666666666666,
+          "width": 14.333333333333334,
+          "height": 11.466666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-19",
+        "source": {
+          "x": 100.0,
+          "y": 308.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 71.66666666666667,
+          "y": 227.06666666666666,
+          "width": 14.333333333333334,
+          "height": 11.466666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-20",
+        "source": {
+          "x": 131.99999999999997,
+          "y": 308.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 94.59999999999998,
+          "y": 227.06666666666666,
+          "width": 14.333333333333334,
+          "height": 11.466666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-21",
+        "source": {
+          "x": 164.0,
+          "y": 308.0,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 117.53333333333333,
+          "y": 227.06666666666666,
+          "width": 14.333333333333334,
+          "height": 11.466666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-22",
+        "source": {
+          "x": 36.0,
+          "y": 340.00000000000006,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 25.800000000000004,
+          "y": 250.00000000000003,
+          "width": 14.333333333333334,
+          "height": 11.466666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-23",
+        "source": {
+          "x": 68.0,
+          "y": 340.00000000000006,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 48.733333333333334,
+          "y": 250.00000000000003,
+          "width": 14.333333333333334,
+          "height": 11.466666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-24",
+        "source": {
+          "x": 100.0,
+          "y": 340.00000000000006,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 71.66666666666667,
+          "y": 250.00000000000003,
+          "width": 14.333333333333334,
+          "height": 11.466666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-25",
+        "source": {
+          "x": 131.99999999999997,
+          "y": 340.00000000000006,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 94.59999999999998,
+          "y": 250.00000000000003,
+          "width": 14.333333333333334,
+          "height": 11.466666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "layer-26",
+        "source": {
+          "x": 164.0,
+          "y": 340.00000000000006,
+          "width": 20.0,
+          "height": 16.0
+        },
+        "target": {
+          "x": 117.53333333333333,
+          "y": 250.00000000000003,
+          "width": 14.333333333333334,
+          "height": 11.466666666666667
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "1f833806-68c4-458c-af81-950b5e952441",
+        "source": {
+          "x": 100.0,
+          "y": 350.0,
+          "width": 71.68,
+          "height": 35.84
+        },
+        "target": {
+          "x": 71.66666666666667,
+          "y": 257.16666666666663,
+          "width": 51.37066666666667,
+          "height": 25.685333333333336
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 0.0
+      },
+      {
+        "layerId": "5d37add7-a96f-4ad8-90dd-6eaef695c7ae",
+        "source": {
+          "x": 100.0,
+          "y": 348.208,
+          "width": 54.476800000000004,
+          "height": 5.6952
+        },
+        "target": {
+          "x": 71.66666666666667,
+          "y": 255.88240000000002,
+          "width": 39.04170666666667,
+          "height": 4.08156
+        },
+        "angle": 0.0,
+        "strategy": "composition",
+        "aspectError": 1.7763568394002505e-15
+      }
+    ],
+    "masterHash": "ebe41a1ad88cfb6a89240bda9fcfab12548045b577202451dd966a84178292d3",
+    "engine": "master-v1"
+  }
+]
