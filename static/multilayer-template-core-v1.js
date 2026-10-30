@@ -45,7 +45,12 @@
     c.getObjects().forEach((o,i)=>{if(o.templateLayerId){const g=geometry(o,c);if(g.x<0||g.x>1||g.y<0||g.y>1||g.width>1.000001||g.height>1.000001)constrain(o,c);o.normalizedGeometry=geometry(o,c);o.zIndex=i;permissions(c,o);}});
   }
   function constrain(o,c){const d=dimensions(o),center=o.getCenterPoint();o.setPositionByOrigin(new fabric.Point(Math.max(0,Math.min(c.width,center.x)),Math.max(0,Math.min(c.height,center.y))),'center','center');
-    o.set({scaleX:Math.min(Math.max(.001,o.scaleX),c.width/Math.max(1,d.w)),scaleY:Math.min(Math.max(.001,o.scaleY),c.height/Math.max(1,d.h))});o.setCoords();}
+    const x=Math.max(.000001,Math.abs(o.scaleX)),y=Math.max(.000001,Math.abs(o.scaleY)),stroke=o.strokeUniform?(o.strokeWidth||0):0;
+    // A single bounded factor preserves the authored ratio, including photos
+    // and paired stickers, when either axis reaches the template boundary.
+    const upper=Math.min((c.width-stroke)/Math.max(.000001,d.w*x),(c.height-stroke)/Math.max(.000001,d.h*y));
+    const factor=Math.min(upper,Math.max(1,.001/x,.001/y));
+    o.set({scaleX:x*factor,scaleY:y*factor});o.setPositionByOrigin(new fabric.Point(Math.max(0,Math.min(c.width,center.x)),Math.max(0,Math.min(c.height,center.y))),'center','center');o.setCoords();}
   async function fonts(c){await core()?.textFonts(c);}
   function exportTemplate(c){
     const rows=c.getObjects().filter(o=>o.role!=='guide');rows.forEach(o=>decorate(o,c));

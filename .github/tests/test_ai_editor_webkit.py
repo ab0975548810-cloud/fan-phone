@@ -751,19 +751,20 @@ def front_test(browser, base):
     angle_slider.click(position={'x': angle_box['width'] / 2, 'y': angle_box['height'] / 2})
     assert abs(float(angle_slider.input_value())) <= 2, angle_slider.input_value()
     angle_history = page.evaluate("() => historyStack.length")
+    angle_scroll = page.evaluate("document.querySelector('#sheet-adjust .sheet-body').scrollTop")
     angle_y = angle_box['y'] + angle_box['height'] / 2
     if browser_engine == 'webkit':
         angle_slider.hover(position={'x': angle_box['width'] / 2, 'y': angle_box['height'] / 2})
         page.mouse.down()
-        page.mouse.move(angle_box['x'] + angle_box['width'] * .75, angle_y, steps=12)
+        page.mouse.move(angle_box['x'] + 14 + (angle_box['width'] - 28) * .75, angle_y, steps=12)
         angle_live = page.evaluate("() => ({value:+document.getElementById('angle-range').value,angle:canvas.getActiveObject().angle,history:historyStack.length,scroll:document.querySelector('#sheet-adjust .sheet-body').scrollTop})")
         assert angle_live['history'] == angle_history, angle_live
         page.mouse.up()
     else:
-        angle_slider.click(position={'x': angle_box['width'] * .75, 'y': angle_box['height'] / 2})
+        angle_slider.click(position={'x': 14 + (angle_box['width'] - 28) * .75, 'y': angle_box['height'] / 2})
         angle_live = page.evaluate("() => ({value:+document.getElementById('angle-range').value,angle:canvas.getActiveObject().angle,history:historyStack.length,scroll:document.querySelector('#sheet-adjust .sheet-body').scrollTop})")
     assert 80 <= angle_live['value'] <= 100 and abs(angle_live['angle'] - angle_live['value']) < .001, angle_live
-    assert angle_live['scroll'] == slider_css['bodyScroll'], angle_live
+    assert angle_live['scroll'] == angle_scroll, angle_live
     page.wait_for_timeout(100)
     assert page.evaluate("() => historyStack.length") == angle_history + 1, 'angle drag should record exactly one history entry'
     trusted_events = page.evaluate("() => window.__rangeTrusted")
@@ -3042,6 +3043,7 @@ def main():
                 base=f'http://127.0.0.1:{BROWSER_TEST_PORT}';passkey_login_test(browser,base);front_test(browser,base);home_draft_catalog_race_test(browser,base);design_draft_test(browser,base);checkout_test(browser,base);admin_test(browser,base);order_print_workspace_test(browser,base,poll)
                 import runpy
                 runpy.run_path(str(ROOT / '.github/tests/test_mobile_editor_tools.py'))['mobile_editor_tools_test'](browser,base,poll)
+                runpy.run_path(str(ROOT / '.github/tests/test_adjust_panel.py'))['adjust_panel_test'](browser,base,poll)
                 runpy.run_path(str(ROOT / '.github/tests/test_pos_dashboard.py'))['dashboard_test'](browser,base,poll)
                 runpy.run_path(str(ROOT / '.github/tests/test_launch_acceptance.py'))['launch_acceptance_test'](browser,base,poll)
                 runpy.run_path(str(ROOT / '.github/tests/test_model_cat_icon.py'))['model_cat_icon_test'](browser,base,poll)

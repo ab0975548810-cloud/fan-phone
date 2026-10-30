@@ -224,7 +224,7 @@ let templatesData={templates:[],categories:['全部']};
 let ctx={modelId:null,modelName:null,styleId:null,styleName:null,price:390,maskUrl:'',printLineUrl:'',printX:0,printY:0,printW:80,printH:160,backgroundColor:'transparent',backgroundOpacity:1,printBase64:null,mockupBase64:null,quantity:1,payment:'現金'};
 let activeBrand=null,selectedTpl=null,templateEntry='style',canvas=null,baseClip=null,activeSlotGuide=null,editorHasSession=false,cartItem=null;
 let historyStack=[],historyIndex=-1,restoringHistory=false,historyTimer=null,gestureState=null;
-const CUSTOM_PROPS=['role','slotId','slotMeta','isTplBg','isSlot','aiBackgroundRemoved','originalName','materialType'];
+const CUSTOM_PROPS=['bfScaleBaseX','bfScaleBaseY','role','slotId','slotMeta','isTplBg','isSlot','aiBackgroundRemoved','originalName','materialType'];
 const PAGE_HASH={"page-home":"home","page-model":"model","page-style":"style","page-template":"template","page-editor":"editor","page-preview":"preview","page-cart":"cart","page-checkout":"checkout","page-success":"success"};
 const HASH_PAGE=Object.fromEntries(Object.entries(PAGE_HASH).map(([k,v])=>[v,k]));
 const builtInStickers=[
@@ -386,20 +386,20 @@ function attachTouchGestures(){
   const el=canvas.upperCanvasEl;
   const stop=e=>{e.preventDefault();e.stopImmediatePropagation()};
   el.addEventListener('touchstart',e=>{
-    if(canvas.layer_contract_version==='multilayer-v1'||e.touches.length!==2)return;
+    if(canvas.__bfUnifiedAdjust||canvas.layer_contract_version==='multilayer-v1'||e.touches.length!==2)return;
     stop(e);const o=canvas.getActiveObject();gestureState=null;
     if(!o||o.bfUserLocked)return;
     const [a,b]=e.touches;canvas._currentTransform=null;
     gestureState={obj:o,dist:distance(a,b),angle:touchAngle(a,b),scaleX:o.scaleX||1,scaleY:o.scaleY||1,objAngle:o.angle||0};
   },{capture:true,passive:false});
   el.addEventListener('touchmove',e=>{
-    if(canvas.layer_contract_version==='multilayer-v1'||e.touches.length!==2)return;
+    if(canvas.__bfUnifiedAdjust||canvas.layer_contract_version==='multilayer-v1'||e.touches.length!==2)return;
     stop(e);if(!gestureState||gestureState.obj.bfUserLocked)return;
     const [a,b]=e.touches,ratio=distance(a,b)/Math.max(1,gestureState.dist),o=gestureState.obj;
     o.set({scaleX:Math.max(.08,gestureState.scaleX*ratio),scaleY:Math.max(.08,gestureState.scaleY*ratio),angle:gestureState.objAngle+(touchAngle(a,b)-gestureState.angle)});
     o.setCoords();canvas.renderAll();
   },{capture:true,passive:false});
-  const end=e=>{if(gestureState&&e.touches.length<2){stop(e);gestureState=null;canvas._currentTransform=null;recordHistory()}};
+  const end=e=>{if(canvas.__bfUnifiedAdjust)return;if(gestureState&&e.touches.length<2){stop(e);gestureState=null;canvas._currentTransform=null;recordHistory()}};
   el.addEventListener('touchend',end,{capture:true,passive:false});el.addEventListener('touchcancel',end,{capture:true,passive:false});
 }
 function distance(a,b){return Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY)}function touchAngle(a,b){return Math.atan2(b.clientY-a.clientY,b.clientX-a.clientX)*180/Math.PI}
