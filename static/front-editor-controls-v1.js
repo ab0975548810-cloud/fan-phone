@@ -277,6 +277,11 @@
     c.on('object:removed',()=>queueMicrotask(slots));
     c.on('object:modified',e=>{if(e.target?.bfUserLocked)applyUserLock(e.target);syncLockButton()});
     for(const e of ['selection:created','selection:updated','selection:cleared'])c.on(e,()=>{finishAdjustment();syncLockButton();});
+    c.on('object:scaling',({target:o})=>{
+      if(!mayAdjust(c,o,'canScale'))return;
+      const value=values(o).scale,[min,max]=limits('scale',c,o),factor=Math.max(min,Math.min(max,value))/value;
+      if(Math.abs(factor-1)>1e-10){const center=o.getCenterPoint();o.set({scaleX:o.scaleX*factor,scaleY:o.scaleY*factor});o.setPositionByOrigin(center,'center','center');window.BenfuwanEditableSticker?.syncAll(c);o.setCoords();}
+    });
     for(const e of ['object:moving','object:scaling','object:rotating'])c.on(e,syncAdjust);
     queueMicrotask(slots);
   }
@@ -299,7 +304,7 @@
   for(const name of ['centerActive','flipActive','sendBackward','bringForward','moveToBottom','moveToTop','duplicateActive','deleteActive']){
     const previous=window[name];if(typeof previous!=='function')continue;
     const permission=name==='duplicateActive'?'canDuplicate':name==='deleteActive'?'canDelete':name==='flipActive'?'canEdit':'canMove';
-    window[name]=function(){if(!mayAdjust(current(),current()?.getActiveObject(),permission))return;finishAdjustment();const result=previous.apply(this,arguments);syncAdjust();return result;};
+    window[name]=function(){const c=current(),active=c?.getActiveObject(),target=active?.role==='editable-sticker-text'?window.BenfuwanEditableSticker?.pair(c,active)?.bg:active;if(!mayAdjust(c,target,permission))return;finishAdjustment();const result=previous.apply(this,arguments);syncAdjust();return result;};
   }
   const close=window.closeSheets;
   window.closeSheets=function(){finishAdjustment();return close.apply(this,arguments);};

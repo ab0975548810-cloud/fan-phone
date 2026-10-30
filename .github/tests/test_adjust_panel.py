@@ -18,7 +18,7 @@ def adjust_panel_test(browser, base, poll):
         errors=[]
         page.on('pageerror',lambda error:errors.append(str(error)))
         if baseline:
-            for name in ('index.html','static/index-base-20260913.html','static/front-editor-controls-v1.js','static/front-editor-access-v1.js','static/front-multilayer-template-v1.js'):
+            for name in ('index.html','static/index-base-20260913.html','static/front-editor-controls-v1.js','static/front-editor-access-v1.js','static/front-multilayer-template-v1.js','static/multilayer-template-core-v1.js'):
                 content=subprocess.check_output(['git','show','origin/main:'+name],cwd=ROOT)
                 page.route('**/'+('' if name=='index.html' else name)+'?*' if name!='index.html' else base+'/',lambda route,request,body=content:route.fulfill(body=body,content_type='text/html' if b'<!DOCTYPE' in body else 'application/javascript'))
         maskname='film/print.png' if product=='camera_film' else 'preview_masks/iphone14-pro-max-print.png'
@@ -46,7 +46,7 @@ def adjust_panel_test(browser, base, poll):
             return page.evaluate("() => {const o=canvas.getActiveObject();return {x:o.getCenterPoint().x,y:o.getCenterPoint().y,sx:o.scaleX,sy:o.scaleY,angle:o.angle,opacity:o.opacity,index:historyIndex,base:o.bfScaleBaseX,w:canvas.width,h:canvas.height}}")
         def layout():
             page.wait_for_timeout(120)
-            result=page.evaluate("() => {const a=document.getElementById('canvas-shell').getBoundingClientRect(),b=document.getElementById('sheet-adjust').getBoundingClientRect(),w=document.querySelector('#page-editor>.workspace').getBoundingClientRect();return {top:a.top,bottom:a.bottom,panel:b.top,workspace:w.top,right:a.right,width:innerWidth,height:a.height}}")
+            result=poll(page,"() => {const a=document.getElementById('canvas-shell').getBoundingClientRect(),b=document.getElementById('sheet-adjust').getBoundingClientRect(),w=document.querySelector('#page-editor>.workspace').getBoundingClientRect();return a.top>=w.top-1&&a.bottom<=b.top+1&&a.right<=innerWidth+1&&a.height>20?{top:a.top,bottom:a.bottom,panel:b.top,workspace:w.top,right:a.right,width:innerWidth,height:a.height}:false}")
             assert result['top']>=result['workspace']-1 and result['bottom']<=result['panel']+1 and result['right']<=result['width']+1 and result['height']>20,result
         def number(selector,value):
             page.locator(selector).fill(str(value));page.locator(selector).press('Enter')
@@ -110,6 +110,15 @@ def adjust_panel_test(browser, base, poll):
         restored=state();assert abs(restored['sx']-before['sx'])<.001 and restored['base']==before['base'],(restored,before)
         page.evaluate('redoCanvas()');poll(page,'() => !restoringHistory')
         page.evaluate("() => {canvas.setActiveObject(canvas.getObjects().find(o=>o.role==='sticker'));syncSelection()}")
+        # Text uses the same uniform percentage without reflowing its box/font.
+        page.evaluate("() => {window.__selectedPhoto=canvas.getActiveObject();const o=new fabric.Textbox('FAN',{width:70,fontSize:18,fontFamily:'jf-openhuninn',role:'text',left:50,top:50});canvas.add(o);canvas.setActiveObject(o);recordHistory();openAdjustSheet()}")
+        text_before=page.evaluate("() => {const o=canvas.getActiveObject();return [o.width,o.height,o.fontSize,o.scaleX/o.scaleY]}")
+        number('#object-scale-number',200)
+        assert page.evaluate("() => {const o=canvas.getActiveObject();return [o.width,o.height,o.fontSize,o.scaleX/o.scaleY]}")==text_before
+        page.evaluate("() => {const o=canvas.getActiveObject();o.set({scaleX:10,scaleY:10});canvas.fire('object:scaling',{target:o});}")
+        assert page.locator('#object-scale-number').input_value()=='300'
+        assert page.locator('#object-scale-range').input_value()=='300'
+        page.evaluate("() => {canvas.remove(canvas.getActiveObject());canvas.setActiveObject(window.__selectedPhoto);recordHistory();syncSelection()}")
         # User locks and immutable template policy cannot be bypassed by events.
         for lock in ('user','template','slot'):
             page.evaluate("kind => {const o=canvas.getActiveObject();if(kind==='user')o.bfUserLocked=true;else {o.bfUserLocked=false;o.templateLayerId='protected';o.templateSlot=kind==='slot';if(kind==='slot')o.role='slot-photo';canvas.layer_contract_version='multilayer-v1';canvas.templateState={initial:[{templateLayerId:'protected',locked:kind==='slot',canMove:false,canScale:false,canRotate:false,canEdit:false}]};}BenfuwanEditorControls.applyUserLock(o);syncSelection()}",lock)
