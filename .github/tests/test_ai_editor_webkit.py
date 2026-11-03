@@ -198,7 +198,7 @@ def front_test(browser, base):
     }""")
     assert desktop['appWidth'] <= 521 and desktop['pageWidth'] <= 521 and desktop['heroBeforeCta'] and desktop['artInsideHero'], desktop
     home_css = page.locator('link[href*="front-home-v1.css"]').get_attribute('href')
-    assert home_css and 'v=20261002hero1' in home_css, home_css
+    assert home_css and 'v=20261103' in home_css, home_css
     print('FRONT_HOME_V1_RESPONSIVE_REAL_ACTIONS_OK', browser_engine, {'iphone':home,'desktop':desktop})
 
     page.route('**/broken-template-thumb.png', lambda route: route.fulfill(status=404, body='missing'))
