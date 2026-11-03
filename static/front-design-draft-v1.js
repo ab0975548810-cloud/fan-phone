@@ -24,7 +24,7 @@
   let suspended = false;
   let autosaveEnabled = true;
   let cachedDraft = null;
-  let quotaMessageShown = false;
+
   let promptState = 'hidden';
 
   const byId = id => document.getElementById(id);
@@ -47,39 +47,22 @@
     );
   }
 
+  const store = window.BenfuwanDraftStore;
+  let activeKey = DRAFT_KEY, revision = null, draftName = '';
+  let queue = Promise.resolve();
   function warnSave(error) {
-    console.warn('[DESIGN DRAFT] autosave failed', error);
-    if (isQuotaError(error) && !quotaMessageShown) {
-      quotaMessageShown = true;
-      try { toast(QUOTA_ERROR); } catch (e) {}
-    }
+    console.warn('[DESIGN DRAFT]', error);
+    toast(isQuotaError(error) ? QUOTA_ERROR : (error.message || '草稿未能保存，請不要關閉頁面。'));
   }
-
-  async function strictIdbSet(value) {
-    const db = await openIdb();
-    await new Promise((resolve, reject) => {
-      const tx = db.transaction(IDB_STORE, 'readwrite');
-      tx.objectStore(IDB_STORE).put(value, DRAFT_KEY);
-      tx.oncomplete = resolve;
-      tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
-      tx.onerror = () => reject(tx.error || new Error('IndexedDB write failed'));
-    });
+  function activate(key, raw) {
+    activeKey = key;
+    revision = raw?.revision || raw?.updatedAt || null;
+    draftName = raw?.name || '';
+    store.resetImages();
   }
-
-  async function strictIdbDelete() {
-    const db = await openIdb();
-    await new Promise((resolve, reject) => {
-      const tx = db.transaction(IDB_STORE, 'readwrite');
-      tx.objectStore(IDB_STORE).delete(DRAFT_KEY);
-      tx.oncomplete = resolve;
-      tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
-      tx.onerror = () => reject(tx.error || new Error('IndexedDB delete failed'));
-    });
-  }
-
   function buildDraft() {
     const c = getCanvas(), state = getContext();
-    if (!c || !state || !state.modelId || !state.styleId) return null;
+    if (!editorHasSession || !c || !state || !state.modelId || !state.styleId) return null;
     const canvasJson = c.toDatalessJSON(DRAFT_CUSTOM_PROPS);
     return {
       version: DRAFT_VERSION,
@@ -102,25 +85,32 @@
     let draft;
     try { draft = buildDraft(); } catch (error) { warnSave(error); return false; }
     if (!draft) return false;
-    try {
-      await strictIdbSet(draft);
-      cachedDraft = draft;
-      return true;
-    } catch (error) {
-      warnSave(error);
-      return false;
-    }
+    const key = activeKey;
+    const run = async () => {
+      if (key !== activeKey || suspended || !autosaveEnabled) return false;
+      const next = {...draft, name:draftName || [ctx.modelName,ctx.styleName].filter(Boolean).join(' · '), revision:crypto.randomUUID()};
+      try {
+        const packed = await store.pack(next);
+        await store.change(key,revision,()=>packed);
+        revision = next.revision;
+        return true;
+      } catch(error) { warnSave(error); return false; }
+    };
+    queue = queue.then(run,run);
+    return queue;
   }
 
   function scheduleSave() {
-    if (suspended || !autosaveEnabled || !getCanvas()) return;
+    if (suspended || !autosaveEnabled || !getCanvas() || !byId('page-editor')?.classList.contains('active')) return;
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => { saveNow(); }, DEBOUNCE_MS);
   }
 
-  async function readDraft() {
+  async function readDraft(key) {
     try {
-      cachedDraft = await idbGet(DRAFT_KEY);
+      key ||= (await store.list())[0]?.key;
+      cachedDraft = key ? await store.unpack(await idbGet(key)) : null;
+      if (cachedDraft) cachedDraft.key = key;
       await prepareDraftGeometry(cachedDraft);
       return cachedDraft;
     } catch (error) {
@@ -144,7 +134,10 @@
     clearTimeout(saveTimer);
     saveTimer = 0;
     try {
-      await strictIdbDelete();
+      await queue;
+      const key = cachedDraft?.key || activeKey;
+      await store.change(key,cachedDraft?.revision || cachedDraft?.updatedAt || revision,()=>null);
+      if (key === activeKey) activate(DRAFT_KEY,null);
       cachedDraft = null;
       setPrompt('hidden');
       return true;
@@ -188,7 +181,7 @@
       if (!profile || !profile.ready) return { ok: false, reason: 'profile-not-ready', message: INVALID_ERROR };
       const availableColors = colorsFor(model, style);
       const savedColor = String(raw.colorName || '');
-      if (availableColors.length > 1 && !availableColors.includes(savedColor)) {
+      if (availableColors.length && savedColor && !availableColors.includes(savedColor) || availableColors.length > 1 && !savedColor) {
         return { ok: false, reason: 'color-not-available', message: INVALID_ERROR };
       }
 
@@ -258,9 +251,10 @@
     });
   }
 
-  async function continueEditing() {
+  async function continueEditing(key) {
     if (suspended) return false;
-    const raw = cachedDraft || await readDraft();
+    await queue;
+    const raw = await readDraft(key || cachedDraft?.key);
     await prepareDraftGeometry(raw);
     const inspection = inspectDraft(raw);
     if (!inspection.ok) { setPrompt('invalid', inspection.message); return false; }
@@ -269,6 +263,7 @@
     clearTimeout(saveTimer);
     saveTimer = 0;
     try {
+      activate(raw.key, raw);
       setBusy(true, '正在恢復上次的設計...');
       selectModel(inspection.model);
       if (selectStyle(inspection.style) === false) throw new Error('Profile is no longer available');
@@ -349,8 +344,10 @@
   const originalStartNewDesign = window.startNewDesign;
   if (typeof originalStartNewDesign === 'function') {
     window.startNewDesign = async function () {
-      const raw = cachedDraft || await readDraft();
-      if (raw) return discardAndStart();
+      if (saveTimer && editorHasSession && getCanvas() && !await saveNow()) return false;
+      const rows = await store.list();
+      activate(rows.some(row=>row.key===DRAFT_KEY) ? DRAFT_KEY + ':' + crypto.randomUUID() : DRAFT_KEY,null);
+      cachedDraft = null;
       autosaveEnabled = true;
       return originalStartNewDesign.apply(this, arguments);
     };
@@ -368,26 +365,40 @@
   const originalSubmitOrder = window.submitOrder;
   if (typeof originalSubmitOrder === 'function') {
     window.submitOrder = async function () {
+      const ordered = cartItem || await idbGet('cart');
       const wasSuccess = byId('page-success') && byId('page-success').classList.contains('active');
       const result = await originalSubmitOrder.apply(this, arguments);
       const success = byId('page-success') && byId('page-success').classList.contains('active');
       let emptyCart = false;
       try { emptyCart = typeof cartItem !== 'undefined' && cartItem === null; } catch (e) {}
       if (!wasSuccess && success && emptyCart) {
-        autosaveEnabled = false;
-        await clearDraft();
+        if (ordered?.draftKey) {
+          if (ordered.draftKey === activeKey) { autosaveEnabled = false; clearTimeout(saveTimer); }
+          await queue;
+          try { await store.change(ordered.draftKey,ordered.draftRevision,()=>null); }
+          catch(error) { console.warn('[DESIGN DRAFT] kept newer draft',error); }
+          cachedDraft = null;
+        }
       }
       return result;
     };
   }
 
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') saveNow();
+    if (document.visibilityState === 'hidden' && byId('page-editor')?.classList.contains('active')) saveNow();
   });
+
+  window.addEventListener('pagehide', () => { if (saveTimer) saveNow(); });
+  const show = window.showPage;
+  window.showPage = function(page) {
+    if (page !== 'page-editor' && saveTimer && byId('page-editor')?.classList.contains('active')) saveNow();
+    return show.apply(this,arguments);
+  };
 
   window.BenfuwanDesignDraft = Object.freeze({
     version: DRAFT_VERSION,
-    key: DRAFT_KEY,
+    get key() { return activeKey; },
+    get revision() { return revision; },
     debounceMs: DEBOUNCE_MS,
     saveNow,
     scheduleSave,

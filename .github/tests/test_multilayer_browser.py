@@ -245,6 +245,7 @@ def multilayer_browser_test(browser,base,poll):
             page.evaluate('async()=>{recordHistory(true);await BenfuwanDesignDraft.saveNow()}')
             page.reload();poll(page,"() => window.BenfuwanDesignDraft?.state().prompt==='ready'")
             page.locator('#home-design-card').click()
+            page.locator('#design-library').get_by_role('button', name='繼續編輯').first.click()
             poll(page,"() => document.getElementById('page-editor').classList.contains('active') && !BenfuwanDesignDraft.state().suspended && canvas?.getObjects().some(o=>o.role==='slot-photo'&&o.aiOutlineViewport)")
             page.evaluate("()=>{canvas.setActiveObject(canvas.getObjects().find(o=>o.role==='slot-photo'));syncSelection()}")
             outline_source=page.evaluate('canvas.getActiveObject().aiOutlineSource')
@@ -280,6 +281,7 @@ def multilayer_browser_test(browser,base,poll):
             # Edit paired Textbox then save/reload and draft restore, not a PNG bake.
             page.evaluate("""async()=>{const bg=canvas.getObjects().find(o=>o.role==='editable-sticker-bg');await BenfuwanEditableSticker.update(canvas,bg,{text:'可以編輯',fontSize:60});recordHistory();await BenfuwanDesignDraft.saveNow();}""")
             page.reload();poll(page,"() => window.BenfuwanDesignDraft?.state().prompt==='ready'");page.locator('#home-design-card').click()
+            page.locator('#design-library').get_by_role('button', name='繼續編輯').first.click()
             poll(page,"() => document.getElementById('page-editor').classList.contains('active') && canvas?.templateState?.initial.length===30")
             assert page.evaluate("canvas.getObjects().find(o=>o.role==='editable-sticker-text').text")=='可以編輯'
             assert page.evaluate("canvas.getObjects().find(o=>o.isTplBg).selectable") is False
@@ -406,6 +408,7 @@ def legacy_lock_and_proxy_test(page,browser,poll,asset_url,model,style):
     print('USER_LOCK_UNDO_REDO_OK')
     page.reload();poll(page,"() => window.BenfuwanDesignDraft?.state().prompt==='ready'")
     page.locator('#home-design-card').click()
+    page.locator('#design-library').get_by_role('button', name='繼續編輯').first.click()
     poll(page,"() => document.getElementById('page-editor').classList.contains('active') && canvas?.getObjects().some(o=>o.bfUserLocked)")
     assert page.evaluate("canvas.getObjects().filter(o=>o.bfUserLocked).every(o=>o.lockMovementX&&o.lockScalingX&&o.lockRotation)")
     print('USER_LOCK_DRAFT_RELOAD_OK')

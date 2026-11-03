@@ -950,7 +950,7 @@ def design_draft_test(browser, base):
       styleEditableObject(photo);canvas.add(photo);canvas.setActiveObject(photo);recordHistory();
       return {modelId:ctx.modelId,styleId:ctx.styleId,colorName:ctx.colorName||'',width:canvas.width,height:canvas.height,aiSource,aiWidth:photo.width,aiHeight:photo.height};
     }""")
-    image_draft = poll(page, "() => idbGet(BenfuwanDesignDraft.key).then(draft => draft?.version === 1 ? draft : false)", timeout=10000)
+    image_draft = poll(page, "() => BenfuwanDesignDraft.readDraft().then(draft => draft?.version === 1 ? draft : false)", timeout=10000)
     assert image_draft and image_draft['version'] == 1
     assert image_draft['modelId'] == initial['modelId'] and image_draft['styleId'] == initial['styleId']
     assert image_draft['colorName'] == initial['colorName']
@@ -981,7 +981,7 @@ def design_draft_test(browser, base):
       return {source:photo.aiOutlineSource,current:photo.getSrc(),width:photo.width,height:photo.height,strength:photo.aiOutlineStrength,style:photo.aiOutlineStyle,outlineWidth:photo.aiOutlineWidth,color:photo.aiOutlineColor};
     }""", timeout=10000)
     page.evaluate("updatedAt => { window.__draftBeforeUpdate = updatedAt; }", image_draft['updatedAt'])
-    full_draft = poll(page, "() => idbGet(BenfuwanDesignDraft.key).then(draft => draft?.updatedAt && draft.updatedAt !== window.__draftBeforeUpdate ? draft : false)", timeout=10000)
+    full_draft = poll(page, "() => BenfuwanDesignDraft.readDraft().then(draft => draft?.updatedAt && draft.updatedAt !== window.__draftBeforeUpdate ? draft : false)", timeout=10000)
     assert full_draft['updatedAt'] != image_draft['updatedAt']
     assert full_draft['backgroundColor'] == '#ffeeaa' and abs(full_draft['backgroundOpacity'] - .67) < .001
     assert {obj.get('role') for obj in full_draft['canvasJson']['objects']} == {'photo','sticker','text'}
@@ -999,6 +999,7 @@ def design_draft_test(browser, base):
     assert page.locator('#design-draft-title').inner_text() == '發現上次未完成的設計'
     assert page.locator('#home-design-title').inner_text() == '繼續上次設計'
     page.locator('#home-design-card').click()
+    page.locator('#design-library').get_by_role('button', name='繼續編輯').first.click()
     poll(page, "() => document.getElementById('page-editor')?.classList.contains('active') && canvas?.getObjects().length===3 && !BenfuwanDesignDraft.state().suspended")
     restored = page.evaluate("""() => {
       const photo=canvas.getObjects().find(object=>object.role==='photo');
@@ -1061,6 +1062,24 @@ def design_draft_test(browser, base):
       return {draft:!!(await idbGet(BenfuwanDesignDraft.key)),cart:!!(await idbGet('cart'))};
     }""")
     assert cart_state == {'draft':True,'cart':True}, cart_state
+    key = page.evaluate("cartItem.draftKey")
+    page.reload(wait_until='domcontentloaded')
+    poll(page,"() => window.BenfuwanFrontHomeV1?.isCatalogReady() && cartItem?.draftKey")
+    page.evaluate("openCartFromNav()")
+    page.locator('#cart-filled').get_by_role('button',name='繼續編輯').click()
+    poll(page,"() => canvas?.getObjects().some(o=>o.role==='photo') && !BenfuwanDesignDraft.state().suspended")
+    assert page.evaluate("canvas.getObjects().find(o=>o.role==='photo').getSrc()") == initial['aiSource']
+    page.context.set_offline(True)
+    assert page.evaluate("async()=>{setCanvasBackground('#123456');return await BenfuwanDesignDraft.saveNow()}")
+    page.context.set_offline(False)
+    page.evaluate('openPreview()')
+    poll(page,"() => !!ctx.printBase64 && !!ctx.productionMeta")
+    page.locator('.preview-buttons .primary').click()
+    poll(page,"() => document.querySelector('#page-cart.active') && !BenfuwanDraftCart.staging")
+    assert page.evaluate("cartItem.draftKey") == key
+    assert page.locator('#cart-other-items button').count() == 0
+    assert page.evaluate("cartItem.productionMeta.dpi") == 720
+    page.locator('#cart-checkout-bar button').click()
     page.evaluate("""async () => {
       document.getElementById('form-surname').value='草稿';
       await submitOrder();
@@ -1101,12 +1120,11 @@ def design_draft_test(browser, base):
     guarded = page.evaluate("""async ({modelId,styleId,width,height}) => {
       const draft={version:1,updatedAt:new Date().toISOString(),modelId,styleId,backgroundColor:'transparent',backgroundOpacity:0,logicalCanvasWidth:width,logicalCanvasHeight:height,canvasJson:{version:'5.3.0',objects:[]}};
       await idbSet(BenfuwanDesignDraft.key,draft);await BenfuwanDesignDraft.refreshPrompt();showPage('page-home');
-      const realConfirm=window.confirm;window.confirm=()=>false;await startNewDesign();const kept=!!(await idbGet(BenfuwanDesignDraft.key))&&document.getElementById('page-home').classList.contains('active');
-      window.confirm=()=>true;await startNewDesign();const discarded=(await idbGet(BenfuwanDesignDraft.key))===null&&document.getElementById('page-model').classList.contains('active');window.confirm=realConfirm;
-      return {kept,discarded};
+      const previous=BenfuwanDesignDraft.key;await startNewDesign();
+      return {kept:!!(await idbGet(previous)),fresh:BenfuwanDesignDraft.key!==previous,choosing:document.getElementById('page-model').classList.contains('active')};
     }""", initial)
-    assert guarded == {'kept':True,'discarded':True}, guarded
-    print('FRONT_DESIGN_DRAFT_NEW_DESIGN_GUARD_OK')
+    assert guarded == {'kept':True,'fresh':True,'choosing':True}, guarded
+    print('FRONT_DESIGN_DRAFT_NEW_DESIGN_PRESERVED_OK')
     page.close()
 
 
@@ -1166,6 +1184,7 @@ def home_draft_catalog_race_test(browser, base):
     poll(page, "() => window.BenfuwanFrontHomeV1?.isCatalogReady() && document.getElementById('home-design-card')?.dataset.draftState==='ready'")
     assert page.locator('#home-design-title').inner_text() == '繼續上次設計'
     page.locator('#home-design-card').click()
+    page.locator('#design-library').get_by_role('button', name='繼續編輯').first.click()
     poll(page, "() => document.getElementById('page-editor')?.classList.contains('active') && canvas && !BenfuwanDesignDraft.state().suspended")
     restored = page.evaluate("() => ({modelId:ctx.modelId,styleId:ctx.styleId,width:canvas.width,height:canvas.height,objects:canvas.getObjects().length})")
     assert restored == {'modelId':seeded['modelId'],'styleId':seeded['styleId'],'width':seeded['width'],'height':seeded['height'],'objects':0}, restored
