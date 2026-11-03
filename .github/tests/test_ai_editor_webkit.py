@@ -1084,7 +1084,17 @@ def design_draft_test(browser, base):
     assert page.evaluate("cartItem.draftKey") == key
     assert page.locator('#cart-other-items button').count() == 0
     assert page.evaluate("cartItem.productionMeta.dpi") == 720
+    updated_catalog=page.evaluate('structuredClone(shopData)')
+    for style in updated_catalog['styles']:style['price']=999
+    def changed_price(route):
+        route.fulfill(json=updated_catalog)
+    page.route('**/api/shop_data',changed_price)
     page.locator('#cart-checkout-bar button').click()
+    poll(page,"()=>document.querySelector('#toast').textContent.includes('商品或價格已更新')")
+    assert page.locator('#page-cart').evaluate("e=>e.classList.contains('active')")
+    page.unroute('**/api/shop_data',changed_price)
+    page.locator('#cart-checkout-bar button').click()
+    poll(page,"()=>document.querySelector('#page-checkout.active')")
     page.evaluate("""async () => {
       document.getElementById('form-surname').value='草稿';
       await submitOrder();
@@ -1130,6 +1140,50 @@ def design_draft_test(browser, base):
     }""", initial)
     assert guarded == {'kept':True,'fresh':True,'choosing':True}, guarded
     print('FRONT_DESIGN_DRAFT_NEW_DESIGN_PRESERVED_OK')
+    # Two independent guest designs, including a stale tab and a failed save.
+    async_design = """async label=>{
+      await startNewDesign();
+      const m=shopData.models[0],s=shopData.styles[0];selectModel(m);selectStyle(s);chooseCaseColor('透明');
+      await startEditor(false);
+      canvas.add(new fabric.Text(label,{role:'text',fontFamily:'jf-openhuninn'}));recordHistory();
+      await openPreview();await confirmDesignToCart();
+      return cartItem.draftKey;
+    }"""
+    first=page.evaluate(async_design,'設計 A')
+    second=page.evaluate(async_design,'設計 B')
+    assert first != second
+    poll(page,"() => document.querySelectorAll('#cart-other-items > div').length===1 && document.querySelector('#cart-badge').textContent==='2'")
+    page.locator('#cart-other-items').get_by_role('button',name='繼續編輯').click()
+    poll(page,"() => ctx.modelId && canvas?.getObjects().some(o=>o.text==='設計 A') && !BenfuwanDesignDraft.state().suspended")
+    other=context.new_page()
+    other.goto(base+'/',wait_until='domcontentloaded')
+    poll(other,"() => window.BenfuwanFrontHomeV1?.isCatalogReady()")
+    assert other.evaluate("key=>BenfuwanDesignDraft.continueEditing(key)",first)
+    assert other.evaluate("async()=>{setCanvasBackground('#abc123');return await BenfuwanDesignDraft.saveNow()}")
+    assert page.evaluate("async()=>{setCanvasBackground('#456789');return await BenfuwanDesignDraft.saveNow()}")
+    copy=page.evaluate('BenfuwanDesignDraft.key')
+    assert copy != first and page.evaluate("key=>idbGet(key).then(d=>d.backgroundColor)",first)=='#abc123'
+    other.close()
+    page.evaluate("()=>showPage('page-home')")
+    page.locator('#home-design-card').click()
+    row=page.locator('#design-library > div').filter(has_text='分頁副本')
+    page.once('dialog',lambda dialog:dialog.accept('紀念款'))
+    row.get_by_role('button',name='重新命名').click()
+    renamed=page.locator('#design-library > div').filter(has_text='紀念款')
+    page.once('dialog',lambda dialog:dialog.accept())
+    renamed.get_by_role('button',name='刪除').click()
+    poll(page,"()=>!document.querySelector('#design-library')?.innerText.includes('紀念款')")
+    assert page.evaluate("key=>idbGet(key)",copy) is None
+    page.evaluate("openCartFromNav()")
+    page.locator('#cart-other-items').get_by_role('button',name='前往結帳').click()
+    poll(page,"()=>document.querySelector('#page-checkout.active')")
+    assert page.evaluate('cartItem.draftKey')==first
+    context.route('**/api/create_order',lambda route:route.abort('failed'))
+    page.locator('#form-surname').fill('測試')
+    page.locator('#submit-order').click()
+    poll(page,"()=>document.querySelector('#toast').textContent.includes('送單失敗')")
+    assert page.evaluate("async()=>!!(await idbGet('cart'))?.orderKey && (await BenfuwanDraftStore.list()).length>=2")
+    print('GUEST_MULTI_CART_CONFLICT_LIBRARY_NETWORK_FAILURE_OK')
     context.close()
 
 

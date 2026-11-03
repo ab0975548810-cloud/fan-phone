@@ -35,7 +35,7 @@
     const token=++syncToken;
     let state='empty';
     try{
-      const raw=await api.readDraft();
+      const raw=await api.readDraft(null,false);
       if(raw)state=api.inspectDraft(raw).ok?'ready':'invalid';
     }catch(error){
       console.warn('[FRONT HOME] draft state unavailable',error);
@@ -60,7 +60,7 @@
     }
     panel.replaceChildren();
     const heading=document.createElement('h3');heading.textContent='我的設計';panel.append(heading);
-    const note=document.createElement('p');note.textContent='草稿保存在此瀏覽器，清除網站資料會一併刪除。';panel.append(note);
+    const note=document.createElement('p');note.textContent='草稿只保存在此瀏覽器，不會定期到期。刪除草稿或清除網站資料會移除圖片。共用裝置請於使用後清理。';panel.append(note);
     for(const row of rows){
       const section=document.createElement('div'),title=document.createElement('p');
       title.textContent=row.name;section.append(title);

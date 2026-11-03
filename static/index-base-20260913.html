@@ -174,12 +174,12 @@
       </div>
       <div id="cart-filled" class="cart-filled">
         <div class="card cart-card"><img id="cart-image"><div class="cart-info"><h3>客製手機殼</h3><p id="cart-desc"></p><div class="cart-price" id="cart-price"></div><div class="qty"><span style="font-size:11px">數量</span><button onclick="changeQty(-1)">−</button><b id="qty-value">1</b><button onclick="changeQty(1)">＋</button></div></div></div>
-        <button class="secondary" type="button" onclick="BenfuwanDraftCart.edit(cartItem)">繼續編輯</button>
+        <div class="preview-buttons"><button class="secondary" type="button" onclick="BenfuwanDraftCart.edit(cartItem)">繼續編輯</button><button class="secondary" type="button" onclick="BenfuwanDraftCart.remove(cartItem)">移出購物車</button></div>
         <div class="card summary"><div class="sum-row"><span>商品單價</span><span id="sum-unit"></span></div><div class="sum-row"><span>數量</span><span id="sum-qty"></span></div><div class="sum-row total"><span>合計</span><span id="sum-total" style="color:var(--pink-dark)"></span></div></div>
+        <div id="cart-checkout-bar" class="cart-checkout-bar"><button class="primary" onclick="goCheckoutFromCart()">前往結帳</button></div>
       </div>
       <div id="cart-other-items"></div>
     </div>
-    <div id="cart-checkout-bar" class="sticky-action cart-checkout-bar"><button class="primary" onclick="goCheckoutFromCart()">前往結帳</button></div>
   </section>
 
   <!-- CHECKOUT -->

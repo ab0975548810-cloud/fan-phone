@@ -20,7 +20,7 @@
   const INVALID_ERROR = '上次的設計草稿已無法安全恢復，請刪除舊草稿並重新開始。';
   const QUOTA_ERROR = '此設計圖片較大，自動儲存空間不足，請不要關閉頁面。';
 
-  let saveTimer = 0;
+  let saveTimer = 0, dirty = false, changedAt = 0, edits = 0;
   let suspended = false;
   let autosaveEnabled = true;
   let cachedDraft = null;
@@ -55,6 +55,7 @@
     toast(isQuotaError(error) ? QUOTA_ERROR : (error?.message || '草稿未能保存，請不要關閉頁面。'));
   }
   function activate(key, raw) {
+    dirty = false; changedAt = 0;
     activeKey = key;
     revision = raw?.revision || raw?.updatedAt || null;
     draftName = raw?.name || '';
@@ -62,7 +63,7 @@
   }
   function buildDraft() {
     const c = getCanvas(), state = getContext();
-    if (!editorHasSession || !c || !state || !state.modelId || !state.styleId) return null;
+    if ((!editorHasSession && !byId('page-editor')?.classList.contains('active')) || !c || !state || !state.modelId || !state.styleId) return null;
     const canvasJson = structuredClone(c.toDatalessJSON(DRAFT_CUSTOM_PROPS));
     return {
       version: DRAFT_VERSION,
@@ -85,22 +86,23 @@
     let draft;
     try { draft = buildDraft(); } catch (error) { warnSave(error); return false; }
     if (!draft) return false;
-    const key = activeKey;
+    const key = activeKey, captured = edits;
     const run = async () => {
       if (key !== activeKey || suspended || !autosaveEnabled) return false;
       const next = {...draft, name:draftName || [ctx.modelName,ctx.styleName].filter(Boolean).join(' · '), revision:crypto.randomUUID()};
-      let packedCopy;
+      let packed;
       try {
-        packedCopy = await store.pack(next);
-        await store.change(key,revision,()=>packedCopy);
+        packed = await store.pack(next);
+        await store.change(key,revision,()=>packed);
         revision = next.revision;
+        if(captured===edits)dirty=false;
         return true;
       } catch(error) {
         if(error?.name==='DraftConflict' && key===activeKey) {
           activate(DRAFT_KEY+':'+crypto.randomUUID(),null);
           draftName=(next.name || '未命名設計')+'（分頁副本）';
           try {
-            await store.change(activeKey,null,()=>({...packedCopy,name:draftName}));
+            await store.change(activeKey,null,()=>({...packed,name:draftName}));
             revision=next.revision;
             toast('另一分頁已變更，這次修改已另存為分頁副本。');
             return true;
@@ -116,13 +118,16 @@
   function scheduleSave() {
     if (suspended || !autosaveEnabled || !getCanvas() || !byId('page-editor')?.classList.contains('active')) return;
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => { saveNow(); }, DEBOUNCE_MS);
+    if(!dirty || !changedAt)changedAt=Date.now();
+    dirty=true; edits++;
+    saveTimer = setTimeout(() => {changedAt=0;saveNow();}, Math.min(DEBOUNCE_MS,Math.max(0,2000-(Date.now()-changedAt))));
   }
 
-  async function readDraft(key) {
+  async function readDraft(key,withImages=true) {
     try {
       key ||= (await store.list())[0]?.key;
-      cachedDraft = key ? await store.unpack(await idbGet(key)) : null;
+      cachedDraft = key ? await idbGet(key) : null;
+      if (withImages) cachedDraft = await store.unpack(cachedDraft);
       if (cachedDraft) cachedDraft.key = key;
       await prepareDraftGeometry(cachedDraft);
       return cachedDraft;
@@ -189,7 +194,7 @@
       const data = currentShopData();
       const model = (data && data.models || []).find(item => item && item.status !== false && String(item.id) === String(raw.modelId));
       const style = (data && data.styles || []).find(item => item && item.status !== false && String(item.id) === String(raw.styleId));
-      if (!model || !style) return { ok: false, reason: 'missing-product', message: INVALID_ERROR };
+      if (!window.BenfuwanProducts.ready(model,style)) return { ok: false, reason: 'missing-product', message: INVALID_ERROR };
       const resolver = window.BenfuwanModelProfile;
       const profile = resolver && resolver.profileFor ? resolver.profileFor(model, style.id) : null;
       if (!profile || !profile.ready) return { ok: false, reason: 'profile-not-ready', message: INVALID_ERROR };
@@ -252,7 +257,7 @@
 
   async function refreshPrompt() {
     installPrompt();
-    const raw = await readDraft();
+    const raw = await readDraft(null,false);
     if (!raw) { setPrompt('hidden'); return null; }
     const inspection = inspectDraft(raw);
     setPrompt(inspection.ok ? 'ready' : 'invalid', inspection.message);
@@ -267,6 +272,7 @@
 
   async function continueEditing(key) {
     if (suspended) return false;
+    if (dirty && !await saveNow()) return false;
     await queue;
     const raw = await readDraft(key || cachedDraft?.key);
     await prepareDraftGeometry(raw);
@@ -293,6 +299,7 @@
 
       restoringHistory = true;
       await loadCanvasJson(canvas, inspection.canvasJson);
+      if (ctx.printLineUrl) await window.BenfuwanPrintMask.ensureClip(canvas,ctx.printLineUrl);
       if (canvas.getObjects().length !== inspection.canvasJson.objects.length)
         throw Error('圖片未完整恢復，請確認連線後再試。');
       rehydrateCanvas();
@@ -360,7 +367,8 @@
   const originalStartNewDesign = window.startNewDesign;
   if (typeof originalStartNewDesign === 'function') {
     window.startNewDesign = async function () {
-      if (saveTimer && editorHasSession && getCanvas() && !await saveNow()) return false;
+      if (dirty && editorHasSession && getCanvas() && !await saveNow()) return false;
+      await queue;
       const rows = await store.list();
       activate(rows.some(row=>row.key===DRAFT_KEY) ? DRAFT_KEY + ':' + crypto.randomUUID() : DRAFT_KEY,null);
       cachedDraft = null;
@@ -391,7 +399,7 @@
       try { emptyCart = typeof cartItem !== 'undefined' && cartItem === null; } catch (e) {}
       if (!wasSuccess && success && emptyCart) {
         if (ordered?.draftKey) {
-          if (ordered.draftKey === activeKey) { autosaveEnabled = false; clearTimeout(saveTimer); }
+          if (ordered.draftKey === activeKey) { autosaveEnabled = false; dirty=false; clearTimeout(saveTimer); }
           await queue;
           try { await store.change(ordered.draftKey,ordered.draftRevision,()=>null); }
           catch(error) { console.warn('[DESIGN DRAFT] kept newer draft',error); }
@@ -406,10 +414,18 @@
     if (document.visibilityState === 'hidden' && byId('page-editor')?.classList.contains('active')) saveNow();
   });
 
-  window.addEventListener('pagehide', () => { if (saveTimer) saveNow(); });
+  const resetHome = window.resetToHome;
+  window.resetToHome = async function(){
+    if(dirty && !await saveNow())return;
+    await queue;
+    return resetHome.apply(this,arguments);
+  };
+  window.addEventListener('pagehide', () => { if (dirty) saveNow(); });
+  window.addEventListener('online', () => { if(dirty) saveNow(); });
+  window.addEventListener('beforeunload', event => { if(dirty){event.preventDefault();event.returnValue='';} });
   const show = window.showPage;
   window.showPage = function(page) {
-    if (page !== 'page-editor' && saveTimer && byId('page-editor')?.classList.contains('active')) saveNow();
+    if (page !== 'page-editor' && dirty && byId('page-editor')?.classList.contains('active')) saveNow();
     return show.apply(this,arguments);
   };
 
