@@ -20,11 +20,11 @@
   const INVALID_ERROR = '上次的設計草稿已無法安全恢復，請刪除舊草稿並重新開始。';
   const QUOTA_ERROR = '此設計圖片較大，自動儲存空間不足，請不要關閉頁面。';
 
-  let saveTimer = 0;
+  let saveTimer = 0, dirty = false, changedAt = 0, edits = 0;
   let suspended = false;
   let autosaveEnabled = true;
   let cachedDraft = null;
-  let quotaMessageShown = false;
+
   let promptState = 'hidden';
 
   const byId = id => document.getElementById(id);
@@ -47,40 +47,24 @@
     );
   }
 
+  const store = window.BenfuwanDraftStore;
+  let activeKey = DRAFT_KEY, revision = null, draftName = '';
+  let queue = Promise.resolve();
   function warnSave(error) {
-    console.warn('[DESIGN DRAFT] autosave failed', error);
-    if (isQuotaError(error) && !quotaMessageShown) {
-      quotaMessageShown = true;
-      try { toast(QUOTA_ERROR); } catch (e) {}
-    }
+    console.warn('[DESIGN DRAFT]', error);
+    toast(isQuotaError(error) ? QUOTA_ERROR : (error?.message || '草稿未能保存，請不要關閉頁面。'));
   }
-
-  async function strictIdbSet(value) {
-    const db = await openIdb();
-    await new Promise((resolve, reject) => {
-      const tx = db.transaction(IDB_STORE, 'readwrite');
-      tx.objectStore(IDB_STORE).put(value, DRAFT_KEY);
-      tx.oncomplete = resolve;
-      tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
-      tx.onerror = () => reject(tx.error || new Error('IndexedDB write failed'));
-    });
+  function activate(key, raw) {
+    dirty = false; changedAt = 0;
+    activeKey = key;
+    revision = raw?.revision || raw?.updatedAt || null;
+    draftName = raw?.name || '';
+    store.resetImages();
   }
-
-  async function strictIdbDelete() {
-    const db = await openIdb();
-    await new Promise((resolve, reject) => {
-      const tx = db.transaction(IDB_STORE, 'readwrite');
-      tx.objectStore(IDB_STORE).delete(DRAFT_KEY);
-      tx.oncomplete = resolve;
-      tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
-      tx.onerror = () => reject(tx.error || new Error('IndexedDB delete failed'));
-    });
-  }
-
   function buildDraft() {
     const c = getCanvas(), state = getContext();
-    if (!c || !state || !state.modelId || !state.styleId) return null;
-    const canvasJson = c.toDatalessJSON(DRAFT_CUSTOM_PROPS);
+    if ((!editorHasSession && !byId('page-editor')?.classList.contains('active')) || !c || !state || !state.modelId || !state.styleId) return null;
+    const canvasJson = structuredClone(c.toDatalessJSON(DRAFT_CUSTOM_PROPS));
     return {
       version: DRAFT_VERSION,
       updatedAt: new Date().toISOString(),
@@ -102,25 +86,49 @@
     let draft;
     try { draft = buildDraft(); } catch (error) { warnSave(error); return false; }
     if (!draft) return false;
-    try {
-      await strictIdbSet(draft);
-      cachedDraft = draft;
-      return true;
-    } catch (error) {
-      warnSave(error);
-      return false;
-    }
+    const key = activeKey, captured = edits;
+    const run = async () => {
+      if (key !== activeKey || suspended || !autosaveEnabled) return false;
+      const next = {...draft, name:draftName || [ctx.modelName,ctx.styleName].filter(Boolean).join(' · '), revision:crypto.randomUUID()};
+      let packed;
+      try {
+        packed = await store.pack(next);
+        await store.change(key,revision,()=>packed);
+        revision = next.revision;
+        if(captured===edits)dirty=false;
+        return true;
+      } catch(error) {
+        if(error?.name==='DraftConflict' && key===activeKey) {
+          activate(DRAFT_KEY+':'+crypto.randomUUID(),null);
+          draftName=(next.name || '未命名設計')+'（分頁副本）';
+          try {
+            await store.change(activeKey,null,()=>({...packed,name:draftName}));
+            revision=next.revision;
+            toast('另一分頁已變更，這次修改已另存為分頁副本。');
+            return true;
+          } catch(copyError) {warnSave(copyError);return false;}
+        }
+        warnSave(error); return false;
+      }
+    };
+    queue = queue.then(run,run);
+    return queue;
   }
 
   function scheduleSave() {
-    if (suspended || !autosaveEnabled || !getCanvas()) return;
+    if (suspended || !autosaveEnabled || !getCanvas() || !byId('page-editor')?.classList.contains('active')) return;
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => { saveNow(); }, DEBOUNCE_MS);
+    if(!dirty || !changedAt)changedAt=Date.now();
+    dirty=true; edits++;
+    saveTimer = setTimeout(() => {changedAt=0;saveNow();}, Math.min(DEBOUNCE_MS,Math.max(0,2000-(Date.now()-changedAt))));
   }
 
-  async function readDraft() {
+  async function readDraft(key,withImages=true) {
     try {
-      cachedDraft = await idbGet(DRAFT_KEY);
+      key ||= (await store.list())[0]?.key;
+      cachedDraft = key ? await idbGet(key) : null;
+      if (withImages) cachedDraft = await store.unpack(cachedDraft);
+      if (cachedDraft) cachedDraft.key = key;
       await prepareDraftGeometry(cachedDraft);
       return cachedDraft;
     } catch (error) {
@@ -144,7 +152,11 @@
     clearTimeout(saveTimer);
     saveTimer = 0;
     try {
-      await strictIdbDelete();
+      await queue;
+      const key = cachedDraft?.key || activeKey;
+      if ((await idbGet('cart'))?.draftKey===key || await idbGet('saved-cart:'+key)) {toast('此設計仍在購物車中。');return false;}
+      await store.change(key,cachedDraft?.revision || cachedDraft?.updatedAt || revision,()=>null);
+      if (key === activeKey) activate(DRAFT_KEY,null);
       cachedDraft = null;
       setPrompt('hidden');
       return true;
@@ -182,13 +194,13 @@
       const data = currentShopData();
       const model = (data && data.models || []).find(item => item && item.status !== false && String(item.id) === String(raw.modelId));
       const style = (data && data.styles || []).find(item => item && item.status !== false && String(item.id) === String(raw.styleId));
-      if (!model || !style) return { ok: false, reason: 'missing-product', message: INVALID_ERROR };
+      if (!window.BenfuwanProducts.ready(model,style)) return { ok: false, reason: 'missing-product', message: INVALID_ERROR };
       const resolver = window.BenfuwanModelProfile;
       const profile = resolver && resolver.profileFor ? resolver.profileFor(model, style.id) : null;
       if (!profile || !profile.ready) return { ok: false, reason: 'profile-not-ready', message: INVALID_ERROR };
       const availableColors = colorsFor(model, style);
       const savedColor = String(raw.colorName || '');
-      if (availableColors.length > 1 && !availableColors.includes(savedColor)) {
+      if (availableColors.length && savedColor && !availableColors.includes(savedColor) || availableColors.length > 1 && !savedColor) {
         return { ok: false, reason: 'color-not-available', message: INVALID_ERROR };
       }
 
@@ -245,7 +257,7 @@
 
   async function refreshPrompt() {
     installPrompt();
-    const raw = await readDraft();
+    const raw = await readDraft(null,false);
     if (!raw) { setPrompt('hidden'); return null; }
     const inspection = inspectDraft(raw);
     setPrompt(inspection.ok ? 'ready' : 'invalid', inspection.message);
@@ -258,9 +270,11 @@
     });
   }
 
-  async function continueEditing() {
+  async function continueEditing(key) {
     if (suspended) return false;
-    const raw = cachedDraft || await readDraft();
+    if (dirty && !await saveNow()) return false;
+    await queue;
+    const raw = await readDraft(key || cachedDraft?.key);
     await prepareDraftGeometry(raw);
     const inspection = inspectDraft(raw);
     if (!inspection.ok) { setPrompt('invalid', inspection.message); return false; }
@@ -269,6 +283,7 @@
     clearTimeout(saveTimer);
     saveTimer = 0;
     try {
+      activate(raw.key, raw);
       setBusy(true, '正在恢復上次的設計...');
       selectModel(inspection.model);
       if (selectStyle(inspection.style) === false) throw new Error('Profile is no longer available');
@@ -284,6 +299,9 @@
 
       restoringHistory = true;
       await loadCanvasJson(canvas, inspection.canvasJson);
+      if (ctx.printLineUrl) await window.BenfuwanPrintMask.ensureClip(canvas,ctx.printLineUrl);
+      if (canvas.getObjects().length !== inspection.canvasJson.objects.length)
+        throw Error('圖片未完整恢復，請確認連線後再試。');
       rehydrateCanvas();
       if (typeof ensureCanvasFonts === 'function') await ensureCanvasFonts();
       await new Promise(resolve => canvas.setBackgroundColor(backgroundRgba(), resolve));
@@ -349,9 +367,14 @@
   const originalStartNewDesign = window.startNewDesign;
   if (typeof originalStartNewDesign === 'function') {
     window.startNewDesign = async function () {
-      const raw = cachedDraft || await readDraft();
-      if (raw) return discardAndStart();
+      if (dirty && editorHasSession && getCanvas() && !await saveNow()) return false;
+      await queue;
+      const rows = await store.list();
+      activate(rows.some(row=>row.key===DRAFT_KEY) ? DRAFT_KEY + ':' + crypto.randomUUID() : DRAFT_KEY,null);
+      cachedDraft = null;
       autosaveEnabled = true;
+      byId('design-library')?.remove();
+      document.querySelector('.preview-buttons .primary').textContent='加入購物車';
       return originalStartNewDesign.apply(this, arguments);
     };
   }
@@ -368,26 +391,49 @@
   const originalSubmitOrder = window.submitOrder;
   if (typeof originalSubmitOrder === 'function') {
     window.submitOrder = async function () {
+      const ordered = cartItem || await idbGet('cart');
       const wasSuccess = byId('page-success') && byId('page-success').classList.contains('active');
       const result = await originalSubmitOrder.apply(this, arguments);
       const success = byId('page-success') && byId('page-success').classList.contains('active');
       let emptyCart = false;
       try { emptyCart = typeof cartItem !== 'undefined' && cartItem === null; } catch (e) {}
       if (!wasSuccess && success && emptyCart) {
-        autosaveEnabled = false;
-        await clearDraft();
+        if (ordered?.draftKey) {
+          if (ordered.draftKey === activeKey) { autosaveEnabled = false; dirty=false; clearTimeout(saveTimer); }
+          await queue;
+          try { await store.change(ordered.draftKey,ordered.draftRevision,()=>null); }
+          catch(error) { console.warn('[DESIGN DRAFT] kept newer draft',error); }
+          cachedDraft = null;
+        }
       }
       return result;
     };
   }
 
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') saveNow();
+    if (document.visibilityState === 'hidden' && byId('page-editor')?.classList.contains('active')) saveNow();
   });
+
+  const resetHome = window.resetToHome;
+  window.resetToHome = async function(){
+    if(dirty && !await saveNow())return;
+    await queue;
+    return resetHome.apply(this,arguments);
+  };
+  window.addEventListener('pagehide', () => { if (dirty) saveNow(); });
+  window.addEventListener('online', () => { if(dirty) saveNow(); });
+  window.addEventListener('beforeunload', event => { if(dirty){event.preventDefault();event.returnValue='';} });
+  const show = window.showPage;
+  window.showPage = function(page) {
+    if (page !== 'page-editor' && dirty && byId('page-editor')?.classList.contains('active')) saveNow();
+    return show.apply(this,arguments);
+  };
 
   window.BenfuwanDesignDraft = Object.freeze({
     version: DRAFT_VERSION,
-    key: DRAFT_KEY,
+    get key() { return activeKey; },
+    get revision() { return revision; },
+    renamed(key,expected,name,next) { if(activeKey===key && revision===expected){revision=next;draftName=name;} },
     debounceMs: DEBOUNCE_MS,
     saveNow,
     scheduleSave,

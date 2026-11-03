@@ -198,7 +198,7 @@ def front_test(browser, base):
     }""")
     assert desktop['appWidth'] <= 521 and desktop['pageWidth'] <= 521 and desktop['heroBeforeCta'] and desktop['artInsideHero'], desktop
     home_css = page.locator('link[href*="front-home-v1.css"]').get_attribute('href')
-    assert home_css and 'v=20261002hero1' in home_css, home_css
+    assert home_css and 'v=20261103' in home_css, home_css
     print('FRONT_HOME_V1_RESPONSIVE_REAL_ACTIONS_OK', browser_engine, {'iphone':home,'desktop':desktop})
 
     page.route('**/broken-template-thumb.png', lambda route: route.fulfill(status=404, body='missing'))
@@ -627,7 +627,7 @@ def front_test(browser, base):
     print('FRONT_FOUR_MODEL_EDITOR_REVIEW_TARGET_CONSISTENCY_OK', editor_contract)
 
     page.evaluate("""fixtures => {
-      ctx.modelId='model_apple_14_pro_max';ctx.modelName='iPhone 14 Pro Max';ctx.styleId='style_crystal';ctx.styleName='晶彩磁吸防摔殼';
+      ctx.modelId='model_apple_14_pro_max';ctx.modelName='iPhone 14 Pro Max';ctx.styleId=shopData.styles[0].id;ctx.styleName=shopData.styles[0].name;
       ctx.printW=80;ctx.printH=160;ctx.maskUrl=fixtures.iphone14ProMax.preview;ctx.printLineUrl=fixtures.iphone14ProMax.print;
       initCanvas();editorHasSession=true;window.BenfuwanEditorAccess?.fitCanvas?.();applyCaseBoundaryClip();
     }""", mask_fixtures)
@@ -900,7 +900,7 @@ def front_test(browser, base):
 
 
 def design_draft_test(browser, base):
-    page = browser.new_page(viewport={'width': 390, 'height': 844})
+    profile_dir = test_dir / ('guest-profile-' + str(time.time_ns()))
     draft_preview = fixture_data_url('iphone13-preview.png')
     draft_print = fixture_data_url('iphone13-print.png')
 
@@ -924,12 +924,15 @@ def design_draft_test(browser, base):
         style.setdefault('model_colors', {})[model['id']] = ['透明', '黑']
         route.fulfill(response=response, body=json.dumps(payload, ensure_ascii=False))
 
-    page.route('**/api/shop_data', configure_draft_catalog)
-    page.route('**/api/create_order', lambda route: route.fulfill(
-        status=200,
-        content_type='application/json',
-        body='{"status":"success","order_id":"DRAFT-TEST","total":390}'
-    ))
+    def reopen_browser():
+        context = browser.browser_type.launch_persistent_context(str(profile_dir),viewport={'width':390,'height':844})
+        context.route('**/api/shop_data', configure_draft_catalog)
+        context.route('**/api/create_order', lambda route: route.fulfill(
+            status=200,content_type='application/json',
+            body='{"status":"success","order_id":"DRAFT-TEST","total":390}'))
+        return context, context.pages[0]
+
+    context,page = reopen_browser()
     page.goto(base + '/', wait_until='domcontentloaded')
     poll(page, "() => !!window.BenfuwanDesignDraft && !!window.BenfuwanModelProfile && shopData.models?.length")
 
@@ -950,7 +953,7 @@ def design_draft_test(browser, base):
       styleEditableObject(photo);canvas.add(photo);canvas.setActiveObject(photo);recordHistory();
       return {modelId:ctx.modelId,styleId:ctx.styleId,colorName:ctx.colorName||'',width:canvas.width,height:canvas.height,aiSource,aiWidth:photo.width,aiHeight:photo.height};
     }""")
-    image_draft = poll(page, "() => idbGet(BenfuwanDesignDraft.key).then(draft => draft?.version === 1 ? draft : false)", timeout=10000)
+    image_draft = poll(page, "() => BenfuwanDesignDraft.readDraft().then(draft => draft?.version === 1 ? draft : false)", timeout=10000)
     assert image_draft and image_draft['version'] == 1
     assert image_draft['modelId'] == initial['modelId'] and image_draft['styleId'] == initial['styleId']
     assert image_draft['colorName'] == initial['colorName']
@@ -981,7 +984,7 @@ def design_draft_test(browser, base):
       return {source:photo.aiOutlineSource,current:photo.getSrc(),width:photo.width,height:photo.height,strength:photo.aiOutlineStrength,style:photo.aiOutlineStyle,outlineWidth:photo.aiOutlineWidth,color:photo.aiOutlineColor};
     }""", timeout=10000)
     page.evaluate("updatedAt => { window.__draftBeforeUpdate = updatedAt; }", image_draft['updatedAt'])
-    full_draft = poll(page, "() => idbGet(BenfuwanDesignDraft.key).then(draft => draft?.updatedAt && draft.updatedAt !== window.__draftBeforeUpdate ? draft : false)", timeout=10000)
+    full_draft = poll(page, "() => BenfuwanDesignDraft.readDraft().then(draft => draft?.updatedAt && draft.updatedAt !== window.__draftBeforeUpdate ? draft : false)", timeout=10000)
     assert full_draft['updatedAt'] != image_draft['updatedAt']
     assert full_draft['backgroundColor'] == '#ffeeaa' and abs(full_draft['backgroundOpacity'] - .67) < .001
     assert {obj.get('role') for obj in full_draft['canvasJson']['objects']} == {'photo','sticker','text'}
@@ -997,8 +1000,9 @@ def design_draft_test(browser, base):
     page.reload(wait_until='domcontentloaded')
     poll(page, "() => window.BenfuwanDesignDraft?.state().prompt==='ready' && document.getElementById('design-draft-prompt')?.classList.contains('show') && document.getElementById('home-design-card')?.dataset.draftState==='ready'")
     assert page.locator('#design-draft-title').inner_text() == '發現上次未完成的設計'
-    assert page.locator('#home-design-title').inner_text() == '繼續上次設計'
+    assert page.locator('#home-design-title').inner_text() == '我的設計'
     page.locator('#home-design-card').click()
+    page.locator('#design-library').get_by_role('button', name='繼續編輯').first.click()
     poll(page, "() => document.getElementById('page-editor')?.classList.contains('active') && canvas?.getObjects().length===3 && !BenfuwanDesignDraft.state().suspended")
     restored = page.evaluate("""() => {
       const photo=canvas.getObjects().find(object=>object.role==='photo');
@@ -1061,6 +1065,36 @@ def design_draft_test(browser, base):
       return {draft:!!(await idbGet(BenfuwanDesignDraft.key)),cart:!!(await idbGet('cart'))};
     }""")
     assert cart_state == {'draft':True,'cart':True}, cart_state
+    key = page.evaluate("cartItem.draftKey")
+    context.close()
+    context,page = reopen_browser()
+    page.goto(base + '/',wait_until='domcontentloaded')
+    poll(page,"() => window.BenfuwanFrontHomeV1?.isCatalogReady() && cartItem?.draftKey")
+    page.evaluate("openCartFromNav()")
+    page.locator('#cart-filled').get_by_role('button',name='繼續編輯').click()
+    poll(page,"() => canvas?.getObjects().some(o=>o.role==='photo') && !BenfuwanDesignDraft.state().suspended")
+    assert page.evaluate("canvas.getObjects().find(o=>o.role==='photo').getSrc()") == initial['aiSource']
+    page.context.set_offline(True)
+    assert page.evaluate("async()=>{setCanvasBackground('#123456');return await BenfuwanDesignDraft.saveNow()}")
+    page.context.set_offline(False)
+    page.evaluate('openPreview()')
+    poll(page,"() => !!ctx.printBase64 && !!ctx.productionMeta")
+    page.locator('.preview-buttons .primary').click()
+    poll(page,"() => document.querySelector('#page-cart.active') && !BenfuwanDraftCart.staging")
+    assert page.evaluate("cartItem.draftKey") == key
+    assert page.locator('#cart-other-items button').count() == 0
+    assert page.evaluate("cartItem.productionMeta.dpi") == 720
+    updated_catalog=page.evaluate('structuredClone(shopData)')
+    for style in updated_catalog['styles']:style['price']=999
+    def changed_price(route):
+        route.fulfill(json=updated_catalog)
+    page.route('**/api/shop_data',changed_price)
+    page.locator('#cart-checkout-bar button').click()
+    poll(page,"()=>document.querySelector('#toast').textContent.includes('商品或價格已更新')")
+    assert page.locator('#page-cart').evaluate("e=>e.classList.contains('active')")
+    page.unroute('**/api/shop_data',changed_price)
+    page.locator('#cart-checkout-bar button').click()
+    poll(page,"()=>document.querySelector('#page-checkout.active')")
     page.evaluate("""async () => {
       document.getElementById('form-surname').value='草稿';
       await submitOrder();
@@ -1101,13 +1135,56 @@ def design_draft_test(browser, base):
     guarded = page.evaluate("""async ({modelId,styleId,width,height}) => {
       const draft={version:1,updatedAt:new Date().toISOString(),modelId,styleId,backgroundColor:'transparent',backgroundOpacity:0,logicalCanvasWidth:width,logicalCanvasHeight:height,canvasJson:{version:'5.3.0',objects:[]}};
       await idbSet(BenfuwanDesignDraft.key,draft);await BenfuwanDesignDraft.refreshPrompt();showPage('page-home');
-      const realConfirm=window.confirm;window.confirm=()=>false;await startNewDesign();const kept=!!(await idbGet(BenfuwanDesignDraft.key))&&document.getElementById('page-home').classList.contains('active');
-      window.confirm=()=>true;await startNewDesign();const discarded=(await idbGet(BenfuwanDesignDraft.key))===null&&document.getElementById('page-model').classList.contains('active');window.confirm=realConfirm;
-      return {kept,discarded};
+      const previous=BenfuwanDesignDraft.key;await startNewDesign();
+      return {kept:!!(await idbGet(previous)),fresh:BenfuwanDesignDraft.key!==previous,choosing:document.getElementById('page-model').classList.contains('active')};
     }""", initial)
-    assert guarded == {'kept':True,'discarded':True}, guarded
-    print('FRONT_DESIGN_DRAFT_NEW_DESIGN_GUARD_OK')
-    page.close()
+    assert guarded == {'kept':True,'fresh':True,'choosing':True}, guarded
+    print('FRONT_DESIGN_DRAFT_NEW_DESIGN_PRESERVED_OK')
+    # Two independent guest designs, including a stale tab and a failed save.
+    async_design = """async label=>{
+      await startNewDesign();
+      const m=shopData.models[0],s=shopData.styles[0];selectModel(m);selectStyle(s);chooseCaseColor('透明');
+      await startEditor(false);
+      canvas.add(new fabric.Text(label,{role:'text',fontFamily:'jf-openhuninn'}));recordHistory();
+      await openPreview();await confirmDesignToCart();
+      return cartItem.draftKey;
+    }"""
+    first=page.evaluate(async_design,'設計 A')
+    second=page.evaluate(async_design,'設計 B')
+    assert first != second
+    poll(page,"() => document.querySelectorAll('#cart-other-items > div').length===1 && document.querySelector('#cart-badge').textContent==='2'")
+    page.locator('#cart-other-items').get_by_role('button',name='繼續編輯').click()
+    poll(page,"() => ctx.modelId && canvas?.getObjects().some(o=>o.text==='設計 A') && !BenfuwanDesignDraft.state().suspended")
+    other=context.new_page()
+    other.goto(base+'/',wait_until='domcontentloaded')
+    poll(other,"() => window.BenfuwanFrontHomeV1?.isCatalogReady()")
+    assert other.evaluate("key=>BenfuwanDesignDraft.continueEditing(key)",first)
+    assert other.evaluate("async()=>{setCanvasBackground('#abc123');return await BenfuwanDesignDraft.saveNow()}")
+    assert page.evaluate("async()=>{setCanvasBackground('#456789');return await BenfuwanDesignDraft.saveNow()}")
+    copy=page.evaluate('BenfuwanDesignDraft.key')
+    assert copy != first and page.evaluate("key=>idbGet(key).then(d=>d.backgroundColor)",first)=='#abc123'
+    other.close()
+    page.evaluate("()=>showPage('page-home')")
+    page.locator('#home-design-card').click()
+    row=page.locator('#design-library > div').filter(has_text='分頁副本')
+    page.once('dialog',lambda dialog:dialog.accept('紀念款'))
+    row.get_by_role('button',name='重新命名').click()
+    renamed=page.locator('#design-library > div').filter(has_text='紀念款')
+    page.once('dialog',lambda dialog:dialog.accept())
+    renamed.get_by_role('button',name='刪除').click()
+    poll(page,"()=>!document.querySelector('#design-library')?.innerText.includes('紀念款')")
+    assert page.evaluate("key=>idbGet(key)",copy) is None
+    page.evaluate("openCartFromNav()")
+    page.locator('#cart-other-items').get_by_role('button',name='前往結帳').click()
+    poll(page,"()=>document.querySelector('#page-checkout.active')")
+    assert page.evaluate('cartItem.draftKey')==first
+    context.route('**/api/create_order',lambda route:route.abort('failed'))
+    page.locator('#form-surname').fill('測試')
+    page.locator('#submit-order').click()
+    poll(page,"()=>document.querySelector('#toast').textContent.includes('送單失敗')")
+    assert page.evaluate("async()=>!!(await idbGet('cart'))?.orderKey && (await BenfuwanDraftStore.list()).length>=2")
+    print('GUEST_MULTI_CART_CONFLICT_LIBRARY_NETWORK_FAILURE_OK')
+    context.close()
 
 
 def home_draft_catalog_race_test(browser, base):
@@ -1164,8 +1241,9 @@ def home_draft_catalog_race_test(browser, base):
     assert not page.locator('#design-draft-prompt.invalid').count()
     page.evaluate("() => window.__releaseShopData()")
     poll(page, "() => window.BenfuwanFrontHomeV1?.isCatalogReady() && document.getElementById('home-design-card')?.dataset.draftState==='ready'")
-    assert page.locator('#home-design-title').inner_text() == '繼續上次設計'
+    assert page.locator('#home-design-title').inner_text() == '我的設計'
     page.locator('#home-design-card').click()
+    page.locator('#design-library').get_by_role('button', name='繼續編輯').first.click()
     poll(page, "() => document.getElementById('page-editor')?.classList.contains('active') && canvas && !BenfuwanDesignDraft.state().suspended")
     restored = page.evaluate("() => ({modelId:ctx.modelId,styleId:ctx.styleId,width:canvas.width,height:canvas.height,objects:canvas.getObjects().length})")
     assert restored == {'modelId':seeded['modelId'],'styleId':seeded['styleId'],'width':seeded['width'],'height':seeded['height'],'objects':0}, restored
