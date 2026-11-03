@@ -221,6 +221,26 @@ def film_density_test(browser, base, poll, dpr):
       try {return render()===expected}
       finally {Object.assign(canvas,own)}
     }"""),'display density changed production PNG'
+    if dpr==2:
+        page.evaluate("confirmDesignToCart()")
+        poll(page,"()=>document.querySelector('#page-cart.active') && !BenfuwanDraftCart.staging")
+        key=page.evaluate("cartItem.draftKey")
+        page.reload(wait_until='domcontentloaded')
+        poll(page,"()=>window.BenfuwanFrontHomeV1?.isCatalogReady() && cartItem?.draftKey")
+        page.evaluate("openCartFromNav()")
+        page.locator('#cart-filled').get_by_role('button',name='繼續編輯').click()
+        poll(page,"()=>canvas?.getObjects().some(o=>o.originalName==='film-photo.png') && !BenfuwanDesignDraft.state().suspended")
+        assert page.evaluate("ctx.styleId==='film' && ctx.modelId==='film-fixture'")
+        page.evaluate("openPreview()")
+        poll(page,"()=>ctx.productionMeta?.dpi===720")
+        page.locator('.preview-buttons .primary').click()
+        poll(page,"()=>document.querySelector('#page-cart.active') && !BenfuwanDraftCart.staging")
+        assert page.evaluate("cartItem.draftKey") == key
+        assert page.evaluate("[cartItem.productionMeta.width,cartItem.productionMeta.height]")==[1899,1332]
+        assert not page.locator('#cart-other-items button').count()
+        page.locator('#cart-checkout-bar button').click()
+        poll(page,"()=>document.querySelector('#page-checkout.active')")
+        print('FILM_CART_REEDIT_UPDATE_SAME_LINE_720_OK',flush=True)
     # Switching back to an ordinary phone case must not reuse the film aspect.
     regular=page.evaluate("""() => {shopData.models[0].product_type='phone_case';shopData.styles[0].product_type='phone_case';shopData.models[0].brand='Apple';resetDesignState(true);selectModel(shopData.models[0]);selectStyle(shopData.styles[0]);ctx.colorName='白';startEditor(false);return [canvas.width,canvas.height]}""")
     assert regular==[201,141],regular

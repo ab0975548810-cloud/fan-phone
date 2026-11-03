@@ -627,7 +627,7 @@ def front_test(browser, base):
     print('FRONT_FOUR_MODEL_EDITOR_REVIEW_TARGET_CONSISTENCY_OK', editor_contract)
 
     page.evaluate("""fixtures => {
-      ctx.modelId='model_apple_14_pro_max';ctx.modelName='iPhone 14 Pro Max';ctx.styleId='style_crystal';ctx.styleName='晶彩磁吸防摔殼';
+      ctx.modelId='model_apple_14_pro_max';ctx.modelName='iPhone 14 Pro Max';ctx.styleId=shopData.styles[0].id;ctx.styleName=shopData.styles[0].name;
       ctx.printW=80;ctx.printH=160;ctx.maskUrl=fixtures.iphone14ProMax.preview;ctx.printLineUrl=fixtures.iphone14ProMax.print;
       initCanvas();editorHasSession=true;window.BenfuwanEditorAccess?.fitCanvas?.();applyCaseBoundaryClip();
     }""", mask_fixtures)
