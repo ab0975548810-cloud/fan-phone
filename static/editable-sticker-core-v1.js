@@ -160,7 +160,7 @@
       if(raw.type==='image'){
         const el=obj.getElement();raw.sourceSize={width:el.naturalWidth||el.width,height:el.naturalHeight||el.height};
         if(typeof el.src==='string'&&el.src.startsWith('data:image/png;base64,')){raw.src=el.src;return;}
-        if(raw.templateLayerId&&raw.publicSrc){
+        if(raw.templateLayerId&&raw.publicSrc&&!/^data:image\//i.test(el.src || '')){
           const url=window.benfuwanTemplateProxyUrl?.(raw.publicSrc)||raw.publicSrc;
           const response=await fetch(url);if(!response.ok)throw Error('模板原始素材無法讀取');const blob=await response.blob();
           if(blob.type==='image/png'){raw.src=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(blob);});return;}

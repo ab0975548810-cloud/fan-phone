@@ -1000,7 +1000,7 @@ def design_draft_test(browser, base):
     page.reload(wait_until='domcontentloaded')
     poll(page, "() => window.BenfuwanDesignDraft?.state().prompt==='ready' && document.getElementById('design-draft-prompt')?.classList.contains('show') && document.getElementById('home-design-card')?.dataset.draftState==='ready'")
     assert page.locator('#design-draft-title').inner_text() == '發現上次未完成的設計'
-    assert page.locator('#home-design-title').inner_text() == '繼續上次設計'
+    assert page.locator('#home-design-title').inner_text() == '我的設計'
     page.locator('#home-design-card').click()
     page.locator('#design-library').get_by_role('button', name='繼續編輯').first.click()
     poll(page, "() => document.getElementById('page-editor')?.classList.contains('active') && canvas?.getObjects().length===3 && !BenfuwanDesignDraft.state().suspended")
@@ -1241,7 +1241,7 @@ def home_draft_catalog_race_test(browser, base):
     assert not page.locator('#design-draft-prompt.invalid').count()
     page.evaluate("() => window.__releaseShopData()")
     poll(page, "() => window.BenfuwanFrontHomeV1?.isCatalogReady() && document.getElementById('home-design-card')?.dataset.draftState==='ready'")
-    assert page.locator('#home-design-title').inner_text() == '繼續上次設計'
+    assert page.locator('#home-design-title').inner_text() == '我的設計'
     page.locator('#home-design-card').click()
     page.locator('#design-library').get_by_role('button', name='繼續編輯').first.click()
     poll(page, "() => document.getElementById('page-editor')?.classList.contains('active') && canvas && !BenfuwanDesignDraft.state().suspended")

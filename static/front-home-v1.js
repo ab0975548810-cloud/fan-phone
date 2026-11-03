@@ -15,8 +15,8 @@
       title.textContent='我的設計';
       subtitle.textContent='正在檢查上次設計…';
     }else if(state==='ready'){
-      title.textContent='繼續上次設計';
-      subtitle.textContent='回到上次中斷的位置';
+      title.textContent='我的設計';
+      subtitle.textContent='查看草稿、繼續編輯或重新命名';
     }else if(state==='invalid'){
       title.textContent='我的設計';
       subtitle.textContent='舊設計需要重新開始';

@@ -44,6 +44,8 @@
         store.get(prefix+target).onsuccess = e => {
           const parked = e.target.result;
           selected = newItem || parked;
+          const existing = current?.draftKey===target ? current : parked;
+          if (newItem && existing) selected={...newItem,quantity:existing.quantity,payment:existing.payment};
           if (!selected || (newItem && (parked?.orderKey || current?.orderKey))) { tx.abort(); return; }
           if (current && current.draftKey !== target) {
             const key = current.draftKey || crypto.randomUUID();
