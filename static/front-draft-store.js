@@ -39,8 +39,12 @@
         else store.delete(key);
       };
       tx.oncomplete = resolve;
-      tx.onabort = () => reject(Error(conflict ? '另一分頁已修改這份草稿，請重新開啟草稿。' : tx.error?.message || '草稿寫入失敗'));
-      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => {
+        const error = Error(conflict ? '另一分頁已修改這份草稿，請重新開啟草稿。' : tx.error?.message || '草稿寫入失敗');
+        if(conflict) error.name='DraftConflict';
+        reject(error);
+      };
+      tx.onerror = event => reject(event.target.error || Error("草稿寫入失敗"));
     });
   }
 
@@ -52,21 +56,23 @@
     }));
   }
   async function freezeImage(src) {
-    let blob;
+    let buffer, type;
     if (src.startsWith('data:')) {
       const comma = src.indexOf(','), header = src.slice(5,comma), body = src.slice(comma+1);
-      const type = header.split(';')[0];
-      blob = header.endsWith(';base64')
-        ? new Blob([Uint8Array.from(atob(body), c => c.charCodeAt(0))],{type})
-        : new Blob([decodeURIComponent(body)],{type});
+      type = header.split(';')[0];
+      buffer = header.endsWith(';base64')
+        ? Uint8Array.from(atob(body), c => c.charCodeAt(0)).buffer
+        : new TextEncoder().encode(decodeURIComponent(body)).buffer;
     } else {
       const response = await fetch(src);
       if (!response.ok) throw Error('圖片無法保存，請確認連線後再試。');
-      blob = await response.blob();
+      buffer = await response.arrayBuffer();
+      type = response.headers.get('content-type') || 'image/png';
     }
-    const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()));
+
+    const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', buffer));
     const ref = prefix + Array.from(bytes, b => b.toString(16).padStart(2,'0')).join('');
-    return {ref,blob};
+    return {ref,asset:{buffer,type}};
   }
   async function pack(draft) {
     const assets = {}, used = new Map();
@@ -75,8 +81,8 @@
       let work = imageCache.get(value) || used.get(value);
       if (!work) work = freezeImage(value);
       used.set(value,work);
-      const {ref,blob} = await work;
-      assets[ref] = blob;
+      const {ref,asset} = await work;
+      assets[ref] = asset;
       return ref;
     });
     imageCache = used;
@@ -88,7 +94,7 @@
     await walk(draft.canvasJson, async value => {
       if (!value.startsWith(prefix)) return value;
       if (!assets[value]) throw Error('草稿缺少原始圖片，已保留草稿。');
-      if (!urls.has(value)) urls.set(value,blobToDataURL(assets[value]));
+      if (!urls.has(value)) urls.set(value,blobToDataURL(new Blob([assets[value].buffer],{type:assets[value].type})));
       return urls.get(value);
     });
     return draft;

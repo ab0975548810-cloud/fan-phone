@@ -52,7 +52,7 @@
   let queue = Promise.resolve();
   function warnSave(error) {
     console.warn('[DESIGN DRAFT]', error);
-    toast(isQuotaError(error) ? QUOTA_ERROR : (error.message || '草稿未能保存，請不要關閉頁面。'));
+    toast(isQuotaError(error) ? QUOTA_ERROR : (error?.message || '草稿未能保存，請不要關閉頁面。'));
   }
   function activate(key, raw) {
     activeKey = key;
@@ -63,7 +63,7 @@
   function buildDraft() {
     const c = getCanvas(), state = getContext();
     if (!editorHasSession || !c || !state || !state.modelId || !state.styleId) return null;
-    const canvasJson = c.toDatalessJSON(DRAFT_CUSTOM_PROPS);
+    const canvasJson = structuredClone(c.toDatalessJSON(DRAFT_CUSTOM_PROPS));
     return {
       version: DRAFT_VERSION,
       updatedAt: new Date().toISOString(),
@@ -89,12 +89,25 @@
     const run = async () => {
       if (key !== activeKey || suspended || !autosaveEnabled) return false;
       const next = {...draft, name:draftName || [ctx.modelName,ctx.styleName].filter(Boolean).join(' · '), revision:crypto.randomUUID()};
+      let packedCopy;
       try {
-        const packed = await store.pack(next);
-        await store.change(key,revision,()=>packed);
+        packedCopy = await store.pack(next);
+        await store.change(key,revision,()=>packedCopy);
         revision = next.revision;
         return true;
-      } catch(error) { warnSave(error); return false; }
+      } catch(error) {
+        if(error?.name==='DraftConflict' && key===activeKey) {
+          activate(DRAFT_KEY+':'+crypto.randomUUID(),null);
+          draftName=(next.name || '未命名設計')+'（分頁副本）';
+          try {
+            await store.change(activeKey,null,()=>({...packedCopy,name:draftName}));
+            revision=next.revision;
+            toast('另一分頁已變更，這次修改已另存為分頁副本。');
+            return true;
+          } catch(copyError) {warnSave(copyError);return false;}
+        }
+        warnSave(error); return false;
+      }
     };
     queue = queue.then(run,run);
     return queue;
@@ -136,6 +149,7 @@
     try {
       await queue;
       const key = cachedDraft?.key || activeKey;
+      if ((await idbGet('cart'))?.draftKey===key || await idbGet('saved-cart:'+key)) {toast('此設計仍在購物車中。');return false;}
       await store.change(key,cachedDraft?.revision || cachedDraft?.updatedAt || revision,()=>null);
       if (key === activeKey) activate(DRAFT_KEY,null);
       cachedDraft = null;
@@ -279,6 +293,8 @@
 
       restoringHistory = true;
       await loadCanvasJson(canvas, inspection.canvasJson);
+      if (canvas.getObjects().length !== inspection.canvasJson.objects.length)
+        throw Error('圖片未完整恢復，請確認連線後再試。');
       rehydrateCanvas();
       if (typeof ensureCanvasFonts === 'function') await ensureCanvasFonts();
       await new Promise(resolve => canvas.setBackgroundColor(backgroundRgba(), resolve));
@@ -349,6 +365,8 @@
       activate(rows.some(row=>row.key===DRAFT_KEY) ? DRAFT_KEY + ':' + crypto.randomUUID() : DRAFT_KEY,null);
       cachedDraft = null;
       autosaveEnabled = true;
+      byId('design-library')?.remove();
+      document.querySelector('.preview-buttons .primary').textContent='加入購物車';
       return originalStartNewDesign.apply(this, arguments);
     };
   }
@@ -399,6 +417,7 @@
     version: DRAFT_VERSION,
     get key() { return activeKey; },
     get revision() { return revision; },
+    renamed(key,expected,name,next) { if(activeKey===key && revision===expected){revision=next;draftName=name;} },
     debounceMs: DEBOUNCE_MS,
     saveNow,
     scheduleSave,

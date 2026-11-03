@@ -72,7 +72,9 @@
       action('重新命名',async()=>{
         const name=window.prompt('設計名稱',row.name)?.trim().slice(0,80);
         if(!name)return;
-        await BenfuwanDraftStore.change(row.key,row.revision||row.updatedAt,old=>({...old,name,revision:crypto.randomUUID()}));
+        const expected=row.revision||row.updatedAt, next=crypto.randomUUID();
+        await BenfuwanDraftStore.change(row.key,expected,old=>({...old,name,revision:next}));
+        api.renamed(row.key,expected,name,next);
         await openHomeDesign();
       });
       action('刪除',async()=>{

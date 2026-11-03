@@ -900,7 +900,7 @@ def front_test(browser, base):
 
 
 def design_draft_test(browser, base):
-    page = browser.new_page(viewport={'width': 390, 'height': 844})
+    profile_dir = test_dir / ('guest-profile-' + str(time.time_ns()))
     draft_preview = fixture_data_url('iphone13-preview.png')
     draft_print = fixture_data_url('iphone13-print.png')
 
@@ -924,12 +924,15 @@ def design_draft_test(browser, base):
         style.setdefault('model_colors', {})[model['id']] = ['透明', '黑']
         route.fulfill(response=response, body=json.dumps(payload, ensure_ascii=False))
 
-    page.route('**/api/shop_data', configure_draft_catalog)
-    page.route('**/api/create_order', lambda route: route.fulfill(
-        status=200,
-        content_type='application/json',
-        body='{"status":"success","order_id":"DRAFT-TEST","total":390}'
-    ))
+    def reopen_browser():
+        context = browser.browser_type.launch_persistent_context(str(profile_dir),viewport={'width':390,'height':844})
+        context.route('**/api/shop_data', configure_draft_catalog)
+        context.route('**/api/create_order', lambda route: route.fulfill(
+            status=200,content_type='application/json',
+            body='{"status":"success","order_id":"DRAFT-TEST","total":390}'))
+        return context, context.pages[0]
+
+    context,page = reopen_browser()
     page.goto(base + '/', wait_until='domcontentloaded')
     poll(page, "() => !!window.BenfuwanDesignDraft && !!window.BenfuwanModelProfile && shopData.models?.length")
 
@@ -1063,7 +1066,9 @@ def design_draft_test(browser, base):
     }""")
     assert cart_state == {'draft':True,'cart':True}, cart_state
     key = page.evaluate("cartItem.draftKey")
-    page.reload(wait_until='domcontentloaded')
+    context.close()
+    context,page = reopen_browser()
+    page.goto(base + '/',wait_until='domcontentloaded')
     poll(page,"() => window.BenfuwanFrontHomeV1?.isCatalogReady() && cartItem?.draftKey")
     page.evaluate("openCartFromNav()")
     page.locator('#cart-filled').get_by_role('button',name='繼續編輯').click()
@@ -1125,7 +1130,7 @@ def design_draft_test(browser, base):
     }""", initial)
     assert guarded == {'kept':True,'fresh':True,'choosing':True}, guarded
     print('FRONT_DESIGN_DRAFT_NEW_DESIGN_PRESERVED_OK')
-    page.close()
+    context.close()
 
 
 def home_draft_catalog_race_test(browser, base):
