@@ -2,7 +2,7 @@
   'use strict';
   if(window.__benfuwanPrintCenterInstalled)return;
   window.__benfuwanPrintCenterInstalled=true;
-  let rows=[],busy=false,query='',bindingEditing=null,triage='all',exactOrderId='',loadVersion=0;
+  let rows=[],busy=false,query='',bindingEditing=null,triage='all',exactOrderId='',loadVersion=0,nextOffset=null,loadingMore=false;
   const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const stateClass=s=>s==='UNKNOWN'?'unknown':(s==='FAILED'?'failed':'');
   const date=v=>{if(!v)return '—';const d=typeof v==='number'?new Date(v*1000):new Date(v);return isNaN(d)?'—':new Intl.DateTimeFormat('zh-TW',{timeZone:'Asia/Taipei',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(d)};
@@ -22,8 +22,9 @@
         <div id="pc-handoff-alert" class="pc-handoff-alert" hidden></div>
         <div class="pc-toolbar"><input id="pc-search" type="search" placeholder="搜尋最近訂單、客人、型號、殼款、taskid"><span class="pc-badge">送到銳印後，由店員在銳印人工確認</span></div>
         <div id="pc-exact" class="pc-exact" hidden></div><div id="pc-triage" class="pc-triage" aria-label="列印任務狀態篩選"></div>
-        <div id="pc-grid" class="pc-grid"><div class="pc-empty">讀取列印任務中…</div></div>`;content.insertBefore(section,content.firstChild);
-      section.querySelector('#pc-reload').onclick=()=>load(true);section.querySelector('#pc-search').oninput=e=>{query=e.target.value.trim().toLowerCase();render()};section.addEventListener('click',onAction);
+        <div id="pc-grid" class="pc-grid"><div class="pc-empty">讀取列印任務中…</div></div>
+        <button type="button" id="pc-more" class="btn alt" hidden>載入更多訂單</button>`;content.insertBefore(section,content.firstChild);
+      section.querySelector('#pc-reload').onclick=()=>load(true);section.querySelector('#pc-more').onclick=()=>loadMore();section.querySelector('#pc-search').oninput=e=>{query=e.target.value.trim().toLowerCase();render()};section.addEventListener('click',onAction);
     }
     if(!document.getElementById('pc-bind-modal')){
       const modal=document.createElement('div');modal.id='pc-bind-modal';modal.className='pc-modal';modal.innerHTML=`<div class="pc-dialog pc-bind-dialog"><div class="pc-dialog-head">補綁列印 SKU</div><div class="pc-form">
@@ -75,10 +76,24 @@
     const chips=document.getElementById('pc-triage');if(chips){chips.innerHTML=Object.entries(labels).map(([key,label])=>`<button type="button" class="pc-triage-chip${triage===key?' active':''}" data-triage="${key}">${label} ${key==='all'?rows.length:rows.filter(r=>bucket(r)===key).length}</button>`).join('');chips.onclick=ev=>{const b=ev.target.closest('[data-triage]');if(b){triage=b.dataset.triage;render()}}}
     const exact=document.getElementById('pc-exact');if(exact){exact.hidden=!exactOrderId;exact.innerHTML=exactOrderId?`精確查詢訂單：${esc(exactOrderId)} <button type="button" data-pc="clear-exact">返回最近訂單</button>`:''}
     const data=filtered();box.innerHTML=data.length?data.map(card).join(''):'<div class="pc-empty">這個條件目前沒有訂單</div>';
+    const more=document.getElementById('pc-more');if(more){more.hidden=nextOffset===null||!!exactOrderId;more.disabled=loadingMore;more.textContent=loadingMore?'載入更多訂單中…':'載入更多訂單';}
   }
   async function json(url,opt={}){const r=await fetch(url,opt);let j={};try{j=await r.json()}catch(e){}if(!r.ok||j.status!=='success'){const err=new Error(j.msg||('HTTP '+r.status));err.code=j.code||'';throw err}return j}
   function renderHandoffs(data){const box=document.getElementById('pc-handoff-alert');if(!box)return;const alerts=data?.alerts||[];if(!alerts.length){box.hidden=true;box.innerHTML='';return}const review=alerts.filter(x=>x.state==='REVIEW'),failed=alerts.filter(x=>x.state==='FAILED'),recovering=alerts.filter(x=>['PENDING','CLAIMED','RETRY'].includes(x.state));const lines=[];if(review.length)lines.push(`${review.length} 筆自動交接需人工核對；上線前歷史漏單不會自動補送。`);if(failed.length)lines.push(`${failed.length} 筆自動交接已停止重試，請人工檢查。`);if(recovering.length)lines.push(`${recovering.length} 筆正在隔離恢復，系統不會建立重複任務。`);box.hidden=false;box.innerHTML=`<b>自動列印交接告警（本頁 ${alerts.length} 筆${data?.truncated?"，尚有更多":""}）</b><div>${lines.map(esc).join('<br>')}</div><div class="pc-handoff-orders">${alerts.map(x=>`<button type="button" data-pc="handoff-order" data-order="${esc(x.order_id||'')}"><span>${esc(x.order_id||x.order_ref)}</span><small>${esc(x.state)}・${esc(x.error_code||'—')}</small><b>查看</b></button>`).join('')}</div><div>${data?.offset?`<button data-pc="handoff-page" data-offset="${Math.max(0,data.offset-20)}">上一頁</button>`:''}${data?.next_offset!=null?`<button data-pc="handoff-page" data-offset="${data.next_offset}">下一頁</button>`:''}</div>`}
-  async function load(force=false){if(busy&&!force)return;const version=++loadVersion;busy=true;const box=document.getElementById('pc-grid');if(force&&box)box.innerHTML='<div class="pc-empty">重新整理中…</div>';try{const p=new URLSearchParams({ts:String(Date.now())});if(exactOrderId)p.set('order_id',exactOrderId);const j=await json('/api/admin/print/jobs?'+p,{cache:'no-store'});if(version!==loadVersion)return;rows=j.rows||[];window.pcVendorReady=!!j.vendor_ready;window.pcVendorConnected=!!j.vendor_connected;const cfg=document.getElementById('pc-config');cfg.className='pc-banner '+(j.vendor_ready?'':'warn');cfg.textContent=j.vendor_ready?`雲打印已接線（設備 ${j.device_id}）。送到銳印後，請由店員在銳印人工確認；網站不會啟動實體打印。`:'雲打印目前關閉，或憑證、HTTPS public URL、生產圖密鑰未完整設定；送到銳印會安全拒絕。';renderHandoffs(j.handoffs);render()}catch(e){if(version===loadVersion&&box)box.innerHTML=`<div class="pc-empty pc-error">${esc(e.message)}</div>`}finally{if(version===loadVersion)busy=false}}
+  async function load(force=false){if(busy&&!force)return;const version=++loadVersion;busy=true;const box=document.getElementById('pc-grid');if(force&&box&&!rows.length)box.innerHTML='<div class="pc-empty">重新整理中…</div>';try{const p=new URLSearchParams({ts:String(Date.now())});if(exactOrderId)p.set('order_id',exactOrderId);const j=await json('/api/admin/print/jobs?'+p,{cache:'no-store'});if(version!==loadVersion)return;rows=j.rows||[];nextOffset=j.next_offset??null;window.pcVendorReady=!!j.vendor_ready;window.pcVendorConnected=!!j.vendor_connected;const cfg=document.getElementById('pc-config');cfg.className='pc-banner '+(j.vendor_ready?'':'warn');cfg.textContent=j.vendor_ready?`雲打印已接線（設備 ${j.device_id}）。送到銳印後，請由店員在銳印人工確認；網站不會啟動實體打印。`:'雲打印目前關閉，或憑證、HTTPS public URL、生產圖密鑰未完整設定；送到銳印會安全拒絕。';renderHandoffs(j.handoffs);render()}catch(e){if(version===loadVersion&&box)box.innerHTML=`<div class="pc-empty pc-error">${esc(e.message)}</div>`}finally{if(version===loadVersion)busy=false}}
+  async function loadMore(){
+    if(loadingMore||busy||nextOffset===null||exactOrderId)return;
+    const offset=nextOffset;loadingMore=true;render();
+    try{
+      const p=new URLSearchParams({offset:String(offset),ts:String(Date.now())});
+      const j=await json('/api/admin/print/jobs?'+p,{cache:'no-store'});
+      const seen=new Set(rows.map(r=>r.order_id));
+      rows.push(...(j.rows||[]).filter(r=>!seen.has(r.order_id)));
+      nextOffset=j.next_offset??null;
+      render();
+    }catch(e){alert('載入更多訂單失敗：'+e.message)}
+    finally{loadingMore=false;render()}
+  }
   function opKey(name,id){const slot='pc:'+name+':'+id;let value=sessionStorage.getItem(slot);if(!value){value=crypto.randomUUID();sessionStorage.setItem(slot,value)}return {slot,value}}
   async function operate(name,id,field='job_id'){
     const k=opKey(name,id);try{await json('/api/admin/print/'+(name==='snapshot'?'profile-snapshot':name),{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':k.value},body:JSON.stringify({[field]:id,idempotency_key:k.value})});sessionStorage.removeItem(k.slot);await load(true)}catch(e){if(e.code!=='RECONCILE_REQUIRED')sessionStorage.removeItem(k.slot);alert(e.message)}
