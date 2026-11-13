@@ -52,7 +52,7 @@
   let queue = Promise.resolve();
   function warnSave(error) {
     console.warn('[DESIGN DRAFT]', error);
-    toast(isQuotaError(error) ? QUOTA_ERROR : (error?.message || '草稿未能保存，請不要關閉頁面。'));
+    toast(isQuotaError(error) ? QUOTA_ERROR : error?.imageLoadCode ? '草稿圖片未能保存，原草稿已保留。請確認網路後再試，暫時不要關閉頁面。' : error instanceof TypeError ? '草稿未能保存，請確認網路連線，暫時不要關閉頁面。' : (error?.message || '草稿未能保存，請不要關閉頁面。'));
   }
   function activate(key, raw) {
     dirty = false; changedAt = 0;
