@@ -69,6 +69,61 @@
     return navigator.locks.request('benfuwan-cart-write',action);
   }
 
+  async function orderRequestStatus(key) {
+    const response=await fetch('/api/order_request_status',{
+      method:'POST',cache:'no-store',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({idempotency_key:key})
+    });
+    const data=await response.json();
+    if(!response.ok||data.status!=='success')throw Error(data.msg||'目前無法確認送單結果');
+    return data;
+  }
+  async function resolveSubmitted(item) {
+    if(!item?.orderKey)return {state:'NOT_SUBMITTED'};
+    try {
+      const result=await orderRequestStatus(item.orderKey);
+      if(result.state==='COMPLETED')return result;
+      if(result.state!=='NOT_FOUND')throw Error('送單狀態不明，請稍後再試，設計已保留');
+      // Two reads limit a race with an in-flight checkout. Absence alone is
+      // not proof that a request cannot commit; never automatically re-submit.
+      await new Promise(resolve=>setTimeout(resolve,900));
+      const second=await orderRequestStatus(item.orderKey);
+      if(second.state==='COMPLETED')return second;
+      if(second.state!=='NOT_FOUND')throw Error('送單狀態仍待確認，請稍後再試');
+      return second;
+    }catch(error){
+      toast(error.message||'無法查核送單結果，請稍後再試');
+      return {state:'UNKNOWN'};
+    }
+  }
+  async function unlockForNewDesign(item) {
+    return withCartLock(async()=>{
+      const db=await openIdb();
+      return new Promise((resolve,reject)=>{
+        const tx=db.transaction(IDB_STORE,'readwrite'),store=tx.objectStore(IDB_STORE);
+        const active=cartItem&&same(cartItem,item);
+        const key=active?'cart':prefix+item.draftKey;
+        let updated;
+        store.get(key).onsuccess=e=>{
+          const stored=e.target.result;
+          if(!stored||stored.orderKey!==item.orderKey||
+             stored.draftKey!==item.draftKey||stored.draftRevision!==item.draftRevision){
+            tx.abort();return;
+          }
+          updated={...stored,orderKey:null};
+          store.put(updated,key);
+        };
+        tx.oncomplete=()=>{
+          if(active){cartItem=updated;updateCartBadge();renderCart();}
+          resolve(updated);
+        };
+        tx.onabort=()=>reject(Error('購物車已變更，請重新開啟確認'));
+        tx.onerror=()=>reject(tx.error);
+      });
+    });
+  }
+
   // Checkout, quantity changes and moving lines share the same origin-wide lock.
   for (const name of ['submitOrder','changeQty','choosePayment']) {
     const original = window[name];
@@ -76,7 +131,17 @@
       const expected = cartItem;
       if (!expected || saving) return;
       return withCartLock(async()=>{
-        if (name==='submitOrder' && !await currentProduct(expected)) return;
+        if (name==='submitOrder') {
+          if(expected.orderKey){
+            const status=await resolveSubmitted(expected);
+            if(status.state==='UNKNOWN')return;
+            if(status.state==='COMPLETED'){
+              toast('這筆設計已成立訂單：'+status.order_id+'。請勿重複下單，可返回購物車建立新設計。');
+              return;
+            }
+          }
+          if(!await currentProduct(expected))return;
+        }
         if (!same(expected,await idbGet('cart'))) { toast('購物車已變更，請重新開啟確認。');return; }
         return original.apply(this,args);
       });
@@ -105,8 +170,13 @@
     } finally { saving = false; }
   };
   async function remove(item,parked=false) {
-    if (!item || saving || item.orderKey) return toast('此項目暫時無法移除，請先確認送單結果。');
-    if (!confirm('從購物車移除這項商品？已保存的草稿會保留在「我的設計」。')) return;
+    if(!item||saving)return;
+    const result=await resolveSubmitted(item);
+    if(result.state==='UNKNOWN')return;
+    const message=result.state==='COMPLETED'
+      ?'這筆商品已成立訂單 '+result.order_id+'。移出購物車不會取消原訂單或退回庫存，確定只清除購物車項目？'
+      :'從購物車移除這項商品？已保存的草稿會保留在「我的設計」。';
+    if(!confirm(message))return;
     await withCartLock(async()=>{
       try {
         const db=await openIdb(), key=parked?prefix+item.draftKey:'cart';
@@ -114,7 +184,7 @@
           const tx=db.transaction(IDB_STORE,'readwrite'),store=tx.objectStore(IDB_STORE);
           store.get(key).onsuccess=e=>{
             const stored=e.target.result;
-            if(!stored || stored.orderKey || (parked?stored.draftRevision!==item.draftRevision:!same(item,stored))){tx.abort();return;}
+            if(!stored || stored.orderKey!==item.orderKey || (parked?stored.draftRevision!==item.draftRevision:!same(item,stored))){tx.abort();return;}
             store.delete(key);
             if(parked)store.delete(summaries+item.draftKey);
           };
@@ -125,14 +195,23 @@
     });
   }
   async function edit(item) {
-    if (saving) return;
-    if (item.orderKey) return toast('此項目已有送單紀錄，請先確認送單結果。');
-    if (!item.draftKey || !await idbGet(item.draftKey)) return toast('此舊項目沒有可還原的編輯草稿。');
-    try { await loadAll(); } catch(error) { return toast('無法確認最新商品資料，草稿已保留，請連線後再試。'); }
-    if (await drafts.continueEditing(item.draftKey)) {
-      ctx.quantity = item.quantity; ctx.payment = item.payment;
-      document.querySelector('.preview-buttons .primary').textContent = '儲存購物車修改';
-    } else toast('此設計無法安全恢復，草稿已保留。');
+    if(saving)return;
+    if(!item.draftKey||!await idbGet(item.draftKey))return toast('此舊項目沒有可還原的編輯草稿，請保留購物車並聯絡店家。');
+    try {await loadAll();}catch(error){return toast('無法確認最新商品資料，草稿已保留，請連線後再試。');}
+    if(item.orderKey){
+      const result=await resolveSubmitted(item);
+      if(result.state==='UNKNOWN')return;
+      if(result.state==='COMPLETED'&&!confirm(
+        '此商品已成立訂單 '+result.order_id+'。繼續編輯將建立新設計，不會修改或取消已成立的訂單。確定？'))return;
+      if(result.state==='NOT_FOUND'&&!confirm(
+        '伺服器目前未找到這次送單紀錄。若原請求仍在處理，可能稍後成立訂單；確定要以新設計繼續編輯？'))return;
+      try {item=await unlockForNewDesign(item);}catch(error){return toast(error.message);}
+    }
+    if(await drafts.continueEditing(item.draftKey)){
+      ctx.quantity=item.quantity;ctx.payment=item.payment;
+      const button=document.querySelector('.preview-buttons .primary');
+      if(button)button.textContent='儲存購物車修改';
+    }else toast('此設計無法安全恢復，草稿已保留。');
   }
   async function others() {
     const db = await openIdb();
