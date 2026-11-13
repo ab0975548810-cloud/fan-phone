@@ -1084,6 +1084,24 @@ def design_draft_test(browser, base):
     assert page.evaluate("cartItem.draftKey") == key
     assert page.locator('#cart-other-items button').count() == 0
     assert page.evaluate("cartItem.productionMeta.dpi") == 720
+    # A committed checkout must not permanently lock the customer's design.
+    page.evaluate("""async () => {
+      cartItem.orderKey='checkout-committed-draft-fixture-0001';
+      await idbSet('cart',cartItem);renderCart();
+    }""")
+    def committed_cart_status(route):
+        route.fulfill(json={'status':'success','state':'COMPLETED','order_id':'existing-order-fixture'})
+    page.route('**/api/order_request_status',committed_cart_status)
+    page.on('dialog',lambda dialog:dialog.accept())
+    page.locator('#cart-filled').get_by_role('button',name='繼續編輯').click()
+    poll(page,"() => document.getElementById('page-editor')?.classList.contains('active') && !BenfuwanDesignDraft.state().suspended && cartItem?.orderKey===null")
+    assert page.evaluate("async () => (await idbGet('cart'))?.orderKey") is None
+    page.evaluate('openPreview()')
+    poll(page,"() => !!ctx.printBase64 && !!ctx.productionMeta")
+    page.locator('.preview-buttons .primary').click()
+    poll(page,"() => document.querySelector('#page-cart.active') && !BenfuwanDraftCart.staging")
+    page.unroute('**/api/order_request_status',committed_cart_status)
+    print('MOBILE_CART_COMMITTED_EDIT_CREATES_NEW_DESIGN_OK')
     updated_catalog=page.evaluate('structuredClone(shopData)')
     for style in updated_catalog['styles']:style['price']=999
     def changed_price(route):
