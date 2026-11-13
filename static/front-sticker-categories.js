@@ -26,5 +26,18 @@
     });
   };
 
+  function resetScroll(){
+    const sheet=document.getElementById('sheet-sticker');
+    if(!sheet)return;
+    sheet.scrollTop=0;
+    const body=sheet.querySelector('.sheet-body');if(body)body.scrollTop=0;
+  }
+  const render=window.renderStickers;
+  window.renderStickers=function(){const r=render.apply(this,arguments);resetScroll();return r;};
+  const open=window.openStickerSheet;
+  window.openStickerSheet=function(){const r=open.apply(this,arguments);resetScroll();requestAnimationFrame(resetScroll);return r;};
+  // Also covers the existing editable-text sticker category.
+  document.getElementById('sticker-cats')?.addEventListener('click',()=>{resetScroll();requestAnimationFrame(resetScroll);});
+
   console.info('[FRONT] sticker category names now follow admin settings');
 })();

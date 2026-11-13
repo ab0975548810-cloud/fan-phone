@@ -1,0 +1,35 @@
+[
+  {
+    "console": "error",
+    "text": "Refused to load https://static.cloudflareinsights.com/beacon.min.js/vce701823e78c4301a35b7e07294d87301792088814092 because it does not appear in the script-src directive of the Content Security Policy."
+  },
+  {
+    "proxy": "https://fanphone.tw/api/public/asset_proxy?url=https%3A%2F%2Fsazoqqgeabjiyzbihpdy.supabase.co%2Fstorage%2Fv1%2Fobject%2Fpublic%2Fcase-assets%2Fmaterials%2F40cc4e278e67416bb0ac7ccf17265d15.png",
+    "status": 200
+  },
+  {
+    "proxy": "https://fanphone.tw/api/public/asset_proxy?url=https%3A%2F%2Fsazoqqgeabjiyzbihpdy.supabase.co%2Fstorage%2Fv1%2Fobject%2Fpublic%2Fcase-assets%2Fmaterials%2Fb66b93a135204771a5f5f672dbb7be3e.png",
+    "status": 200
+  },
+  {
+    "console": "error",
+    "text": "Refused to connect to https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/stickers/97b1e5a9a6b8430d8bd55ff38407f4b7.png because it does not appear in the connect-src directive of the Content Security Policy."
+  },
+  {
+    "console": "error",
+    "text": "Refused to connect to https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/stickers/97b1e5a9a6b8430d8bd55ff38407f4b7.png because it does not appear in the connect-src directive of the Content Security Policy."
+  },
+  {
+    "state": {
+      "objects": [
+        {
+          "role": "sticker",
+          "src": "https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/stickers/97b1e5a9a6b8430d8bd55ff38407f4b7.png",
+          "width": 489
+        }
+      ],
+      "toast": "Load failed"
+    },
+    "draftSaved": false
+  }
+]

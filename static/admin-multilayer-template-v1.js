@@ -9,7 +9,7 @@
   function syncBackground(c){if(!mode||!c.backgroundColor||c.backgroundColor==='transparent')return;const fill=c.backgroundColor;background(c);c.getObjects().find(o=>o.isTplBg&&o.type==='rect').set('fill',fill);c.backgroundColor='transparent';}
   function controls(){const editor=by('template-modal')?.querySelector('.editor');if(!editor||by('multilayer-admin-tools'))return;
     const bar=document.createElement('div');bar.id='multilayer-admin-tools';bar.className='multi-admin-tools';bar.innerHTML='<label><input type="checkbox" id="multilayer-enable"> 多圖層可編輯模板</label><button type="button" class="btn alt" id="multilayer-upload">加入 PNG 圖層</button><input id="multilayer-files" type="file" accept=".png,image/png" multiple hidden><small>背景預設鎖定；每個圖片／文字／照片框保持獨立。</small>';
-    editor.parentElement.insertBefore(bar,editor);by('multilayer-enable').checked=mode;
+    editor.parentElement.insertBefore(bar,editor);queueMicrotask(()=>window.bfInstallMasterTemplate?.());by('multilayer-enable').checked=mode;
     by('multilayer-enable').onchange=e=>{if(saving){e.target.checked=mode;return;}if(!e.target.checked&&window.__bfEditingTemplate?.layer_contract_version===multi.VERSION){e.target.checked=true;notify('已保存的多圖層模板不能降級；舊模板維持原流程',true);return;}mode=e.target.checked;
       if(!mode){for(const o of canvas()?.getObjects()||[])for(const key of ['layerId','templateLayerId','layerInstanceId','templateApplicationId','normalizedGeometry','zIndex',...multi.FLAGS])delete o[key];if(canvas()){delete canvas().templateState;delete canvas().layer_contract_version;}}
       if(mode){canvas().layer_contract_version=multi.VERSION;background(canvas());notify('已啟用多圖層；普通文字使用站內固定字型，請確認排版');for(const o of canvas()?.getObjects()||[]){multi.decorate(o,canvas());if(['text','textbox','i-text'].includes(o.type)&&!editable.FONTS[o.fontFamily]&&!editable.LEGACY[o.fontFamily]&&!Object.values(editable.LEGACY).includes(o.fontFamily))o.set('fontFamily','NotoSansTC');}}
@@ -48,7 +48,7 @@
     try{if(!out.width||out.width*out.height>32_000_000)throw Error('圖片像素超過安全範圍');out.getContext('2d').drawImage(el,0,0);const blob=await pngBlob(out),url=await originalPng(new File([blob],'effects.png',{type:'image/png'}));return await replacePng(o,blob,url,{}, {canvas:c,preserveViewport:true});}finally{out.width=out.height=1;}
   }
   async function bakeImages(c){for(const o of [...c.getObjects()])if(o.type==='image')await bakeImage(o,c);}
-  window.BenfuwanAdminMultilayer={enabled,pngBlob,pngFile,replace:replacePng,bakeImage,upload:originalPng};
+  window.BenfuwanAdminMultilayer={enabled,pngBlob,pngFile,replace:replacePng,bakeImage,bakeImages,upload:originalPng};
   async function upload(event,bg){const files=[...(event.target.files||[])];event.target.value='';const c=canvas();if(!c)return;
     if(!mode){if(bg)return legacyBackground(event);return;}
     try{for(const file of files){const url=await originalPng(file),o=await new Promise((resolve,reject)=>fabric.Image.fromURL(url,img=>img?.width?resolve(img):reject(Error('PNG 無法讀取')),{crossOrigin:'anonymous'}));
@@ -59,7 +59,7 @@
       render();notify('原始 PNG 已加入獨立圖層');
     }catch(error){notify(error.message,true);}
   }
-  function pairedFlags(c,o,patch){const pair=editable.isMember(o)?editable.pair(c,o):null;const objects=pair?[pair.bg,pair.text]:[o];for(const item of objects){if(!item)continue;Object.assign(item,patch);if(item.locked)multi.FLAGS.filter(k=>k!=='locked').forEach(k=>item[k]=false);multi.permissions(c,item,true);}render();}
+  function pairedFlags(c,o,patch){const pair=editable.isMember(o)?editable.pair(c,o):null;const objects=pair?[pair.bg,pair.text]:[o];for(const item of objects){if(!item)continue;Object.assign(item,patch);if(item.locked)multi.FLAGS.filter(k=>k!=='locked'&&!(k==='canEdit'&&item.templateSlot)).forEach(k=>item[k]=false);multi.permissions(c,item,true);}render();}
   function render(){controls();const c=canvas(),box=by('bf-tpl-layer-list');if(!box||!c||!mode)return;
     if(observed!==box){observed=box;new MutationObserver(()=>{if(mode&&box.children.length&&!box.firstElementChild?.classList.contains('multi-admin-layer')&&!box.firstElementChild?.classList.contains('multi-admin-empty'))render();}).observe(box,{childList:true});}
     const fragment=document.createDocumentFragment();
@@ -68,13 +68,13 @@
       const top=document.createElement('div');top.className='multi-row-top';const field=document.createElement('input');field.type='text';field.dataset.name='';field.value=multi.name(o);field.maxLength=100;field.onchange=()=>{o.layerName=field.value.trim()||multi.name(o);};
       const type=document.createElement('span');type.dataset.type='';type.textContent=o.templateSlot?'照片框':o.isTplBg?'背景':o.type==='image'?'PNG':o.type==='textbox'?'文字':o.type;
       top.append(field,type);
-      const locked=document.createElement('label');const checkbox=document.createElement('input');checkbox.type='checkbox';checkbox.checked=o.locked;checkbox.dataset.locked='';locked.append(checkbox,document.createTextNode('鎖定'));checkbox.onchange=()=>pairedFlags(c,o,Object.fromEntries(multi.FLAGS.map(flag=>[flag,flag==='locked'?checkbox.checked:!checkbox.checked])));top.append(locked);
+      const locked=document.createElement('label');const checkbox=document.createElement('input');checkbox.type='checkbox';checkbox.checked=o.locked;checkbox.dataset.locked='';locked.append(checkbox,document.createTextNode('鎖定'));checkbox.onchange=()=>pairedFlags(c,o,Object.fromEntries(multi.FLAGS.map(flag=>[flag,flag==='locked'?checkbox.checked:flag==='canEdit'&&o.templateSlot?o.canEdit:!checkbox.checked])));top.append(locked);
       for(const [title,fn] of [['顯示／隱藏',()=>o.set('visible',o.visible===false)],['上移',()=>c.bringForward(o)],['下移',()=>c.sendBackwards(o)]]){
         const button=document.createElement('button');button.type='button';button.title=title;button.setAttribute('aria-label',title);button.textContent=title==='上移'?'↑':title==='下移'?'↓':o.visible===false?'顯示':'隱藏';button.onclick=()=>{fn();c.requestRenderAll();c.fire('object:modified',{target:o});render();};top.append(button);
       }
       row.append(top);const details=document.createElement('details');const summary=document.createElement('summary');summary.textContent='客人可編輯權限';const flags=document.createElement('div');
       for(const [key,label] of [['canMove','移動／圖層順序'],['canScale','縮放'],['canRotate','旋轉'],['canDelete','刪除'],['canDuplicate','複製'],['canEdit','文字／內容／翻轉']]){
-        const labelEl=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.checked=o[key];input.disabled=o.locked;input.dataset.permission=key;input.onchange=()=>pairedFlags(c,o,{[key]:input.checked});labelEl.append(input,document.createTextNode(label));flags.append(labelEl);
+        const labelEl=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.checked=o[key];input.disabled=o.locked&&!(key==='canEdit'&&o.templateSlot);input.dataset.permission=key;input.onchange=()=>pairedFlags(c,o,{[key]:input.checked});labelEl.append(input,document.createTextNode(label));flags.append(labelEl);
       }
       details.append(summary,flags);row.append(details);row.onclick=e=>{if(e.target.closest('button,input,label,details'))return;c.setActiveObject(o);c.requestRenderAll();};fragment.append(row);
     }

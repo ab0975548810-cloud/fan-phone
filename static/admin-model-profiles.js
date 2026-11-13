@@ -8,6 +8,10 @@
   let editingModel = null;
   let activeStyleId = '';
   let profileSnapshot = '';
+  let filmStyleId = '';
+  let importedFilmProfile = null;
+  const products = window.BenfuwanProducts;
+  const editingFilm = () => document.getElementById('model-product-type')?.value === 'camera_film';
 
   const notify = (message, type = 'error') => {
     const workspace = window.BenfuwanAdminProductWorkspace;
@@ -24,7 +28,7 @@
     if (!model || !styleId) return null;
     const profiles = model.case_profiles && typeof model.case_profiles === 'object' ? model.case_profiles : {};
     if (Object.prototype.hasOwnProperty.call(profiles, styleId)) return profiles[styleId] || {};
-    return styleId === LEGACY_CRYSTAL_STYLE_ID ? model : null;
+    return products.type(model) === 'phone_case' && styleId === LEGACY_CRYSTAL_STYLE_ID ? model : null;
   }
   window.BenfuwanCaseProfiles = Object.freeze({LEGACY_CRYSTAL_STYLE_ID, profileFor, complete});
 
@@ -46,10 +50,11 @@
     if (!body) return;
     const styles = activeStyles(), models = shopData.models || [];
     body.innerHTML = models.length ? models.map((model, index) => {
-      const statuses = styles.length ? styles.map(caseStyle => {
+      const relevant = styles.filter(s => products.compatible(model, s));
+      const statuses = relevant.length ? relevant.map(caseStyle => {
         const ready = complete(profileFor(model, caseStyle.id));
         return `<span class="bf-model-profile-status ${ready ? 'ready' : 'bad'}">${esc(caseStyle.name || caseStyle.id)}：${ready ? '已設定' : '未設定'}</span>`;
-      }).join('') : '<span class="bad">目前沒有上架殼款</span>';
+      }).join('') : '<span class="bad">' + (window.BenfuwanProducts.type(model) === 'camera_film' ? '底膜獨立商品尚未設定' : '目前沒有上架殼款') + '</span>';
       return `<tr><td>${index + 1}</td><td>${esc(model.brand)}</td><td><b>${esc(model.name)}</b><br><small class="${model.status === false ? 'bad' : 'ok'}">${model.status === false ? '已下架' : '上架中'}</small></td><td><div class="bf-model-profile-statuses">${statuses}</div></td><td><button class="btn alt mini" data-edit-model="${esc(model.id)}">編輯</button><button class="btn danger mini" data-delete-model="${esc(model.id)}">刪除</button></td></tr>`;
     }).join('') : '<tr><td colspan="5" class="empty">目前沒有型號</td></tr>';
     body.querySelectorAll('[data-edit-model]').forEach(button => button.onclick = () => window.openModelEditor(button.dataset.editModel));
@@ -80,7 +85,8 @@
   function renderProfilePanel() {
     const host = document.getElementById('model-profile-admin');
     if (!host) return;
-    const styles = activeStyles();
+    const film = editingFilm();
+    const styles = film ? [{id:filmStyleId, name:'鏡頭底膜'}] : activeStyles().filter(s => (s.product_type || 'phone_case') === 'phone_case');
     if (!styles.length) {
       activeStyleId = '';
       host.innerHTML = '<div class="notice bad">請先建立並上架至少一個手機殼款，再設定生產資料。</div>';
@@ -88,7 +94,7 @@
     }
     if (!styles.some(row => String(row.id) === String(activeStyleId))) activeStyleId = styles[0].id;
     const selected = styles.find(row => String(row.id) === String(activeStyleId));
-    const profile = profileFor(editingModel, activeStyleId) || {};
+    const profile = (film ? importedFilmProfile : null) || profileFor(editingModel, activeStyleId) || {};
     const tabs = styles.map(caseStyle => {
       const ready = complete(profileFor(editingModel, caseStyle.id));
       return `<button type="button" class="bf-profile-tab ${ready ? 'ready' : ''} ${caseStyle.id === activeStyleId ? 'active' : ''}" data-profile-style="${esc(caseStyle.id)}"><span class="dot"></span>${esc(caseStyle.name || caseStyle.id)}</button>`;
@@ -116,6 +122,24 @@
     ['mask', 'line'].forEach(kind => {
       document.getElementById(`model-profile-${kind}-file`)?.addEventListener('change', event => uploadProfileImage(event, kind));
     });
+    if (film && !complete(profile)) {
+      const legacy = Object.entries(editingModel?.case_profiles || {}).filter(([id,p]) => id !== filmStyleId && complete(p));
+      if (legacy.length) {
+        const box = document.createElement('div'); box.className = 'notice';
+        box.innerHTML = '<b>既有設定不會自動繼承。</b>可明確確認並帶入本型號已存的底膜刀模，或重新上傳。';
+        legacy.forEach(([id,p]) => {
+          const b = document.createElement('button'); b.type='button'; b.className='btn alt mini';
+          const name = (shopData.styles || []).find(s => s.id === id)?.name || id;
+          b.textContent = '確認帶入本型號的「' + name + '」刀模';
+          b.onclick = () => {
+            if (!confirm('請確認這是本型號的底膜刀模與校準值。只複製到獨立底膜商品，不修改原設定。')) return;
+            importedFilmProfile = structuredClone(p); renderProfilePanel();
+          };
+          box.appendChild(b);
+        });
+        host.prepend(box);
+      }
+    }
     profileSnapshot = currentProfileSnapshot();
   }
 
@@ -147,6 +171,27 @@
     document.getElementById('model-brand').value = editingModel?.brand || defaultBrand || '';
     document.getElementById('model-name').value = editingModel?.name || '';
     document.getElementById('model-active').checked = editingModel?.status !== false;
+    filmStyleId = editingModel?.direct_style_id || `film_${id || Date.now()}`;
+    importedFilmProfile = null;
+    let config = document.getElementById('model-product-config');
+    if (!config) {
+      config = document.createElement('div'); config.id='model-product-config';
+      config.innerHTML = '<div class="field"><label>商品類型</label><select id="model-product-type"><option value="phone_case">手機殼（款式／顏色／模板）</option><option value="camera_film">鏡頭底膜（直接設計）</option></select></div><div id="model-film-config" class="row"><div class="field"><label>底膜商品名稱</label><input id="model-film-name"></div><div class="field"><label>底膜獨立售價</label><input id="model-film-price" type="number" min="1" step="1"></div></div>';
+      document.getElementById('model-profile-admin').before(config);
+    }
+    const typeInput = document.getElementById('model-product-type');
+    typeInput.value = products.type(editingModel);
+    const filmStyle = (shopData.styles || []).find(s => s.id === filmStyleId);
+    document.getElementById('model-film-name').value = filmStyle?.name || '鏡頭底膜';
+    document.getElementById('model-film-price').value = filmStyle?.price ?? 490;
+    const updateType = () => { document.getElementById('model-film-config').style.display = editingFilm() ? '' : 'none'; renderProfilePanel(); };
+    typeInput.onchange = () => {
+      if (profileIsDirty() && !confirm('目前有尚未儲存的修改，確定切換商品類型？')) {
+        typeInput.value = typeInput.value === 'camera_film' ? 'phone_case' : 'camera_film'; return;
+      }
+      updateType();
+    };
+    document.getElementById('model-film-config').style.display = editingFilm() ? '' : 'none';
     const styles = activeStyles();
     activeStyleId = styles.some(row => String(row.id) === String(requestedStyleId))
       ? requestedStyleId
@@ -176,7 +221,20 @@
       status: document.getElementById('model-active').checked,
       case_profiles: {...(previous.case_profiles && typeof previous.case_profiles === 'object' ? previous.case_profiles : {}), [activeStyleId]: profile},
     };
-    const next = structuredClone(shopData), index = next.models.findIndex(row => String(row.id) === String(id));
+    patch.product_type = editingFilm() ? 'camera_film' : 'phone_case';
+    const next = structuredClone(shopData);
+    if (editingFilm()) {
+      const price = Number(value('model-film-price'));
+      const productName = value('model-film-name').trim();
+      if (!productName || !Number.isInteger(price) || price <= 0) return notify('請填底膜名稱與正整數售價');
+      patch.direct_style_id = filmStyleId;
+      const old = (next.styles || []).find(s => s.id === filmStyleId);
+      const dedicated = {...(old || {}), id:filmStyleId, name:productName, price,
+        product_type:'camera_film', colors:[], model_colors:{}, status:true};
+      const si = next.styles.findIndex(s => s.id === filmStyleId);
+      if (si < 0) next.styles.push(dedicated); else next.styles[si] = dedicated;
+    } else { delete patch.direct_style_id; }
+    const index = next.models.findIndex(row => String(row.id) === String(id));
     if (index >= 0) next.models[index] = patch; else next.models.push(patch);
     const button = document.getElementById('model-save');
     modelSaveBusy = true;

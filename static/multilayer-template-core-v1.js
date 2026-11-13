@@ -3,17 +3,21 @@
   'use strict';if(window.BenfuwanMultilayer)return;
   const VERSION='multilayer-v1';
   const FLAGS=['locked','canMove','canScale','canRotate','canDelete','canDuplicate','canEdit'];
-  const PROPS=['role','layerId','templateLayerId','layerInstanceId','templateApplicationId','layerName','assetId','duplicateOf','normalizedGeometry','zIndex',...FLAGS,'sourceSize','cropX','cropY','templateSlot','slotId','slotMeta','isSlot','isTplBg','templateState','layer_contract_version'];
+  const PROPS=['role','layerId','templateLayerId','layerInstanceId','templateApplicationId','layerName','assetId','duplicateOf','normalizedGeometry','zIndex','adaptationRole',...FLAGS,'sourceSize','cropX','cropY','templateSlot','slotId','slotMeta','isSlot','isTplBg','templateState','layer_contract_version'];
   const uid=()=>crypto.randomUUID(),clone=v=>structuredClone(v);
   const text=o=>['text','textbox','i-text'].includes(o.type);
   const core=()=>window.BenfuwanEditableSticker;
   const freeze=v=>{if(v&&typeof v==='object'){Object.values(v).forEach(freeze);Object.freeze(v);}return v;};
   const dimensions=o=>({w:(Number(o.width)||0)+(o.strokeUniform?0:Number(o.strokeWidth)||0),h:(Number(o.height)||0)+(o.strokeUniform?0:Number(o.strokeWidth)||0)});
-  function geometry(o,c){const p=o.getCenterPoint();return {x:p.x/c.width,y:p.y/c.height,width:o.getScaledWidth()/c.width,height:o.getScaledHeight()/c.height};}
+  function geometry(o,c){const p=o.getCenterPoint();
+    // Exact boundary values can become 1 + 2e-16 after Fabric scale math.
+    // Canonicalize only floating-point noise, never clamp actual overflow.
+    const canonical=n=>Math.abs(n)<1e-12?0:Math.abs(n-1)<1e-12?1:n;
+    return {x:canonical(p.x/c.width),y:canonical(p.y/c.height),width:canonical(o.getScaledWidth()/c.width),height:canonical(o.getScaledHeight()/c.height)};}
   function validGeometry(g){if(!g||!['x','y','width','height'].every(k=>Number.isFinite(g[k])&&g[k]>=0&&g[k]<=1)||!g.width||!g.height)throw Error('圖層位置／尺寸需在模板畫布範圍內（0～1）');return g;}
   function map(o,g,c){validGeometry(g);const d=dimensions(o),stroke=o.strokeUniform?Number(o.strokeWidth)||0:0;
     o.set({originX:'center',originY:'center',left:g.x*c.width,top:g.y*c.height,scaleX:(g.width*c.width-stroke)/Math.max(.0001,d.w),scaleY:(g.height*c.height-stroke)/Math.max(.0001,d.h)});o.setCoords();}
-  function defaults(o){const locked=o.locked??Boolean(o.isTplBg||o.role==='template-bg');return Object.fromEntries(FLAGS.map(k=>[k,k==='locked'?locked:locked?false:o[k]??true]));}
+  function defaults(o){const locked=o.locked??Boolean(o.isTplBg||o.role==='template-bg');return Object.fromEntries(FLAGS.map(k=>[k,k==='locked'?locked:locked?(k==='canEdit'&&!!o.templateSlot?o[k]===true:false):o[k]??true]));}
   function name(o){return o.layerName||o.originalName||o.text?.slice(0,18)||(o.isSlot?'照片框':o.isTplBg?'背景':o.type==='image'?'圖片':'素材');}
   function decorate(o,c){
     if(!o.stroke)o.strokeWidth=0;
@@ -25,21 +29,32 @@
     return o;
   }
   function policy(c,o){return c.templateState?.initial?.find(r=>r.templateLayerId===o.templateLayerId)||o;}
-  function allowed(c,o,flag){if(!o?.templateLayerId)return true;const p=policy(c,o);return !p.locked&&p[flag]!==false;}
+  function allowed(c,o,flag){if(!o?.templateLayerId)return true;const p=policy(c,o);
+    // A photo placeholder is intended for the customer to fill, even when
+    // the author has locked the frame's geometry against dragging/resizing.
+    if(flag==='canEdit'&&o.templateSlot&&['slot-guide','slot-photo'].includes(o.role))return p.canEdit===true;
+    return !p.locked&&p[flag]!==false;}
   function permissions(c,o,admin=false){
     if(admin){o.set({selectable:true,evented:true,lockMovementX:false,lockMovementY:false,lockScalingX:false,lockScalingY:false,lockRotation:false,editable:true,hasControls:true});return;}
     const p=policy(c,o);FLAGS.forEach(k=>o[k]=p[k]);
     if(!p.canRotate)o.set('angle',p.angle||0);
-    o.set({selectable:!p.locked,evented:!p.locked,lockMovementX:p.locked||!p.canMove,lockMovementY:p.locked||!p.canMove,lockScalingX:p.locked||!p.canScale,lockScalingY:p.locked||!p.canScale,lockRotation:p.locked||!p.canRotate,editable:!p.locked&&p.canEdit,hasControls:!p.locked&&(p.canScale||p.canRotate)});
+    const photoSlot=!!o.templateSlot&&['slot-guide','slot-photo'].includes(o.role);
+    o.set({selectable:photoSlot&&o.role==='slot-photo'?true:!p.locked,evented:(photoSlot&&p.canEdit)||!p.locked,lockMovementX:p.locked||!p.canMove,lockMovementY:p.locked||!p.canMove,lockScalingX:p.locked||!p.canScale,lockScalingY:p.locked||!p.canScale,lockRotation:p.locked||!p.canRotate,editable:photoSlot?p.canEdit===true:(!p.locked&&p.canEdit),hasControls:!p.locked&&(p.canScale||p.canRotate)});
+    if(o.bfUserLocked)o.set({lockMovementX:true,lockMovementY:true,lockScalingX:true,lockScalingY:true,lockRotation:true,hasControls:false});
     o.setControlsVisibility?.({tl:!!p.canScale,tr:!!p.canScale,bl:!!p.canScale,br:!!p.canScale,mtr:!!p.canRotate,mt:false,mb:false,ml:false,mr:false});
-    if(o.role==='slot-guide'){o.selectable=false;o.evented=!p.locked&&p.canEdit;}
+    if(o.role==='slot-guide'){o.selectable=false;o.evented=p.canEdit===true;}
     if(o.role==='editable-sticker-text'){o.lockMovementX=o.lockMovementY=o.lockScalingX=o.lockScalingY=o.lockRotation=true;o.hasControls=false;}
   }
   function update(c){if(c.layer_contract_version!==VERSION)return;core()?.syncAll(c);
     c.getObjects().forEach((o,i)=>{if(o.templateLayerId){const g=geometry(o,c);if(g.x<0||g.x>1||g.y<0||g.y>1||g.width>1.000001||g.height>1.000001)constrain(o,c);o.normalizedGeometry=geometry(o,c);o.zIndex=i;permissions(c,o);}});
   }
   function constrain(o,c){const d=dimensions(o),center=o.getCenterPoint();o.setPositionByOrigin(new fabric.Point(Math.max(0,Math.min(c.width,center.x)),Math.max(0,Math.min(c.height,center.y))),'center','center');
-    o.set({scaleX:Math.min(Math.max(.001,o.scaleX),c.width/Math.max(1,d.w)),scaleY:Math.min(Math.max(.001,o.scaleY),c.height/Math.max(1,d.h))});o.setCoords();}
+    const x=Math.max(.000001,Math.abs(o.scaleX)),y=Math.max(.000001,Math.abs(o.scaleY)),stroke=o.strokeUniform?(o.strokeWidth||0):0;
+    // A single bounded factor preserves the authored ratio, including photos
+    // and paired stickers, when either axis reaches the template boundary.
+    const upper=Math.min((c.width-stroke)/Math.max(.000001,d.w*x),(c.height-stroke)/Math.max(.000001,d.h*y));
+    const factor=Math.min(upper,Math.max(1,.001/x,.001/y));
+    o.set({scaleX:x*factor,scaleY:y*factor});o.setPositionByOrigin(new fabric.Point(Math.max(0,Math.min(c.width,center.x)),Math.max(0,Math.min(c.height,center.y))),'center','center');o.setCoords();}
   async function fonts(c){await core()?.textFonts(c);}
   function exportTemplate(c){
     const rows=c.getObjects().filter(o=>o.role!=='guide');rows.forEach(o=>decorate(o,c));
@@ -61,6 +76,9 @@
     const application=uid(),pairs=new Map();
     for(const [i,o] of objects.entries()){
       const saved=raw.objects[i];o.set({layerId:saved.layerId,templateLayerId:saved.layerId,layerInstanceId:(binding?.applicationId||application)+':'+saved.layerId,templateApplicationId:binding?.applicationId||application});Object.assign(o,defaults(saved));
+      // Match the deterministic renderer: master layers are drawn from their
+      // original vectors/fonts, not Fabric's intermediate bitmap object cache.
+      if(tpl.adaptation_contract_version==='master-v1')o.objectCaching=false;
       map(o,saved.normalizedGeometry,c);o.zIndex=i;
       if(o.editableStickerInstanceId){if(!pairs.has(o.editableStickerInstanceId))pairs.set(o.editableStickerInstanceId,uid());o.editableStickerInstanceId=pairs.get(o.editableStickerInstanceId);}
       if(!admin&&o.templateSlot){o.set({role:'slot-guide',fill:'rgba(255,255,255,.25)',stroke:'#ff6f9a',strokeWidth:1.5,strokeUniform:true,strokeDashArray:[5,4]});map(o,saved.normalizedGeometry,c);}
@@ -80,7 +98,7 @@
   }
   function hydrate(c){if(c.layer_contract_version!==VERSION)return;
     if(c.templateState)c.templateState=freeze(clone(c.templateState));
-    c.selection=false;c.getObjects().filter(o=>o.templateLayerId).forEach(o=>{map(o,o.normalizedGeometry,c);permissions(c,o);});
+    c.selection=false;c.getObjects().filter(o=>o.templateLayerId).forEach(o=>{if(c.templateState?.binding?.geometryHash)o.objectCaching=false;map(o,o.normalizedGeometry,c);permissions(c,o);});
   }
   async function serialize(c,ctx){update(c);const data=await core().serialize(c,ctx);data.layer_contract_version=VERSION;data.templateBinding=clone(c.templateState.binding);data.emptyTemplateSlots=c.getObjects().filter(o=>o.templateSlot&&o.role==='slot-guide').map(o=>o.toObject(PROPS));data.objects.forEach((o,i)=>o.zIndex=i);delete data.templateState;return data;}
   async function prepareRender(c,data){if(data.layer_contract_version!==VERSION)return;c._objects.sort((a,b)=>(a.zIndex??0)-(b.zIndex??0));for(const o of c.getObjects()){if(o.templateLayerId){map(o,o.normalizedGeometry,c);o.setCoords();}}await core()?.rehydrate(c);}

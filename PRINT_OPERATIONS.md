@@ -103,11 +103,11 @@ Keep `YUN_PRINT_ENABLED` unset or false until callback reachability, artwork fet
 
 Provide this printer-status callback URL to the vendor for backend binding:
 
-`https://fanphone.zeabur.app/api/print/printer-callback`
+`https://fanphone.tw/api/print/printer-callback`
 
 Task callbacks continue to use:
 
-`https://fanphone.zeabur.app/api/print/callback`
+`https://fanphone.tw/api/print/callback`
 
 Printer status code `6` remains raw-only until the vendor gives one consistent definition.
 

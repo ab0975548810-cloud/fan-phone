@@ -70,6 +70,7 @@ def editable_sticker_test(browser,base,poll):
     page.reload()
     poll(page,"() => window.BenfuwanDesignDraft?.state().prompt==='ready'")
     page.locator('#home-design-card').click()
+    page.locator('#design-library').get_by_role('button', name='繼續編輯').first.click()
     poll(page,"() => document.getElementById('page-editor').classList.contains('active') && canvas?.getObjects().some(o=>o.editableStickerInstanceId)")
     page.evaluate("() => {window.__pair=BenfuwanEditableSticker.pair(canvas,canvas.getObjects().find(o=>o.editableStickerInstanceId));const mask=document.createElement('canvas');mask.width=200;mask.height=400;const g=mask.getContext('2d');g.fillStyle='#000';g.fillRect(10,10,180,380);g.clearRect(15,15,35,35);window.__editableMask=mask.toDataURL();}")
     assert page.evaluate('__pair.text.type')=='textbox'

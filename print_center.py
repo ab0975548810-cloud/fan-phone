@@ -1,5 +1,6 @@
 """Print Phase 3.1 A5 Desktop domain, safe vendor handoff, and callbacks."""
 from __future__ import annotations
+from catalog_products import film_ready, product_type
 
 import base64
 import hashlib
@@ -10,6 +11,7 @@ import re
 import secrets
 import threading
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlsplit
@@ -82,10 +84,12 @@ def _model_style_profile(model, style_id):
     """Resolve an explicit model/style profile, with one-way crystal legacy compatibility."""
     if not isinstance(model, dict) or not style_id:
         return None
+    if product_type(model) == "camera_film" and str(model.get("direct_style_id") or "") != str(style_id):
+        return None
     profiles = model.get("case_profiles")
     if isinstance(profiles, dict) and style_id in profiles:
         return profiles.get(style_id) if isinstance(profiles.get(style_id), dict) else None
-    return model if style_id == LEGACY_CRYSTAL_STYLE_ID else None
+    return model if product_type(model) == "phone_case" and style_id == LEGACY_CRYSTAL_STYLE_ID else None
 
 
 def _complete_model_style_profile(model, style_id):
@@ -209,6 +213,10 @@ class PrintService:
         model = next((row for row in (shop.get("models") or [])
                       if str(row.get("id") or "") == model_id), None)
         profile = _complete_model_style_profile(model, style_id)
+        if model and product_type(model) == "camera_film":
+            style = next((s for s in shop.get("styles", []) if str(s.get("id")) == style_id), None)
+            if not film_ready(model, style):
+                profile = None
         if not profile:
             raise PrintError(
                 "PRODUCTION_STYLE_NOT_CONFIGURED",
@@ -716,6 +724,9 @@ class PrintService:
             raise PrintError("BAD_MODEL_PROFILE", "找不到要儲存的型號", 400)
         if not any(str(row.get("id") or "") == style_id for row in (shop.get("styles") or [])):
             raise PrintError("BAD_MODEL_PROFILE", "找不到要儲存的殼款", 400)
+        style = next(row for row in shop["styles"] if str(row.get("id") or "") == style_id)
+        if not film_ready(model, style):
+            raise PrintError("BAD_MODEL_PROFILE", "請確認獨立商品、售價與完整生產設定；底膜不可使用手機殼款式或顏色", 400)
         source_profile = _complete_model_style_profile(model, style_id)
         if not source_profile:
             raise PrintError("BAD_MODEL_PROFILE", "預覽遮罩、打印線圖與列印尺寸必須完整", 400)
@@ -1575,6 +1586,10 @@ def install(app_module):
 
     @app.route("/api/print/artwork/<job_id>/<token>")
     def print_artwork(job_id, token):
+        try:
+            uuid.UUID(job_id)
+        except (ValueError, AttributeError):
+            return app_module.no_cache_json({"status": "error", "msg": "生產圖連結無效"}, 404)
         job = service.store.job(job_id)
         if not service.verify_artwork_token(job, token):
             return app_module.no_cache_json({"status": "error", "msg": "生產圖連結無效"}, 404)

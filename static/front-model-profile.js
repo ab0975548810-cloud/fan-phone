@@ -8,7 +8,8 @@
   const text = value => String(value || '').trim();
   const filmFrames = new Map();
   const filmLoads = new Map();
-  const isFilm = model => /背膜|底膜/.test(String(model?.brand || '') + String(model?.name || ''));
+  const products = window.BenfuwanProducts;
+  const isFilm = model => products.type(model) === 'camera_film';
 
   function editorGeometry(model, profile) {
     const width = Math.max(1, Math.round(profile.printW * 3));
@@ -45,9 +46,10 @@
 
   function rawProfileFor(model, styleId) {
     if (!model || !styleId) return null;
+    if (isFilm(model) && String(model.direct_style_id || '') !== String(styleId)) return null;
     const profiles = model.case_profiles && typeof model.case_profiles === 'object' ? model.case_profiles : {};
     if (Object.prototype.hasOwnProperty.call(profiles, styleId)) return profiles[styleId] || {};
-    return styleId === LEGACY_CRYSTAL_STYLE_ID ? model : null;
+    return !isFilm(model) && styleId === LEGACY_CRYSTAL_STYLE_ID ? model : null;
   }
 
   function profileFor(model, styleId) {
@@ -91,7 +93,7 @@
 
   function blockUnconfigured(model, caseStyle) {
     const profile = profileFor(model, caseStyle && caseStyle.id);
-    if (profile.ready) return false;
+    if (profile.ready && products.ready(model, caseStyle)) return false;
     const name = model && model.name ? `「${model.name}」` : '這個型號';
     const styleName = caseStyle && caseStyle.name ? `的「${caseStyle.name}」` : '的這個殼款';
     toast(`${name}${styleName}尚未完成生產設定，請選擇其他殼款或聯絡店家。`);
@@ -109,7 +111,8 @@
     const styles = (shopData.styles || []).filter(caseStyle => caseStyle && caseStyle.status !== false);
     document.querySelectorAll('#style-grid .style-card').forEach((card, index) => {
       const caseStyle = styles[index];
-      if (!caseStyle || profileFor(model, caseStyle.id).ready) return;
+      if (!products.compatible(model, caseStyle)) { card.remove(); return; }
+      if (profileFor(model, caseStyle.id).ready) return;
       card.classList.add('bf-style-unconfigured');
       card.setAttribute('aria-disabled', 'true');
       card.onclick = () => blockUnconfigured(model, caseStyle);
@@ -123,7 +126,40 @@
   const originalSelectModel = window.selectModel;
   window.selectModel = function (model) {
     originalSelectModel.apply(this, arguments);
+    const next = document.getElementById('model-next');
+    if (next) {
+      next.textContent = isFilm(model) ? '開始設計' : '下一步';
+      next.onclick = () => isFilm(currentModel()) ? startFilm() : navigate('page-style');
+    }
     return true;
+  };
+
+  function startFilm() {
+    const model = currentModel();
+    const style = (shopData.styles || []).find(s => String(s.id) === String(model?.direct_style_id) && s.status !== false);
+    if (!style || !products.ready(model, style) || blockUnconfigured(model, style)) {
+      toast('此鏡頭底膜尚未完成獨立商品與生產設定，請聯絡店家。');
+      return false;
+    }
+    if (window.selectStyle(style) === false) return false;
+    ctx.colorName = ''; selectedTpl = null;
+    return window.startEditor(false);
+  }
+
+  // Back/history navigation and the in-editor template button cannot expose
+  // phone-case choices for a film. A future film-template route can be explicit.
+  const originalShowPage = window.showPage;
+  window.showPage = function (id) {
+    const film = isFilm(currentModel());
+    if (film && ['page-style','page-template'].includes(id)) id = 'page-model';
+    const templatesButton = document.querySelector('[onclick="openTemplatesInEditor()"]');
+    if (templatesButton) templatesButton.style.display = film ? 'none' : '';
+    return originalShowPage.call(this, id);
+  };
+  const originalOpenTemplates = window.openTemplatesInEditor;
+  window.openTemplatesInEditor = function () {
+    if (isFilm(currentModel())) return false;
+    return originalOpenTemplates.apply(this, arguments);
   };
 
   const originalSelectStyle = window.selectStyle;
@@ -145,6 +181,7 @@
   for (const name of ['openTemplatesFromStyle', 'startEditor']) {
     const original = window[name];
     window[name] = function () {
+      if (name === 'openTemplatesFromStyle' && isFilm(currentModel())) return startFilm();
       if (blockUnconfigured(currentModel(), currentStyle())) return false;
       if (name === 'startEditor' && isFilm(currentModel()) && !editorHasSession) {
         const model = currentModel(), styleId = ctx.styleId, context = ctx, args = arguments;

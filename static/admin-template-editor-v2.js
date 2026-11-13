@@ -130,7 +130,7 @@
 
   async function addStickerItem(s){
     if(!visualCanvas||!s?.url)return;
-    try{setStatus('貼紙載入中…');const el=await loadImageElement(proxyUrl(s.url));const img=new fabric.Image(el,{left:tplW/2,top:tplH/2,originX:'center',originY:'center'});img.publicSrc=s.url;img.stickerId=s.id||'';img.scaleToWidth(Math.min(90,Math.max(55,tplW*.28)));visualCanvas.add(img);visualCanvas.setActiveObject(img);visualCanvas.requestRenderAll();showPanel('');setStatus('貼紙已加入，可以直接拖曳縮放')}
+    try{setStatus('貼紙載入中…');const el=await loadImageElement(proxyUrl(s.url));const img=new fabric.Image(el,{left:tplW/2,top:tplH/2,originX:'center',originY:'center'});img.publicSrc=s.url;img.stickerId=s.id||'';img.scaleToWidth(Math.min(90,Math.max(55,tplW*.28)));visualCanvas.add(img);visualCanvas.setActiveObject(img);visualCanvas.requestRenderAll();showPanel('sticker');setStatus('貼紙已加入，可繼續點選其他貼紙；完成後再按「收起」')}
     catch(e){console.error(e);alert('貼紙載入失敗：'+e.message)}
   }
 

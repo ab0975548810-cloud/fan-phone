@@ -4,8 +4,8 @@ This repository powers the production website for 本福丸訂製.
 
 - Repository: `ab0975548810-cloud/fan-phone`
 - Production branch: `main`
-- Production URL: `https://fanphone.zeabur.app`
-- Deployment: pushes/merges to `main` trigger Zeabur
+- Production URL: `https://fanphone.tw`
+- Deployment: pushes/merges to `main` trigger Railway; the Zeabur service remains available only as the temporary rollback origin during cutover
 
 ## Mandatory companion document
 
@@ -34,7 +34,7 @@ For feature or bugfix PRs:
 - Run the WebKit/browser regression where relevant.
 - A green syntax/CI check does not prove browser behavior. For UI/editor/AI flows, verify the actual browser path when possible.
 - Do not merge a PR with unexplained red checks.
-- Before asking the user to test production, confirm the final `main` commit and Zeabur deployment are successful.
+- Before asking the user to test production, confirm the final `main` commit and Railway deployment are successful.
 
 ## 3. Frontend/editor invariants
 

@@ -119,8 +119,25 @@ class PasskeyService:
     def _default_document(self):
         return {"version": 1, "owner_id": self.config.owner_id, "credentials": []}
 
+    def _store(self):
+        """Keep credentials isolated when the WebAuthn RP ID changes.
+
+        A credential is cryptographically scoped to its RP ID.  During a
+        domain migration the legacy document must therefore remain available
+        to the rollback origin, while the new origin starts with its own
+        document instead of failing every passkey request on owner mismatch.
+        """
+        default = self._default_document()
+        legacy = self.app_module.cloud_get_json(STORE_KEY, self.filepath, default)
+        if isinstance(legacy, dict) and legacy.get("owner_id") == self.config.owner_id:
+            return STORE_KEY, self.filepath, legacy
+        scoped_key = f"{STORE_KEY}:{self.config.owner_id}"
+        scoped_file = f"{self.filepath}.{self.config.owner_id}"
+        scoped = self.app_module.cloud_get_json(scoped_key, scoped_file, default)
+        return scoped_key, scoped_file, scoped
+
     def _load(self):
-        data = self.app_module.cloud_get_json(STORE_KEY, self.filepath, self._default_document())
+        _, _, data = self._store()
         if not isinstance(data, dict) or data.get("version") != 1 or data.get("owner_id") != self.config.owner_id:
             raise RuntimeError("Passkey credential store 格式不符")
         credentials = data.get("credentials")
@@ -129,7 +146,8 @@ class PasskeyService:
         return data
 
     def _save(self, data):
-        self.app_module.cloud_save_json(STORE_KEY, self.filepath, data)
+        key, filepath, _ = self._store()
+        self.app_module.cloud_save_json(key, filepath, data)
 
     def _error(self, code, message, status):
         return self.app_module.no_cache_json({"status": "error", "code": code, "msg": message}, status)

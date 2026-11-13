@@ -56,7 +56,7 @@
       if(o.role==='editable-sticker-text')await font(family,o.text);
       o.set('fontFamily',family);o.initDimensions();o.setCoords();
     }await Promise.all((o._objects||[]).map(visit));}
-    await Promise.all(c.getObjects().map(visit));c.requestRenderAll();
+    await Promise.all(c.getObjects().map(visit));if(c.contextContainer)c.requestRenderAll();
   }
   function members(c,o){const id=typeof o==='string'?o:o?.editableStickerInstanceId;return c.getObjects().filter(x=>x.editableStickerInstanceId===id);}
   function pair(c,o){const list=members(c,o);return {bg:list.find(x=>x.role==='editable-sticker-bg'),text:list.find(x=>x.role==='editable-sticker-text')};}
@@ -83,10 +83,14 @@
     t.setCoords();bg.setCoords();
   }
   async function rehydrate(c){
+    if(!c.contextContainer)return;
     await textFonts(c);
+    // A template/model switch may dispose this canvas while fonts load.
+    if(!c.contextContainer)return;
     for(const o of c.getObjects().filter(isMember))o.role=o.type==='image'?'editable-sticker-bg':'editable-sticker-text';
     const texts=c.getObjects().filter(o=>o.role==='editable-sticker-text');
     await Promise.all(texts.map(o=>font(o.fontFamily,o.text)));
+    if(!c.contextContainer)return;
     for(const t of texts){const {bg}=pair(c,t);sync(bg,t);t.__lastValid=t.text;}
     bind(c);c.requestRenderAll();
   }
@@ -122,10 +126,11 @@
     c.on('selection:created',select);c.on('selection:updated',select);
     c.on('selection:cleared',()=>window.bfEditableSelection?.(c,null));
   }
-  async function add(c,asset){
+  async function add(c,asset,options={}){
     const a=area(asset.textArea),s={text:'輸入文字',fontFamily:'jf-openhuninn',fontSize:160,minFontSize:24,fill:'#604047',stroke:null,strokeWidth:0,textAlign:'center',charSpacing:0,lineHeight:1.2,fontWeight:'400',fontStyle:'normal',...(asset.defaultTextStyle||{})};
     await font(s.fontFamily,s.text);
-    const bg=await new Promise((resolve,reject)=>fabric.Image.fromURL(asset.imageSrc,img=>img?.width?resolve(img):reject(Error('對話框圖片無法載入')),{crossOrigin:'anonymous'}));
+    const bg=options.loadImage?await options.loadImage(asset.imageSrc):await new Promise((resolve,reject)=>fabric.Image.fromURL(asset.imageSrc,img=>img?.width?resolve(img):reject(Error('對話框圖片無法載入')),{crossOrigin:'anonymous'}));
+    if(options.isCurrent&&!options.isCurrent())throw window.BenfuwanEditorImage.fail('cancel');
     const instance=uuid(),common={editableStickerId:asset.id,editableStickerInstanceId:instance};
     bg.set({...common,assetId:asset.id,publicSrc:asset.imageSrc,role:'editable-sticker-bg',left:c.width/2,top:c.height/2,originX:'center',originY:'center',strokeWidth:0});
     bg.scaleToWidth(Math.min(200,c.width*.65));
@@ -156,7 +161,7 @@
       if(raw.type==='image'){
         const el=obj.getElement();raw.sourceSize={width:el.naturalWidth||el.width,height:el.naturalHeight||el.height};
         if(typeof el.src==='string'&&el.src.startsWith('data:image/png;base64,')){raw.src=el.src;return;}
-        if(raw.templateLayerId&&raw.publicSrc){
+        if(raw.templateLayerId&&raw.publicSrc&&!/^data:image\//i.test(el.src || '')){
           const url=window.benfuwanTemplateProxyUrl?.(raw.publicSrc)||raw.publicSrc;
           const response=await fetch(url);if(!response.ok)throw Error('模板原始素材無法讀取');const blob=await response.blob();
           if(blob.type==='image/png'){raw.src=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(blob);});return;}

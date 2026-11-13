@@ -172,10 +172,11 @@
     const models = (shopData.models || []).filter(modelMatches);
     const caseStyles = stylesForProfiles();
     body.innerHTML = models.length ? models.map((model, index) => {
-      const statuses = caseStyles.length ? caseStyles.map(caseStyle => {
+      const relevant = caseStyles.filter(s => window.BenfuwanProducts.compatible(model, s));
+      const statuses = relevant.length ? relevant.map(caseStyle => {
         const ready = completeProfile(profileFor(model, caseStyle.id));
         return `<button type="button" class="bf-model-profile-status ${ready ? 'ready' : 'bad'}" data-model-style="${esc(caseStyle.id)}" data-model-id="${esc(model.id)}" aria-label="編輯 ${esc(model.name)} ${esc(caseStyle.name || caseStyle.id)}生產設定">${esc(caseStyle.name || caseStyle.id)}：${ready ? '已設定' : '未設定'}</button>`;
-      }).join('') : '<span class="bad">目前沒有上架殼款</span>';
+      }).join('') : '<span class="bad">' + (window.BenfuwanProducts.type(model) === 'camera_film' ? '底膜獨立商品尚未設定' : '目前沒有上架殼款') + '</span>';
       return `<tr data-model-id="${esc(model.id)}">
         <td data-label="序號">${index + 1}</td>
         <td data-label="品牌">${esc(model.brand || '未分類')}</td>

@@ -39,6 +39,39 @@
 
   const gate=createGate();
 
+  // For camera-back films, the final customer preview and the order thumbnail
+  // must be derived from the SAME raster that is uploaded as print.png.
+  // The legacy source-frame mockup and production alpha-bounds crop differ.
+  function showFilmProductionPreview(output,context,width,height){
+    const profile=window.BenfuwanModelProfile;
+    const model=typeof shopData==='undefined'?null:(shopData.models||[])
+      .find(item=>String(item.id)===String(context.modelId));
+    if(!profile?.isFilm(model))return;
+    const scale=Math.min(1,1200/Math.max(width,height));
+    const thumb=document.createElement('canvas');
+    thumb.width=Math.max(1,Math.round(width*scale));
+    thumb.height=Math.max(1,Math.round(height*scale));
+    try{
+      const g=thumb.getContext('2d');
+      if(!g)throw new Error('生產圖預覽無法建立，請重新按「完成」。');
+      g.imageSmoothingEnabled=true;
+      g.imageSmoothingQuality='high';
+      g.drawImage(output,0,0,width,height,0,0,thumb.width,thumb.height);
+      const preview=thumb.toDataURL('image/png');
+      // Store the real print-derived preview; do not save a conflicting
+      // source-frame mockup for this product.
+      context.mockupBase64=preview;
+      const image=document.getElementById('preview-image');
+      if(image)image.src=preview;
+      const checker=document.querySelector('.design-checker');
+      if(checker)checker.style.aspectRatio=width+' / '+height;
+      const info=document.querySelector('.preview-info p');
+      if(info)info.textContent='此預覽直接來自將送往銳印的 720 DPI 生產圖。鏡頭孔透明處不印刷；請核對圖案與孔位，若與編輯畫面不同請返回調整。';
+    }finally{
+      thumb.width=thumb.height=1;
+    }
+  }
+
   async function rebuildHQ(target,context){
     const maskApi=window.BenfuwanPrintMask;
     if(!maskApi)throw new Error('高清生產圖元件尚未載入，請重新整理後再試。');
@@ -50,9 +83,14 @@
     if(canvas!==target||ctx!==context||context.printLineUrl!==maskUrl)throw new Error('型號或設計已切換，請重新按「完成」。');
     await new Promise(resolve=>requestAnimationFrame(resolve));
     const output=maskApi.renderPrint(target,state.mask,width,height);
-    const data=pngDensity(output.toDataURL('image/png'));
-    output.width=output.height=1;
-    if(canvas!==target||ctx!==context||context.printLineUrl!==maskUrl)throw new Error('型號或設計已切換，請重新按「完成」。');
+    let data;
+    try{
+      data=pngDensity(output.toDataURL('image/png'));
+      if(canvas!==target||ctx!==context||context.printLineUrl!==maskUrl)throw new Error('型號或設計已切換，請重新按「完成」。');
+      showFilmProductionPreview(output,context,width,height);
+    }finally{
+      output.width=output.height=1;
+    }
     context.printBase64=data;
     context.productionMeta={ppm:PPM,dpi:720,width,height,maskBounds:{...state.mask.bounds}};
     console.info('[PRINT] normalized 720 DPI production PNG ready',width,height,state.mask.bounds);

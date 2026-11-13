@@ -7,7 +7,7 @@ reveals the API key.
 
 This patch also exposes a same-origin MediaPipe vendor proxy. Mobile Safari can be
 unreliable when dynamically importing cross-origin module URLs; serving the JS,
-WASM and MagicTouch model through fanphone.zeabur.app avoids that browser/CDN edge.
+WASM and MagicTouch model through the production origin avoids that browser/CDN edge.
 """
 
 _INSTALLED = False
@@ -78,7 +78,7 @@ def install(app_module):
     app = app_module.app
 
     # MediaPipe Tasks Vision 1.0.1, pinned so the JS and WASM files always match.
-    # Browser requests stay same-origin; Zeabur performs the upstream fetch.
+    # Browser requests stay same-origin; the Railway application performs the upstream fetch.
     mediapipe_version = '1.0.1'
     mediapipe_base = f'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@{mediapipe_version}'
     mediapipe_model = (

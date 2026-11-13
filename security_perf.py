@@ -116,7 +116,7 @@ def _invalidate(path):
     keys = []
     if path in ('/api/admin/save_shop_data', '/api/admin/commerce_set_style_price', '/api/admin/print/model-profiles'):
         keys.append('/api/shop_data')
-    elif path == '/api/admin/save_templates':
+    elif path in ('/api/admin/save_templates', '/api/admin/template-adaptation/save'):
         keys.append('/api/templates')
     elif path in ('/api/admin/upload_image', '/api/admin/batch_upload_stickers', '/api/admin/delete_sticker', '/api/admin/sticker_category', '/api/admin/editable_sticker'):
         keys += ['/api/assets', '/api/templates']
@@ -156,9 +156,9 @@ def install(app_module):
     admin_pw = (os.environ.get('ADMIN_PASSWORD') or '').strip()
     generated_secret = os.environ.get('BENFUWAN_GENERATED_SECRET') == '1'
     if not admin_pw or admin_pw == 'fan123' or len(admin_pw) < 12:
-        print('[SECURITY] WARNING: set ADMIN_PASSWORD in Zeabur to a unique password of at least 12 characters.', flush=True)
+        print('[SECURITY] WARNING: set ADMIN_PASSWORD in Railway to a unique password of at least 12 characters.', flush=True)
     if generated_secret:
-        print('[SECURITY] FLASK_SECRET_KEY is using a safe random per-boot fallback. Set a stable secret in Zeabur to keep sessions across redeploys.', flush=True)
+        print('[SECURITY] FLASK_SECRET_KEY is using a safe random per-boot fallback. Set a stable secret in Railway to keep sessions across redeploys.', flush=True)
 
     @app.before_request
     def _before():

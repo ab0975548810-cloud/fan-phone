@@ -55,3 +55,9 @@
 @media (max-width:360px){.bf-home-content{padding-left:10px;padding-right:10px}.bf-home-hero{min-height:0}.bf-home-hero h1{font-size:30px}.bf-home-hero-copy{min-height:100px;padding-top:16px}.bf-home-hero-art{width:100%;margin-top:0;margin-bottom:0}.bf-home-primary{grid-template-columns:50px minmax(0,1fr) 16px;padding:14px}.bf-home-primary-icon{width:49px;height:57px}.bf-home-primary strong{font-size:23px}.bf-home-quick{grid-template-columns:40px minmax(0,1fr);gap:8px;padding:11px}.bf-home-quick>i{display:none}.bf-home-quick-icon{width:40px}.bf-home-cat-banner{padding-left:44%}}
 @media (max-height:700px){.bf-home-hero{min-height:0}.bf-home-hero-art{width:88%;margin-top:0;margin-bottom:0}.bf-home-hero-copy{min-height:96px;padding-top:14px}.bf-home-hero h1{font-size:29px}.bf-home-primary{min-height:91px}.bf-home-quick{min-height:112px}}
 @media (prefers-reduced-motion:reduce){.bf-home-scroll{scroll-behavior:auto}}
+
+#cart-checkout-bar{margin:10px 14px 18px}
+#cart-checkout-bar button{width:100%}
+#cart-other-items>.card,#design-library{margin:12px 14px;padding:14px}
+#cart-other-items button,#design-library button{min-height:44px;padding:8px 12px;margin:4px}
+#design-library>div+div{border-top:1px solid #eadce1;margin-top:8px}
