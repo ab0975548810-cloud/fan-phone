@@ -1311,17 +1311,26 @@ class PrintService:
             "vendor_connected": bool(self.client.ready),
         }
 
-    def dashboard(self, order_id=None):
+    def dashboard(self, order_id=None, offset=0, limit=30):
+        """Read only one page of orders. Avoid 200 image cards on first paint."""
+        offset = max(0, int(offset))
+        limit = max(1, min(50, int(limit)))
         if order_id:
             order = self.app.commerce.store.order(order_id)
             orders = [order] if order else []
+            has_more = False
         elif self.app.USE_SUPABASE:
             fields = "id,customer_name,model_id,model_name,style_id,style_name,status,print_path,mockup_path,created_at_unix"
-            orders = self.app.SUPABASE.table("orders").select(fields).order("created_at_unix", desc=True).limit(200).execute().data or []
+            fetched = (self.app.SUPABASE.table("orders").select(fields)
+                       .order("created_at_unix", desc=True)
+                       .range(offset, offset + limit).execute().data or [])
+            has_more = len(fetched) > limit
+            orders = fetched[:limit]
         else:
-            orders = self.app.commerce.store.local_orders()
-            orders.sort(key=lambda row: int(row.get("created_at_unix") or 0), reverse=True)
-            orders = orders[:200]
+            fetched = self.app.commerce.store.local_orders()
+            fetched.sort(key=lambda row: int(row.get("created_at_unix") or 0), reverse=True)
+            orders = fetched[offset:offset + limit]
+            has_more = len(fetched) > offset + limit
         commerce = self.app.commerce.read()
         finance = commerce.get("order_finance") or {}
         shop = self.app.cloud_get_json("shop_data", self.app.DATA_FILE, self.app.DEFAULT_SHOP_DATA)
@@ -1381,6 +1390,7 @@ class PrintService:
                 }
         return {
             "rows": result,
+            "next_offset": (offset + len(orders)) if has_more else None,
             "handoffs": handoffs,
             "vendor_ready": self.vendor_ready,
             "vendor_connected": self.client.ready,
@@ -1478,7 +1488,13 @@ def install(app_module):
         order_id = str(request.args.get('order_id') or '').strip()
         if order_id and not re.fullmatch(r'[A-Za-z0-9-]{1,100}', order_id):
             raise PrintError('BAD_REQUEST', '訂單編號格式錯誤', 400)
-        return app_module.no_cache_json({"status": "success", **service.dashboard(order_id or None)})
+        try:
+            offset = int(request.args.get('offset', '0'))
+        except (ValueError, TypeError):
+            raise PrintError('BAD_REQUEST', '分頁參數錯誤', 400)
+        if offset < 0 or offset > 100000:
+            raise PrintError('BAD_REQUEST', '分頁參數超出範圍', 400)
+        return app_module.no_cache_json({"status": "success", **service.dashboard(order_id or None, offset=offset)})
 
     @app.route("/api/admin/print/resend-check")
     @guarded
