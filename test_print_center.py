@@ -301,6 +301,35 @@ class PrintCenterTests(unittest.TestCase):
         self.assertEqual(len([p for p, _ in self.fake.calls
                              if p == "/api/Device/receiveTask"]), before)
 
+    def test_manual_reprint_reconcile_never_adopts_legacy_order_task(self):
+        self.save_profile()
+        self.fake.timeout_paths.add('/api/Device/receiveTask')
+        self.post('manual-reprint', {'order_id': self.order_id})
+        job = app.print_center.store.latest_job(self.order_id)
+        self.assertEqual(job['state'], 'UNKNOWN')
+        self.fake.responses['/api/Device/getAllTasks'] = {'code': 0, 'data': [
+            {'order_id': self.order_id, 'taskid': 'unbound-historical-task', 'status': 0}]}
+        response = self.post('reconcile', {'job_id': job['id']})
+        self.assertEqual(response.status_code, 200)
+        updated = app.print_center.store.job(job['id'])
+        self.assertEqual(updated['state'], 'UNKNOWN')
+        self.assertIsNone(updated['vendor_taskid'])
+        self.fake.responses['/api/Device/getAllTasks'] = {'code': 0, 'data': [
+            {'order_id': vendor_order_identity(job), 'taskid': 'exact-manual-task', 'status': 0}]}
+        self.assertEqual(self.post('reconcile', {'job_id': job['id']}).status_code, 200)
+        self.assertEqual(app.print_center.store.job(job['id'])['vendor_taskid'], 'exact-manual-task')
+        self.assertEqual(len([p for p, _ in self.fake.calls if p.endswith('receiveTask')]), 1)
+
+    def test_manual_reprint_invalid_snapshot_creates_no_attempt(self):
+        self.save_profile()
+        old = self.prepare()
+        app.print_center.store.patch_job(old['id'], {'profile_complete': False})
+        before = app.print_center.store.jobs_for_order(self.order_id)
+        response = self.post('manual-reprint', {'order_id': self.order_id})
+        self.assertEqual(response.get_json()['code'], 'PROFILE_MISSING')
+        self.assertEqual(app.print_center.store.jobs_for_order(self.order_id), before)
+        self.assertFalse(any(p.endswith('receiveTask') for p, _ in self.fake.calls))
+
     def test_manual_reprint_disabled_vendor_creates_nothing(self):
         self.save_profile()
         app.print_center.client = YunPrintClient(

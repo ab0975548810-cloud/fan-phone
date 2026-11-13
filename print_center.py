@@ -1058,7 +1058,9 @@ class PrintService:
                 match = candidates[0]
             elif len(candidates) > 1:
                 ambiguous = True
-            else:
+            elif not job.get("manual_independent"):
+                # Independent manual jobs always use their attempt identity;
+                # a legacy customer-order task cannot identify this new send.
                 # Pre-attempt-identity tasks used the customer order id. They
                 # are safe to adopt only when the remote candidate is unique.
                 legacy = [row for row in rows

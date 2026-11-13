@@ -899,7 +899,9 @@ class PrintStore:
             required = ("artwork_path", "artwork_sha256", "sku_id", "width_mm",
                         "height_mm", "left_mm", "top_mm", "copies", "spot_color",
                         "channel", "angle")
-            if not values or any(values.get(name) is None for name in required):
+            if (not values or any(values.get(name) is None for name in required)
+                    or any(not values.get(name) for name in ("artwork_path", "artwork_sha256", "sku_id"))
+                    or (source and not source.get("profile_complete"))):
                 return {"ok": False, "code": "PROFILE_MISSING"}
             now = utcnow()
             job = {

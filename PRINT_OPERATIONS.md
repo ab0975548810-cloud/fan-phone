@@ -186,3 +186,11 @@ environment variables are changed by this PR.
 正式上線需另行批准：先備份、停止舊應用/worker，再套 migration，再部署相容版本；本 PR 未執行這些正式操作。
 不能在已有多個 active 人工任務時直接恢復舊 unique index 或部署舊 callback 程式；回復需保留新 schema/相容程式並由店主另行規劃，不能刪除/取消任務來硬退版。
 作廢訂單、遺失原圖/參數、總開關關閉或憑證不完整仍 fail closed；這不是以舊任務狀態限制人工重印。
+
+### 2026-11-13 修復與核對
+
+- 獨立人工重送若逾時且沒有 taskid，查核只能採用該 attempt 的 vendor order identity；不得用客戶 order_id 的歷史任務代替，找不到則保持 UNKNOWN，不自動重送。
+- SQLite 與 PostgreSQL 一致：原快照缺少必要內容或 profile_complete=false 時，在建立 attempt/request/audit 前拒絕。
+- 回歸先重現：舊版查核誤把 UNKNOWN 改為 QUEUED，且 SQLite 無效快照留下多餘 PREPARED attempt；新增測試確認修復。
+- 店主核對：原任務 QUEUED／PRINTING／COMPLETED／UNKNOWN 時仍可明確點擊建立獨立重印；同次雙擊只送一次。請核對 UNKNOWN 提示及再次點擊會建立新任務的語意。
+- 本次未修改 migration；既有 migration 仍須在另行批准正式上線時執行。所有驗證使用隔離資料與模擬 vendor，不向正式銳印送任務。

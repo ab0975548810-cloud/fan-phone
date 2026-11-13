@@ -759,3 +759,18 @@ with psycopg.connect(DSN) as db:
                     ([x['job']['id'] for x in [same[0],*different]],)).fetchall()
 assert all(row==('SENDING',None) for row in rows),rows
 print('INDEPENDENT_MANUAL_POSTGRES_CONCURRENCY_AND_CALLBACK_OK')
+
+# Incomplete snapshots must fail before allocating an attempt/audit/request.
+with psycopg.connect(DSN) as db:
+    latest_id = db.execute('select id from public.print_jobs where order_id=%s order by attempt_no desc limit 1',
+                           (manual_order,)).fetchone()[0]
+    db.execute('update public.print_jobs set profile_complete=false where id=%s', (latest_id,))
+    before = db.execute('select count(*) from public.print_jobs where order_id=%s', (manual_order,)).fetchone()[0]
+    result = db.execute("""select public.authorize_manual_reprint(
+        %s,'invalid-manual-snapshot-0001',%s,'fixture-clerk','列印中','{}'::jsonb,false)""",
+        (manual_order, 'f'*64)).fetchone()[0]
+    assert result == {'ok': False, 'code': 'PROFILE_MISSING'}, result
+    assert db.execute('select count(*) from public.print_jobs where order_id=%s', (manual_order,)).fetchone()[0] == before
+    assert not db.execute("select 1 from public.print_requests where request_key='invalid-manual-snapshot-0001'").fetchone()
+    db.rollback()
+print('INDEPENDENT_MANUAL_POSTGRES_INVALID_SNAPSHOT_NO_ATTEMPT_OK')
