@@ -126,10 +126,11 @@
     c.on('selection:created',select);c.on('selection:updated',select);
     c.on('selection:cleared',()=>window.bfEditableSelection?.(c,null));
   }
-  async function add(c,asset){
+  async function add(c,asset,options={}){
     const a=area(asset.textArea),s={text:'輸入文字',fontFamily:'jf-openhuninn',fontSize:160,minFontSize:24,fill:'#604047',stroke:null,strokeWidth:0,textAlign:'center',charSpacing:0,lineHeight:1.2,fontWeight:'400',fontStyle:'normal',...(asset.defaultTextStyle||{})};
     await font(s.fontFamily,s.text);
-    const bg=await new Promise((resolve,reject)=>fabric.Image.fromURL(asset.imageSrc,img=>img?.width?resolve(img):reject(Error('對話框圖片無法載入')),{crossOrigin:'anonymous'}));
+    const bg=options.loadImage?await options.loadImage(asset.imageSrc):await new Promise((resolve,reject)=>fabric.Image.fromURL(asset.imageSrc,img=>img?.width?resolve(img):reject(Error('對話框圖片無法載入')),{crossOrigin:'anonymous'}));
+    if(options.isCurrent&&!options.isCurrent())throw window.BenfuwanEditorImage.fail('cancel');
     const instance=uuid(),common={editableStickerId:asset.id,editableStickerInstanceId:instance};
     bg.set({...common,assetId:asset.id,publicSrc:asset.imageSrc,role:'editable-sticker-bg',left:c.width/2,top:c.height/2,originX:'center',originY:'center',strokeWidth:0});
     bg.scaleToWidth(Math.min(200,c.width*.65));

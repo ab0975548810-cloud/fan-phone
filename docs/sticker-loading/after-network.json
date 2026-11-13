@@ -1,0 +1,27 @@
+[
+  {
+    "proxy": "https://fanphone.tw/api/public/asset_proxy?url=https%3A%2F%2Fsazoqqgeabjiyzbihpdy.supabase.co%2Fstorage%2Fv1%2Fobject%2Fpublic%2Fcase-assets%2Fmaterials%2F40cc4e278e67416bb0ac7ccf17265d15.png",
+    "status": 200
+  },
+  {
+    "proxy": "https://fanphone.tw/api/public/asset_proxy?url=https%3A%2F%2Fsazoqqgeabjiyzbihpdy.supabase.co%2Fstorage%2Fv1%2Fobject%2Fpublic%2Fcase-assets%2Fmaterials%2Fb66b93a135204771a5f5f672dbb7be3e.png",
+    "status": 200
+  },
+  {
+    "proxy": "https://fanphone.tw/api/public/asset_proxy?url=https%3A%2F%2Fsazoqqgeabjiyzbihpdy.supabase.co%2Fstorage%2Fv1%2Fobject%2Fpublic%2Fcase-assets%2Fstickers%2F97b1e5a9a6b8430d8bd55ff38407f4b7.png",
+    "status": 200
+  },
+  {
+    "state": {
+      "objects": [
+        {
+          "role": "sticker",
+          "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAekAAAITCAYAAAAjL+R1AAAQAElEQVR4Aez915dt2XXeCX5rbXds+OtdWgAJIOESjgDhvSM8SIIEjShKIilKpRIlVnXrocdoO/qh/4h66+ruMbqqVVWUKFEUHTyQ3t+83oQ3x2",
+          "width": 489
+        }
+      ],
+      "toast": ""
+    },
+    "draftSaved": true
+  }
+]

@@ -3120,6 +3120,7 @@ def main():
             try:
                 base=f'http://127.0.0.1:{BROWSER_TEST_PORT}';passkey_login_test(browser,base);front_test(browser,base);home_draft_catalog_race_test(browser,base);design_draft_test(browser,base);checkout_test(browser,base);admin_test(browser,base);order_print_workspace_test(browser,base,poll)
                 import runpy
+                runpy.run_path(str(ROOT / '.github/tests/test_sticker_loading.py'))['sticker_loading_test'](browser,base,poll)
                 runpy.run_path(str(ROOT / '.github/tests/test_mobile_editor_tools.py'))['mobile_editor_tools_test'](browser,base,poll)
                 runpy.run_path(str(ROOT / '.github/tests/test_adjust_panel.py'))['adjust_panel_test'](browser,base,poll)
                 runpy.run_path(str(ROOT / '.github/tests/test_pos_dashboard.py'))['dashboard_test'](browser,base,poll)

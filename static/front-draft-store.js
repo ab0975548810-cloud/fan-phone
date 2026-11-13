@@ -56,6 +56,9 @@
     }));
   }
   async function freezeImage(src) {
+    if (!src.startsWith('data:') && window.BenfuwanEditorImage) {
+      return freezeImage(await BenfuwanEditorImage.read(src));
+    }
     let buffer, type;
     if (src.startsWith('data:')) {
       const comma = src.indexOf(','), header = src.slice(5,comma), body = src.slice(comma+1);
