@@ -3126,13 +3126,47 @@ def order_print_workspace_test(browser, base, poll):
     page.close()
 
 
+def cart_request_recovery_test(browser, base):
+    """Mobile cart: committed checkout may be removed without cancelling order."""
+    context=browser.new_context(viewport={'width':390,'height':844},has_touch=True,is_mobile=True)
+    page=context.new_page()
+    page.on('dialog',lambda dialog:dialog.accept())
+    try:
+        page.goto(base+'/',wait_until='domcontentloaded')
+        poll(page,"() => window.BenfuwanDraftCart && typeof renderCart==='function'")
+        def committed(route):
+            route.fulfill(json={'status':'success','state':'COMPLETED','order_id':'fixture-order-123','total':790})
+        page.route('**/api/order_request_status',committed)
+        def setup():
+            return """async () => {
+              const item={draftKey:'draft:cart-recovery-fixture',draftRevision:'revision-1',
+                orderKey:'checkout-recovery-fixture-0001',modelName:'iPhone 16',
+                styleName:'晶透',colorName:'白色',quantity:1,price:790,
+                printBase64:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z7VQAAAAASUVORK5CYII='};
+              cartItem=item;await idbSet('cart',item);renderCart();navigate('page-cart');
+            }"""
+        page.evaluate(setup())
+        page.evaluate("async () => {await BenfuwanDraftCart.remove(cartItem);}")
+        assert page.evaluate("async () => await idbGet('cart')") is None
+        page.evaluate(setup())
+        page.unroute('**/api/order_request_status',committed)
+        def unavailable(route):
+            route.fulfill(status=503,json={'status':'error','msg':'查核暫時不可用'})
+        page.route('**/api/order_request_status',unavailable)
+        page.evaluate("async () => {await BenfuwanDraftCart.remove(cartItem);}")
+        assert page.evaluate("async () => (await idbGet('cart'))?.orderKey")=='checkout-recovery-fixture-0001'
+        print('MOBILE_CART_COMMITTED_REMOVE_AND_UNKNOWN_HOLD_OK')
+    finally:
+        context.close()
+
+
 def main():
     server = ServerThread();server.start();time.sleep(.8)
     try:
         with sync_playwright() as p:
             browser = getattr(p, os.environ.get('BROWSER_ENGINE', 'webkit')).launch()
             try:
-                base=f'http://127.0.0.1:{BROWSER_TEST_PORT}';passkey_login_test(browser,base);front_test(browser,base);home_draft_catalog_race_test(browser,base);design_draft_test(browser,base);checkout_test(browser,base);admin_test(browser,base);order_print_workspace_test(browser,base,poll)
+                base=f'http://127.0.0.1:{BROWSER_TEST_PORT}';passkey_login_test(browser,base);front_test(browser,base);cart_request_recovery_test(browser,base);home_draft_catalog_race_test(browser,base);design_draft_test(browser,base);checkout_test(browser,base);admin_test(browser,base);order_print_workspace_test(browser,base,poll)
                 import runpy
                 runpy.run_path(str(ROOT / '.github/tests/test_sticker_loading.py'))['sticker_loading_test'](browser,base,poll)
                 runpy.run_path(str(ROOT / '.github/tests/test_mobile_editor_tools.py'))['mobile_editor_tools_test'](browser,base,poll)
