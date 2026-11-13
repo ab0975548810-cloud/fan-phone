@@ -830,6 +830,8 @@ class PrintService:
         if not job:
             raise PrintError("JOB_NOT_FOUND", "找不到列印任務", 404)
         if not manual_reprint:
+            if job.get("manual_independent"):
+                raise PrintError("MANUAL_REPRINT_AUTH_REQUIRED", "獨立人工重印只能使用原操作識別送出", 403)
             self._assert_no_prior_physical_activity(job["order_id"])
         order = self._order(job["order_id"])
         self._assert_order_printable(order)
@@ -1056,7 +1058,9 @@ class PrintService:
                 match = candidates[0]
             elif len(candidates) > 1:
                 ambiguous = True
-            else:
+            elif not job.get("manual_independent"):
+                # Independent manual jobs always use their attempt identity;
+                # a legacy customer-order task cannot identify this new send.
                 # Pre-attempt-identity tasks used the customer order id. They
                 # are safe to adopt only when the remote candidate is unique.
                 legacy = [row for row in rows
@@ -1105,6 +1109,8 @@ class PrintService:
         return updated
 
     def _sync_order(self, job):
+        if job.get("manual_independent"):
+            return
         target = "列印中" if job.get("state") == "PRINTING" else ("已完成" if job.get("state") == "COMPLETED" else "")
         if not target:
             return

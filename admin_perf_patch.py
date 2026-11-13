@@ -28,7 +28,7 @@ def install(app_module):
                     '/static/admin-model-profiles.js?v=20261025filmflow1',
                     '/static/admin-asset-categories.js?v=20261012lazyfix1',
                     '/static/admin-template-loader.js?v=20261026master1',
-                    '/static/admin-orders-v3.js?v=20261020manualreprint1',
+                    '/static/admin-orders-v3.js?v=20261113manualreprint1',
                     '/static/admin-steward-v1.js?v=20261001a',
                     '/static/admin-shell-v1.js?v=20261001a',
                     '/static/admin-product-workspace-v1.js?v=20261025filmflow1',
