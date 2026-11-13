@@ -127,6 +127,26 @@ class CommerceTests(unittest.TestCase):
             order_id=order_id, action=action, idempotency_key=key.ljust(16, '0') if key else uuid.uuid4().hex, **extra))
 
 
+    def test_checkout_request_status_reconciles_without_mutating_order_or_stock(self):
+        key = 'checkout-status-recovery-0001'
+        endpoint = '/api/order_request_status'
+        before = self.stock()
+        missing = self.client.post(endpoint, json={'idempotency_key': key})
+        self.assertEqual(missing.status_code, 200)
+        self.assertEqual(missing.get_json()['state'], 'NOT_FOUND')
+        self.assertEqual(self.client.post(endpoint, json={'idempotency_key': 'bad'}).status_code, 400)
+        created = self.create(key)
+        self.assertEqual(created.status_code, 200, created.get_json())
+        order_id = created.get_json()['order_id']
+        confirmed = self.client.post(endpoint, json={'idempotency_key': key})
+        self.assertEqual(confirmed.status_code, 200)
+        self.assertEqual(confirmed.get_json()['state'], 'COMPLETED')
+        self.assertEqual(confirmed.get_json()['order_id'], order_id)
+        self.assertNotIn('customer_name', confirmed.get_json())
+        self.assertEqual(self.stock(), before - 1)
+        self.assertEqual(self.client.post(endpoint, json={'idempotency_key': key}).get_json(), confirmed.get_json())
+        self.assertEqual(self.stock(), before - 1)
+
     def test_concurrent_purchase_and_sale(self):
         ctx = multiprocessing.get_context('spawn')
         barrier, queue = ctx.Barrier(2), ctx.Queue()
