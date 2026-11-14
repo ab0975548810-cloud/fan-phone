@@ -216,7 +216,11 @@
           const original=fabric.Object.prototype.controls[name],horizontal=['ml','mr'].includes(name),action=horizontal?'scaleX':'scaleY';
           const scale=horizontal?fabric.controlsUtils.scalingX:fabric.controlsUtils.scalingY;
           // Explicit axis handlers also prevent the desktop Alt key from skewing.
-          o.controls[name]=new fabric.Control({...original,actionName:action,getActionName:()=>action,actionHandler:(event,transform,x,y)=>stretchable(transform.target)&&mayAdjust(transform.target.canvas,transform.target,'canScale')&&scale(event,transform,x,y)});
+          o.controls[name]=new fabric.Control({...original,actionName:action,getActionName:()=>action,
+            // Keep side touch targets away from the center of tiny template images.
+            // Only handle placement changes; artwork geometry stays untouched.
+            offsetX:original.x*36,offsetY:original.y*36,
+            actionHandler:(event,transform,x,y)=>stretchable(transform.target)&&mayAdjust(transform.target.canvas,transform.target,'canScale')&&scale(event,transform,x,y)});
         }
       }
     }
