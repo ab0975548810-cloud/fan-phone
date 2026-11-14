@@ -568,6 +568,27 @@ def install(app_module):
             release(app_module,req.get('design_json'))
     app.view_functions['create_order'] = create_order
 
+    @app.route('/api/order_request_status', methods=['POST'])
+    def order_request_status():
+        """Read-only reconciliation by an unguessable checkout idempotency key.
+
+        Never returns customer details or creates an order. A missing key is
+        not proof that an in-flight request cannot still commit.
+        """
+        payload = request.get_json(silent=True)
+        key = payload.get('idempotency_key') if isinstance(payload, dict) else None
+        if not isinstance(key, str) or not re.fullmatch(r'[A-Za-z0-9_-]{16,100}', key):
+            return reply(dict(status='error', code='BAD_REQUEST', msg='送單識別無效'), 400)
+        prior = commerce.read()['requests'].get(key)
+        if not prior:
+            return reply(dict(status='success', state='NOT_FOUND'))
+        response = prior.get('response') or {}
+        if response.get('status') == 'success' and response.get('order_id'):
+            return reply(dict(status='success', state='COMPLETED',
+                              order_id=response['order_id'],
+                              total=response.get('total')))
+        return reply(dict(status='success', state='UNKNOWN'))
+
     @app.after_request
     def inject_commerce(resp):
         if request.path == '/admin' and resp.status_code == 200 and resp.mimetype == 'text/html':

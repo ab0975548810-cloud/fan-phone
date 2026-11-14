@@ -69,6 +69,87 @@
     return navigator.locks.request('benfuwan-cart-write',action);
   }
 
+  async function orderRequestStatus(key) {
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),10000);
+    try {
+      const response=await fetch('/api/order_request_status',{
+        method:'POST',cache:'no-store',
+        signal:controller.signal,
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({idempotency_key:key})
+      });
+      const data=await response.json();
+      if(!response.ok||data.status!=='success')throw Error(data.msg||'目前無法確認送單結果');
+      return data;
+    } finally { clearTimeout(timer); }
+  }
+  async function resolveSubmitted(item) {
+    if(!item?.orderKey)return {state:'NOT_SUBMITTED'};
+    try {
+      const result=await orderRequestStatus(item.orderKey);
+      if(result.state==='COMPLETED' && typeof result.order_id==='string' && result.order_id)return result;
+      if(result.state==='NOT_FOUND')return result;
+      throw Error('送單狀態不明，請稍後再試，設計已保留');
+    }catch(error){
+      toast(error.name==='AbortError'?'查核逾時，購物車與草稿已保留，請稍後再試。':
+        error instanceof TypeError?'無法連線查核送單結果，購物車與草稿已保留。':error.message||'無法查核送單結果，請稍後再試');
+      return {state:'UNKNOWN'};
+    }
+  }
+  function matchesLine(a,b) {
+    return !!a && !!b && a.draftKey===b.draftKey && a.draftRevision===b.draftRevision &&
+      a.orderKey===b.orderKey && a.quantity===b.quantity && a.payment===b.payment;
+  }
+  async function completeRecovered(item,result) {
+    const db=await openIdb();
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction(IDB_STORE,'readwrite'),store=tx.objectStore(IDB_STORE);
+      store.get('cart').onsuccess=e=>{
+        if(!same(item,e.target.result)){tx.abort();return;}
+        store.delete('cart');
+      };
+      tx.oncomplete=resolve;
+      tx.onabort=()=>reject(Error('購物車已變更，請重新開啟確認。'));
+    });
+    cartItem=null;
+    document.getElementById('success-id').textContent=result.order_id;
+    document.getElementById('success-name').textContent='依原訂單資料';
+    document.getElementById('success-pay').textContent='依原訂單資料';
+    document.getElementById('success-total').textContent=result.total==null?'依原訂單資料':'NT$ '+Number(result.total).toLocaleString();
+    updateCartBadge();
+    history.pushState({page:'page-success'},'',location.pathname+'#success');
+    showPage('page-success');
+    // Recovery only clears this cart line. Keep its source design intact.
+  }
+  async function forkSubmitted(item,parked) {
+    const source=await idbGet(item.draftKey);
+    if(!source || (source.revision||source.updatedAt)!==item.draftRevision)
+      throw Error('原草稿已變更，請從「我的設計」確認，原訂單不受影響。');
+    const draftKey='design-draft-v1:'+crypto.randomUUID();
+    const draftRevision=crypto.randomUUID();
+    await BenfuwanDraftStore.change(draftKey,null,()=>({...source,revision:draftRevision,updatedAt:new Date().toISOString()}));
+    if(!await drafts.continueEditing(draftKey))throw Error('此設計無法安全恢復，原草稿與購物車已保留。');
+    const updated={...item,draftKey,draftRevision,orderKey:null};
+    const db=await openIdb();
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction(IDB_STORE,'readwrite'),store=tx.objectStore(IDB_STORE);
+      const key=parked?prefix+item.draftKey:'cart';
+      store.get(key).onsuccess=e=>{
+        if(!same(item,e.target.result)){tx.abort();return;}
+        store.delete(key);
+        if(parked){
+          store.delete(summaries+item.draftKey);
+          store.put(updated,prefix+draftKey);
+          const {modelName,styleName,colorName,quantity,payment,price,orderKey}=updated;
+          store.put({draftKey,draftRevision,modelName,styleName,colorName,quantity,payment,price,orderKey},summaries+draftKey);
+        }else store.put(updated,'cart');
+      };
+      tx.oncomplete=resolve;
+      tx.onabort=()=>reject(Error('購物車已變更，原草稿已保留，請重新開啟確認。'));
+    });
+    return updated;
+  }
+
   // Checkout, quantity changes and moving lines share the same origin-wide lock.
   for (const name of ['submitOrder','changeQty','choosePayment']) {
     const original = window[name];
@@ -76,7 +157,18 @@
       const expected = cartItem;
       if (!expected || saving) return;
       return withCartLock(async()=>{
-        if (name==='submitOrder' && !await currentProduct(expected)) return;
+        if (!same(expected,await idbGet('cart'))) { toast('購物車已變更，請重新開啟確認。');return; }
+        if (name==='submitOrder') {
+          if(expected.orderKey){
+            const status=await resolveSubmitted(expected);
+            if(status.state==='UNKNOWN')return;
+            if(status.state==='COMPLETED'){
+              try { await completeRecovered(expected,status); } catch(error) { toast(error.message); }
+              return;
+            }
+          }
+          if(!await currentProduct(expected))return;
+        }
         if (!same(expected,await idbGet('cart'))) { toast('購物車已變更，請重新開啟確認。');return; }
         return original.apply(this,args);
       });
@@ -105,8 +197,14 @@
     } finally { saving = false; }
   };
   async function remove(item,parked=false) {
-    if (!item || saving || item.orderKey) return toast('此項目暫時無法移除，請先確認送單結果。');
-    if (!confirm('從購物車移除這項商品？已保存的草稿會保留在「我的設計」。')) return;
+    if(!item||saving)return;
+    const result=await resolveSubmitted(item);
+    if(result.state==='UNKNOWN')return;
+    if(result.state==='NOT_FOUND')return toast('送單結果尚未確認，請先返回結帳重試同一筆送單；購物車與草稿已保留。');
+    const message=result.state==='COMPLETED'
+      ?'這筆商品已成立訂單 '+result.order_id+'。移出購物車不會取消原訂單或退回庫存，確定只清除購物車項目？'
+      :'從購物車移除這項商品？已保存的草稿會保留在「我的設計」。';
+    if(!confirm(message))return;
     await withCartLock(async()=>{
       try {
         const db=await openIdb(), key=parked?prefix+item.draftKey:'cart';
@@ -114,7 +212,7 @@
           const tx=db.transaction(IDB_STORE,'readwrite'),store=tx.objectStore(IDB_STORE);
           store.get(key).onsuccess=e=>{
             const stored=e.target.result;
-            if(!stored || stored.orderKey || (parked?stored.draftRevision!==item.draftRevision:!same(item,stored))){tx.abort();return;}
+            if(!stored || (parked?!matchesLine(item,stored):!same(item,stored))){tx.abort();return;}
             store.delete(key);
             if(parked)store.delete(summaries+item.draftKey);
           };
@@ -124,15 +222,30 @@
       } catch(error){toast(error.message);}
     });
   }
-  async function edit(item) {
-    if (saving) return;
-    if (item.orderKey) return toast('此項目已有送單紀錄，請先確認送單結果。');
-    if (!item.draftKey || !await idbGet(item.draftKey)) return toast('此舊項目沒有可還原的編輯草稿。');
-    try { await loadAll(); } catch(error) { return toast('無法確認最新商品資料，草稿已保留，請連線後再試。'); }
-    if (await drafts.continueEditing(item.draftKey)) {
-      ctx.quantity = item.quantity; ctx.payment = item.payment;
-      document.querySelector('.preview-buttons .primary').textContent = '儲存購物車修改';
-    } else toast('此設計無法安全恢復，草稿已保留。');
+  async function edit(item,parked=false) {
+    if(saving)return;
+    return withCartLock(async()=>{
+      try {
+        const stored=await idbGet(parked?prefix+item.draftKey:'cart');
+        if(!matchesLine(item,stored))throw Error('購物車已變更，請重新開啟確認。');
+        item=stored;
+        if(!item.draftKey||!await idbGet(item.draftKey))throw Error('此舊項目沒有可還原的編輯草稿，請保留購物車並聯絡店家。');
+        await loadAll();
+        const submitted=!!item.orderKey;
+        if(item.orderKey){
+          const result=await resolveSubmitted(item);
+          if(result.state==='UNKNOWN')return;
+          if(result.state!=='COMPLETED')throw Error('送單結果尚未確認，請先返回結帳重試同一筆送單；原草稿已保留。');
+          if(!confirm('此商品已成立訂單 '+result.order_id+'。繼續編輯將建立新設計，不會修改或取消已成立的訂單。確定？'))return;
+          item=await forkSubmitted(item,parked);
+        }else if(!await drafts.continueEditing(item.draftKey))throw Error('此設計無法安全恢復，草稿已保留。');
+        if(submitted)cartItem=parked?await exchange(await idbGet('cart'),item.draftKey,null):item;
+        updateCartBadge();
+        ctx.quantity=item.quantity;ctx.payment=item.payment;
+        const button=document.querySelector('.preview-buttons .primary');
+        if(button)button.textContent='儲存購物車修改';
+      }catch(error){toast(error.message||'無法恢復設計，草稿已保留。');}
+    });
   }
   async function others() {
     const db = await openIdb();
@@ -168,7 +281,7 @@
         const editBtn=document.createElement('button'),checkout=document.createElement('button');
         editBtn.className='secondary';checkout.className='primary';
         editBtn.textContent='繼續編輯';checkout.textContent='前往結帳';
-        editBtn.onclick=()=>edit(item);
+        editBtn.onclick=()=>edit(item,true);
         checkout.onclick=async()=>{
           try { cartItem=await withCartLock(()=>exchange(cartItem,item.draftKey,null));updateCartBadge();goCheckoutFromCart(); }
           catch(error){toast(error.message);}

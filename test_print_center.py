@@ -143,6 +143,18 @@ class PrintCenterTests(unittest.TestCase):
                 os.environ[name] = value
         self.tmp.cleanup()
 
+    def test_print_dashboard_is_paged_and_exact_lookup_is_preserved(self):
+        response = self.client.get('/api/admin/print/jobs')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('next_offset', response.get_json())
+        self.assertLessEqual(len(response.get_json()['rows']), 30)
+        self.assertEqual(self.client.get('/api/admin/print/jobs?offset=bad').status_code, 400)
+        self.assertEqual(self.client.get('/api/admin/print/jobs?offset=-1').status_code, 400)
+        exact = self.client.get('/api/admin/print/jobs?order_id=' + self.order_id + '&offset=100')
+        self.assertEqual(exact.status_code, 200)
+        self.assertEqual(len(exact.get_json()['rows']), 1)
+        self.assertIsNone(exact.get_json()['next_offset'])
+
     def create_order(self, *, style_id=None, color_name="透明", key=None):
         key = key or ("checkout-" + uuid.uuid4().hex)
         response = self.client.post("/api/create_order", json={

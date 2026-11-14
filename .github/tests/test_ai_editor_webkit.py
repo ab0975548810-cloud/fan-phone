@@ -1084,6 +1084,52 @@ def design_draft_test(browser, base):
     assert page.evaluate("cartItem.draftKey") == key
     assert page.locator('#cart-other-items button').count() == 0
     assert page.evaluate("cartItem.productionMeta.dpi") == 720
+    # A committed checkout must not permanently lock the customer's design.
+    source_before_fork = page.evaluate("async () => JSON.stringify(await idbGet(cartItem.draftKey))")
+    page.evaluate("""async () => {
+      cartItem.orderKey='checkout-committed-draft-fixture-0001';
+      await idbSet('cart',cartItem);renderCart();
+    }""")
+    submitted_source = page.evaluate("structuredClone(cartItem)")
+    def committed_cart_status(route):
+        route.fulfill(json={'status':'success','state':'COMPLETED','order_id':'existing-order-fixture'})
+    page.route('**/api/order_request_status',committed_cart_status)
+    def accept_committed_edit(dialog):
+        dialog.accept()
+    page.on('dialog',accept_committed_edit)
+    page.locator('#cart-filled').get_by_role('button',name='繼續編輯').click()
+    poll(page,"() => document.getElementById('page-editor')?.classList.contains('active') && !BenfuwanDesignDraft.state().suspended && cartItem?.orderKey===null")
+    assert page.evaluate("async () => (await idbGet('cart'))?.orderKey") is None
+    fork_key = page.evaluate("cartItem.draftKey")
+    assert fork_key != key
+    assert page.evaluate("async key => JSON.stringify(await idbGet(key))", key) == source_before_fork
+    page.evaluate('openPreview()')
+    poll(page,"() => !!ctx.printBase64 && !!ctx.productionMeta")
+    page.locator('.preview-buttons .primary').click()
+    poll(page,"() => document.querySelector('#page-cart.active') && !BenfuwanDraftCart.staging")
+    # A parked committed line restores the full stored item, selects its new
+    # copy, and preserves the previously selected line as another cart item.
+    page.evaluate("""async item => {
+      await idbSet('saved-cart:'+item.draftKey,item);
+      const {draftKey,draftRevision,modelName,styleName,colorName,quantity,payment,price,orderKey}=item;
+      const summary={draftKey,draftRevision,modelName,styleName,colorName,quantity,payment,price,orderKey};
+      await idbSet('cart-summary:'+draftKey,summary);
+      await BenfuwanDraftCart.edit(summary,true);
+    }""", submitted_source)
+    assert page.evaluate("cartItem.draftKey") not in (key, fork_key)
+    assert page.evaluate("async key => !!(await idbGet('saved-cart:'+key))", fork_key)
+    page.evaluate('openPreview()')
+    poll(page,"() => !!ctx.printBase64 && !!ctx.productionMeta")
+    page.locator('.preview-buttons .primary').click()
+    poll(page,"() => document.querySelector('#page-cart.active') && !BenfuwanDraftCart.staging")
+    # Isolate the subsequent single-line checkout fixture.
+    page.evaluate("""async key => {
+      await idbDel('saved-cart:'+key);await idbDel('cart-summary:'+key);await idbDel(key);
+    }""", fork_key)
+    page.unroute('**/api/order_request_status',committed_cart_status)
+    page.remove_listener('dialog',accept_committed_edit)
+    assert page.evaluate("async key => JSON.stringify(await idbGet(key))", key) == source_before_fork
+    print('MOBILE_CART_COMMITTED_EDIT_CREATES_NEW_DESIGN_OK')
     updated_catalog=page.evaluate('structuredClone(shopData)')
     for style in updated_catalog['styles']:style['price']=999
     def changed_price(route):
@@ -1105,10 +1151,14 @@ def design_draft_test(browser, base):
       return {draft:await idbGet(BenfuwanDesignDraft.key),autosave:BenfuwanDesignDraft.state().autosaveEnabled};
     }""")
     assert completed == {'draft':None,'autosave':False}, completed
+    assert page.evaluate("async key => JSON.stringify(await idbGet(key))", key) == source_before_fork
+    # The following legacy invalid-draft fixture assumes a single saved design.
+    # Remove only this test's already-verified preserved source before seeding it.
+    page.evaluate("async key => await idbDel(key)", key)
     print('FRONT_DESIGN_DRAFT_CART_KEEP_ORDER_SUCCESS_CLEAR_OK')
 
     incompatible = page.evaluate("""async draft => {
-      draft.logicalCanvasWidth+=1;await idbSet(BenfuwanDesignDraft.key,draft);return draft;
+      draft.logicalCanvasWidth+=1;draft.updatedAt=new Date().toISOString();await idbSet(BenfuwanDesignDraft.key,draft);return draft;
     }""", full_draft)
     page.reload(wait_until='domcontentloaded')
     poll(page, "() => window.BenfuwanDesignDraft?.state().prompt==='invalid'")
@@ -1253,18 +1303,25 @@ def home_draft_catalog_race_test(browser, base):
 
 def checkout_test(browser, base):
     page = browser.new_page()
-    sent = []
+    sent, committed, status_keys = [], [], []
+    before = app_module.commerce.read()
     def intercept(route):
         sent.append(route.request.post_data_json)
         if len(sent) == 1:
             # Server commits, browser receives a simulated transport failure.
             result = route.fetch()
             assert result.status == 200, result.text()
+            committed.append(result.json())
             route.abort('failed')
         else:
             route.continue_()
     page.route('**/api/create_order', intercept)
-    page.goto(base + '/', wait_until='domcontentloaded')
+    def status_check(route):
+        status_keys.append(route.request.post_data_json['idempotency_key'])
+        route.continue_()
+    page.route('**/api/order_request_status', status_check)
+    with page.expect_response(lambda r:r.url==base+'/api/health'):
+        page.goto(base + '/', wait_until='domcontentloaded')
     poll(page, "() => !!window.BenfuwanOrderPayload && typeof shopData !== 'undefined' && shopData.models?.length")
     page.evaluate("""async () => {
       const c=document.createElement('canvas');c.width=2;c.height=2;
@@ -1280,11 +1337,16 @@ def checkout_test(browser, base):
       await idbSet('cart',cartItem);document.getElementById('form-surname').value='測試';await submitOrder();
     }""")
     assert len(sent) == 1 and sent[0]['idempotency_key']
-    page.reload(wait_until='domcontentloaded')
+    with page.expect_response(lambda r:r.url==base+'/api/health'):
+        page.reload(wait_until='domcontentloaded')
     poll(page, "() => !!window.BenfuwanOrderPayload && typeof shopData !== 'undefined' && shopData.models?.length")
     page.evaluate("async () => {document.getElementById('form-surname').value='測試';await submitOrder()}")
-    assert len(sent) == 2 and sent[0] == sent[1], sent
-    assert page.evaluate("() => !!document.getElementById('success-id').textContent")
+    assert len(sent) == 1, sent
+    assert status_keys == [sent[0]['idempotency_key']]
+    assert page.locator('#success-id').inner_text() == committed[0]['order_id']
+    assert page.locator('#page-success').evaluate("e=>e.classList.contains('active')")
+    after = app_module.commerce.read()
+    assert len(after['order_finance']) == len(before['order_finance'])+1
     assert page.evaluate("() => idbGet('cart')") is None
     print('CHECKOUT_LOST_RESPONSE_RELOAD_OK')
     page.close()
@@ -3126,13 +3188,74 @@ def order_print_workspace_test(browser, base, poll):
     page.close()
 
 
+def cart_request_recovery_test(browser, base):
+    """Mobile cart: committed checkout may be removed without cancelling order."""
+    context=browser.new_context(viewport={'width':390,'height':844},has_touch=True,is_mobile=True)
+    page=context.new_page()
+    page.on('dialog',lambda dialog:dialog.accept())
+    try:
+        with page.expect_response(lambda r:r.url==base+'/api/health'):
+            page.goto(base+'/',wait_until='domcontentloaded')
+        poll(page,"() => window.BenfuwanDraftCart && typeof renderCart==='function'")
+        def committed(route):
+            route.fulfill(json={'status':'success','state':'COMPLETED','order_id':'fixture-order-123','total':790})
+        page.route('**/api/order_request_status',committed)
+        def setup():
+            return """async () => {
+              const item={draftKey:'draft:cart-recovery-fixture',draftRevision:'revision-1',
+                orderKey:'checkout-recovery-fixture-0001',modelName:'iPhone 16',
+                styleName:'晶透',colorName:'白色',quantity:1,price:790,
+                printBase64:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z7VQAAAAASUVORK5CYII='};
+              await idbSet(item.draftKey,{revision:'revision-1',original:true});
+              cartItem=item;await idbSet('cart',item);renderCart();navigate('page-cart');
+            }"""
+        page.evaluate(setup())
+        page.evaluate("async () => {await BenfuwanDraftCart.remove(cartItem);}")
+        assert page.evaluate("async () => await idbGet('cart')") is None
+        assert page.evaluate("async () => (await idbGet('draft:cart-recovery-fixture')).original")
+        page.evaluate(setup())
+        page.unroute('**/api/order_request_status',committed)
+        def unavailable(route):
+            route.fulfill(status=503,json={'status':'error','msg':'查核暫時不可用'})
+        page.route('**/api/order_request_status',unavailable)
+        page.evaluate("async () => {await BenfuwanDraftCart.remove(cartItem);}")
+        assert page.evaluate("async () => (await idbGet('cart'))?.orderKey")=='checkout-recovery-fixture-0001'
+        page.unroute('**/api/order_request_status',unavailable)
+        # NOT_FOUND may be an in-flight commit; never unlock/delete its identity.
+        def missing(route):
+            route.fulfill(json={'status':'success','state':'NOT_FOUND'})
+        page.route('**/api/order_request_status',missing)
+        page.evaluate("async () => {await BenfuwanDraftCart.remove(cartItem);await BenfuwanDraftCart.edit(cartItem);}")
+        assert page.evaluate("async () => (await idbGet('cart'))?.orderKey")=='checkout-recovery-fixture-0001'
+        page.unroute('**/api/order_request_status',missing)
+        page.route('**/api/order_request_status',committed)
+        # Parked submitted lines can be removed without touching their drafts.
+        page.evaluate("""async () => {
+          const item=cartItem;await idbSet('saved-cart:'+item.draftKey,item);
+          await idbSet('cart-summary:'+item.draftKey,item);await idbDel('cart');cartItem=null;
+          await BenfuwanDraftCart.remove(item,true);
+        }""")
+        assert page.evaluate("async () => await idbGet('saved-cart:draft:cart-recovery-fixture')") is None
+        assert page.evaluate("async () => (await idbGet('draft:cart-recovery-fixture')).original")
+        # A stale tab cannot remove or recover a newer cart line.
+        page.evaluate(setup())
+        page.evaluate("""async () => {
+          await idbSet('cart',{...cartItem,orderKey:'checkout-newer-tab-fixture-0001'});
+          await BenfuwanDraftCart.remove(cartItem);await submitOrder();
+        }""")
+        assert page.evaluate("async () => (await idbGet('cart')).orderKey")=='checkout-newer-tab-fixture-0001'
+        print('MOBILE_CART_COMMITTED_REMOVE_AND_UNKNOWN_HOLD_OK')
+    finally:
+        context.close()
+
+
 def main():
     server = ServerThread();server.start();time.sleep(.8)
     try:
         with sync_playwright() as p:
             browser = getattr(p, os.environ.get('BROWSER_ENGINE', 'webkit')).launch()
             try:
-                base=f'http://127.0.0.1:{BROWSER_TEST_PORT}';passkey_login_test(browser,base);front_test(browser,base);home_draft_catalog_race_test(browser,base);design_draft_test(browser,base);checkout_test(browser,base);admin_test(browser,base);order_print_workspace_test(browser,base,poll)
+                base=f'http://127.0.0.1:{BROWSER_TEST_PORT}';passkey_login_test(browser,base);front_test(browser,base);cart_request_recovery_test(browser,base);home_draft_catalog_race_test(browser,base);design_draft_test(browser,base);checkout_test(browser,base);admin_test(browser,base);order_print_workspace_test(browser,base,poll)
                 import runpy
                 runpy.run_path(str(ROOT / '.github/tests/test_sticker_loading.py'))['sticker_loading_test'](browser,base,poll)
                 runpy.run_path(str(ROOT / '.github/tests/test_mobile_editor_tools.py'))['mobile_editor_tools_test'](browser,base,poll)
