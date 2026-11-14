@@ -179,7 +179,7 @@
     if(!window.fabric?.Control||!fabric.controlsUtils?.dragHandler)return null;
     if(window.__bfMoveCorner)return window.__bfMoveCorner;
     const c=new fabric.Control({
-      x:.5,y:.5,offsetX:32,offsetY:32,cursorStyle:'move',actionName:'drag',
+      x:0,y:.5,offsetX:0,offsetY:38,cursorStyle:'move',actionName:'drag',
       actionHandler:fabric.controlsUtils.dragHandler,
       render(ctx,left,top){
         ctx.save();ctx.translate(left,top);
