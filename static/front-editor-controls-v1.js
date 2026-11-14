@@ -1,4 +1,4 @@
-/* Customer editor: a dedicated drag corner, position lock, and reachable template photo slots. */
+/* Customer editor: permission-aware image stretching, position lock and photo slots. */
 (function(){
   'use strict';
   if(window.__bfEditorControls20261017)return;
@@ -9,7 +9,8 @@
   const multi=()=>window.BenfuwanMultilayer;
   const bound=new WeakSet();
   let adjustment=null;
-  const fields={scale:['object-scale-range','object-scale-number','canScale'],opacity:['opacity-range','opacity-number','canEdit'],angle:['angle-range','angle-number','canRotate'],x:[null,'position-x','canMove'],y:[null,'position-y','canMove']};
+  const stretchable=o=>allowed(o)&&!o.isTplBg&&!o.isSlot&&!o.templateSlot&&o.type==='image';
+  const fields={width:['object-width-range','object-width-number','canScale'],height:['object-height-range','object-height-number','canScale'],scale:['object-scale-range','object-scale-number','canScale'],opacity:['opacity-range','opacity-number','canEdit'],angle:['angle-range','angle-number','canRotate'],x:[null,'position-x','canMove'],y:[null,'position-y','canMove']};
   function baseline(o){
     if(!allowed(o))return;
     if(!(o.bfScaleBaseX>0&&o.bfScaleBaseY>0)){o.bfScaleBaseX=Math.abs(o.scaleX)||1;o.bfScaleBaseY=Math.abs(o.scaleY)||1;}
@@ -25,8 +26,15 @@
   }
   const snapshot=o=>({left:o.left,top:o.top,scaleX:o.scaleX,scaleY:o.scaleY,angle:o.angle,opacity:o.opacity});
   const normalAngle=a=>((a+180)%360+360)%360-180;
-  function values(o){baseline(o);const p=o.getCenterPoint();return {scale:Math.abs(o.scaleX)/o.bfScaleBaseX*100,opacity:(o.opacity??1)*100,angle:normalAngle(o.angle||0),x:p.x,y:p.y};}
+  function values(o){baseline(o);const p=o.getCenterPoint();return {width:Math.abs(o.scaleX)/o.bfScaleBaseX*100,height:Math.abs(o.scaleY)/o.bfScaleBaseY*100,scale:Math.abs(o.scaleX)/o.bfScaleBaseX*100,opacity:(o.opacity??1)*100,angle:normalAngle(o.angle||0),x:p.x,y:p.y};}
   function limits(key,c,o){
+    if(key==='width'||key==='height'){
+      const horizontal=key==='width',axis=horizontal?'scaleX':'scaleY',v=values(o)[key];
+      const stroke=o.strokeUniform?(o.strokeWidth||0):0;
+      const size=horizontal?o.getScaledWidth():o.getScaledHeight();
+      const extent=horizontal?c.width:c.height;
+      return o.templateLayerId&&c.layer_contract_version===multi()?.VERSION?[Math.max(.1,v*.001/Math.abs(o[axis])),Math.min(300,v*(extent-stroke)/Math.max(.001,size-stroke))]:[.1,300];
+    }
     if(key==='scale'){
       let min=.1,max=300;
       if(o.templateLayerId&&c.layer_contract_version===multi()?.VERSION){
@@ -53,17 +61,18 @@
     syncAdjust();
   }
   function updateObject(key,value,preview=false){
-    const c=current(),o=c?.getActiveObject();if(!mayAdjust(c,o,fields[key][2])){syncAdjust();return false;}
+    const c=current(),o=c?.getActiveObject();if(!mayAdjust(c,o,fields[key][2])||(['width','height'].includes(key)&&!stretchable(o))){syncAdjust();return false;}
     const [min,max]=limits(key,c,o);
     if(typeof value==='string'&&!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(value.trim())||!Number.isFinite(Number(value))||Number(value)<min-1e-7||Number(value)>max+1e-7){
       toast(`請輸入 ${Number(min.toFixed(2))}～${Number(max.toFixed(2))} 的有效數字`);syncAdjust();return false;
     }
     value=Number(value);beginAdjustment(c,o);const center=o.getCenterPoint();
     if(key==='scale'){const factor=value/values(o).scale;o.set({scaleX:o.scaleX*factor,scaleY:o.scaleY*factor});o.setPositionByOrigin(center,'center','center');}
+    else if(key==='width'||key==='height'){const axis=key==='width'?'scaleX':'scaleY';o.set(axis,o[axis]*value/values(o)[key]);o.setPositionByOrigin(center,'center','center');}
     else if(key==='angle')o.rotate(value);
     else if(key==='opacity')o.set('opacity',value/100);
     else {center[key]=value;o.setPositionByOrigin(center,'center','center');}
-    if(key!=='opacity')c.fire(key==='scale'?'object:scaling':key==='angle'?'object:rotating':'object:moving',{target:o});
+    if(key!=='opacity')c.fire(['scale','width','height'].includes(key)?'object:scaling':key==='angle'?'object:rotating':'object:moving',{target:o,axis:key==='width'?'x':key==='height'?'y':null});
     window.BenfuwanEditableSticker?.syncAll(c);o.setCoords();c.requestRenderAll();syncAdjust();
     if(!preview)finishAdjustment();return true;
   }
@@ -71,7 +80,7 @@
     const c=current(),o=c?.getActiveObject();if(!by('object-scale-range'))return;
     const v=o?values(o):{};
     for(const [key,[slider,input,permission]] of Object.entries(fields)){
-      const enabled=mayAdjust(c,o,permission),number=by(input),range=by(slider);
+      const enabled=mayAdjust(c,o,permission)&&(!['width','height'].includes(key)||stretchable(o)),number=by(input),range=by(slider);
       if(number){number.disabled=!enabled;if(document.activeElement!==number||!number.dataset.editing)number.value=o?String(Number(v[key].toFixed(3))):'';}
       if(range){range.disabled=!enabled;if(o){const [min,max]=limits(key,c,o);range.min=min;range.max=max;range.value=v[key];}}
     }
@@ -93,6 +102,10 @@
     row.innerHTML='<div class="head"><label for="object-scale-range">大小（初始 100%）</label><output id="object-scale-value"></output></div><input id="object-scale-range" type="range" min="0.1" max="300" step="any">';
     opacity.closest('.range-row').before(row);
     const body=row.parentElement;
+    for(const [key,label] of [['width','寬度'],['height','高度']]){
+      const axisRow=document.createElement('div');axisRow.className='range-row bf-axis-row';
+      axisRow.innerHTML=`<div class="head"><label for="object-${key}-range">${label}（初始 100%，僅圖片）</label></div><input id="object-${key}-range" type="range" min="0.1" max="300" step="any">`;body.append(axisRow);
+    }
     const position=document.createElement('div');position.className='bf-position-inputs';
     position.innerHTML='<p>畫布座標 px：左上角為原點，X 向右、Y 向下；數值為物件中心，非列印定位。</p><label>X <input id="position-x" aria-label="畫布中心 X" inputmode="decimal" type="text"></label><label>Y <input id="position-y" aria-label="畫布中心 Y" inputmode="decimal" type="text"></label>';
     body.querySelector('.position-title').before(position);
@@ -100,7 +113,7 @@
       const range=by(slider);
       if(range){
         range.removeAttribute('oninput');range.removeAttribute('onchange');range.step='any';
-        const number=document.createElement('input');number.id=input;number.type='text';number.inputMode='decimal';number.setAttribute('aria-label',({scale:'大小百分比',opacity:'透明度百分比',angle:'旋轉角度'})[key]);
+        const number=document.createElement('input');number.id=input;number.type='text';number.inputMode='decimal';number.setAttribute('aria-label',({width:'寬度百分比',height:'高度百分比',scale:'大小百分比',opacity:'透明度百分比',angle:'旋轉角度'})[key]);
         range.before(number);
         range.addEventListener('input',()=>updateObject(key,range.value,true));
         for(const event of ['change','pointerup','pointercancel','blur'])range.addEventListener(event,finishAdjustment);
@@ -113,7 +126,7 @@
     }
     const more=document.createElement('details');more.id='bf-adjust-more';
     more.innerHTML='<summary>更多調整</summary>';
-    for(const el of [...body.children])if(!el.classList.contains('range-row'))more.append(el);
+    for(const el of [...body.children])if(!el.classList.contains('range-row')||el.classList.contains('bf-axis-row'))more.append(el);
     body.append(more);
     const header=by('sheet-adjust').querySelector('.sheet-header');
     const collapse=document.createElement('button');collapse.id='bf-adjust-collapse';collapse.type='button';collapse.textContent='收合';collapse.setAttribute('aria-expanded','true');
@@ -166,7 +179,7 @@
     if(!window.fabric?.Control||!fabric.controlsUtils?.dragHandler)return null;
     if(window.__bfMoveCorner)return window.__bfMoveCorner;
     const c=new fabric.Control({
-      x:.5,y:.5,offsetX:7,offsetY:7,cursorStyle:'move',actionName:'drag',
+      x:0,y:.5,offsetX:0,offsetY:38,cursorStyle:'move',actionName:'drag',
       actionHandler:fabric.controlsUtils.dragHandler,
       render(ctx,left,top){
         ctx.save();ctx.translate(left,top);
@@ -195,8 +208,21 @@
     if(locked)o.set({lockMovementX:true,lockMovementY:true,lockScalingX:true,lockScalingY:true,lockRotation:true,hasControls:false});
     else {
       const handle=control();
-      if(handle){o.controls={...o.controls,br:handle};o.setControlsVisibility?.({br:!o.lockMovementX&&!o.lockMovementY});}
-      o.setControlsVisibility?.({ml:false,mr:false,mt:false,mb:false});
+      if(handle){o.controls={...o.controls,br:fabric.Object.prototype.controls.br,bfMove:handle};o.setControlsVisibility?.({bfMove:!o.lockMovementX&&!o.lockMovementY});}
+      const canStretch=stretchable(o)&&mayAdjust(c,o,'canScale');
+      o.setControlsVisibility?.({ml:canStretch,mr:canStretch,mt:canStretch,mb:canStretch});
+      if(canStretch){
+        for(const name of ['ml','mr','mt','mb']){
+          const original=fabric.Object.prototype.controls[name],horizontal=['ml','mr'].includes(name),action=horizontal?'scaleX':'scaleY';
+          const scale=horizontal?fabric.controlsUtils.scalingX:fabric.controlsUtils.scalingY;
+          // Explicit axis handlers also prevent the desktop Alt key from skewing.
+          o.controls[name]=new fabric.Control({...original,actionName:action,getActionName:()=>action,
+            // Keep side touch targets away from the center of tiny template images.
+            // Only handle placement changes; artwork geometry stays untouched.
+            offsetX:original.x*36,offsetY:original.y*36,
+            actionHandler:(event,transform,x,y)=>stretchable(transform.target)&&mayAdjust(transform.target.canvas,transform.target,'canScale')&&scale(event,transform,x,y)});
+        }
+      }
     }
     o.setCoords?.();
   }
@@ -286,8 +312,10 @@
     c.on('object:removed',()=>queueMicrotask(slots));
     c.on('object:modified',e=>{if(e.target?.bfUserLocked)applyUserLock(e.target);syncLockButton()});
     for(const e of ['selection:created','selection:updated','selection:cleared'])c.on(e,()=>{finishAdjustment();syncLockButton();});
-    c.on('object:scaling',({target:o})=>{
+    c.on('object:scaling',({target:o,transform,axis})=>{
       if(!mayAdjust(c,o,'canScale'))return;
+      const direction=axis||(transform?.action==='scaleX'?'x':transform?.action==='scaleY'?'y':null);
+      if(direction){const key=direction==='x'?'width':'height',prop=direction==='x'?'scaleX':'scaleY',value=values(o)[key],[min,max]=limits(key,c,o);o.set(prop,o[prop]*Math.max(min,Math.min(max,value))/value);window.BenfuwanEditableSticker?.syncAll(c);o.setCoords();return;}
       const value=values(o).scale,[min,max]=limits('scale',c,o),factor=Math.max(min,Math.min(max,value))/value;
       if(Math.abs(factor-1)>1e-10){const center=o.getCenterPoint();o.set({scaleX:o.scaleX*factor,scaleY:o.scaleY*factor});o.setPositionByOrigin(center,'center','center');window.BenfuwanEditableSticker?.syncAll(c);o.setCoords();}
     });

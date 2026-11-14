@@ -42,6 +42,7 @@ def adjust_panel_test(browser, base, poll):
         page.screenshot(path=str(evidence/f"{'before' if baseline else 'after'}-{product}-{browser.browser_type.name}.png"))
         if baseline:
             context.close();continue
+        runpy.run_path(str(ROOT/'.github/tests/image_stretch.py'))['stretch_regression'](page,context,browser.browser_type.name,poll,product)
         runpy.run_path(str(ROOT/'.github/tests/adjust_gestures.py'))['gesture_regression'](page,context,browser.browser_type.name,poll,product)
         def state():
             return page.evaluate("() => {const o=canvas.getActiveObject();return {x:o.getCenterPoint().x,y:o.getCenterPoint().y,sx:o.scaleX,sy:o.scaleY,angle:o.angle,opacity:o.opacity,index:historyIndex,base:o.bfScaleBaseX,w:canvas.width,h:canvas.height}}")
@@ -127,7 +128,7 @@ def adjust_panel_test(browser, base, poll):
         for lock in ('user','template','slot'):
             page.evaluate("kind => {const o=canvas.getActiveObject();if(kind==='user')o.bfUserLocked=true;else {o.bfUserLocked=false;o.templateLayerId='protected';o.templateSlot=kind==='slot';if(kind==='slot')o.role='slot-photo';canvas.layer_contract_version='multilayer-v1';canvas.templateState={initial:[{templateLayerId:'protected',locked:kind==='slot',canMove:false,canScale:false,canRotate:false,canEdit:false}]};}BenfuwanEditorControls.applyUserLock(o);syncSelection()}",lock)
             before=state()
-            page.evaluate("() => {changeOpacity(10);changeAngle(80);nudgeActive(2,3);const r=document.getElementById('object-scale-range');r.value=200;r.dispatchEvent(new Event('input'));adjustTouch('touchstart',[[100,180],[180,180]]);adjustTouch('touchmove',[[100,180],[220,220]]);adjustTouch('touchend',[]);}")
+            page.evaluate("() => {changeOpacity(10);changeAngle(80);nudgeActive(2,3);const r=document.getElementById('object-scale-range');r.value=200;r.dispatchEvent(new Event('input'));for(const key of ['width','height']){const a=document.getElementById('object-'+key+'-range');a.value=180;a.dispatchEvent(new Event('input'));}adjustTouch('touchstart',[[100,180],[180,180]]);adjustTouch('touchmove',[[100,180],[220,220]]);adjustTouch('touchend',[]);}")
             assert state()==before,(lock,before,state())
         page.evaluate("() => {const o=canvas.getActiveObject();o.role='sticker';delete o.templateLayerId;delete o.templateSlot;delete o.locked;o.bfUserLocked=false;delete canvas.templateState;delete canvas.layer_contract_version;BenfuwanEditorControls.applyUserLock(o);closeSheets()}")
         # Production data and pixels are identical across opening/reflow/closing.

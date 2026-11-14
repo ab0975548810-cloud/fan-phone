@@ -41,20 +41,21 @@
     const photoSlot=!!o.templateSlot&&['slot-guide','slot-photo'].includes(o.role);
     o.set({selectable:photoSlot&&o.role==='slot-photo'?true:!p.locked,evented:(photoSlot&&p.canEdit)||!p.locked,lockMovementX:p.locked||!p.canMove,lockMovementY:p.locked||!p.canMove,lockScalingX:p.locked||!p.canScale,lockScalingY:p.locked||!p.canScale,lockRotation:p.locked||!p.canRotate,editable:photoSlot?p.canEdit===true:(!p.locked&&p.canEdit),hasControls:!p.locked&&(p.canScale||p.canRotate)});
     if(o.bfUserLocked)o.set({lockMovementX:true,lockMovementY:true,lockScalingX:true,lockScalingY:true,lockRotation:true,hasControls:false});
-    o.setControlsVisibility?.({tl:!!p.canScale,tr:!!p.canScale,bl:!!p.canScale,br:!!p.canScale,mtr:!!p.canRotate,mt:false,mb:false,ml:false,mr:false});
+    const stretch=!p.locked&&!!p.canScale&&!o.bfUserLocked&&o.type==='image'&&!o.isTplBg&&!o.isSlot&&!o.templateSlot&&o.role!=='guide'&&o.role!=='template-bg';
+    o.setControlsVisibility?.({tl:!!p.canScale,tr:!!p.canScale,bl:!!p.canScale,br:!!p.canScale,mtr:!!p.canRotate,mt:stretch,mb:stretch,ml:stretch,mr:stretch});
     if(o.role==='slot-guide'){o.selectable=false;o.evented=p.canEdit===true;}
     if(o.role==='editable-sticker-text'){o.lockMovementX=o.lockMovementY=o.lockScalingX=o.lockScalingY=o.lockRotation=true;o.hasControls=false;}
   }
   function update(c){if(c.layer_contract_version!==VERSION)return;core()?.syncAll(c);
     c.getObjects().forEach((o,i)=>{if(o.templateLayerId){const g=geometry(o,c);if(g.x<0||g.x>1||g.y<0||g.y>1||g.width>1.000001||g.height>1.000001)constrain(o,c);o.normalizedGeometry=geometry(o,c);o.zIndex=i;permissions(c,o);}});
   }
-  function constrain(o,c){const d=dimensions(o),center=o.getCenterPoint();o.setPositionByOrigin(new fabric.Point(Math.max(0,Math.min(c.width,center.x)),Math.max(0,Math.min(c.height,center.y))),'center','center');
+  function constrain(o,c,axis){const d=dimensions(o),center=o.getCenterPoint();o.setPositionByOrigin(new fabric.Point(Math.max(0,Math.min(c.width,center.x)),Math.max(0,Math.min(c.height,center.y))),'center','center');
     const x=Math.max(.000001,Math.abs(o.scaleX)),y=Math.max(.000001,Math.abs(o.scaleY)),stroke=o.strokeUniform?(o.strokeWidth||0):0;
-    // A single bounded factor preserves the authored ratio, including photos
-    // and paired stickers, when either axis reaches the template boundary.
+    // Corner/pinch scaling preserves the current ratio. Explicit side stretching
+    // constrains only its own axis so the untouched dimension cannot drift.
     const upper=Math.min((c.width-stroke)/Math.max(.000001,d.w*x),(c.height-stroke)/Math.max(.000001,d.h*y));
     const factor=Math.min(upper,Math.max(1,.001/x,.001/y));
-    o.set({scaleX:x*factor,scaleY:y*factor});o.setPositionByOrigin(new fabric.Point(Math.max(0,Math.min(c.width,center.x)),Math.max(0,Math.min(c.height,center.y))),'center','center');o.setCoords();}
+    o.set(axis==='x'?{scaleX:Math.max(.001,Math.min(x,(c.width-stroke)/Math.max(.001,d.w)))}:axis==='y'?{scaleY:Math.max(.001,Math.min(y,(c.height-stroke)/Math.max(.001,d.h)))}:{scaleX:x*factor,scaleY:y*factor});o.setPositionByOrigin(new fabric.Point(Math.max(0,Math.min(c.width,center.x)),Math.max(0,Math.min(c.height,center.y))),'center','center');o.setCoords();}
   async function fonts(c){await core()?.textFonts(c);}
   function exportTemplate(c){
     const rows=c.getObjects().filter(o=>o.role!=='guide');rows.forEach(o=>decorate(o,c));
@@ -114,7 +115,7 @@
       if(old.templateSlot&&old.sourceSize?.width===(target.getElement().naturalWidth||target.width)&&old.sourceSize?.height===(target.getElement().naturalHeight||target.height))target.set({width:old.width,height:old.height,cropX:old.cropX,cropY:old.cropY,scaleX:old.scaleX,scaleY:old.scaleY});
       permissions(c,target);update(c);
     });
-    for(const evt of ['object:moving','object:scaling','object:rotating'])c.on(evt,({target})=>{if(!admin&&c.layer_contract_version===VERSION&&target?.templateLayerId){constrain(target,c);core()?.syncAll(c);}});
+    for(const evt of ['object:moving','object:scaling','object:rotating'])c.on(evt,({target,transform,axis})=>{if(!admin&&c.layer_contract_version===VERSION&&target?.templateLayerId){constrain(target,c,axis||(transform?.action==='scaleX'?'x':transform?.action==='scaleY'?'y':null));core()?.syncAll(c);}});
     c.on('object:modified',()=>{if(!admin)update(c);});
   }
   window.BenfuwanMultilayer={VERSION,PROPS,FLAGS,uid,clone,freeze,geometry,validGeometry,map,name,decorate,defaults,policy,allowed,permissions,constrain,update,fonts,exportTemplate,apply,reset,hydrate,serialize,prepareRender,bind};

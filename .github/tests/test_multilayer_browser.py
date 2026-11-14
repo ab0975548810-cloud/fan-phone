@@ -341,7 +341,7 @@ def multilayer_browser_test(browser,base,poll):
 
 def move_handle_test(page,admin=False):
     symbol='visualCanvas' if admin else 'canvas'
-    start=page.evaluate("""name=>{const c=window[name]||canvas,o=c.getActiveObject();o.setCoords();c.requestRenderAll();const p=o.oCoords.br,r=c.upperCanvasEl.getBoundingClientRect();return {x:r.x+p.x*r.width/c.width,y:r.y+p.y*r.height/c.height,left:o.left,top:o.top,width:o.width,height:o.height,sx:o.scaleX,sy:o.scaleY};}""",symbol)
+    start=page.evaluate("""name=>{const c=window[name]||canvas,o=c.getActiveObject();o.setCoords();c.requestRenderAll();const p=o.oCoords[name==='visualCanvas'?'br':'bfMove'],r=c.upperCanvasEl.getBoundingClientRect();return {x:r.x+p.x*r.width/c.width,y:r.y+p.y*r.height/c.height,left:o.left,top:o.top,width:o.width,height:o.height,sx:o.scaleX,sy:o.scaleY};}""",symbol)
     page.mouse.move(start['x'],start['y']);page.mouse.down();page.mouse.move(start['x']-12,start['y']-10,steps=8);page.mouse.up()
     end=page.evaluate("name=>{const o=(window[name]||canvas).getActiveObject();return {left:o.left,top:o.top,width:o.width,height:o.height,sx:o.scaleX,sy:o.scaleY}}",symbol)
     assert abs(end['left']-start['left'])>3,(start,end)
@@ -434,7 +434,7 @@ def legacy_lock_and_proxy_test(page,browser,poll,asset_url,model,style):
 
 
 def single_touch_drag_test(page,browser):
-    point=page.evaluate("""()=>{const p=canvas.getActiveObject().getCenterPoint(),r=canvas.upperCanvasEl.getBoundingClientRect();return {x:r.x+p.x*r.width/canvas.width,y:r.y+p.y*r.height/canvas.height,left:canvas.getActiveObject().left}}""")
+    point=page.evaluate("""()=>{const p=canvas.getActiveObject().getCenterPoint(),r=canvas.upperCanvasEl.getBoundingClientRect();return {x:r.x+p.x*r.width/canvas.width,y:r.y+p.y*r.height/canvas.height,left:canvas.getActiveObject().left,sx:canvas.getActiveObject().scaleX,sy:canvas.getActiveObject().scaleY,hit:canvas.getActiveObject()._findTargetCorner(p,true),width:canvas.getActiveObject().getScaledWidth(),height:canvas.getActiveObject().getScaledHeight()}}""")
     if browser.browser_type.name=='chromium':
         cdp=page.context.new_cdp_session(page)
         cdp.send('Input.dispatchTouchEvent',{'type':'touchStart','touchPoints':[{'x':point['x'],'y':point['y'],'id':1}]})
@@ -445,7 +445,8 @@ def single_touch_drag_test(page,browser):
           function emit(type,dx,dy){const touch={identifier:1,target:el,clientX:p.x+dx,clientY:p.y+dy,pageX:p.x+dx+scrollX,pageY:p.y+dy+scrollY};const touches=type==='touchend'?[]:[touch],event=new Event(type,{bubbles:true,cancelable:true});Object.defineProperties(event,{touches:{value:touches},targetTouches:{value:touches},changedTouches:{value:[touch]}});el.dispatchEvent(event);}
           emit('touchstart',0,0);for(let i=1;i<=5;i++)emit('touchmove',i*3,i*2);emit('touchend',15,10);
         }""",point)
-    assert abs(page.evaluate('canvas.getActiveObject().left')-point['left'])>3
+    assert abs(page.evaluate('canvas.getActiveObject().left')-point['left'])>3,(point,page.evaluate('({left:canvas.getActiveObject().left,scaleX:canvas.getActiveObject().scaleX,scaleY:canvas.getActiveObject().scaleY})'))
+    assert page.evaluate('[canvas.getActiveObject().scaleX,canvas.getActiveObject().scaleY]')==[point['sx'],point['sy']],point
 
 
 def image_tools_regression(page,poll,info):
