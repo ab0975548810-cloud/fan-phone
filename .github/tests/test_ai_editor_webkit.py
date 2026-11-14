@@ -1303,18 +1303,25 @@ def home_draft_catalog_race_test(browser, base):
 
 def checkout_test(browser, base):
     page = browser.new_page()
-    sent = []
+    sent, committed, status_keys = [], [], []
+    before = app_module.commerce.read()
     def intercept(route):
         sent.append(route.request.post_data_json)
         if len(sent) == 1:
             # Server commits, browser receives a simulated transport failure.
             result = route.fetch()
             assert result.status == 200, result.text()
+            committed.append(result.json())
             route.abort('failed')
         else:
             route.continue_()
     page.route('**/api/create_order', intercept)
-    page.goto(base + '/', wait_until='domcontentloaded')
+    def status_check(route):
+        status_keys.append(route.request.post_data_json['idempotency_key'])
+        route.continue_()
+    page.route('**/api/order_request_status', status_check)
+    with page.expect_response(lambda r:r.url==base+'/api/health'):
+        page.goto(base + '/', wait_until='domcontentloaded')
     poll(page, "() => !!window.BenfuwanOrderPayload && typeof shopData !== 'undefined' && shopData.models?.length")
     page.evaluate("""async () => {
       const c=document.createElement('canvas');c.width=2;c.height=2;
@@ -1330,11 +1337,16 @@ def checkout_test(browser, base):
       await idbSet('cart',cartItem);document.getElementById('form-surname').value='測試';await submitOrder();
     }""")
     assert len(sent) == 1 and sent[0]['idempotency_key']
-    page.reload(wait_until='domcontentloaded')
+    with page.expect_response(lambda r:r.url==base+'/api/health'):
+        page.reload(wait_until='domcontentloaded')
     poll(page, "() => !!window.BenfuwanOrderPayload && typeof shopData !== 'undefined' && shopData.models?.length")
     page.evaluate("async () => {document.getElementById('form-surname').value='測試';await submitOrder()}")
-    assert len(sent) == 2 and sent[0] == sent[1], sent
-    assert page.evaluate("() => !!document.getElementById('success-id').textContent")
+    assert len(sent) == 1, sent
+    assert status_keys == [sent[0]['idempotency_key']]
+    assert page.locator('#success-id').inner_text() == committed[0]['order_id']
+    assert page.locator('#page-success').evaluate("e=>e.classList.contains('active')")
+    after = app_module.commerce.read()
+    assert len(after['order_finance']) == len(before['order_finance'])+1
     assert page.evaluate("() => idbGet('cart')") is None
     print('CHECKOUT_LOST_RESPONSE_RELOAD_OK')
     page.close()
