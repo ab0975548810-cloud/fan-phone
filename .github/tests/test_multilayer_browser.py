@@ -341,7 +341,7 @@ def multilayer_browser_test(browser,base,poll):
 
 def move_handle_test(page,admin=False):
     symbol='visualCanvas' if admin else 'canvas'
-    start=page.evaluate("""name=>{const c=window[name]||canvas,o=c.getActiveObject();o.setCoords();c.requestRenderAll();const p=o.oCoords.br,r=c.upperCanvasEl.getBoundingClientRect();return {x:r.x+p.x*r.width/c.width,y:r.y+p.y*r.height/c.height,left:o.left,top:o.top,width:o.width,height:o.height,sx:o.scaleX,sy:o.scaleY};}""",symbol)
+    start=page.evaluate("""name=>{const c=window[name]||canvas,o=c.getActiveObject();o.setCoords();c.requestRenderAll();const p=o.oCoords[name==='visualCanvas'?'br':'bfMove'],r=c.upperCanvasEl.getBoundingClientRect();return {x:r.x+p.x*r.width/c.width,y:r.y+p.y*r.height/c.height,left:o.left,top:o.top,width:o.width,height:o.height,sx:o.scaleX,sy:o.scaleY};}""",symbol)
     page.mouse.move(start['x'],start['y']);page.mouse.down();page.mouse.move(start['x']-12,start['y']-10,steps=8);page.mouse.up()
     end=page.evaluate("name=>{const o=(window[name]||canvas).getActiveObject();return {left:o.left,top:o.top,width:o.width,height:o.height,sx:o.scaleX,sy:o.scaleY}}",symbol)
     assert abs(end['left']-start['left'])>3,(start,end)
