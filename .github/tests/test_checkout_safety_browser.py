@@ -43,7 +43,7 @@ def run():
         ('photo-sticker-text', mixed), ('ai-cutout', removed),
         ('transparent-png', {'objects': [mixed['objects'][0]]}),
         ('legacy-template', legacy), ('editable-text', fx.fx.draft),
-        ('multilayer-template', fx.design()),
+        ('multilayer-template', fx.design()), ('not-received', mixed),
     ]
     server = make_server('127.0.0.1', 0, app.app, threaded=True)
     worker = threading.Thread(target=server.serve_forever, daemon=True)
@@ -60,11 +60,15 @@ def run():
                     context = browser.new_context(viewport={'width': 390, 'height': 844},
                                                   has_touch=True, is_mobile=True)
                     page = context.new_page()
-                    requests, responses = [], []
+                    requests, responses, status_checks = [], [], []
                     lose_first = name == 'editable-text'
+                    not_received = name == 'not-received'
 
                     def checkout(route):
                         requests.append(route.request.post_data_json)
+                        if not_received and len(requests) == 1:
+                            route.abort('failed')
+                            return
                         response = route.fetch()
                         responses.append(response.json())
                         assert response.status == 200, (name, response.status, response.text())
@@ -74,6 +78,10 @@ def run():
                             route.fulfill(response=response)
 
                     page.route('**/api/create_order', checkout)
+                    def status_check(route):
+                        status_checks.append(route.request.post_data_json['idempotency_key'])
+                        route.continue_()
+                    page.route('**/api/order_request_status', status_check)
                     before = app.commerce.read()
                     try:
                         # initializeFront restores IndexedDB cart before its health probe.
@@ -91,11 +99,15 @@ def run():
                           cartItem={modelId:data.model,styleId:data.style,modelName:'測試型號',styleName:'測試殼款',colorName:'透明',quantity:1,payment:'現金',price:390,
                             printBase64:data.artwork,mockupBase64:data.artwork,designJson:data.design,
                             productionMeta:{ppm:BenfuwanProductionHQ.PPM,dpi:720,width:2030,height:4241}};
+                          if(data.keepSource){
+                            cartItem.draftKey='protected-source:lost-response';cartItem.draftRevision='source-revision';
+                            await idbSet(cartItem.draftKey,{revision:'source-revision',design:data.design});
+                          }
                           await idbSet('cart',cartItem);goCheckoutFromCart();
-                        }''', dict(model=fx.model, style=fx.style, artwork=artwork, design=design))
+                        }''', dict(model=fx.model, style=fx.style, artwork=artwork, design=design, keepSource=lose_first))
                         page.locator('#form-surname').fill('回歸')
                         page.locator('#submit-order').click()
-                        if lose_first:
+                        if lose_first or not_received:
                             page.wait_for_function("() => document.getElementById('toast').textContent.includes('送單失敗') && !document.getElementById('submit-order').disabled")
                             with page.expect_response(lambda r: r.url == origin + '/api/health'):
                                 page.reload(wait_until='domcontentloaded')
@@ -105,10 +117,16 @@ def run():
                             page.locator('#submit-order').click()
                         page.wait_for_function("() => document.getElementById('page-success').classList.contains('active')")
                         order_id = page.locator('#success-id').inner_text()
-                        assert len(requests) == (2 if lose_first else 1), (name, len(requests))
+                        assert len(requests) == (2 if not_received else 1), (name, len(requests))
                         if lose_first:
+                            assert status_checks == [requests[0]['idempotency_key']]
+                            assert responses[0]['order_id'] == order_id
+                            assert page.evaluate("async () => (await idbGet('protected-source:lost-response')).revision") == 'source-revision'
+                        elif not_received:
+                            assert status_checks == [requests[0]['idempotency_key']]
                             assert requests[0]['idempotency_key'] == requests[1]['idempotency_key']
-                            assert responses[0]['order_id'] == responses[1]['order_id']
+                        else:
+                            assert status_checks == [], (name, status_checks)
                         after = app.commerce.read()
                         assert len(after['order_finance']) == len(before['order_finance']) + 1
                         sku_id = after['order_finance'][order_id]['sku_id']
