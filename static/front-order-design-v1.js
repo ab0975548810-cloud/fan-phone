@@ -1,6 +1,7 @@
 /* Order recovery uses the existing storefront editor, in an isolated admin mode. */
 (function(){
   'use strict';
+  if(window.BenfuwanPixelEditor)return;
   const core=()=>window.BenfuwanEditableSticker;
   for(const key of ['aiOutlineSource','aiRemovalMode','aiOutlineStyle','aiOutlineStrength','aiOutlineWidth','aiOutlineColor'])if(!CUSTOM_PROPS.includes(key))CUSTOM_PROPS.push(key);
   // Match the isolated production renderer without changing interactive caching.
@@ -95,6 +96,7 @@
       restoringHistory=false;ready=false;
       document.body.replaceChildren();const msg=document.createElement('p');msg.style.cssText='padding:24px;white-space:pre-wrap';msg.textContent='無法重新編輯此訂單\n'+error.message;
       const back=document.createElement('a');back.href='/admin';back.textContent='返回後台';document.body.append(msg,back);
+      const pixel=document.createElement('a');pixel.href=location.pathname+'?pixel=1';pixel.textContent='以原始生產圖進行修改（保留排版）';pixel.style.cssText='display:block;padding:16px';document.body.append(pixel);
       const remake=document.createElement('button');remake.textContent='建立獨立重製草稿（不恢復舊圖層）';
       remake.onclick=async()=>{if(!confirm('將以目前商品設定建立空白 V2 草稿，不載入舊圖、不改原訂單、不送印。確定重新製作？'))return;remake.disabled=true;try{await api('/remake',{confirm:'new-design-current-profile'});location.reload();}catch(e){msg.textContent=e.message;remake.disabled=false;}};document.body.append(remake);
     }

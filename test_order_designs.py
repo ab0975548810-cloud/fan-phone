@@ -149,6 +149,8 @@ class OrderDesignTests(fx.EditableTests):
 
 # Avoid rerunning the inherited renderer suite in this module's entry point.
 if __name__=='__main__':
+    import subprocess,sys
+    subprocess.run([sys.executable,'test_pixel_orders.py'],check=True)
     suite=unittest.TestSuite(OrderDesignTests(name) for name in OrderDesignTests.__dict__ if name.startswith('test_'))
     from test_legacy_order_designs import LegacyTests
     suite.addTests(LegacyTests(name) for name in LegacyTests.__dict__ if name.startswith('test_') and name!='test_history_hash_geometry_and_exact_output_gate')

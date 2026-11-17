@@ -359,4 +359,6 @@ def install(app):
         next_work=signer.dumps({'order':order_id,'version':result['version'],'actor':actor(),'id':uuid.uuid4().hex})
         return app.no_cache_json({'status':'success','version':result['version'],'work':next_work,'msg':'已另存設計草稿；原生產圖與列印任務未變更'})
 
+    from pixel_order_designs import install as install_pixel
+    install_pixel(app,store,admin,actor,signer)
     app.order_designs=store
