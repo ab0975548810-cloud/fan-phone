@@ -88,10 +88,10 @@ def run(legacy=False):
                     assert page.evaluate("canvas.layer_contract_version==='multilayer-v1'")
                 print('STEP add objects',flush=True)
                 photo='data:image/png;base64,'+base64.b64encode(fixture.fx.image()).decode()
-                page.evaluate("""async url=>{try{
-                  for(const [role,x] of [['photo',45],['sticker',100]])await new Promise((resolve,reject)=>fabric.Image.fromURL(url,o=>{try{const scale=Math.min(.15,canvas.height/1024);o.set({role,left:x,top:Math.min(160,canvas.height*.4),scaleX:scale,scaleY:scale,opacity:.8});canvas.add(o);resolve()}catch(e){reject(e)}}));
-                  await ensureEditorFont('jf-openhuninn','本福丸');canvas.add(new fabric.Textbox('本福丸',{role:'text',fontFamily:'jf-openhuninn',fontSize:18,left:40,top:Math.min(250,canvas.height*.65),width:100}));recordHistory();
-                }catch(e){throw Error(e.stack)}}""",photo)
+                page.evaluate("""async ({url,realFilm})=>{try{
+                  for(const [role,x] of [['photo',45],['sticker',100]])await new Promise((resolve,reject)=>fabric.Image.fromURL(url,o=>{try{const scale=realFilm ? 0.1 : 0.15;o.set({role,left:x,top:realFilm?Math.round(canvas.height*.4):160,scaleX:scale,scaleY:scale,opacity:.8});canvas.add(o);resolve()}catch(e){reject(e)}}));
+                  await ensureEditorFont('jf-openhuninn','本福丸');canvas.add(new fabric.Textbox('本福丸',{role:'text',fontFamily:'jf-openhuninn',fontSize:18,left:40,top:realFilm?Math.round(canvas.height*.65):250,width:100}));recordHistory();
+                }catch(e){throw Error(e.stack)}}""",{'url':photo,'realFilm':real_film})
                 page.evaluate("()=>{canvas.setActiveObject(canvas.getObjects().find(o=>o.role==='sticker'));openAiOutlineSheet()}")
                 page.locator('#sheet-outline-v2 [data-style="pink"]').click()
                 wait(page,"canvas.getActiveObject()?.aiOutlineStyle==='pink'")
