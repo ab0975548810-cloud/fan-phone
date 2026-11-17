@@ -33,7 +33,7 @@
     };
     return;
   }
-  let work=null,saving=false,ready=false;
+  let work=null,saving=false,ready=false,dirty=false,generation=0;
   const orderId=decodeURIComponent(location.pathname.split('/').pop());
   const root='/api/admin/order-design/'+encodeURIComponent(orderId);
   // This tab never reads or writes the customer's local cart/draft database.
@@ -52,22 +52,31 @@
     saving=true;let uploaded=null;
     const button=document.getElementById('order-design-save');button.disabled=true;
     try{
+      const submitted=generation;
       const design=await serialize();uploaded=await BenfuwanDesignSources.prepare(design);
       const result=await api('/save',{work:work.work,design:uploaded});
       document.getElementById('order-design-status').textContent=`V${result.version} 草稿已保存；原生產圖未變更`;
       toast(result.msg);
       // The append response binds the next edit to exactly this saved version.
       // No second network request can strand the editor or adopt another staff member's version.
-      work={...work,version:result.version,work:result.work};
+      work={...work,version:result.version,hash:result.hash,work:result.work};dirty=generation!==submitted;
     }catch(error){toast(error.message);document.getElementById('order-design-status').textContent=error.message;}
     finally{if(uploaded)await BenfuwanDesignSources.release(uploaded);saving=false;button.disabled=false;}
   }
+  async function compare(){
+    if(!work||saving||!ready)return;
+    if(dirty){toast('請先儲存修改，再比較實際保存的 V1／V2');return;}
+    const reviewed=work,stamp=JSON.stringify(canvas.toJSON(CUSTOM_PROPS));
+    try{await BenfuwanRevisionReview.open({orderId,work:reviewed,valid:()=>!dirty&&work.hash===reviewed.hash&&JSON.stringify(canvas.toJSON(CUSTOM_PROPS))===stamp});}
+    catch(error){toast(error.message);document.getElementById('order-design-status').textContent=error.message;}
+  }
   async function boot(){
     const panel=document.createElement('div');panel.id='order-design-banner';
-    panel.innerHTML='<strong>訂單設計修改</strong> <span id="order-design-status" role="status">正在驗證原始設計…</span><button id="order-design-save" disabled>儲存修改</button>';
+    panel.innerHTML='<strong>訂單設計修改</strong> <span id="order-design-status" role="status">正在驗證原始設計…</span><button id="order-design-save" disabled>儲存修改</button><button id="order-design-review" disabled>V1／V2 比較與確認</button>';
     const style=document.createElement('style');style.textContent='#order-design-banner{background:#fff3db;padding:8px;font-size:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}#order-design-save{margin-left:auto;min-height:40px;border:1px solid #ad4770;background:white;border-radius:12px;color:#ad4770;padding:6px 12px}#page-editor .topbar{flex-wrap:wrap}';document.head.append(style);
     document.querySelector('#page-editor > .top')?.after(panel);
     document.getElementById('order-design-save').onclick=save;
+    document.getElementById('order-design-review').onclick=compare;
     try{
       work=await api('/open');await loadAll();const d=work.design,p=d.production,c=d.editorContext||{};
       const profile={preview_mask_img:c.previewPath||p.maskPath,print_line_img:p.maskPath,print_w:p.printW,print_h:p.printH,print_x:c.printX||0,print_y:c.printY||0,print_angle:c.printAngle||0};
@@ -90,9 +99,13 @@
       restoringHistory=false;historyStack=[];historyIndex=-1;recordHistory(true);renderLayerList();canvas.renderAll();
       window.BenfuwanEditorAccess?.fitCanvas?.();
       ready=true;document.getElementById('order-design-save').disabled=false;
+      document.getElementById('order-design-review').disabled=false;
+      const changed=()=>{dirty=true;generation++;};
+      for(const event of ['object:added','object:removed','object:modified','text:changed'])canvas.on(event,changed);
       document.getElementById('order-design-status').textContent=`訂單 ${orderId} · 正在編輯 V${work.version} 的獨立副本，尚未儲存${d.remakeNotice?' · '+d.remakeNotice:''}`;
       const previewSave=document.querySelector('.preview-buttons .primary');if(previewSave)previewSave.textContent='儲存修改（不送印）';
     }catch(error){
+      console.error('Order design initialization failed',error);
       restoringHistory=false;ready=false;
       document.body.replaceChildren();const msg=document.createElement('p');msg.style.cssText='padding:24px;white-space:pre-wrap';msg.textContent='無法重新編輯此訂單\n'+error.message;
       const back=document.createElement('a');back.href='/admin';back.textContent='返回後台';document.body.append(msg,back);

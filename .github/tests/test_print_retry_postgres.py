@@ -449,7 +449,7 @@ class _PostgresTableQuery:
     """Small PostgREST-shaped adapter for exercising the real PrintStore path."""
 
     def __init__(self, table):
-        if table not in ("print_jobs", "print_handoffs"):
+        if table not in ("print_jobs", "print_handoffs", "print_events"):
             raise AssertionError(f"unexpected test table: {table}")
         self.table = table
         self.filters = []
@@ -774,3 +774,42 @@ with psycopg.connect(DSN) as db:
     assert not db.execute("select 1 from public.print_requests where request_key='invalid-manual-snapshot-0001'").fetchone()
     db.rollback()
 print('INDEPENDENT_MANUAL_POSTGRES_INVALID_SNAPSHOT_NO_ATTEMPT_OK')
+
+# Automatic send cannot bypass an independent queued/unknown/manual task.
+with psycopg.connect(DSN) as db:
+    guarded_order='guarded-auto-'+uuid.uuid4().hex
+    ordinary_id,manual_id=str(uuid.uuid4()),str(uuid.uuid4())
+    db.execute("""insert into public.print_jobs(id,order_id,attempt_no,artwork_path,artwork_token_nonce,state,manual_independent)
+        values (%s,%s,1,'fixture.png','auto','PREPARED',false),(%s,%s,2,'fixture.png','manual','QUEUED',true)""",
+        (ordinary_id,guarded_order,manual_id,guarded_order))
+    for state in ('PREPARED','QUEUED','SENDING','UNKNOWN','COMPLETED'):
+        db.execute('update public.print_jobs set state=%s where id=%s',(state,manual_id))
+        result=db.execute("select public.claim_print_send_if_safe(%s,'test',now()+interval '1 day','fixture')",(ordinary_id,)).fetchone()[0]
+        assert not result['ok'],(state,result)
+        assert db.execute('select state from public.print_jobs where id=%s',(ordinary_id,)).fetchone()[0]=='PREPARED'
+print('AUTO_SEND_INDEPENDENT_MANUAL_QUEUED_UNKNOWN_COMPLETED_BLOCKED_OK')
+
+# Generic manual retry must not discard a revision's identity or bypass its gate.
+revision_clone_order='revision-clone-guard-'+uuid.uuid4().hex
+revision_clone_id=str(uuid.uuid4())
+with psycopg.connect(DSN) as db:
+    db.execute("""insert into public.print_jobs
+        (id,order_id,attempt_no,artwork_path,artwork_sha256,artwork_token_nonce,state,
+         manual_independent,profile_complete,sku_id,width_mm,height_mm,left_mm,top_mm,copies,spot_color,channel,angle)
+        values (%s,%s,1,'revision-fixture.png',%s,'fixture','PREPARED',true,true,'fixture',80,160,1,2,1,'','1',0)""",
+        (revision_clone_id,revision_clone_order,'a'*64))
+    db.execute("""insert into public.print_events(id,job_id,event_key,event_type,payload_json)
+        values (%s,%s,%s,'MANUAL_REPRINT_AUTHORIZED',jsonb_build_object('version',2,'versionHash',%s))""",
+        (str(uuid.uuid4()),revision_clone_id,'revision-clone-'+uuid.uuid4().hex,'b'*64))
+    for index in range(2):
+        key='revision-clone-blocked-'+uuid.uuid4().hex
+        result=db.execute("""select public.authorize_manual_reprint(
+            %s,%s,%s,'fixture-clerk','待處理','{}'::jsonb,false)""",
+            (revision_clone_order,key,'c'*64)).fetchone()[0]
+        assert result=={'ok':False,'code':'REVISION_REVIEW_REQUIRED'},result
+        assert db.execute('select count(*) from public.print_jobs where order_id=%s',(revision_clone_order,)).fetchone()[0]==1
+        assert not db.execute('select 1 from public.print_requests where request_key=%s',(key,)).fetchone()
+    assert db.execute('select state from public.print_jobs where id=%s',(revision_clone_id,)).fetchone()[0]=='PREPARED'
+revision_store=PrintStore(SimpleNamespace(USE_SUPABASE=True,SUPABASE=_PostgresSupabaseAdapter()))
+assert revision_store.revision_authorization(revision_clone_id)=={'version':2,'versionHash':'b'*64}
+print('REVISION_GENERIC_MANUAL_CLONE_POSTGRES_BLOCKED_NO_JOB_OR_REQUEST_OK')

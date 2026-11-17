@@ -296,7 +296,7 @@ def install(app):
         # Verify all referenced objects exist before any editor canvas is opened.
         for path in asset_paths(latest['document']):image_bytes(read(app,path))
         work=signer.dumps({'order':order_id,'version':latest['version'],'actor':actor(),'id':uuid.uuid4().hex})
-        return app.no_cache_json({'status':'success','orderId':order_id,'version':latest['version'],'work':work,
+        return app.no_cache_json({'status':'success','orderId':order_id,'version':latest['version'],'hash':latest['content_hash'],'work':work,
             'design':materialize(order_id,latest['version'],latest['document']),
             'versions':[{k:r[k] for k in ('version','actor','created_at','content_hash')} for r in rows]})
 
@@ -354,10 +354,19 @@ def install(app):
             if key in base:design[key]=copy.deepcopy(base[key])
             else:design.pop(key,None)
         design.pop('sourceCheckout',None);design.pop('layerSeal',None)
+        # Print proofs are server-owned and bind the entire immutable V2 document.
+        design.pop('revisionPrint',None)
+        from revision_artwork import prepare
+        previous=next((r for r in rows if r['request_id']==claim['id']),None)
+        # Lost-response retries reuse the committed proof even if Storage or
+        # historical job availability changed. append still checks all content.
+        if previous:
+            if 'revisionPrint' in previous['document']:design['revisionPrint']=copy.deepcopy(previous['document']['revisionPrint'])
+        else:design['revisionPrint']=prepare(app,order_id,rows[0]['document'],design)
         result=store.append(order_id,claim['version'],design,actor(),claim['id'])
         if not result['ok']:return app.no_cache_json({'status':'error','msg':'另一位店員已保存新版，或此工作副本已提交不同內容。請重新開啟後再編輯；你的畫布仍保留。'},409)
         next_work=signer.dumps({'order':order_id,'version':result['version'],'actor':actor(),'id':uuid.uuid4().hex})
-        return app.no_cache_json({'status':'success','version':result['version'],'work':next_work,'msg':'已另存設計草稿；原生產圖與列印任務未變更'})
+        return app.no_cache_json({'status':'success','version':result['version'],'hash':digest(design),'work':next_work,'msg':'已另存設計草稿；原生產圖與列印任務未變更'})
 
     from pixel_order_designs import install as install_pixel
     install_pixel(app,store,admin,actor,signer)

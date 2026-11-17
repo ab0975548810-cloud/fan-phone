@@ -412,6 +412,10 @@ class PrintStore:
             ).fetchall()]
             if any(self._physical_evidence(value) for value in attempts):
                 return {"ok": False, "code": "REPRINT_REQUIRED"}
+            if any(value["id"] != job_id and (
+                    value.get("state") in ACTIVE_STATES or value.get("ambiguous_operation") not in (None, "", "operator_confirmed_missing"))
+                   for value in attempts):
+                return {"ok": False, "code": "RECONCILE_REQUIRED"}
             if row.get("state") != "PREPARED":
                 return {"ok": False, "code": "CONCURRENT_OPERATION"}
             now = utcnow()
@@ -895,6 +899,12 @@ class PrintStore:
             ).fetchall()]
             latest = attempts[0] if attempts else None
             source = latest
+            if source:
+                approvals = db.execute(
+                    "SELECT payload_json FROM print_events WHERE job_id=? AND event_type='MANUAL_REPRINT_AUTHORIZED'",
+                    (source["id"],)).fetchall()
+                if any(json.loads(event[0]).get("versionHash") for event in approvals):
+                    return {"ok": False, "code": "REVISION_REVIEW_REQUIRED"}
             values = source or seed
             required = ("artwork_path", "artwork_sha256", "sku_id", "width_mm",
                         "height_mm", "left_mm", "top_mm", "copies", "spot_color",
@@ -956,6 +966,19 @@ class PrintStore:
                  json.dumps({"job_id": job["id"]}, ensure_ascii=False), now, now))
             return {"ok": True, "code": "OK", "replay": False, "job": job}
 
+    def revision_authorization(self, job_id):
+        """Identify a revision attempt without inferring it from storage paths."""
+        if self.app.USE_SUPABASE:
+            rows = self.app.SUPABASE.table("print_events").select("payload_json").eq(
+                "job_id", job_id).eq("event_type", "MANUAL_REPRINT_AUTHORIZED").execute().data
+        else:
+            with self.connection() as db:
+                rows = [self._decode(row) for row in db.execute(
+                    "SELECT payload_json FROM print_events WHERE job_id=? AND event_type='MANUAL_REPRINT_AUTHORIZED'",
+                    (job_id,)).fetchall()]
+        return next((row["payload_json"] for row in rows
+                     if isinstance(row.get("payload_json"), dict) and row["payload_json"].get("versionHash")), None)
+
     def claim_manual_reprint_send_if_safe(self, job_id, *, nonce, expires_at,
                                           device_id):
         """Claim an audited manual attempt without treating old output as a ban."""
@@ -974,12 +997,28 @@ class PrintStore:
             if not row:
                 return {"ok": False, "code": "JOB_NOT_FOUND"}
             authorized = db.execute(
-                "SELECT 1 FROM print_events WHERE job_id=? AND event_type IN "
+                "SELECT payload_json FROM print_events WHERE job_id=? AND event_type IN "
                 "('MANUAL_REPRINT_AUTHORIZED','HANDOFF_REVIEW_MANUAL_REPRINT_AUTHORIZED') LIMIT 1",
                 (job_id,),
             ).fetchone()
             if not authorized or not row.get("manual_independent"):
                 return {"ok": False, "code": "MANUAL_REPRINT_AUTH_REQUIRED"}
+            # Design-revision confirmation is conditional on no other live job.
+            # Recheck under the send lock: another job may appear after approval.
+            authorization = json.loads(authorized[0])
+            if authorization.get("versionHash"):
+                latest = db.execute(
+                    "SELECT version,content_hash FROM order_design_versions WHERE order_id=? ORDER BY version DESC LIMIT 1",
+                    (row["order_id"],)).fetchone()
+                if not latest or latest["version"] != authorization.get("version") or latest["content_hash"] != authorization["versionHash"]:
+                    return {"ok": False, "code": "STALE_DESIGN_VERSION"}
+                competing = db.execute(
+                    "SELECT * FROM print_jobs WHERE order_id=? AND id<>?",
+                    (row["order_id"], job_id)).fetchall()
+                if any(value["state"] in ACTIVE_STATES or
+                       value["ambiguous_operation"] not in (None, "", "operator_confirmed_missing")
+                       for value in competing):
+                    return {"ok": False, "code": "RECONCILE_REQUIRED"}
             if row.get("state") != "PREPARED" or row.get("ambiguous_operation"):
                 code = "RECONCILE_REQUIRED" if row.get("state") in (
                     "SENDING", "UNKNOWN") or row.get("ambiguous_operation") else "CONCURRENT_OPERATION"

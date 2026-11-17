@@ -11,6 +11,9 @@ import subprocess
 import sys
 import threading
 import tempfile
+import time
+import logging
+from contextlib import contextmanager
 from functools import lru_cache
 from bisect import bisect_left
 from urllib.parse import urlsplit
@@ -26,6 +29,49 @@ LEGACY_FONTS={'Arial':'BF-Arimo, NotoSansTC, BF-Emoji','sans-serif':'NotoSansTC,
 MAX_BYTES = 70 * 1024 * 1024
 MAX_SOURCE_PIXELS = 64000000
 _RENDER_SLOT = threading.BoundedSemaphore(1)
+
+
+class ProductionRenderError(ValueError):
+    """Verified rebuild failure; callers decide retry versus operator review."""
+    def __init__(self, code, stage, message, *, retryable=False, exit_code=None):
+        super().__init__(message)
+        self.code = code
+        self.stage = stage
+        self.retryable = retryable
+        self.exit_code = exit_code
+
+
+@contextmanager
+def _render_stage(app, order, stage, code, message, *, retryable=False):
+    started = time.monotonic()
+    logger = getattr(getattr(app, 'app', None), 'logger', logging.getLogger(__name__))
+    # Never log design JSON, customer text, private paths, URLs or worker stderr.
+    record = {'order_ref': hashlib.sha256(str(order.get('id', '')).encode()).hexdigest()[:12], 'stage': stage}
+    try:
+        yield
+    except Exception as cause:
+        error = cause if isinstance(cause, ProductionRenderError) else ProductionRenderError(code, stage, message, retryable=retryable)
+        record.update(stage=error.stage, code=error.code, retryable=error.retryable,
+                      elapsed_ms=round((time.monotonic()-started)*1000),
+                      exception_type=type(cause).__name__)
+        if error.exit_code is not None:record['exit_code'] = error.exit_code
+        logger.warning('production_render_failed %s', json.dumps(record, separators=(',', ':')))
+        if error is cause:raise
+        raise error from cause
+    else:
+        record['elapsed_ms'] = round((time.monotonic()-started)*1000)
+        logger.info('production_render_stage %s', json.dumps(record, separators=(',', ':')))
+
+
+def _worker_failure(exc):
+    """Classify bounded known signatures without exposing Chromium's payload."""
+    stderr = (exc.stderr or '') if isinstance(exc.stderr, str) else ''
+    lowered = stderr.lower()
+    if any(s in lowered for s in ("executable doesn't exist", 'please run the following command to download new browsers', 'host system is missing dependencies', 'error while loading shared libraries')):
+        return ProductionRenderError('PRODUCTION_RENDERER_UNAVAILABLE', 'worker', '生產 renderer 或其系統套件未安裝完成，請檢查部署', exit_code=exc.returncode)
+    if any(s in stderr for s in ('字型載入失敗', '字型版本不一致', '字型尚未準備好', '字型契約缺失')):
+        return ProductionRenderError('PRODUCTION_FONT_LOAD_FAILED', 'worker', '生產 renderer 無法驗證或載入固定字型', exit_code=exc.returncode)
+    return ProductionRenderError('PRODUCTION_RENDERER_FAILED', 'worker', '生產 renderer 執行中斷，尚未送印', retryable=True, exit_code=exc.returncode)
 
 
 @lru_cache(maxsize=16)
@@ -270,6 +316,12 @@ def snapshot(app, design, order_id, model, style_id, upload_paths):
             if total > MAX_BYTES:raise ValueError('設計原始素材總容量過大')
             if pixels>MAX_SOURCE_PIXELS:raise ValueError('原始素材總像素過多，請減少圖片')
             seen[src]=claim
+    # The renderer decodes the frozen mask as well as sources. Apply the same
+    # total pixel budget here before promoting any private order artifacts.
+    mask=public_image(app,profile['print_line_img'])
+    mask_width,mask_height=image_bytes(mask)
+    if pixels+mask_width*mask_height>MAX_SOURCE_PIXELS:
+        raise ValueError('原始素材與生產遮罩總像素過多，請減少圖片')
     # Full preflight before promotion; no partial uploads when total guards fail.
     for src,claim in list(seen.items()):
             raw=read(app,stored_path(app,claim));size=image_bytes(raw)
@@ -294,7 +346,6 @@ def snapshot(app, design, order_id, model, style_id, upload_paths):
             start=item.get(key,0)
             if not isinstance(start,(int,float)) or start<0 or start+item[extent]>limit+.001 or item[extent]<=0:raise ValueError('圖片裁切超出原始素材')
         item['src']=path;item.pop('sourceRef',None)
-    mask=public_image(app,profile['print_line_img'])
     intended=f'orders/{order_id}/sources/print-mask.png'
     mask_path=intended if app.USE_SUPABASE else intended.replace('/','_')
     upload_paths.append(mask_path);app.upload_private_bytes(intended,mask)
@@ -335,40 +386,71 @@ def _worker(payload):
 
 
 def render(app, order, profile, read):
-    design=validate(copy.deepcopy(order.get('design_json')))
-    if design.get('layer_contract_version')=='multilayer-v1':
-        from multilayer_templates import verify_seal
-        verify_seal(app,design,order['id'])
-    contract=design['production']
-    for field,key in (('width_mm','printW'),('height_mm','printH')):
-        if abs(float(profile[field])-float(contract[key]))>.001:raise ValueError('生產尺寸已更新，生產圖無法重建')
-    for family,path in FONTS.items():
-        if design.get('fontHashes',{}).get(family)!=hashlib.sha256((ROOT/path).read_bytes()).hexdigest():raise ValueError('字型版本不一致，生產圖無法重建')
+    with _render_stage(app, order, 'contract', 'PRODUCTION_DESIGN_INVALID', '設計結構無法安全重建'):
+        design=validate(copy.deepcopy(order.get('design_json')))
+        if design.get('layer_contract_version')=='multilayer-v1':
+            from multilayer_templates import verify_seal
+            verify_seal(app,design,order['id'])
+        contract=design['production']
+        for field,key in (('width_mm','printW'),('height_mm','printH')):
+            if abs(float(profile[field])-float(contract[key]))>.001:
+                raise ProductionRenderError('PRODUCTION_GEOMETRY_MISMATCH', 'geometry', '生產尺寸已更新，生產圖無法重建')
+    with _render_stage(app, order, 'fonts', 'PRODUCTION_FONT_UNAVAILABLE', '固定字型檔案無法讀取，請檢查部署'):
+        for family,path in FONTS.items():
+            if design.get('fontHashes',{}).get(family)!=hashlib.sha256((ROOT/path).read_bytes()).hexdigest():
+                raise ProductionRenderError('PRODUCTION_FONT_MISMATCH', 'fonts', '字型版本不一致，生產圖無法重建')
     resources={};source_cache={};pixels=0;prefix=f'orders/{order["id"]}/sources/' if app.USE_SUPABASE else f'orders_{order["id"]}_sources_'
     def resource(path):
         nonlocal pixels
         if not isinstance(path,str) or not path.startswith(prefix) or '..' in path or '\\' in path:raise ValueError('原始素材不屬於此訂單')
         if path in source_cache:return source_cache[path]
-        raw=read(path);w,h=image_bytes(raw);pixels+=w*h
+        try:raw=read(path)
+        except Exception as exc:
+            error_code=getattr(exc, 'code', None)
+            status=str(getattr(exc, 'status', '') or getattr(exc, 'status_code', ''))
+            if error_code=='PRINT_FILE_INVALID':
+                raise ProductionRenderError('PRODUCTION_SOURCE_INVALID', 'sources', '原始素材不是有效 PNG，禁止送印') from exc
+            if status in ('401','403'):
+                raise ProductionRenderError('PRODUCTION_STORAGE_ACCESS_DENIED', 'sources', '原始素材存取權限不足，請檢查設定') from exc
+            if status=='400':
+                raise ProductionRenderError('PRODUCTION_STORAGE_REQUEST_INVALID', 'sources', '原始素材儲存路徑或請求設定無效') from exc
+            missing=isinstance(exc, FileNotFoundError) or error_code=='PRINT_FILE_MISSING' or status=='404'
+            raise ProductionRenderError('PRODUCTION_SOURCE_MISSING' if missing else 'PRODUCTION_STORAGE_READ_FAILED', 'sources', '原始素材不存在' if missing else '原始素材暫時無法讀取，尚未送印', retryable=not missing) from exc
+        w,h=image_bytes(raw);pixels+=w*h
         if pixels>MAX_SOURCE_PIXELS:raise ValueError('原始素材總像素過多，生產圖無法重建')
         url='/asset/'+hashlib.sha256(raw).hexdigest()+'.png';resources[url]=base64.b64encode(raw).decode();source_cache[path]='https://renderer.invalid'+url;return source_cache[path]
-    for item in nodes(design):
-        if item['type']=='image':item['src']=resource(item['src'])
-    mask=resource(contract['maskPath'])
-    width=int(math.floor(float(profile['width_mm'])*720/25.4+.5));height=int(math.floor(float(profile['height_mm'])*720/25.4+.5))
-    if width<=0 or height<=0 or width*height>18000000:raise ValueError('生產尺寸無效')
-    if not _RENDER_SLOT.acquire(timeout=5):raise ValueError('生產重繪忙碌，請稍後再試')
+    with _render_stage(app, order, 'sources', 'PRODUCTION_SOURCE_INVALID', '原始素材格式、範圍或容量無法安全重建'):
+        for item in nodes(design):
+            if item['type']=='image':item['src']=resource(item['src'])
+        mask=resource(contract['maskPath'])
+    with _render_stage(app, order, 'geometry', 'PRODUCTION_GEOMETRY_INVALID', '生產尺寸無效'):
+        width=int(math.floor(float(profile['width_mm'])*720/25.4+.5));height=int(math.floor(float(profile['height_mm'])*720/25.4+.5))
+        if width<=0 or height<=0 or width*height>18000000:raise ValueError('生產尺寸無效')
+    with _render_stage(app, order, 'admission', 'PRODUCTION_RENDERER_BUSY', '生產重繪忙碌，請稍後再試', retryable=True):
+        if not _RENDER_SLOT.acquire(timeout=5):raise ValueError('renderer slot unavailable')
     try:
-        result=subprocess.run([sys.executable,str(Path(__file__)),'--worker'],input=json.dumps({'design':design,'resources':resources,'mask':mask,'width':width,'height':height}),text=True,encoding='utf-8',capture_output=True,timeout=90,check=True)
-        output=json.loads(result.stdout)
-    except (subprocess.SubprocessError,OSError,ValueError) as exc:
-        raise ValueError('生產圖無法重建：字型、原始素材或 renderer 不可用') from exc
+        with _render_stage(app, order, 'worker', 'PRODUCTION_RENDERER_FAILED', '生產 renderer 執行中斷，尚未送印', retryable=True):
+            try:
+                result=subprocess.run([sys.executable,str(Path(__file__)),'--worker'],input=json.dumps({'design':design,'resources':resources,'mask':mask,'width':width,'height':height}),text=True,encoding='utf-8',capture_output=True,timeout=90,check=True)
+            except subprocess.TimeoutExpired as exc:
+                raise ProductionRenderError('PRODUCTION_RENDERER_TIMEOUT', 'worker', '生產 renderer 超過時間限制，尚未送印', retryable=True) from exc
+            except subprocess.CalledProcessError as exc:raise _worker_failure(exc) from exc
+            except OSError as exc:
+                raise ProductionRenderError('PRODUCTION_RENDERER_UNAVAILABLE', 'worker', '生產 renderer 無法啟動，請檢查部署') from exc
     finally:_RENDER_SLOT.release()
-    raw=base64.b64decode(output['png'].split(',',1)[1],validate=True)
-    if image_bytes(raw)!=(width,height):raise ValueError('生產圖尺寸不一致')
-    image=Image.open(io.BytesIO(raw));buffer=io.BytesIO();image.save(buffer,'PNG',dpi=(720,720));raw=buffer.getvalue()
-    path=store_generated(app,f'orders/{order["id"]}/rendered/{hashlib.sha256(raw).hexdigest()}.png',raw)
-    return path,raw,output['layouts']
+    with _render_stage(app, order, 'output', 'PRODUCTION_RENDERER_OUTPUT_INVALID', '生產 renderer 回傳無效圖片，禁止送印'):
+        output=json.loads(result.stdout)
+        layouts=output['layouts']
+        if not isinstance(layouts,list):raise ValueError('生產圖文字配置無效')
+        raw=base64.b64decode(output['png'].split(',',1)[1],validate=True)
+        if image_bytes(raw)!=(width,height):raise ValueError('生產圖尺寸不一致')
+        image=Image.open(io.BytesIO(raw));buffer=io.BytesIO();image.save(buffer,'PNG',dpi=(720,720));raw=buffer.getvalue()
+    with _render_stage(app, order, 'storage', 'PRODUCTION_STORAGE_WRITE_FAILED', '生產圖暫時無法保存，尚未送印', retryable=True):
+        try:path=store_generated(app,f'orders/{order["id"]}/rendered/{hashlib.sha256(raw).hexdigest()}.png',raw)
+        except ValueError as exc:
+            if str(exc)=='生產圖保存衝突':raise ProductionRenderError('PRODUCTION_STORAGE_CONFLICT', 'storage', str(exc)) from exc
+            raise
+    return path,raw,layouts
 
 
 def store_generated(app,path,raw):

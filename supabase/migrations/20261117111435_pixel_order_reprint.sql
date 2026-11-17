@@ -18,9 +18,18 @@ begin
         return jsonb_build_object('ok',prior.request_hash=p_hash,'job',to_jsonb(j));
     end if;
     select document into d from public.order_design_versions where order_id=p_order and version=p_version and content_hash=p_hash;
-    if d is null or d->>'mode'<>'pixel-v1' or p_version<>(select max(version) from public.order_design_versions where order_id=p_order)
+    if d is null or p_version<>(select max(version) from public.order_design_versions where order_id=p_order)
        or exists(select 1 from public.print_jobs where order_id=p_order and
           (state in ('PREPARED','SENDING','QUEUED','STARTING','PRINTING','CANCELING','UNKNOWN') or ambiguous_operation is not null)) then
+        return jsonb_build_object('ok',false); end if;
+    if d->>'mode' is distinct from 'pixel-v1' then
+        d:=d->'revisionPrint';
+        if d is null or d->>'mode' is distinct from 'layered-v1' then
+            return jsonb_build_object('ok',false); end if;
+    end if;
+    if jsonb_typeof(d->'profile') is distinct from 'object' or nullif(d->>'outputPath','') is null
+       or not coalesce(d->>'outputSha' ~ '^[a-f0-9]{64}$',false)
+       or not coalesce(d->>'baseSha' ~ '^[a-f0-9]{64}$',false) then
         return jsonb_build_object('ok',false); end if;
     select * into s from public.print_jobs where order_id=p_order and id=(d->'profile'->>'sourceJobId')::uuid;
     if s.id is null or s.artwork_sha256<>d->>'baseSha' or not s.profile_complete
@@ -34,7 +43,7 @@ begin
         s.width_mm,s.height_mm,s.left_mm,s.top_mm,s.angle,s.copies,s.channel,s.spot_color,'PREPARED') returning * into j;
     insert into public.print_events(id,job_id,event_key,event_type,raw_message,payload_json)
     values(gen_random_uuid(),j.id,p_key,'MANUAL_REPRINT_AUTHORIZED','已比較 V1／V2，人工確認像素修補重印',
-        jsonb_build_object('actor',p_actor,'version',p_version,'versionHash',p_hash,
+        jsonb_build_object('actor',p_actor,'version',p_version,'versionHash',p_hash,'mode',d->>'mode',
         'reason',p_reason,'costCents',p_cost,'sourceJobId',s.id,'baseSha',d->>'baseSha','outputSha',d->>'outputSha','parameters',d->'profile'));
     insert into public.print_requests(request_key,operation,job_id,request_hash,status,response_json)
     values(p_key,'manual_reprint',j.id,p_hash,'COMPLETED',jsonb_build_object('job_id',j.id));

@@ -41,3 +41,4 @@ print('ORDER_DESIGN_POSTGRES_RLS_CAS_APPEND_ONLY_OK')
 import runpy
 from pathlib import Path
 runpy.run_path(str(Path(__file__).with_name('test_pixel_order_postgres.py')))
+runpy.run_path(str(Path(__file__).with_name('test_revision_reprint_postgres.py')))

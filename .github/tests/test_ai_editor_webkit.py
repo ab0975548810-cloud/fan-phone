@@ -3284,9 +3284,16 @@ if __name__ == '__main__':
     # A separate process keeps checkout fixtures/credentials isolated from the
     # broad editor suite. Any failure blocks this existing browser CI job.
     import subprocess
+    subprocess.run([sys.executable, str(ROOT / 'test_renderer_recovery.py')],
+                   check=True, env={**os.environ, 'RUN_REAL_RENDERER_TEST': '1'})
+    # Full revision proofs use the real canonical renderer; run in this job,
+    # where Chromium is installed, rather than the browser-free Commerce job.
+    subprocess.run([sys.executable, '-m', 'unittest', 'test_revision_reprints', 'test_pixel_orders'], check=True)
     subprocess.run([sys.executable, str(ROOT / '.github/tests/test_pixel_order_browser.py')], check=True)
     subprocess.run([sys.executable, str(ROOT / 'test_legacy_order_designs.py')], check=True)
     subprocess.run([sys.executable, str(ROOT / '.github/tests/test_order_design_browser.py')], check=True)
+    subprocess.run([sys.executable, str(ROOT / '.github/tests/test_admin_order_edit_navigation.py')], check=True)
+    subprocess.run([sys.executable, str(ROOT / '.github/tests/test_revision_reprint_browser.py')], check=True)
     subprocess.run([sys.executable, str(ROOT / '.github/tests/test_checkout_safety_browser.py')], check=True)
     subprocess.run([sys.executable, str(ROOT / 'test_template_adaptation.py')], check=True)
     subprocess.run([sys.executable, str(ROOT / '.github/tests/test_master_template_adaptation_browser.py')], check=True)

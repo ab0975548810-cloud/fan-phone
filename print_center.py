@@ -56,10 +56,12 @@ A5_DESKTOP_METADATA = {
 
 
 class PrintError(ValueError):
-    def __init__(self, code, message, status=409):
+    def __init__(self, code, message, status=409, *, retryable=False, stage=None):
         super().__init__(message)
         self.code = code
         self.status = status
+        self.retryable = retryable
+        self.stage = stage
 
 
 def _hash(value):
@@ -253,7 +255,8 @@ class PrintService:
         if not path:
             raise PrintError("PRINT_FILE_REQUIRED", "找不到高清生產圖")
         if self.app.USE_SUPABASE:
-            raw = self.app.SUPABASE.storage.from_(self.app.SUPABASE_PRIVATE_BUCKET).download(path)
+            from production_storage import download_artwork
+            raw = download_artwork(self.app, path)
         else:
             full = os.path.join(self.app.SAVE_DIR, path)
             try:
@@ -346,7 +349,10 @@ class PrintService:
         # process with valid settings can claim it without consuming attempts.
         if not self.auto_ready:
             return []
-        handoffs = self.store.claim_handoffs(limit=limit, lease_seconds=90)
+        # Claim only work that can start now. Leasing a batch before sequential
+        # Storage reads/rendering lets later items expire before they even start.
+        limit = max(1, min(int(limit), 50))
+        handoffs = self.store.claim_handoffs(limit=1, lease_seconds=600)
         if not handoffs:
             return []
         try:
@@ -366,7 +372,15 @@ class PrintService:
 
         requests = commerce.get("requests") or {}
         results = []
-        for handoff in handoffs:
+        def claimed_in_turn():
+            yield handoffs[0]
+            for _ in range(limit - 1):
+                following = self.store.claim_handoffs(limit=1, lease_seconds=600)
+                if not following:
+                    break
+                yield following[0]
+
+        for handoff in claimed_in_turn():
             try:
                 age_seconds = None
                 try:
@@ -379,7 +393,11 @@ class PrintService:
                 self._handoff_log(
                     "warning" if (age_seconds or 0) >= 60 else "info",
                     "marker_claimed", handoff, pending_age_seconds=age_seconds)
-                receipt = requests.get(str(handoff.get("request_key") or "")) or {}
+                receipt_key = str(handoff.get("request_key") or "")
+                if receipt_key not in requests:
+                    # A checkout may commit while a preceding render is busy.
+                    requests = self.app.commerce.read().get("requests") or {}
+                receipt = requests.get(receipt_key) or {}
                 marker = receipt.get("auto_print_handoff_v1") or {}
                 response = receipt.get("response") or {}
                 valid = (
@@ -413,10 +431,14 @@ class PrintService:
                                   job_ref=_hash(str(job["id"]))[:12])
                 results.append(job)
             except (PrintError, PrintConflict) as exc:
+                retryable = getattr(exc, "retryable", False)
+                state = ("FAILED" if int(handoff.get("attempt_count") or 0) >= 8
+                         else "RETRY") if retryable else "REVIEW"
                 self._try_finish_handoff(
-                    handoff, "REVIEW", error_code=exc.code)
-                self._handoff_log("warning", "preflight_review", handoff,
-                                  code=exc.code)
+                    handoff, state, error_code=exc.code,
+                    retry_seconds=self._handoff_retry_seconds(handoff) if state == "RETRY" else None)
+                self._handoff_log("warning", "preflight_retry" if retryable else "preflight_review", handoff,
+                                  state=state, code=exc.code, stage=getattr(exc, "stage", None))
             except Exception as exc:
                 attempt = int(handoff.get("attempt_count") or 0)
                 state = "FAILED" if attempt >= 8 else "RETRY"
@@ -502,6 +524,9 @@ class PrintService:
                     "REPRINT_REQUIRED",
                     "已有列印中或完成的歷史嘗試；為避免重複打印，只能使用未來獨立的重印流程",
                 )
+            if attempt.get("manual_independent") and (
+                    attempt.get("state") in ACTIVE_STATES or attempt.get("ambiguous_operation")):
+                raise PrintError("RECONCILE_REQUIRED", "已有獨立人工重印進行中或狀態待確認，禁止自動重複送印")
 
     def _create_prepared_attempt(self, order_id):
         """Run the one canonical preflight/render path and create one attempt."""
@@ -522,11 +547,15 @@ class PrintService:
         profile = self._materialize_sku_profile(order, sku_id)
         if not profile:
             raise PrintError("PROFILE_MISSING", "請先到「品牌及型號」儲存此型號的列印參數")
-        from editable_stickers import configured as editable_contract, render as render_editable
+        from editable_stickers import ProductionRenderError, configured as editable_contract, render as render_editable
         print_order = order
         if editable_contract(order.get("design_json")):
             try:
                 path, raw, _ = render_editable(self.app, order, profile, self._download_artwork)
+            except ProductionRenderError as exc:
+                raise PrintError(exc.code, "生產圖無法重建：" + str(exc),
+                                 503 if exc.retryable else 422,
+                                 retryable=exc.retryable, stage=exc.stage) from exc
             except (ValueError, OSError) as exc:
                 raise PrintError("PRODUCTION_REBUILD_FAILED", "生產圖無法重建：" + str(exc), 422) from exc
             print_order = {**order, "print_path": path}
@@ -829,6 +858,9 @@ class PrintService:
         job = self.store.job(job_id)
         if not job:
             raise PrintError("JOB_NOT_FOUND", "找不到列印任務", 404)
+        if (manual_reprint and self.store.revision_authorization(job_id)
+                and os.environ.get("ORDER_PIXEL_REPRINT_ENABLED") != "true"):
+            raise PrintError("REVISION_REPRINT_DISABLED", "修改版送印尚未啟用；可先保存與比較", 403)
         if not manual_reprint:
             if job.get("manual_independent"):
                 raise PrintError("MANUAL_REPRINT_AUTH_REQUIRED", "獨立人工重印只能使用原操作識別送出", 403)
@@ -1230,6 +1262,7 @@ class PrintService:
                 "ACTIVE_PRINT_JOB": "銳印已有待確認、列印中或取消中的任務，不能再建立重印",
                 "PROFILE_MISSING": "原列印任務沒有完整生產圖或列印參數",
                 "JOB_NOT_FOUND": "找不到已授權的重印任務",
+                "REVISION_REVIEW_REQUIRED": "最新任務使用修改版設計；請回到訂單設計的 V1／V2 比較與確認，不可直接重新送任務",
             }
             status = 503 if code == "PRINT_UNAVAILABLE" else 409
             raise PrintError(code, messages.get(code, "人工重印目前無法送出"), status)

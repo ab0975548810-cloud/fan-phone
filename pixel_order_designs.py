@@ -87,8 +87,18 @@ def historical_profile(app, order, raw, size):
     return found[0]
 
 
+def artwork_document(document):
+    """Normalize only the two server-generated, immutable artwork contracts."""
+    if document.get('mode')=='pixel-v1':return document
+    proof=document.get('revisionPrint') or {}
+    if not isinstance(proof,dict):raise ValueError('修改版生產圖驗證資料無效')
+    if proof.get('mode')=='layered-v1':return proof
+    raise ValueError('此版本尚無可比較的生產圖；請先儲存修改')
+
+
 def install(app, store, admin, actor, signer):
     root='/api/admin/order-design/<order_id>/pixel'
+    revision_root='/api/admin/order-design/<order_id>/revision'
     def rows(order_id):
         if not re.fullmatch(r'[A-Za-z0-9-]{1,100}',order_id):raise ValueError('訂單識別無效')
         return store.rows(order_id)
@@ -153,17 +163,51 @@ def install(app, store, admin, actor, signer):
         if not result['ok']:return app.no_cache_json({'status':'error','msg':'其他店員已保存，請重新開啟；目前畫布仍保留'},409)
         return opened(order_id,row(order_id,result['version']))
 
+    @app.app.route(revision_root+'/review',methods=['POST'])
+    @admin
+    def review_revision(order_id):
+        data=request.get_json() or {}
+        r=next((r for r in rows(order_id) if r['version']==data.get('version') and r['content_hash']==data.get('hash')),None)
+        if not r:raise ValueError('設計版本已變更，請重新開啟後比較')
+        d=artwork_document(r['document'])
+        if not d.get('outputPath'):raise ValueError(d.get('reason') or '缺少可比較的生產圖')
+        return app.no_cache_json({'status':'success','version':r['version'],'hash':r['content_hash'],
+            'design':{'basePath':f'/api/admin/order-design/{order_id}/revision/assets/{r["version"]}/basePath',
+                      'outputPath':f'/api/admin/order-design/{order_id}/revision/assets/{r["version"]}/outputPath',
+                      'profile':bool(d.get('profile'))},
+            'enabled':os.environ.get('ORDER_PIXEL_REPRINT_ENABLED')=='true'})
+
+    @app.app.route(revision_root+'/assets/<int:version>/<name>')
+    @admin
+    def revision_asset(order_id,version,name):
+        r=next((r for r in rows(order_id) if r['version']==version),None)
+        if not r or name not in ('basePath','outputPath'):raise ValueError('生產圖不存在')
+        d=artwork_document(r['document']);path=d.get(name)
+        if not path:raise ValueError('生產圖尚未通過驗證')
+        raw=read(app,path)
+        if sha(raw)!=d['baseSha' if name=='basePath' else 'outputSha']:raise ValueError('生產圖雜湊不符')
+        png(raw,d['size'],True)
+        response=send_file(io.BytesIO(raw),mimetype='image/png');response.headers['Cache-Control']='private, no-store';response.headers['X-Content-Type-Options']='nosniff';return response
+
     def print_version(order_id,data):
-        if os.environ.get('ORDER_PIXEL_REPRINT_ENABLED')!='true':raise ValueError('像素修補送印尚未啟用；可先保存與比較')
-        r=row(order_id,int(data.get('version',0)))
+        if os.environ.get('ORDER_PIXEL_REPRINT_ENABLED')!='true':raise ValueError('修改版送印尚未啟用；可先保存與比較')
+        versions=rows(order_id)
+        r=next((r for r in versions if r['version']==int(data.get('version',0))),None)
+        if not r:raise ValueError('找不到設計版本')
         if r['version']<2 or r['content_hash']!=data.get('hash'):raise ValueError('請重新比較並確認此版本')
-        if not r['document'].get('profile'):raise ValueError('缺少與 V1 雜湊相符的歷史列印定位，禁止送印')
-        d=r['document'];raw=read(app,d['outputPath'])
+        if versions[-1]['version']!=r['version']:raise ValueError('已有更新設計版本，請重新比較並確認')
+        d=artwork_document(r['document'])
+        if not d.get('profile'):raise ValueError('缺少與 V1 雜湊相符的歷史列印定位，禁止送印')
+        raw=read(app,d['outputPath'])
         if sha(raw)!=d['outputSha']:raise ValueError('V2 生產圖雜湊不符')
         png(raw,d['size'],True)
+        original=read(app,d['basePath'])
+        if sha(original)!=d['baseSha']:raise ValueError('V1 生產圖雜湊不符')
+        png(original,d['size'],True)
         app.print_center._assert_order_printable(app.print_center._order(order_id))
         return r
 
+    @app.app.route(revision_root+'/confirm',methods=['POST'])
     @app.app.route(root+'/confirm',methods=['POST'])
     @admin
     def confirm(order_id):
@@ -176,6 +220,7 @@ def install(app, store, admin, actor, signer):
         if not result.get('ok'):raise ValueError('版本已變更或已有未結束／不明列印任務，請先查核')
         return app.no_cache_json({'status':'success','jobId':result['job']['id'],'msg':'已建立獨立任務，尚未傳送銳印'})
 
+    @app.app.route(revision_root+'/send',methods=['POST'])
     @app.app.route(root+'/send',methods=['POST'])
     @admin
     def send(order_id):
@@ -186,4 +231,5 @@ def install(app, store, admin, actor, signer):
         from print_center import PrintError
         try:job=app.print_center.send(record['job_id'],'pixel-send-'+digest(key)[:64],manual_reprint=True)
         except PrintError as exc:return app.no_cache_json({'status':'error','msg':str(exc),'code':exc.code},exc.status)
+        if job['state']=='PREPARED':return app.no_cache_json({'status':'error','msg':'此版本未傳送；請到列印中心查核阻擋原因，勿重複建立送印任務','code':'REVISION_SEND_NOT_STARTED'},409)
         return app.no_cache_json({'status':'success','jobId':job['id'],'state':job['state']})
