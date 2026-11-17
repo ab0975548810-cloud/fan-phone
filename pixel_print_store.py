@@ -13,6 +13,16 @@ def authorize(app, order_id, revision, actor, reason, cost):
           'p_key':key,'p_actor':actor,'p_reason':reason,'p_cost':cost}
     if app.USE_SUPABASE:return app.SUPABASE.rpc('approve_pixel_reprint',args).execute().data
     with store.connection(True) as db:
+        # The existing print-center profile action must not replace the approved
+        # historical geometry, including when it races the send claim.
+        immutable=FIELDS+('artwork_path','artwork_sha256','manual_independent')
+        changed=' OR '.join(f'NEW.{k} IS NOT OLD.{k}' for k in immutable)
+        db.execute(f"""CREATE TRIGGER IF NOT EXISTS pixel_reprint_geometry_immutable
+            BEFORE UPDATE ON print_jobs WHEN ({changed}) AND EXISTS (
+                SELECT 1 FROM print_events WHERE job_id=OLD.id
+                AND event_type='MANUAL_REPRINT_AUTHORIZED'
+                AND json_extract(payload_json,'$.versionHash') IS NOT NULL)
+            BEGIN SELECT RAISE(ABORT,'Approved pixel reprint geometry is immutable'); END""")
         prior=db.execute('SELECT * FROM print_requests WHERE request_key=?',(key,)).fetchone()
         if prior:return {'ok':prior['request_hash']==revision['content_hash'],'job':store._decode(db.execute('SELECT * FROM print_jobs WHERE id=?',(prior['job_id'],)).fetchone())}
         latest=db.execute('SELECT max(version) FROM order_design_versions WHERE order_id=?',(order_id,)).fetchone()[0]

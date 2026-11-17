@@ -20,7 +20,7 @@ V1 原檔不變；明確保存產生 V2，後續修改追加版本。以版本 C
 
 ## Migration 與部署
 
-新增 `20261117111435_pixel_order_reprint.sql`，只增加 service_role 可呼叫的 `approve_pixel_reprint`，無資料回填。複用 #108 版本表及既有列印表。必須先於隔離 PostgreSQL 通過 migration、權限與多連線競爭測試，再由店主核准正式 migration。
+新增 `20261117111435_pixel_order_reprint.sql`，增加 service_role 可呼叫的 `approve_pixel_reprint` 及只保護新像素修補任務的定位／檔案不可變更 trigger，無資料回填。確認後，既有列印中心的「套用參數」也不能取代已確認的歷史定位；狀態與查核照常更新。複用 #108 版本表及既有列印表。必須先於隔離 PostgreSQL 通過 migration、權限與多連線競爭測試，再由店主核准正式 migration。
 
 `ORDER_PIXEL_REPRINT_ENABLED` 預設關閉；開關只控制確認／送印，保存與比較可用。正式部署須先套用新增 RPC，再經核對啟用；缺 RPC 或開關關閉會拒絕確認，絕不默默改用舊送印。回退時關閉開關並保留版本資料，勿刪除有 audit 的任務。
 

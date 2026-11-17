@@ -43,3 +43,25 @@ end;
 $$;
 revoke all on function public.approve_pixel_reprint(text,integer,text,text,text,text,integer) from public,anon,authenticated;
 grant execute on function public.approve_pixel_reprint(text,integer,text,text,text,text,integer) to service_role;
+
+-- Narrow guard: only NEW pixel-approved jobs. Existing tasks are unaffected.
+-- The DB boundary also closes the race with the existing profile snapshot API.
+create function public.guard_pixel_reprint_geometry()
+returns trigger language plpgsql security invoker set search_path='' as $$
+begin
+    if row(new.sku_id,new.width_mm,new.height_mm,new.left_mm,new.top_mm,new.angle,
+           new.copies,new.channel,new.spot_color,new.artwork_path,new.artwork_sha256,new.manual_independent)
+       is distinct from
+       row(old.sku_id,old.width_mm,old.height_mm,old.left_mm,old.top_mm,old.angle,
+           old.copies,old.channel,old.spot_color,old.artwork_path,old.artwork_sha256,old.manual_independent)
+       and exists(select 1 from public.print_events where job_id=old.id
+           and event_type='MANUAL_REPRINT_AUTHORIZED' and payload_json->>'versionHash' is not null) then
+        raise exception 'Approved pixel reprint geometry is immutable' using errcode='23514';
+    end if;
+    return new;
+end;
+$$;
+revoke all on function public.guard_pixel_reprint_geometry() from public,anon,authenticated;
+grant execute on function public.guard_pixel_reprint_geometry() to service_role;
+create trigger pixel_reprint_geometry_immutable before update on public.print_jobs
+for each row execute function public.guard_pixel_reprint_geometry();

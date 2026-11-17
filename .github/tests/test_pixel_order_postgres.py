@@ -34,6 +34,13 @@ with psycopg.connect(DSN) as db:
         if k!='sourceJobId':assert job[k]==profile[k],(k,job[k],profile[k])
     audit=db.execute('select payload_json from public.print_events where job_id=%s',(job['id'],)).fetchone()[0]
     assert audit['costCents']==2500 and audit['versionHash']==hashed and audit['reason']=='pixel repair'
+    try:
+        with db.transaction():
+            db.execute('set local role service_role')
+            db.execute('update public.print_jobs set left_mm=left_mm+1 where id=%s',(job['id'],))
+    except psycopg.errors.CheckViolation:pass
+    else:raise AssertionError('Approved pixel geometry was changed')
+    assert db.execute('select left_mm from public.print_jobs where id=%s',(job['id'],)).fetchone()[0]==profile['left_mm']
     # New version cannot be confirmed while the previous approved job is active.
     db.execute('select public.append_order_design_version(%s,2,%s,%s,%s,%s)',(order,Jsonb(doc),'admin','v3',hashed))
     blocked=db.execute('select public.approve_pixel_reprint(%s,3,%s,%s,%s,%s,2500)',(order,hashed,key+'x','admin','next')).fetchone()[0]

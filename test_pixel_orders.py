@@ -69,6 +69,10 @@ class PixelTests(unittest.TestCase):
         again=self.client.post(self.url+'/confirm',headers=HEAD,json=payload);self.assertEqual(r.json['jobId'],again.json['jobId'])
         self.assertEqual(self.fx.fake.calls,[])
         self.assertEqual(app.print_center.store.job(self.source['id']),self.source)
+        import sqlite3
+        with self.assertRaises(sqlite3.IntegrityError):
+            app.print_center.store.patch_job(r.json['jobId'],{'left_mm':self.source['left_mm']+1})
+        self.assertEqual(app.print_center.store.job(r.json['jobId'])['left_mm'],self.source['left_mm'])
         self.fx.fake.responses['/api/Device/receiveTask']={'code':0,'data':{'taskid':'pixel-fixture-task','status':0}}
         for _ in range(2):
             sent=self.client.post(self.url+'/send',headers=HEAD,json=payload);self.assertEqual(sent.status_code,200,sent.json)
