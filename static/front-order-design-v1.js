@@ -43,9 +43,10 @@
       const design=await serialize();uploaded=await BenfuwanDesignSources.prepare(design);
       const result=await api('/save',{work:work.work,design:uploaded});
       document.getElementById('order-design-status').textContent=`V${result.version} 草稿已保存；原生產圖未變更`;
-      toast(result.msg);ready=false;
-      // Renew the work token after a confirmed append, allowing the next explicit save.
-      work=await api('/open');ready=true;
+      toast(result.msg);
+      // The append response binds the next edit to exactly this saved version.
+      // No second network request can strand the editor or adopt another staff member's version.
+      work={...work,version:result.version,work:result.work};
     }catch(error){toast(error.message);document.getElementById('order-design-status').textContent=error.message;}
     finally{if(uploaded)await BenfuwanDesignSources.release(uploaded);saving=false;button.disabled=false;}
   }

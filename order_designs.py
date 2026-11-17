@@ -312,6 +312,7 @@ def install(app):
         design.pop('sourceCheckout',None);design.pop('layerSeal',None)
         result=store.append(order_id,claim['version'],design,actor(),claim['id'])
         if not result['ok']:return app.no_cache_json({'status':'error','msg':'另一位店員已保存新版，或此工作副本已提交不同內容。請重新開啟後再編輯；你的畫布仍保留。'},409)
-        return app.no_cache_json({'status':'success','version':result['version'],'msg':'已另存設計草稿；原生產圖與列印任務未變更'})
+        next_work=signer.dumps({'order':order_id,'version':result['version'],'actor':actor(),'id':uuid.uuid4().hex})
+        return app.no_cache_json({'status':'success','version':result['version'],'work':next_work,'msg':'已另存設計草稿；原生產圖與列印任務未變更'})
 
     app.order_designs=store

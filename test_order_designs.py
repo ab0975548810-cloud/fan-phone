@@ -55,6 +55,16 @@ class OrderDesignTests(fx.EditableTests):
         self.assertEqual(reopened['design']['objects'][0]['left'],design['objects'][0]['left'])
         self.assertEqual(self.save(order,work,design,client).status_code,422)
 
+    def test_save_response_continues_at_exact_saved_version(self):
+        order=self.create_original();work=self.open(order);design=self.candidate(work)
+        first=self.save(order,work,design);self.assertEqual(first.status_code,200)
+        next_work={'work':first.json['work']}
+        design['objects'][0]['left']+=1
+        second=self.save(order,next_work,design);self.assertEqual(second.status_code,200,second.json)
+        self.assertEqual(second.json['version'],3)
+        # A separate work token from V2 cannot silently overwrite V3.
+        self.assertEqual(self.save(order,next_work,{**design,'background':'white'}).status_code,409)
+
     def test_private_assets_and_forged_work_are_denied(self):
         order=self.create_original();work=self.open(order);anonymous=app.app.test_client()
         url=work['design']['objects'][0]['src']
