@@ -23,11 +23,14 @@ def run():
                 c=browser.new_context(viewport={'width':width,'height':844},has_touch=width==390)
                 c.add_cookies([{'name':k.key,'value':k.value,'url':base} for k in fx.client._cookies.values()]);return c
             try:
+                evidence=ROOT/'__pycache__'/'pixel-evidence';evidence.mkdir(exist_ok=True)
                 c=context(390);page=c.new_page();errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
                 page.on('response',lambda r:print('HTTP_ERROR',r.url,r.text()[:500],flush=True) if r.status>=400 and '/pixel/' in r.url else None)
                 page.goto(base+'/admin/order-design/'+fx.order+'?pixel=1');wait(page,"document.querySelector('#pixel-status')?.textContent.includes('正在編輯 V1')")
                 assert page.evaluate('canvas.getObjects().length')==0
                 assert page.evaluate('canvas.backgroundImage.selectable===false')
+                assert page.locator('#canvas-shell').evaluate("el=>getComputedStyle(el).borderRadius==='0px'")
+                assert page.locator('#safe-guide').evaluate("el=>getComputedStyle(el).display==='none'")
                 # Actual existing text and image tools remain available; original is never an object.
                 page.evaluate('openTextSheet()');page.locator('#text-input').fill('修補');page.locator('#text-font').select_option('jf-openhuninn');page.locator('#text-size').fill('16')
                 page.get_by_role('button',name='新增文字',exact=True).click();wait(page,'canvas.getObjects().length===1')
@@ -52,10 +55,12 @@ def run():
                 box=d['proof']['bounds'];assert box
                 # Entire unedited lower half must be identical, including all RGBA channels.
                 assert out.crop((0,int(size[1]*.8),size[0],size[1])).tobytes()==before.crop((0,int(size[1]*.8),size[0],size[1])).tobytes()
+                page.screenshot(path=str(evidence/(browser.browser_type.name+'-'+str(size[0])+'-editor.png')))
                 c.close();c=context(1280);page=c.new_page();page.goto(base+'/admin/order-design/'+fx.order+'?pixel=1')
                 wait(page,"document.querySelector('#pixel-status')?.textContent.includes('正在編輯 V2')")
                 assert page.evaluate('canvas.getObjects().length')==6
                 page.locator('#pixel-review').click();page.locator('#pixel-reason').fill('隔離像素修補測試');page.locator('#pixel-cost').fill('12.50')
+                page.screenshot(path=str(evidence/(browser.browser_type.name+'-'+str(size[0])+'-compare.png')))
                 page.locator('#pixel-confirm').click();wait(page,"document.querySelector('#pixel-send')?.disabled===false")
                 assert fx.fx.fake.calls==[]
                 fx.fx.fake.responses['/api/Device/receiveTask']={'code':0,'data':{'taskid':'pixel-browser-'+str(size[0]),'status':0}}
@@ -64,7 +69,6 @@ def run():
                 assert app.commerce.store.order(fx.order)==order and app.commerce.read()==finance
                 assert app.print_center.store.job(fx.source['id'])==original_job
                 assert not errors,errors
-                evidence=ROOT/'__pycache__'/'pixel-evidence';evidence.mkdir(exist_ok=True)
                 page.screenshot(path=str(evidence/(browser.browser_type.name+'-'+str(size[0])+'.png')))
                 c.close();print('PIXEL_REPAIR_NATIVE_RGBA_V2_COMPARE_REPRINT_OK',browser.browser_type.name,size,flush=True)
             finally:server.shutdown();server.server_close();fx.doCleanups()

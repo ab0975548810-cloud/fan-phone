@@ -49,7 +49,7 @@
     const label=document.createElement('p');label.textContent='V1 原生產圖 ／ V'+work.version+' 修補生產圖（可開原尺寸圖片核對）';dialog.append(label);
     const pair=document.createElement('div');pair.className='pixel-pair';dialog.append(pair);
     const loaded=[];
-    for(const key of ['basePath','outputPath']){const a=document.createElement('a');a.href=work.design[key];a.target='_blank';a.rel='noopener';const im=new Image();loaded.push(new Promise((ok,no)=>{im.onload=ok;im.onerror=no;}));im.src=a.href;a.append(im);pair.append(a);}
+    for(const key of ['basePath','outputPath']){const a=document.createElement('a');a.href=work.design[key];a.target='_blank';a.rel='noopener';const caption=document.createElement('strong');caption.textContent=key==='basePath'?'V1 原圖':'V'+work.version+' 修補圖';const im=new Image();im.alt=caption.textContent;loaded.push(new Promise((ok,no)=>{im.onload=ok;im.onerror=no;}));im.src=a.href;a.append(caption,im);pair.append(a);}
     const warning=document.createElement('p');warning.textContent=work.design.profile?'沿用與 V1 雜湊相符的歷史列印定位。確認只建立獨立任務，仍需另按傳送。':'缺少可核對的歷史列印定位：可保存修補圖，但禁止送印。';dialog.append(warning);
     const reason=document.createElement('input');reason.placeholder='重印原因';reason.id='pixel-reason';dialog.append(reason);
     const cost=document.createElement('input');cost.type='number';cost.min='0';cost.step='0.01';cost.placeholder='重印成本（元）';cost.id='pixel-cost';dialog.append(cost);
@@ -64,9 +64,10 @@
     try{await Promise.all(loaded);comparison=work.hash;confirm.disabled=!work.design.profile||work.version<2;}catch(e){warning.textContent='比較圖片載入失敗，禁止確認';}
   }
   async function boot(){
-    const style=document.createElement('style');style.textContent='#pixel-tools{padding:8px;background:#fff3db;font-size:12px}#pixel-tools button,#pixel-compare button{min-height:44px;margin:4px}#pixel-compare{max-width:95vw;max-height:90vh;overflow:auto}.pixel-pair{display:flex;gap:8px}.pixel-pair a{width:50%}.pixel-pair img{width:100%;background:repeating-conic-gradient(#ddd 0% 25%,#fff 0% 50%) 0/12px 12px}';document.head.append(style);
+    const style=document.createElement('style');style.textContent='#pixel-tools{padding:8px;background:#fff3db;font-size:12px;flex:0 0 auto;max-height:34vh;overflow:auto}#pixel-tools button,#pixel-compare button{min-height:44px;margin:4px;max-width:100%}#pixel-compare{max-width:95vw;max-height:90vh;overflow:auto}#pixel-compare input{font-size:16px;min-height:44px;max-width:100%}.pixel-pair{display:flex;gap:8px}.pixel-pair a{width:50%;min-width:0;text-align:center}.pixel-pair img{display:block;width:100%;height:45vh;object-fit:contain;background:repeating-conic-gradient(#ddd 0% 25%,#fff 0% 50%) 0/12px 12px}';document.head.append(style);
     const tools=document.createElement('div');tools.id='pixel-tools';tools.innerHTML='<strong>原生產圖像素修補</strong><p>底圖已鎖定；合成照片／文字不能拆開編輯。透明區不擴張，不套用現行刀模。</p><p id="pixel-status" role="status">正在讀取原生產圖…</p>';
     document.querySelector('#page-editor > .top').after(tools);
+    style.textContent+='#page-editor #canvas-shell{border-radius:0!important}#page-editor #safe-guide,#page-editor #phone-mask{display:none!important}';
     tools.append(button('儲存修改','pixel-save',save),button('V1／V2 比較與確認','pixel-review',compare));
     tools.append(button('新增局部遮蓋','pixel-cover',()=>{canvas.add(new fabric.Rect({left:10,top:10,width:40,height:40,fill:'#ffffff'}));mark();}));
     tools.append(button('新增擦除區（可移動／縮放）','pixel-erase',()=>{const rect=new fabric.Rect({left:10,top:10,width:40,height:40,fill:'#ff00ff',opacity:1,pixelErase:true});canvas.add(rect);canvas.setActiveObject(rect);mark();}));
