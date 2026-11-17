@@ -64,6 +64,7 @@ class RendererRecoveryTests(unittest.TestCase):
     def test_timeout_is_retryable_and_slot_is_released(self):
         with mock.patch.object(editable.subprocess, 'run', side_effect=subprocess.TimeoutExpired('worker', 90)):
             self.failure('PRODUCTION_RENDERER_TIMEOUT', 'worker', True)
+        self.assertEqual(json.loads(self.warning.call_args.args[1])['cause_type'], 'TimeoutExpired')
         self.assertTrue(editable._RENDER_SLOT.acquire(blocking=False))
         editable._RENDER_SLOT.release()
 
@@ -118,6 +119,8 @@ class RendererRecoveryTests(unittest.TestCase):
             for reader, code, retryable in cases:
                 with self.subTest(code=code):
                     self.failure(code, 'sources', retryable, reader)
+                    if isinstance(reader.side_effect, TimeoutError):
+                        self.assertEqual(json.loads(self.warning.call_args.args[1])['cause_type'], 'TimeoutError')
         run.assert_not_called()
 
     def test_foreign_source_never_reads_storage(self):

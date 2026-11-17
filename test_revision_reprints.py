@@ -87,6 +87,53 @@ class RevisionReprintTests(unittest.TestCase):
             self.assertEqual(self.client.post(root+'/confirm',headers=HEAD,json=self.payload(result.json)).status_code,422)
         self.assertEqual(self.fx.fixture.fake.calls,[])
 
+    def test_multilayer_archived_revision_reseals_only_validated_frozen_policy(self):
+        import test_multilayer_templates as templates
+        layered=templates.MultilayerTests();layered.setUp();self.addCleanup(layered.doCleanups)
+        design=layered.design();design['orderDesignVersion']=1
+        design['objects'][1]['styles']=[]
+        order=layered.create(design).json['order_id']
+        source=app.print_center.prepare(order,'revision-multilayer-original-'+order)
+        source=app.print_center.store.patch_job(source['id'],{'state':'COMPLETED'})
+        original=copy.deepcopy(app.commerce.store.order(order));finance=copy.deepcopy(app.commerce.read())
+        work=self.fx.open(order,layered.client)
+        v1=copy.deepcopy(app.order_designs.rows(order)[0])
+        self.assertEqual(v1['document']['layer_contract_version'],'multilayer-v1')
+        self.assertEqual(len(v1['document']['objects']),30)
+        candidate=self.fx.candidate(work,layered.client)
+        forged=copy.deepcopy(candidate);forged['objects'][0]['locked']=False;forged['objects'][0]['canMove']=True
+        denied=self.fx.save(order,work,forged,layered.client)
+        self.assertEqual(denied.status_code,422,denied.json)
+        self.assertEqual(app.order_designs.rows(order),[v1])
+        # Remove today's template entirely: archived V1 permissions and assets
+        # must remain sufficient to render and verify an allowed sticker move.
+        app.local_save_json(app.TEMPLATES_FILE,{'templates':[],'categories':[]})
+        moved=27
+        self.assertEqual(candidate['objects'][moved]['type'],'image')
+        self.assertTrue(candidate['objects'][moved]['canMove'])
+        candidate['objects'][moved]['left']+=40
+        candidate['objects'][moved]['normalizedGeometry']['x']+=.2
+        saved=self.fx.save(order,work,candidate,layered.client)
+        self.assertEqual(saved.status_code,200,saved.json)
+        rows=app.order_designs.rows(order);self.assertEqual(rows[0],v1)
+        proof=rows[-1]['document']['revisionPrint']
+        self.assertTrue(proof.get('profile'),proof)
+        self.assertEqual(proof['baseSha'],source['artwork_sha256'])
+        self.assertNotEqual(proof['outputSha'],proof['baseSha'])
+        for index,(before,after) in enumerate(zip(v1['document']['objects'],rows[-1]['document']['objects'])):
+            if index!=moved:
+                # Saving intentionally removes obsolete public URL hints; private
+                # src, all visual properties, identity and permissions stay exact.
+                retained={k:v for k,v in before.items() if k!='publicSrc'}
+                self.assertEqual(retained,after,('unchanged layer',index))
+        raw=app.print_center._download_artwork(proof['outputPath'])
+        output=Image.open(io.BytesIO(raw))
+        self.assertEqual(output.size,(2030,4241));self.assertAlmostEqual(output.info['dpi'][0],720,delta=.1)
+        self.assertEqual(sha(raw),proof['outputSha'])
+        self.assertEqual(app.print_center.store.job(source['id']),source)
+        self.assertEqual(app.commerce.store.order(order),original);self.assertEqual(app.commerce.read(),finance)
+        self.assertEqual(layered.fx.fixture.fake.calls,[])
+
     def test_untrusted_archive_and_changed_historical_artwork_fail_closed(self):
         from revision_artwork import render_revision
         order,job=self.prepare('camera_film');work=self.fx.open(order)

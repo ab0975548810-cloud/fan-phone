@@ -53,7 +53,8 @@ def _render_stage(app, order, stage, code, message, *, retryable=False):
         error = cause if isinstance(cause, ProductionRenderError) else ProductionRenderError(code, stage, message, retryable=retryable)
         record.update(stage=error.stage, code=error.code, retryable=error.retryable,
                       elapsed_ms=round((time.monotonic()-started)*1000),
-                      exception_type=type(cause).__name__)
+                      exception_type=type(cause).__name__,
+                      cause_type=type(cause.__cause__ or cause).__name__)
         if error.exit_code is not None:record['exit_code'] = error.exit_code
         logger.warning('production_render_failed %s', json.dumps(record, separators=(',', ':')))
         if error is cause:raise

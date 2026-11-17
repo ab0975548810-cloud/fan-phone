@@ -30,8 +30,10 @@
 - `test_renderer_recovery.py`：字型／幾何／素材／worker 故障分類；實際背景與同步 720 DPI PNG 一致；實際背景 outbox → renderer → 假 receiveTask，一次送出、帳務不變。實際 Chromium 案例由 `RUN_REAL_RENDERER_TEST=1` 啟用，已接既有兩引擎 CI。
 - `test_production_storage.py`：真實 SDK 搭配 MockTransport，有限網路重試、預算、權限／404／非 PNG 拒絕。
 - `test_order_designs.py`、`test_pixel_orders.py`、`test_revision_reprints.py`：私有封存、V1 不可變、V2 CAS、原像素與 alpha、歷史定位證據、旗標、原因／成本、草稿與帳務保護。
+- 真實 30 圖層模板案例：移除目前模板後仍可用封存資料驗證歷史 V1；只移動一個允許的圖層，其他 29 層保持原樣；鎖定層修改拒絕，V2 為 2030×4241／720 DPI。
 - `.github/tests/test_admin_order_edit_navigation.py`、`test_pixel_order_browser.py`、`test_revision_reprint_browser.py`：WebKit／Chromium 真實完整編輯器，手機殼／鏡頭底膜，保存／重載／比較／假送印。
 - `.github/tests/setup_commerce_postgres.py` 與原 Commerce PostgreSQL 入口：在一次性 PostgreSQL 17 套用全部 migrations，驗證權限、鎖、併發及版本送出。
+- PostgreSQL 直接交錯測試以真實鎖等待控制兩種順序：V3 保存先完成則拒絕 V2；V2 先取得送出權則凍結其圖與參數，後來的 V3 不修改該任務。核准後新增 QUEUED／UNKNOWN 任務也拒絕送出。
 - 既有 Smoke、Commerce、Print Center、checkout safety、WebKit、Chromium 全套保留。CI 結果以 PR 最終 HEAD checks 為準。
 
 ## Migration、部署風險與建議順序
