@@ -118,6 +118,10 @@ def nodes(design):
             if item.get('clipPath'):
                 yield from visit([item['clipPath']], depth + 1)
     yield from visit(design.get('objects'))
+    assets=design.get('sourceAssets',[])
+    if assets:
+        if not isinstance(assets,list) or any(not isinstance(o,dict) or o.get('type')!='image' or o.get('objects') or o.get('clipPath') for o in assets):raise ValueError('附加原始素材無效')
+        yield from visit(assets)
 
 
 def validate(design):
@@ -183,7 +187,7 @@ def validate(design):
                 normalized_area(item.get('textArea'))
                 text_style({**item, 'fontSize': item.get('requestedFontSize', item.get('fontSize'))})
     multilayer=design.get('layer_contract_version')=='multilayer-v1'
-    if (not pairs and not multilayer) or any(set(p) != {'editable-sticker-bg', 'editable-sticker-text'} for p in pairs.values()):
+    if (not pairs and not multilayer and design.get('orderDesignVersion') != 1) or any(set(p) != {'editable-sticker-bg', 'editable-sticker-text'} for p in pairs.values()):
         raise ValueError('文字貼紙缺少圖片或文字')
     if any(p['editable-sticker-bg']['editableStickerId'] != p['editable-sticker-text']['editableStickerId'] for p in pairs.values()):
         raise ValueError('文字貼紙成員識別不一致')
@@ -296,6 +300,9 @@ def snapshot(app, design, order_id, model, style_id, upload_paths):
     upload_paths.append(mask_path);app.upload_private_bytes(intended,mask)
     design['production']={'printW':float(profile['print_w']),'printH':float(profile['print_h']), 'maskPath':mask_path,'maskUrl':profile['print_line_img']}
     design['fontHashes']=hashes
+    if design.get('orderDesignVersion') == 1:
+        from order_designs import checkout_context
+        checkout_context(app, design, order_id, model, style_id, profile, upload_paths)
     design.pop('sourceCheckout',None)
     if design.get('layer_contract_version')=='multilayer-v1':
         from multilayer_templates import seal

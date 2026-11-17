@@ -1,6 +1,7 @@
 /* 本福丸前台：只在此裝置保存未完成設計；恢復時一律重新解析最新型號 × 殼款生產設定。 */
 (function () {
   'use strict';
+  if(window.__bfOrderDesignMode)return;
   if (window.__bfFrontDesignDraftV1) return;
   window.__bfFrontDesignDraftV1 = true;
 

@@ -155,12 +155,35 @@
   async function serialize(c,context){
     await rehydrate(c);c.discardActiveObject();
     await textFonts(c);
-    const data=c.toJSON(PROPS);delete data.clipPath;
+    let data;const precision=fabric.Object.NUM_FRACTION_DIGITS;
+    try{fabric.Object.NUM_FRACTION_DIGITS=8;data=c.toJSON([...PROPS,...(typeof CUSTOM_PROPS==='undefined'?[]:CUSTOM_PROPS),'bfUserLocked','bfScaleBaseX','bfScaleBaseY','stickerId','originalName','aiRemovalMode','aiOutlineStyle','aiOutlineStrength','aiOutlineWidth','aiOutlineColor']);}finally{fabric.Object.NUM_FRACTION_DIGITS=precision;}
+    delete data.clipPath;data.sourceAssets=[];const sourceCache=new Map();
+    data.editorGuides=data.objects.filter(o=>o.role==='slot-guide'&&!o.templateLayerId);
     data.objects=data.objects.filter(o=>!['guide','slot-guide'].includes(o.role));
     const visit=async(raw,obj)=>{
       if(raw.type==='image'){
+        delete raw.aiOutlineSource;
+        // Keep the pre-outline raster independently, never a transient blob URL.
+        if(obj.aiOutlineSource){
+          let asset=sourceCache.get(obj.aiOutlineSource);
+          if(!asset){
+            const image=await BenfuwanEditorImage.image(obj.aiOutlineSource),el=image.getElement();
+            const source=document.createElement('canvas');source.width=image.width;source.height=image.height;
+            source.getContext('2d').drawImage(el,0,0);
+            const src=/^data:image\/png;base64,/.test(el.src)?el.src:source.toDataURL('image/png');
+            const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(src))),v=>v.toString(16).padStart(2,'0')).join('');
+            asset={id:hash,type:'image',src,width:image.width,height:image.height,sourceSize:{width:image.width,height:image.height}};
+            if(!data.sourceAssets.some(a=>a.id===hash))data.sourceAssets.push(asset);
+            sourceCache.set(obj.aiOutlineSource,asset);source.width=source.height=1;
+          }
+          raw.orderOutlineSourceId=asset.id;
+        }
         const el=obj.getElement();raw.sourceSize={width:el.naturalWidth||el.width,height:el.naturalHeight||el.height};
         if(typeof el.src==='string'&&el.src.startsWith('data:image/png;base64,')){raw.src=el.src;return;}
+        if(window.__bfOrderDesignMode&&new URL(el.src,location.href).pathname.startsWith('/api/admin/order-design/')){
+          const response=await fetch(el.src,{credentials:'same-origin',cache:'no-store'});if(!response.ok)throw Error('訂單原始素材無法讀取');const blob=await response.blob();
+          raw.src=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(blob);});return;
+        }
         if(raw.templateLayerId&&raw.publicSrc&&!/^data:image\//i.test(el.src || '')){
           const url=window.benfuwanTemplateProxyUrl?.(raw.publicSrc)||raw.publicSrc;
           const response=await fetch(url);if(!response.ok)throw Error('模板原始素材無法讀取');const blob=await response.blob();
@@ -175,7 +198,7 @@
     };
     const objs=c.getObjects().filter(o=>!['guide','slot-guide'].includes(o.role));for(const [i,r] of data.objects.entries())await visit(r,objs[i]);
     const coverage=await fontManifest();
-    return {...data,render_contract_version:VERSION,fontHashes:Object.fromEntries(Object.entries(coverage).map(([key,value])=>[key,value.sha256])),logicalCanvas:{width:c.width,height:c.height},production:{printW:context.printW,printH:context.printH},modelId:context.modelId,styleId:context.styleId};
+    return {...data,orderDesignVersion:1,render_contract_version:VERSION,fontHashes:Object.fromEntries(Object.entries(coverage).map(([key,value])=>[key,value.sha256])),logicalCanvas:{width:c.width,height:c.height},production:{printW:context.printW,printH:context.printH},modelId:context.modelId,styleId:context.styleId};
   }
   async function render(data,maskSrc,width,height){
     const c=new fabric.StaticCanvas(null,{width:data.logicalCanvas.width,height:data.logicalCanvas.height,enableRetinaScaling:false});

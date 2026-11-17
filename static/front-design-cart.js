@@ -1,6 +1,7 @@
 /* Keep the protected checkout contract: the explicitly selected line occupies 'cart'. */
 (function () {
   'use strict';
+  if(window.__bfOrderDesignMode)return;
   const drafts = window.BenfuwanDesignDraft;
   const prefix = 'saved-cart:';
   const summaries = 'cart-summary:';
