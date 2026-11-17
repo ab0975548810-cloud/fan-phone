@@ -182,11 +182,12 @@ def protect_layers(base, candidate):
         elif any(new.get(k)!=old.get(k) for k in ('type','role')):raise ValueError('模板圖層類型不可修改')
         g=geometry(new.get('normalizedGeometry'));initial=geometry(old.get('normalizedGeometry'))
         keys=['x','y'] if locked or not old.get('canMove') else []
-        if locked or not old.get('canScale'):keys+=['width','height']
+        text_reflow=can_edit and new.get('type') in ('text','textbox','i-text')
+        if locked or (not old.get('canScale') and not text_reflow):keys+=['width','height']
         if any(not close(g[k],initial[k]) for k in keys):raise ValueError('禁止修改保護圖層座標／尺寸')
         if (locked or not old.get('canRotate')) and not close(new.get('angle',0),old.get('angle',0)):raise ValueError('禁止旋轉保護圖層')
         if not can_edit:
-            for key in CONTENT_FIELDS+('src','opacity','visible','flipX','flipY'):
+            for key in CONTENT_FIELDS+('src','opacity','visible','flipX','flipY','orderOutlineSourceId','aiOutlineStyle','aiOutlineStrength','aiOutlineWidth','aiOutlineColor'):
                 if new.get(key)!=old.get(key):raise ValueError('禁止變更保護圖層內容')
     for identity,old in originals.items():
         if identity not in incoming and (old.get('locked') or not old.get('canDelete')):raise ValueError('禁止移除保護圖層')

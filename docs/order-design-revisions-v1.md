@@ -48,3 +48,15 @@ V2 不產生或取代 Print Center 正式圖，不建立 print job、重送、�
 ## 第二階段建議
 
 另建設計版本確認與生產版本關聯：展示 V1/V2 預覽差異，伺服器重建並驗證 720 DPI 後由管理員明確確認；以版本 ID + artwork hash 連結獨立列印任務，沿用既有人工重送授權、去重與未知狀態保護。新增原因／成本／操作員審計，不建立第二筆銷售訂單或重新扣庫存。這些動作需另行開發與核准，不由本 PR 觸發。
+
+## 修改檔案
+
+| 範圍 | 檔案 |
+| --- | --- |
+| 後端快照、授權與版本 | order_designs.py、editable_stickers.py、app.py |
+| 後台訂單按鈕與資源版本 | admin_perf_patch.py、static/admin-orders-v3.js |
+| 編輯器完整保存、私有來源與工作副本 | index.html、static/editable-sticker-core-v1.js、static/design-source-upload-v1.js、static/front-order-design-v1.js |
+| 後台編輯模式隔離 | static/index-base-20260913.html、static/front-design-draft-v1.js、static/front-design-cart.js、static/front-home-v1.js、static/front-multilayer-template-v1.js |
+| 版本資料表與 RLS | supabase/migrations/20261117082423_order_design_revisions_v1.sql |
+| 測試與既有 CI 入口 | test_order_designs.py、test_commerce.py、.github/tests/test_order_design_browser.py、.github/tests/test_order_design_postgres.py、.github/tests/test_ai_editor_webkit.py |
+| 盤點與操作文件 | docs/order-design-revisions-v1.md |

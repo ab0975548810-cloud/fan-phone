@@ -118,6 +118,16 @@ class OrderDesignTests(fx.EditableTests):
         candidate['objects'][3]['normalizedGeometry']['x']+=.01
         self.assertEqual(self.save(order,work,candidate,mf.client).status_code,200)
 
+    def test_editable_template_text_can_reflow_without_moving_protected_anchor(self):
+        from order_designs import protect_layers
+        from test_multilayer_templates import layer
+        old=layer(1,'textbox');old.update(canScale=False,canMove=False)
+        base={'objects':[old]};new=copy.deepcopy(old)
+        new['text']='文字增加後的自動換行';new['height']*=2;new['normalizedGeometry']['height']*=2
+        protect_layers(base,{'objects':[new]})
+        new['normalizedGeometry']['x']+=.1
+        with self.assertRaises(ValueError):protect_layers(base,{'objects':[new]})
+
     def test_concurrent_version_append_only_one_winner(self):
         order=self.create_original();self.open(order)
         document=app.order_designs.rows(order)[0]['document']
