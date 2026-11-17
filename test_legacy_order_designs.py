@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 import test_order_designs as fx
-from legacy_order_designs import classify, verified
+from legacy_order_designs import classify, verified, recover
 from order_designs import digest, asset_paths
 
 class LegacyTests(unittest.TestCase):
@@ -23,6 +23,7 @@ class LegacyTests(unittest.TestCase):
         self.assertEqual(client.post('/api/admin/order-design/unknown/remake').status_code,401)
 
     def test_history_hash_geometry_and_exact_output_gate(self):
+        self.fx.draft['objects'][1]['text']='0.png'
         order_id=self.fx.create_original();order=fx.app.commerce.store.order(order_id)
         original=copy.deepcopy(order);full=order['design_json']
         _,png,_=fx.fx.editable.render(fx.app,order,{'width_mm':full['production']['printW'],'height_mm':full['production']['printH']},fx.app.print_center._download_artwork)
@@ -42,6 +43,9 @@ class LegacyTests(unittest.TestCase):
             path=folder/'manifest.json';path.write_text(json.dumps(manifest),'utf-8')
             with mock.patch.dict(os.environ,{'ORDER_DESIGN_HISTORY_DIR':root}),mock.patch('legacy_order_designs.read',return_value=png):
                 result,_=verified(order,fx.app);self.assertEqual(result['legacyRecovery']['verification'],'rgba-exact-720dpi')
+                archived=recover(fx.app,order)
+                self.assertEqual(archived['objects'][1]['text'],'0.png')
+                self.assertTrue(all(p.startswith('order-design_') for p in asset_paths(archived)))
                 for key,value in (('archiveReference',''),('orderId','another-order'),('originalDesignHash','0'*64),('originalPrintHash','0'*64),('sourceMap',{}),('assets',{})):
                     changed=copy.deepcopy(manifest);changed[key]=value;path.write_text(json.dumps(changed),'utf-8')
                     with self.subTest(key=key),self.assertRaises(ValueError):verified(order,fx.app)

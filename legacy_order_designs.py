@@ -110,9 +110,12 @@ def verified(order,app):
 def recover(app,order):
     candidate,assets=verified(order,app)
     mapping={name:persist_asset(app,order['id'],raw) for name,raw in assets.items()}
-    def replace(v):
-        if isinstance(v,str):return mapping.get(v,v)
-        if isinstance(v,list):return [replace(x) for x in v]
-        if isinstance(v,dict):return {k:replace(x) for k,x in v.items()}
-        return v
-    return replace(candidate)
+    # Asset filenames may also be ordinary text: never replace arbitrary strings.
+    for o in nodes(candidate):
+        if o.get('type')=='image':o['src']=mapping[o['src']]
+    state=candidate.get('editorState') or {}
+    for o in nodes({'objects':state.get('initial',[]),'sourceAssets':state.get('sourceAssets',[])}):
+        if o.get('type')=='image':o['src']=mapping[o['src']]
+    candidate['production']['maskPath']=mapping[candidate['production']['maskPath']]
+    candidate['editorContext']['previewPath']=mapping[candidate['editorContext']['previewPath']]
+    return candidate
