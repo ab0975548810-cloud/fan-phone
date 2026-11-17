@@ -1207,6 +1207,8 @@ from editable_sticker_admin import install as install_editable_sticker_admin
 install_editable_sticker_admin(sys.modules[__name__])
 from design_sources import install as install_design_sources
 install_design_sources(sys.modules[__name__])
+from order_designs import install as install_order_designs
+install_order_designs(sys.modules[__name__])
 from multilayer_templates import install as install_multilayer_templates
 install_multilayer_templates(sys.modules[__name__])
 from admin_ai_ab_test import install as install_admin_ai_ab_test

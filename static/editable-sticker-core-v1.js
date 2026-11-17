@@ -155,12 +155,17 @@
   async function serialize(c,context){
     await rehydrate(c);c.discardActiveObject();
     await textFonts(c);
-    const data=c.toJSON(PROPS);delete data.clipPath;
+    const data=c.toJSON([...PROPS,...(typeof CUSTOM_PROPS==='undefined'?[]:CUSTOM_PROPS),'bfUserLocked','bfScaleBaseX','bfScaleBaseY','stickerId','originalName']);delete data.clipPath;
+    data.editorGuides=data.objects.filter(o=>o.role==='slot-guide'&&!o.templateLayerId);
     data.objects=data.objects.filter(o=>!['guide','slot-guide'].includes(o.role));
     const visit=async(raw,obj)=>{
       if(raw.type==='image'){
         const el=obj.getElement();raw.sourceSize={width:el.naturalWidth||el.width,height:el.naturalHeight||el.height};
         if(typeof el.src==='string'&&el.src.startsWith('data:image/png;base64,')){raw.src=el.src;return;}
+        if(window.__bfOrderDesignMode&&new URL(el.src,location.href).pathname.startsWith('/api/admin/order-design/')){
+          const response=await fetch(el.src,{credentials:'same-origin',cache:'no-store'});if(!response.ok)throw Error('訂單原始素材無法讀取');const blob=await response.blob();
+          raw.src=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(blob);});return;
+        }
         if(raw.templateLayerId&&raw.publicSrc&&!/^data:image\//i.test(el.src || '')){
           const url=window.benfuwanTemplateProxyUrl?.(raw.publicSrc)||raw.publicSrc;
           const response=await fetch(url);if(!response.ok)throw Error('模板原始素材無法讀取');const blob=await response.blob();
@@ -175,7 +180,7 @@
     };
     const objs=c.getObjects().filter(o=>!['guide','slot-guide'].includes(o.role));for(const [i,r] of data.objects.entries())await visit(r,objs[i]);
     const coverage=await fontManifest();
-    return {...data,render_contract_version:VERSION,fontHashes:Object.fromEntries(Object.entries(coverage).map(([key,value])=>[key,value.sha256])),logicalCanvas:{width:c.width,height:c.height},production:{printW:context.printW,printH:context.printH},modelId:context.modelId,styleId:context.styleId};
+    return {...data,orderDesignVersion:1,render_contract_version:VERSION,fontHashes:Object.fromEntries(Object.entries(coverage).map(([key,value])=>[key,value.sha256])),logicalCanvas:{width:c.width,height:c.height},production:{printW:context.printW,printH:context.printH},modelId:context.modelId,styleId:context.styleId};
   }
   async function render(data,maskSrc,width,height){
     const c=new fabric.StaticCanvas(null,{width:data.logicalCanvas.width,height:data.logicalCanvas.height,enableRetinaScaling:false});

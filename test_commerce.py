@@ -552,4 +552,8 @@ class CommerceTests(unittest.TestCase):
 
 
 if __name__ == '__main__':
+    # Keep revision regression in the existing CI gate, isolated from commerce fixtures.
+    import subprocess, sys
+    revision_test='.github/tests/test_order_design_postgres.py' if os.environ.get('TEST_POSTGRES_DSN') else 'test_order_designs.py'
+    subprocess.run([sys.executable,str(Path(__file__).parent/revision_test)],check=True)
     unittest.main(verbosity=2)

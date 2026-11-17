@@ -1,5 +1,6 @@
 (function(){
   'use strict';
+  if(window.__bfOrderDesignMode)return;
   if(window.__benfuwanFrontHomeV1)return;
   window.__benfuwanFrontHomeV1=true;
 

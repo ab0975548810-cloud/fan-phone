@@ -168,6 +168,7 @@
         <div class="bf-order-printstate${(!printStatusLoaded||physical)?' warn':''}">${printLabel}</div>
         ${isVoid?'':`<div class="bf-order-status-row"><span style="font-size:10px;color:#887a80">生產狀態</span><select data-order-status="${e(o.order_id)}" data-current-status="${e(current)}">${statusOptions(o)}</select></div>`}
         <div class="bf-order-actions">
+          <a href="/admin/order-design/${encodeURIComponent(o.order_id)}" target="_blank" rel="noopener">重新編輯設計</a>
           ${o.print_url?`<a href="${e(o.print_url)}" target="_blank" rel="noopener"><i class="fa-solid fa-file-arrow-down"></i> 生產圖</a>`:''}
           ${!isVoid&&o.has_print?`<button data-order-action="print" data-order-id="${e(o.order_id)}">前往列印中心</button>`:''}
           ${printAction}

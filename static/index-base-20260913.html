@@ -247,6 +247,7 @@ const backgroundColors=['transparent','#ffffff','#fff7f1','#fff0f5','#ffdce8','#
 
 let catalogState='loading', catalogRequest=null, frontInitialized=false;
 async function initializeFront(){
+  if(window.__bfOrderDesignMode)return;
   if(frontInitialized)return;frontInitialized=true;
   history.replaceState({page:'page-home'},'',location.pathname+'#home');
   const results=await Promise.allSettled([loadAll(),idbGet('cart')]);

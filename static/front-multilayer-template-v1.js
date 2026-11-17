@@ -7,7 +7,7 @@
     const url='/api/template_contract/'+encodeURIComponent(id)+'?model_id='+encodeURIComponent(ctx.modelId)+'&style_id='+encodeURIComponent(ctx.styleId)+(application?'&application_id='+encodeURIComponent(application):'');
     const r=await fetch(url,{credentials:'same-origin',cache:'no-store'}),data=await r.json();if(!r.ok||data.status!=='success')throw Error(data.msg||'模板設定無法讀取');return data;
   }
-  async function refresh(c){if(!enabled(c)||!c.templateState)return;
+  async function refresh(c){if(window.__bfOrderDesignMode)return;if(!enabled(c)||!c.templateState)return;
     const state=c.templateState,data=await contract(state.id,state.applicationId);
     if(state.binding.hash!==data.binding.hash||state.binding.geometryHash!==data.binding.geometryHash)throw Error('此模板設定已更新，請重新套用模板');
     c.templateState=multi.freeze({...multi.clone(state),binding:data.binding});
