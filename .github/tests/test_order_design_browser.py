@@ -8,6 +8,7 @@ import threading
 import time
 from pathlib import Path
 from unittest import mock
+from contextlib import ExitStack
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT));os.chdir(ROOT)
 os.environ.pop('SUPABASE_URL',None);os.environ.pop('SUPABASE_SERVICE_ROLE_KEY',None)
@@ -42,14 +43,14 @@ def wait(page, expression, timeout=30000):
     raise AssertionError((expression,page.locator("body").inner_text()[:1500]))
 
 
-def run():
+def run(legacy=False):
     fx=fixture.OrderDesignTests();fx.setUp()
     saved_templates=app.TEMPLATES_FILE;app.TEMPLATES_FILE=str(Path(fx.fixture.tmp.name)/'order-templates.json')
     fx.addCleanup(setattr,app,'TEMPLATES_FILE',saved_templates)
     server=make_server('127.0.0.1',0,app.app,threaded=True);thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
     base='http://127.0.0.1:'+str(server.server_port)
     try:
-        with sync_playwright() as p, mock.patch('editable_stickers.public_image',side_effect=lambda app,url:preview_mask() if 'preview' in url else fixture.fx.mask()):
+        with sync_playwright() as p, ExitStack() as history, mock.patch('editable_stickers.public_image',side_effect=lambda app,url:preview_mask() if 'preview' in url else fixture.fx.mask()):
             browser=getattr(p,os.environ.get('BROWSER_ENGINE','webkit')).launch()
             for product,use_template in (('phone_case',False),('camera_film',False),('phone_case',True),('camera_film',True)):
                 if os.environ.get('TEMPLATE_ONLY') and not use_template:continue
@@ -106,6 +107,9 @@ def run():
                     for key in ('left','top','fontSize'):assert abs(front[key]-rendered[key])<.000001,(front,rendered)
                 if browser.browser_type.name=='chromium':same_pixels(original_pixels,'data:image/png;base64,'+base64.b64encode(raw).decode())
                 print('SERVER_720_PREVIEW_PARITY_OK',browser.browser_type.name,product,use_template,flush=True)
+                if legacy:
+                    from legacy_history_fixture import history_order
+                    original=history.enter_context(history_order(app,original,raw))
                 customer.close()
                 def admin_context(desktop=False):
                     context=browser.new_context(viewport={'width':1280,'height':900} if desktop else {'width':390,'height':844},has_touch=not desktop)
@@ -144,15 +148,43 @@ def run():
                 assert not errors,errors
                 again.evaluate("navigate('page-editor')")
                 evidence=ROOT/'__pycache__'/'order-design-evidence';evidence.mkdir(exist_ok=True)
-                again.screenshot(path=str(evidence/(browser.browser_type.name+'-'+product+'-'+str(use_template)+'.png')))
+                again.screenshot(path=str(evidence/(('legacy-' if legacy else '')+browser.browser_type.name+'-'+product+'-'+str(use_template)+'.png')))
                 again.evaluate("()=>{canvas.setActiveObject(canvas.getObjects().find(o=>o.role==='sticker'));openAiOutlineSheet()}")
                 again.locator('#sheet-outline-v2 [data-style="none"]').click()
                 wait(again,"canvas.getActiveObject()?.aiOutlineStyle==='none' && canvas.getActiveObject().width===512")
                 second.close()
                 print('ORDER_DESIGN_CROSS_DEVICE_V2_720_IMMUTABLE_OK',browser.browser_type.name,product,'template='+str(use_template),meta,flush=True)
+                if legacy:
+                    assert app.order_designs.rows(order)[0]['document']['legacyRecovery']['verification']=='rgba-exact-720dpi'
+                    print('LEGACY_VERIFIED_RECOVERY_OK',browser.browser_type.name,product,use_template,flush=True)
+                    if not use_template:
+                        fx.draft['production'].update(printW=profile['print_w'],printH=profile['print_h'])
+                        old=fx.create();untouched=app.commerce.store.order(old);balances=app.commerce.store.read()
+                        remake=admin_context();page=remake.new_page();page.goto(base+'/admin/order-design/'+old)
+                        page.get_by_text('建立獨立重製草稿（不恢復舊圖層）',exact=True).wait_for()
+                        assert '無法重新編輯此訂單' in page.locator('body').inner_text()
+                        page.on('dialog',lambda dialog:dialog.accept())
+                        page.get_by_text('建立獨立重製草稿（不恢復舊圖層）',exact=True).click()
+                        wait(page,"document.querySelector('#order-design-save')?.disabled===false")
+                        assert page.evaluate('canvas.getObjects().length')==0
+                        assert '全新重製' in page.locator('#order-design-status').inner_text()
+                        page.evaluate("()=>{canvas.add(new fabric.Rect({left:20,top:20,width:30,height:40,fill:'red'}));recordHistory()}")
+                        page.locator('#order-design-save').click();wait(page,"document.querySelector('#order-design-status').textContent.includes('V3 草稿已保存')")
+                        page.evaluate('openPreview()');wait(page,'ctx.productionMeta?.dpi===720 && !!ctx.printBase64')
+                        remake_pixels=page.evaluate('ctx.printBase64')
+                        remake.close();desktop=admin_context(desktop=True);page=desktop.new_page();page.goto(base+'/admin/order-design/'+old)
+                        wait(page,"document.querySelector('#order-design-save')?.disabled===false")
+                        assert page.evaluate('canvas.getObjects().length')==1
+                        page.evaluate('openPreview()');wait(page,'ctx.productionMeta?.dpi===720 && !!ctx.printBase64')
+                        same_pixels(remake_pixels,page.evaluate('ctx.printBase64'))
+                        assert app.commerce.store.order(old)==untouched
+                        assert app.commerce.store.read()==balances and fx.fixture.fake.calls==[]
+                        desktop.close();print('LEGACY_EXPLICIT_REMAKE_REOPEN_OK',browser.browser_type.name,product,flush=True)
             browser.close()
     finally:
         server.shutdown();server.server_close();fx.doCleanups()
 
 
-if __name__=='__main__':run()
+if __name__=='__main__':
+    if '--legacy-only' not in sys.argv:run()
+    run(legacy=True)

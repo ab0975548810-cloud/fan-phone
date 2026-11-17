@@ -89,12 +89,14 @@
       restoringHistory=false;historyStack=[];historyIndex=-1;recordHistory(true);renderLayerList();canvas.renderAll();
       window.BenfuwanEditorAccess?.fitCanvas?.();
       ready=true;document.getElementById('order-design-save').disabled=false;
-      document.getElementById('order-design-status').textContent=`訂單 ${orderId} · 正在編輯 V${work.version} 的獨立副本，尚未儲存`;
+      document.getElementById('order-design-status').textContent=`訂單 ${orderId} · 正在編輯 V${work.version} 的獨立副本，尚未儲存${d.remakeNotice?' · '+d.remakeNotice:''}`;
       const previewSave=document.querySelector('.preview-buttons .primary');if(previewSave)previewSave.textContent='儲存修改（不送印）';
     }catch(error){
       restoringHistory=false;ready=false;
       document.body.replaceChildren();const msg=document.createElement('p');msg.style.cssText='padding:24px;white-space:pre-wrap';msg.textContent='無法重新編輯此訂單\n'+error.message;
       const back=document.createElement('a');back.href='/admin';back.textContent='返回後台';document.body.append(msg,back);
+      const remake=document.createElement('button');remake.textContent='建立獨立重製草稿（不恢復舊圖層）';
+      remake.onclick=async()=>{if(!confirm('將以目前商品設定建立空白 V2 草稿，不載入舊圖、不改原訂單、不送印。確定重新製作？'))return;remake.disabled=true;try{await api('/remake',{confirm:'new-design-current-profile'});location.reload();}catch(e){msg.textContent=e.message;remake.disabled=false;}};document.body.append(remake);
     }
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
