@@ -3,7 +3,7 @@ import os
 import sys
 import base64
 import io
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageChops, ImageStat
 import threading
 import time
 from pathlib import Path
@@ -23,6 +23,15 @@ def preview_mask():
     im=Image.new('RGBA',(200,400),(0,0,0,0));draw=ImageDraw.Draw(im)
     draw.rounded_rectangle((10,10,189,389),radius=12,outline='#9a9a9a',width=2)
     out=io.BytesIO();im.save(out,'PNG');return out.getvalue()
+
+
+def same_pixels(before,after):
+    images=[Image.open(io.BytesIO(base64.b64decode(value.split(',')[1]))).convert('RGBA') for value in (before,after)]
+    assert images[0].size==images[1].size,(images[0].size,images[1].size)
+    diff=ImageChops.difference(*images)
+    bounds=diff.getbbox(alpha_only=False)
+    if bounds:print('PIXEL_DIFFERENCE',bounds,ImageStat.Stat(diff).mean,diff.getextrema(),flush=True)
+    assert images[0].tobytes()==images[1].tobytes(),'decoded 720 DPI pixels differ'
 
 
 def wait(page, expression, timeout=30000):
@@ -91,8 +100,9 @@ def run():
                 page.goto(base+'/admin/order-design/'+order)
                 wait(page,"document.querySelector('#order-design-save')?.disabled===false",timeout=30000)
                 page.evaluate('openPreview()');wait(page,'ctx.productionMeta?.dpi===720 && !!ctx.printBase64')
-                assert page.evaluate('ctx.printBase64')==original_pixels
-                page.evaluate("navigate('page-editor')")
+                same_pixels(original_pixels,page.evaluate('ctx.printBase64'))
+                page.locator('#page-preview .preview-buttons .secondary').click()
+                assert page.locator('#page-editor').evaluate("el=>el.classList.contains('active')")
                 baseline=page.evaluate("canvas.toJSON(CUSTOM_PROPS).objects")
                 index=next(i for i,o in enumerate(baseline) if o.get('role')=='sticker')
                 page.evaluate("()=>{canvas.setActiveObject(canvas.getObjects().find(o=>o.role==='sticker'));nudgeActive(5,0)}")
@@ -110,7 +120,7 @@ def run():
                 restored=again.evaluate('canvas.toJSON(CUSTOM_PROPS).objects')
                 assert restored[index]['left']==changed[index]['left']
                 again.evaluate('openPreview()');wait(again,'ctx.productionMeta?.dpi===720 && !!ctx.printBase64')
-                assert again.evaluate('ctx.printBase64')==pixels
+                same_pixels(pixels,again.evaluate('ctx.printBase64'))
                 assert app.commerce.store.order(order)==original
                 assert app.commerce.store.read()==finance
                 assert len(app.order_designs.rows(order))==2

@@ -28,7 +28,7 @@
   window.submitOrder=()=>toast('此處只保存設計修改，不建立銷售訂單');
   window.confirmDesignToCart=save;
   window.startNewDesign=()=>false;
-  window.navBack=()=>{location.href='/admin';};
+  window.navBack=()=>{if(document.querySelector('#page-preview.active'))navigate('page-editor');else location.href='/admin';};
   window.addEventListener('beforeunload',event=>{if(ready){event.preventDefault();event.returnValue='';}});
   async function api(path,body){
     const r=await fetch(root+path,{method:'POST',credentials:'same-origin',cache:'no-store',headers:{'Content-Type':'application/json','X-Order-Design':'1'},body:JSON.stringify(body||{})});

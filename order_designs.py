@@ -198,7 +198,8 @@ def install(app):
             if not session.get('logged_in'):return app.no_cache_json({'status':'error','msg':'請先登入後台'},401)
             if request.method=='POST' and request.headers.get('X-Order-Design')!='1':return app.no_cache_json({'status':'error','msg':'操作來源驗證失敗'},403)
             try:return fn(*args,**kwargs)
-            except (ValueError,BadSignature) as exc:return app.no_cache_json({'status':'error','msg':str(exc)},422)
+            except BadSignature:return app.no_cache_json({'status':'error','msg':'編輯工作副本已失效，請重新開啟訂單設計；原版本未變更'},422)
+            except ValueError as exc:return app.no_cache_json({'status':'error','msg':str(exc)},422)
             except Exception:
                 app.app.logger.exception('order design operation failed')
                 return app.no_cache_json({'status':'error','msg':'設計版本或私有素材暫時無法讀取／保存，請確認 Migration 與儲存服務後重試；原訂單未變更'},503)
@@ -260,7 +261,9 @@ def install(app):
     @app.app.route('/api/admin/order-design/<order_id>/save',methods=['POST'])
     @admin
     def save_work(order_id):
-        data=request.get_json() or {};claim=signer.loads(data.get('work'),max_age=8*3600)
+        data=request.get_json() or {}
+        if not isinstance(data,dict) or not isinstance(data.get('work'),str):raise ValueError('缺少有效的編輯工作副本')
+        claim=signer.loads(data['work'],max_age=8*3600)
         if claim['order']!=order_id or claim['actor']!=actor():raise ValueError('編輯工作副本不屬於此登入者或訂單')
         rows=store.rows(order_id);base=next((r['document'] for r in rows if r['version']==claim['version']),None)
         if not base:raise ValueError('編輯基準不存在')
