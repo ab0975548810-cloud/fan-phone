@@ -84,16 +84,20 @@ def run():
                 photo='data:image/png;base64,'+base64.b64encode(fixture.fx.image()).decode()
                 page.evaluate("""async url=>{try{
                   for(const [role,x] of [['photo',45],['sticker',100]])await new Promise((resolve,reject)=>fabric.Image.fromURL(url,o=>{try{o.set({role,left:x,top:160,scaleX:.15,scaleY:.15,opacity:.8});canvas.add(o);resolve()}catch(e){reject(e)}}));
-                  await ensureEditorFont('jf-openhuninn','本福丸');canvas.add(new fabric.Textbox('本福丸',{role:'text',fontFamily:'jf-openhuninn',fontSize:18,left:40,top:250,width:100}));recordHistory();await openPreview();await confirmDesignToCart();
+                  await ensureEditorFont('jf-openhuninn','本福丸');canvas.add(new fabric.Textbox('本福丸',{role:'text',fontFamily:'jf-openhuninn',fontSize:18,left:40,top:250,width:100}));recordHistory();
                 }catch(e){throw Error(e.stack)}}""",photo)
+                page.evaluate("()=>{canvas.setActiveObject(canvas.getObjects().find(o=>o.role==='sticker'));openAiOutlineSheet()}")
+                page.locator('#sheet-outline-v2 [data-style="pink"]').click()
+                wait(page,"canvas.getActiveObject()?.aiOutlineStyle==='pink'")
+                page.evaluate('async()=>{closeSheets();await openPreview();await confirmDesignToCart()}')
                 print('STEP cart',flush=True)
                 wait(page,"cartItem?.designJson?.orderDesignVersion===1")
                 original_pixels=page.evaluate('ctx.printBase64')
                 order=page.evaluate("""async()=>{const d=await BenfuwanDesignSources.prepare(cartItem.designJson);const r=await fetch('/api/create_order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({idempotency_key:crypto.randomUUID(),model_id:ctx.modelId,style_id:ctx.styleId,quantity:1,customer_name:'隔離設計測試',payment_method:'現金',print_file:ctx.printBase64,mockup_file:ctx.mockupBase64||ctx.printBase64,design_json:d})});const j=await r.json();if(!r.ok)throw Error(JSON.stringify(j));return j.order_id;}""")
                 original=app.commerce.store.order(order);finance=app.commerce.store.read()
                 customer.close()
-                def admin_context():
-                    context=browser.new_context(viewport={'width':390,'height':844},has_touch=True)
+                def admin_context(desktop=False):
+                    context=browser.new_context(viewport={'width':1280,'height':900} if desktop else {'width':390,'height':844},has_touch=not desktop)
                     context.add_cookies([{'name':cookie.key,'value':cookie.value,'url':base} for cookie in fx.client._cookies.values()])
                     return context
                 admin=admin_context();page=admin.new_page();page.on('pageerror',lambda e:errors.append(str(e)))
@@ -114,9 +118,10 @@ def run():
                 page.evaluate('openPreview()');wait(page,'ctx.productionMeta?.dpi===720 && !!ctx.printBase64')
                 pixels=page.evaluate('ctx.printBase64');meta=page.evaluate('ctx.productionMeta')
                 admin.close()
-                second=admin_context();again=second.new_page();again.goto(base+'/admin/order-design/'+order)
+                second=admin_context(desktop=True);again=second.new_page();again.goto(base+'/admin/order-design/'+order)
                 wait(again,"document.querySelector('#order-design-save')?.disabled===false")
                 assert 'V2' in again.locator('#order-design-status').text_content()
+                assert again.evaluate("canvas.getObjects().find(o=>o.role==='sticker').aiOutlineSource.startsWith('/api/admin/order-design/')")
                 restored=again.evaluate('canvas.toJSON(CUSTOM_PROPS).objects')
                 assert restored[index]['left']==changed[index]['left']
                 again.evaluate('openPreview()');wait(again,'ctx.productionMeta?.dpi===720 && !!ctx.printBase64')
@@ -129,6 +134,9 @@ def run():
                 again.evaluate("navigate('page-editor')")
                 evidence=ROOT/'__pycache__'/'order-design-evidence';evidence.mkdir(exist_ok=True)
                 again.screenshot(path=str(evidence/(browser.browser_type.name+'-'+product+'-'+str(use_template)+'.png')))
+                again.evaluate("()=>{canvas.setActiveObject(canvas.getObjects().find(o=>o.role==='sticker'));openAiOutlineSheet()}")
+                again.locator('#sheet-outline-v2 [data-style="none"]').click()
+                wait(again,"canvas.getActiveObject()?.aiOutlineStyle==='none' && canvas.getActiveObject().width===512")
                 second.close()
                 print('ORDER_DESIGN_CROSS_DEVICE_V2_720_IMMUTABLE_OK',browser.browser_type.name,product,'template='+str(use_template),meta,flush=True)
             browser.close()

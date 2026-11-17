@@ -24,6 +24,7 @@ def checkout_context(app, design, order_id, model, style_id, profile, paths):
     from editable_stickers import public_image
     from catalog_products import product_type
     validate_guides(design)
+    validate_sources(design)
     preview = profile.get('preview_mask_img') or model.get('preview_mask_img')
     preview_path = design['production']['maskPath']
     if preview:
@@ -42,7 +43,8 @@ def checkout_context(app, design, order_id, model, style_id, profile, paths):
         design['editorState'] = {'version': 'multilayer-v1', 'id': design['templateBinding']['id'],
             'applicationId': design['templateBinding']['applicationId'],
             'binding': copy.deepcopy(design['templateBinding']),
-            'initial': copy.deepcopy(design['objects'] + design.get('emptyTemplateSlots', []))}
+            'initial': copy.deepcopy(design['objects'] + design.get('emptyTemplateSlots', [])),
+            'sourceAssets': copy.deepcopy(design.get('sourceAssets',[]))}
         # The immutable context is part of the order's existing renderer seal.
         from multilayer_templates import seal
         seal(app, design, order_id)
@@ -93,11 +95,20 @@ def check_restore(design):
     if context.get('productType') not in ('phone_case','camera_film') or not context.get('previewPath'):
         raise ValueError('此舊訂單缺少商品類型與預覽定位快照，無法安全恢復')
     validate_guides(design)
+    validate_sources(design)
     for family, path in FONTS.items():
         if design.get('fontHashes', {}).get(family) != hashlib.sha256((ROOT/path).read_bytes()).hexdigest():
             raise ValueError('原設計字型版本已不存在，無法保證文字位置一致')
     if design.get('layer_contract_version') and not design.get('editorState'):
         raise ValueError('此舊模板訂單缺少完整圖層權限快照，無法安全恢復')
+
+
+def validate_sources(design):
+    assets=design.get('sourceAssets',[])
+    if not isinstance(assets,list):raise ValueError('原始素材清單無效')
+    ids=[a.get('id') for a in assets]
+    if any(not isinstance(i,str) or not re.fullmatch('[0-9a-f]{64}',i) for i in ids) or len(set(ids))!=len(ids):raise ValueError('原始素材識別無效')
+    if any(o.get('orderOutlineSourceId') and o['orderOutlineSourceId'] not in ids for o in nodes(design)):raise ValueError('描邊原始素材缺失')
 
 
 def validate_guides(design):
@@ -117,7 +128,7 @@ def asset_paths(design):
     paths = {o['src'] for o in nodes(design) if o.get('type') == 'image'}
     paths.add(design['production']['maskPath'])
     paths.add(design.get('editorContext', {}).get('previewPath', design['production']['maskPath']))
-    for o in design.get('editorState', {}).get('initial', []):
+    for o in nodes({'objects':design.get('editorState', {}).get('initial', []),'sourceAssets':design.get('editorState',{}).get('sourceAssets',[])}):
         if o.get('type') == 'image':paths.add(o['src'])
     return paths
 
@@ -269,6 +280,7 @@ def install(app):
         if not base:raise ValueError('編輯基準不存在')
         design=validate(copy.deepcopy(data.get('design')))
         validate_guides(design)
+        validate_sources(design)
         if any(design.get(k) for k in ('backgroundImage','overlayImage','clipPath')):raise ValueError('不支援額外的畫布外部圖片')
         empty=design.get('emptyTemplateSlots',[])
         if not isinstance(empty,list) or len(empty)>100 or any(not isinstance(o,dict) or o.get('role')!='slot-guide' or not o.get('templateLayerId') for o in empty):raise ValueError('空照片框資料無效')

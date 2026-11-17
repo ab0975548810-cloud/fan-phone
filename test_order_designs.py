@@ -88,6 +88,18 @@ class OrderDesignTests(fx.EditableTests):
         self.assertEqual(self.client.get(work['design']['objects'][0]['src']).status_code,200)
         self.assertEqual(self.open(order)['version'],1)
 
+    def test_outline_original_is_private_durable_and_verified(self):
+        raw='data:image/png;base64,'+fx.base64.b64encode(fx.image(300,200)).decode()
+        self.draft['sourceAssets']=[{'id':'a'*64,'type':'image','src':raw,'width':300,'height':200}]
+        self.draft['objects'][0]['orderOutlineSourceId']='a'*64
+        order=self.create_original();work=self.open(order)
+        path=work['design']['sourceAssets'][0]['src']
+        self.assertEqual(self.client.get(path).data,fx.image(300,200))
+        self.assertEqual(app.app.test_client().get(path).status_code,401)
+        candidate=self.candidate(work);candidate['sourceAssets']=[]
+        self.assertEqual(self.save(order,work,candidate).status_code,422)
+        self.assertEqual(len(app.order_designs.rows(order)),1)
+
     def test_template_policy_and_normalized_geometry_cannot_be_forged(self):
         import test_multilayer_templates as multi
         mf=multi.MultilayerTests();mf.setUp();self.addCleanup(mf.doCleanups)

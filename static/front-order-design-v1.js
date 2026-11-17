@@ -2,6 +2,7 @@
 (function(){
   'use strict';
   const core=()=>window.BenfuwanEditableSticker;
+  for(const key of ['aiOutlineSource','aiRemovalMode','aiOutlineStyle','aiOutlineStrength','aiOutlineWidth','aiOutlineColor'])if(!CUSTOM_PROPS.includes(key))CUSTOM_PROPS.push(key);
   async function serialize(){
     await ensureCanvasFonts();
     const data=canvas.layer_contract_version==='multilayer-v1'?await BenfuwanMultilayer.serialize(canvas,ctx):await core().serialize(canvas,ctx);
@@ -69,7 +70,8 @@
       await Promise.all([...new Set(images)].map(url=>new Promise((resolve,reject)=>{const im=new Image();im.onload=resolve;im.onerror=()=>reject(Error('原始素材無法解碼，設計尚未開啟'));im.src=url;})));
       await new Promise(resolve=>canvas.loadFromJSON({...d,objects:d.objects.concat(d.emptyTemplateSlots||[],d.editorGuides||[]),templateState:d.editorState},resolve));
       if(canvas.getObjects().length!==d.objects.length+(d.emptyTemplateSlots||[]).length+(d.editorGuides||[]).length)throw Error('圖層未完整恢復');
-      if(d.layer_contract_version){canvas.layer_contract_version=d.layer_contract_version;canvas.templateState=BenfuwanMultilayer.freeze(structuredClone(d.editorState));}
+      const restoreSources=(objects,assets)=>{for(const o of objects){if(o.orderOutlineSourceId){const a=assets?.find(a=>a.id===o.orderOutlineSourceId);if(!a)throw Error('描邊原始素材缺失');o.aiOutlineSource=a.src;}restoreSources(o._objects||o.objects||[],assets);}};restoreSources(canvas.getObjects(),d.sourceAssets);
+      if(d.layer_contract_version){const state=structuredClone(d.editorState);restoreSources(state.initial,state.sourceAssets);canvas.layer_contract_version=d.layer_contract_version;canvas.templateState=BenfuwanMultilayer.freeze(state);}
       rehydrateCanvas();await core().textFonts(canvas);await core().rehydrate(canvas);
       await BenfuwanPrintMask.ensureClip(canvas,ctx.printLineUrl);
       restoringHistory=false;historyStack=[];historyIndex=-1;recordHistory(true);renderLayerList();canvas.renderAll();

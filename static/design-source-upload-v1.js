@@ -28,8 +28,8 @@
       if(item.objects)await visit(item.objects);
       if(item.clipPath)await visit([item.clipPath]);
     }}
-    try{await visit(result.objects);return result;}catch(error){await release(result);throw error;}
+    try{await visit(result.objects);await visit(result.sourceAssets||[]);return result;}catch(error){await release(result);throw error;}
   }
-  async function release(design){const objects=[];const scan=items=>{for(const o of items||[]){if(o.sourceRef)objects.push({sourceRef:o.sourceRef});scan(o.objects);if(o.clipPath)scan([o.clipPath]);}};scan(design.objects);if(!objects.length)return;try{await fetch('/api/design-sources/release',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({render_contract_version:design.render_contract_version,sourceCheckout:design.sourceCheckout,objects}),credentials:'same-origin'});}catch(_){} }
+  async function release(design){const objects=[];const scan=items=>{for(const o of items||[]){if(o.sourceRef)objects.push({sourceRef:o.sourceRef});scan(o.objects);if(o.clipPath)scan([o.clipPath]);}};scan(design.objects);scan(design.sourceAssets);if(!objects.length)return;try{await fetch('/api/design-sources/release',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({render_contract_version:design.render_contract_version,sourceCheckout:design.sourceCheckout,objects}),credentials:'same-origin'});}catch(_){} }
   window.BenfuwanDesignSources={prepare,release};
 })();

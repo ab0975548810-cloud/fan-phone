@@ -12,7 +12,7 @@
 
 ## 資料流
 
-新加入購物車的設計由既有固定字型／多圖層序列化器保存完整 Fabric objects、來源 PNG、裁切、位置、縮放、旋轉、透明度、順序、使用者鎖定、模板權限、空照片框與導引。結帳繼續使用既有 session-bound source receipts、完整驗證與 atomic commerce commit；新增原始預覽遮罩、商品類型、列印定位及模板初始權限快照。素材進入 orders/{id}/sources，沒有暫存 TTL，清理 receipt 不會移除已成立訂單來源。
+新加入購物車的設計由既有固定字型／多圖層序列化器保存完整 Fabric objects、來源 PNG、描邊前原始素材與效果參數、裁切、位置、縮放、旋轉、透明度、順序、使用者鎖定、模板權限、空照片框與導引。結帳繼續使用既有 session-bound source receipts、完整驗證與 atomic commerce commit；新增原始預覽遮罩、商品類型、列印定位及模板初始權限快照。素材進入 orders/{id}/sources，沒有暫存 TTL，清理 receipt 不會移除已成立訂單來源。
 
 後台重新編輯先驗證管理員 session，再將訂單快照與來源複製到獨立、內容雜湊命名的 order-design/{id}/ 私有空間。初次開啟以 compare-and-swap 建立版本表 V1；不改 orders.design_json 或原有成品。後續開啟不再依賴商品、模板目前版本或客人 IndexedDB。資源透過管理員驗證代理，no-store，不能僅靠訂單編號讀取。
 
@@ -41,7 +41,7 @@ V2 不產生或取代 Print Center 正式圖，不建立 print job、重送、�
 ## 驗收
 
 - test_order_designs.py：私有素材授權、偽造 token、V1/V2 保留、跨登入恢復、工作副本 replay/CAS、來源清理、舊單拒絕、模板權限與並行修改、業務狀態不變。
-- .github/tests/test_order_design_browser.py：WebKit/Chromium iPhone 尺寸，以正常購物車序列化建立隔離訂單；兩種商品 × 一般／模板，修改一張貼紙、其他圖層不變，V2 另存再以獨立瀏覽器 context 恢復。比對原預覽與 V1 恢復、V2 前後 720 DPI PNG 完全相同；fake vendor 呼叫為零。
+- .github/tests/test_order_design_browser.py：WebKit/Chromium iPhone 尺寸，以正常購物車序列化建立隔離訂單；兩種商品 × 一般／模板，修改一張貼紙、其他圖層不變，V2 另存再以獨立桌面瀏覽器 context 恢復，描邊原始素材仍可編輯。比對原預覽與 V1 恢復、V2 前後 720 DPI 解碼像素完全相同；fake vendor 呼叫為零。
 - .github/tests/test_order_design_postgres.py：隔離 PostgreSQL RLS/權限、immutable V1、8 個並行保存只一筆成功、重試不重建版本。
 - 原有 Smoke、Commerce、Print Center、PostgreSQL、storage compatibility、完整 WebKit/Chromium 套件仍為 PR gates。CI 狀態以 PR 最新 SHA 為準。
 

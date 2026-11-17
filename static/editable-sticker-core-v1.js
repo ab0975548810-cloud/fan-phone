@@ -155,11 +155,29 @@
   async function serialize(c,context){
     await rehydrate(c);c.discardActiveObject();
     await textFonts(c);
-    const data=c.toJSON([...PROPS,...(typeof CUSTOM_PROPS==='undefined'?[]:CUSTOM_PROPS),'bfUserLocked','bfScaleBaseX','bfScaleBaseY','stickerId','originalName']);delete data.clipPath;
+    let data;const precision=fabric.Object.NUM_FRACTION_DIGITS;
+    try{fabric.Object.NUM_FRACTION_DIGITS=8;data=c.toJSON([...PROPS,...(typeof CUSTOM_PROPS==='undefined'?[]:CUSTOM_PROPS),'bfUserLocked','bfScaleBaseX','bfScaleBaseY','stickerId','originalName','aiRemovalMode','aiOutlineStyle','aiOutlineStrength','aiOutlineWidth','aiOutlineColor']);}finally{fabric.Object.NUM_FRACTION_DIGITS=precision;}
+    delete data.clipPath;data.sourceAssets=[];const sourceCache=new Map();
     data.editorGuides=data.objects.filter(o=>o.role==='slot-guide'&&!o.templateLayerId);
     data.objects=data.objects.filter(o=>!['guide','slot-guide'].includes(o.role));
     const visit=async(raw,obj)=>{
       if(raw.type==='image'){
+        delete raw.aiOutlineSource;
+        // Keep the pre-outline raster independently, never a transient blob URL.
+        if(obj.aiOutlineSource){
+          let asset=sourceCache.get(obj.aiOutlineSource);
+          if(!asset){
+            const image=await BenfuwanEditorImage.image(obj.aiOutlineSource),el=image.getElement();
+            const source=document.createElement('canvas');source.width=image.width;source.height=image.height;
+            source.getContext('2d').drawImage(el,0,0);
+            const src=/^data:image\/png;base64,/.test(el.src)?el.src:source.toDataURL('image/png');
+            const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(src))),v=>v.toString(16).padStart(2,'0')).join('');
+            asset={id:hash,type:'image',src,width:image.width,height:image.height,sourceSize:{width:image.width,height:image.height}};
+            if(!data.sourceAssets.some(a=>a.id===hash))data.sourceAssets.push(asset);
+            sourceCache.set(obj.aiOutlineSource,asset);source.width=source.height=1;
+          }
+          raw.orderOutlineSourceId=asset.id;
+        }
         const el=obj.getElement();raw.sourceSize={width:el.naturalWidth||el.width,height:el.naturalHeight||el.height};
         if(typeof el.src==='string'&&el.src.startsWith('data:image/png;base64,')){raw.src=el.src;return;}
         if(window.__bfOrderDesignMode&&new URL(el.src,location.href).pathname.startsWith('/api/admin/order-design/')){

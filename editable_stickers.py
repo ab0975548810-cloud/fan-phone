@@ -118,6 +118,10 @@ def nodes(design):
             if item.get('clipPath'):
                 yield from visit([item['clipPath']], depth + 1)
     yield from visit(design.get('objects'))
+    assets=design.get('sourceAssets',[])
+    if assets:
+        if not isinstance(assets,list) or any(not isinstance(o,dict) or o.get('type')!='image' or o.get('objects') or o.get('clipPath') for o in assets):raise ValueError('附加原始素材無效')
+        yield from visit(assets)
 
 
 def validate(design):
