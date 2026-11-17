@@ -61,8 +61,17 @@ def run(legacy=False):
     def artwork(kind):
         if real_film:return (ROOT/'.github/tests/fixtures/film'/('preview.png' if kind=='preview' else 'print.png')).read_bytes()
         return preview_mask() if kind=='preview' else fixture.fx.mask()
+    real_static=app.app.view_functions['static']
+    def fixture_static(filename):
+        # Keep the browser's actual multipart upload path. Playwright WebKit
+        # interception can discard Blob bytes even when only image routes are
+        # mocked: https://github.com/microsoft/playwright/issues/14624
+        if filename in ('dialog-preview.png','dialog-mask.png','multi-layer.png'):
+            raw=fixture.fx.image() if filename=='multi-layer.png' else artwork('preview' if 'preview' in filename else 'print')
+            return app.app.response_class(raw,mimetype='image/png',headers={'Cache-Control':'no-store'})
+        return real_static(filename=filename)
     try:
-        with sync_playwright() as p, ExitStack() as history, mock.patch('editable_stickers.public_image',side_effect=lambda app,url:artwork('preview' if 'preview' in url else 'print')):
+        with sync_playwright() as p, ExitStack() as history, mock.patch.dict(app.app.view_functions,{'static':fixture_static}), mock.patch('editable_stickers.public_image',side_effect=lambda app,url:artwork('preview' if 'preview' in url else 'print')):
             browser=getattr(p,os.environ.get('BROWSER_ENGINE','webkit')).launch()
             for product,use_template in (('phone_case',False),('camera_film',False),('phone_case',True),('camera_film',True)):
                 if os.environ.get('TEMPLATE_ONLY') and not use_template:continue
@@ -82,8 +91,7 @@ def run(legacy=False):
                 security_perf._CACHE.clear();security_perf._HITS.clear()
                 customer=browser.new_context(viewport={'width':390,'height':844},has_touch=True)
                 page=customer.new_page();errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
-                page.route('**/static/dialog-*.png',lambda r:r.fulfill(body=artwork('preview' if 'preview' in r.request.url else 'print'),content_type='image/png'))
-                print('STEP storefront',product,flush=True);page.route('**/static/multi-layer.png',lambda r:r.fulfill(body=fixture.fx.image(),content_type='image/png'))
+                print('STEP storefront',product,flush=True)
                 page.goto(base);wait(page,"typeof catalogState!=='undefined' && catalogState==='ready'")
                 print('STEP start editor',flush=True)
                 page.evaluate("async()=>{await startNewDesign();selectModel(shopData.models[0]);selectStyle(shopData.styles[0]);await startEditor(false)}")
