@@ -799,7 +799,7 @@ with psycopg.connect(DSN) as db:
         values (%s,%s,1,'revision-fixture.png',%s,'fixture','PREPARED',true,true,'fixture',80,160,1,2,1,'','1',0)""",
         (revision_clone_id,revision_clone_order,'a'*64))
     db.execute("""insert into public.print_events(id,job_id,event_key,event_type,payload_json)
-        values (%s,%s,%s,'MANUAL_REPRINT_AUTHORIZED',jsonb_build_object('version',2,'versionHash',%s))""",
+        values (%s,%s,%s,'MANUAL_REPRINT_AUTHORIZED',jsonb_build_object('version',2,'versionHash',%s::text))""",
         (str(uuid.uuid4()),revision_clone_id,'revision-clone-'+uuid.uuid4().hex,'b'*64))
     for index in range(2):
         key='revision-clone-blocked-'+uuid.uuid4().hex
