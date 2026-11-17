@@ -19,6 +19,14 @@ import test_order_designs as fixture
 import test_multilayer_templates as templates
 app=fixture.app
 
+@app.app.after_request
+def source_upload_diagnostic(response):
+    from flask import request
+    if request.path=='/api/design-sources' and response.status_code>=400:
+        file=request.files.get('file')
+        print('SOURCE_UPLOAD_FAILURE',{'contentLength':request.content_length,'readBytes':file.stream.tell() if file else None,'response':response.get_json()},flush=True)
+    return response
+
 
 def preview_mask():
     im=Image.new('RGBA',(200,400),(0,0,0,0));draw=ImageDraw.Draw(im)

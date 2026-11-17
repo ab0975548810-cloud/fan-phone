@@ -29,11 +29,22 @@ def run():
                 assert page.evaluate('canvas.getObjects().length')==0
                 assert page.evaluate('canvas.backgroundImage.selectable===false')
                 # Actual existing text and image tools remain available; original is never an object.
-                page.evaluate("()=>{canvas.add(new fabric.Textbox('修補',{left:20,top:40,width:100,fontSize:16,fontFamily:'jf-openhuninn'}));recordHistory()}")
-                page.evaluate("""async url=>{for(const role of ['photo','sticker'])await new Promise(ok=>fabric.Image.fromURL(url,o=>{o.set({left:110,top:30,width:30,height:30,role});canvas.add(o);ok()}));recordHistory();}""",fixtures.data(fixtures.picture((30,30))))
+                page.evaluate('openTextSheet()');page.locator('#text-input').fill('修補');page.locator('#text-font').select_option('jf-openhuninn');page.locator('#text-size').fill('16')
+                page.get_by_role('button',name='新增文字',exact=True).click();wait(page,'canvas.getObjects().length===1')
+                page.locator('#photo-input').set_input_files({'name':'fixture.png','mimeType':'image/png','buffer':fixtures.picture((30,30))})
+                wait(page,'canvas.getObjects().length===2')
+                page.evaluate('async url=>{await addStickerImage(url)}',fixtures.data(fixtures.picture((30,30))))
+                wait(page,'canvas.getObjects().length===3')
+                page.evaluate("()=>{canvas.getObjects().forEach(o=>{o.set({left:110,top:30,scaleX:1,scaleY:1});});recordHistory();}")
                 page.get_by_role('button',name='新增局部遮蓋',exact=True).click()
                 page.get_by_role('button',name='新增擦除區（可移動／縮放）',exact=True).click()
                 page.evaluate("()=>{const o=canvas.getObjects().find(o=>o.pixelErase);o.set({left:80,top:80,width:20,height:20});canvas.fire('object:modified',{target:o});}")
+                page.evaluate("()=>{recordHistory();const o=canvas.getObjects().find(o=>o.pixelErase);o.set('left',90);recordHistory();undoCanvas();}")
+                wait(page,"!restoringHistory && canvas.getObjects().find(o=>o.pixelErase)?.left===80")
+                page.evaluate('redoCanvas()');wait(page,"!restoringHistory && canvas.getObjects().find(o=>o.pixelErase)?.left===90")
+                assert page.evaluate('canvas.backgroundImage.selectable===false && !canvas.clipPath'),page.evaluate('({selectable:canvas.backgroundImage?.selectable,clip:canvas.clipPath?.toObject()})')
+                # Hidden additions must not appear in the final PNG, including below the edited region.
+                page.evaluate("()=>{canvas.add(new fabric.Rect({left:0,top:canvas.height*.8,width:canvas.width,height:canvas.height*.2,fill:'red',visible:false}));}")
                 page.locator('#pixel-save').click();wait(page,"document.querySelector('#pixel-status').textContent.includes('V2 已保存')",60000)
                 versions=app.order_designs.rows(fx.order);d=versions[-1]['document']
                 out=Image.open(io.BytesIO(fixtures.app.print_center._download_artwork(d['outputPath'])))
@@ -43,7 +54,7 @@ def run():
                 assert out.crop((0,int(size[1]*.8),size[0],size[1])).tobytes()==before.crop((0,int(size[1]*.8),size[0],size[1])).tobytes()
                 c.close();c=context(1280);page=c.new_page();page.goto(base+'/admin/order-design/'+fx.order+'?pixel=1')
                 wait(page,"document.querySelector('#pixel-status')?.textContent.includes('正在編輯 V2')")
-                assert page.evaluate('canvas.getObjects().length')==5
+                assert page.evaluate('canvas.getObjects().length')==6
                 page.locator('#pixel-review').click();page.locator('#pixel-reason').fill('隔離像素修補測試');page.locator('#pixel-cost').fill('12.50')
                 page.locator('#pixel-confirm').click();wait(page,"document.querySelector('#pixel-send')?.disabled===false")
                 assert fx.fx.fake.calls==[]

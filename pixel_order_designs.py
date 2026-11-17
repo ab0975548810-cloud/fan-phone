@@ -26,6 +26,7 @@ def png(raw, size=None, dpi=False):
     image_bytes(raw)
     im=Image.open(io.BytesIO(raw))
     if im.format!='PNG' or im.width*im.height>18000000:raise ValueError('只接受安全尺寸的原生產 PNG')
+    if raw[24]>8:raise ValueError('原圖超過 8 位元色深，禁止自動降色深修補')
     if im.mode not in ('RGB','RGBA','P','L','LA'):raise ValueError('原圖色彩位深需先核對，禁止自動轉換')
     if im.info.get('icc_profile'):
         if len(im.info['icc_profile'])>4000000:raise ValueError('ICC 設定容量無效')

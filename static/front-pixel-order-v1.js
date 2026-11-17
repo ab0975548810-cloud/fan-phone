@@ -33,8 +33,8 @@
       let overlay,erase;
       try{
         canvas.backgroundImage=null;canvas.backgroundColor='transparent';canvas.clipPath=null;canvas.setViewportTransform([1,0,0,1,0,0]);
-        objects.forEach(o=>o.set({visible:!o.pixelErase,objectCaching:false}));overlay=canvas.toDataURL(exportOptions);
-        objects.forEach(o=>o.set('visible',!!o.pixelErase));erase=canvas.toDataURL(exportOptions);
+        settings.forEach(([o,v])=>o.set({visible:v&&!o.pixelErase,objectCaching:false}));overlay=canvas.toDataURL(exportOptions);
+        settings.forEach(([o,v])=>o.set('visible',v&&!!o.pixelErase));erase=canvas.toDataURL(exportOptions);
       }finally{canvas.backgroundImage=originalBackground;canvas.setViewportTransform(view);settings.forEach(([o,v,c])=>o.set({visible:v,objectCaching:c}));canvas.requestRenderAll();}
       const submitted=generation;
       const result=await api('/save',{work:work.work,overlay,erase,objects:objects.map(rasterObject)});
@@ -77,11 +77,14 @@
       document.getElementById('editor-model').textContent=ctx.modelName;document.getElementById('editor-style').textContent=ctx.styleName;
       navigate('page-editor');initCanvas();editorHasSession=true;
       canvas.setDimensions({width:d.size[0]/d.factor,height:d.size[1]/d.factor});canvas.backgroundColor='transparent';canvas.clipPath=null;
+      baseClip=new fabric.Rect({left:0,top:0,width:d.size[0]/d.factor,height:d.size[1]/d.factor,absolutePositioned:true});
       // BackgroundImage is outside the selectable object list and all layer controls.
       await new Promise((ok,no)=>fabric.Image.fromURL(d.basePath,im=>{if(!im)return no(Error('V1 圖片載入失敗'));im.set({scaleX:1/d.factor,scaleY:1/d.factor,selectable:false,evented:false});canvas.setBackgroundImage(im,ok);},{crossOrigin:'anonymous'}));
       await new Promise(ok=>fabric.util.enlivenObjects(d.objects,objects=>{objects.forEach(o=>canvas.add(o));ok();}));
       for(const name of ['applyTemplate','applyTemplateById','setBackgroundColor'])if(typeof window[name]==='function')window[name]=()=>toast('像素修補不套用模板或整張背景，請新增局部遮蓋');
       window.openPreview=compare;window.confirmDesignToCart=save;
+      const rehydrate=window.rehydrateCanvas;
+      window.rehydrateCanvas=function(){const result=rehydrate.apply(this,arguments);canvas.backgroundImage?.set({selectable:false,evented:false});return result;};
       CUSTOM_PROPS.push('pixelErase');historyStack=[];historyIndex=-1;recordHistory(true);dirty=false;
       canvas.on('object:added',mark);canvas.on('object:removed',mark);canvas.on('object:modified',mark);
       canvas.on('after:render',()=>{canvas.backgroundColor='transparent';});

@@ -7,7 +7,7 @@ from unittest import mock
 from PIL import Image, ImageDraw
 from pathlib import Path
 import test_print_center as fx
-from pixel_order_designs import compose, sha
+from pixel_order_designs import compose, sha, png
 
 app=fx.app
 HEAD={'X-Order-Design':'1'}
@@ -53,6 +53,12 @@ class PixelTests(unittest.TestCase):
         self.assertEqual(result.getpixel((0,0)),(15,25,35,0))
         self.assertEqual(result.size,(72,144));self.assertAlmostEqual(result.info['dpi'][0],720,delta=.1)
         with self.assertRaises(ValueError):compose(self.raw,picture((71,144)),encode(erase))
+
+    def test_16_bit_color_is_not_silently_reduced(self):
+        import struct,zlib
+        def chunk(name,value):return struct.pack('>I',len(value))+name+value+struct.pack('>I',zlib.crc32(name+value))
+        raw=b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',1,1,16,6,0,0,0))+chunk(b'IDAT',zlib.compress(b'\x00'+b'\x00\xff'*4))+chunk(b'IEND',b'')
+        with self.assertRaisesRegex(ValueError,'色深'):png(raw)
 
     def test_version_compare_confirm_send_no_business_changes(self):
         first=self.open();second=self.save(first);self.assertEqual(second['version'],2)
