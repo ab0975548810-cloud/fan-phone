@@ -41,7 +41,7 @@ V2 不產生或取代 Print Center 正式圖，不建立 print job、重送、�
 ## 驗收
 
 - test_order_designs.py：私有素材授權、偽造 token、V1/V2 保留、跨登入恢復、工作副本 replay/CAS、來源清理、舊單拒絕、模板權限與並行修改、業務狀態不變。
-- .github/tests/test_order_design_browser.py：WebKit/Chromium iPhone 尺寸，以正常購物車序列化建立隔離訂單；兩種商品 × 一般／模板，修改一張貼紙、其他圖層不變，V2 另存再以獨立桌面瀏覽器 context 恢復，描邊原始素材仍可編輯。比對原預覽與 V1 恢復、V2 前後 720 DPI 解碼像素完全相同；fake vendor 呼叫為零。
+- .github/tests/test_order_design_browser.py：WebKit/Chromium iPhone 尺寸，以正常購物車序列化建立隔離訂單；兩種商品 × 一般／模板，修改一張貼紙、其他圖層不變，V2 另存再以獨立桌面瀏覽器 context 恢復，描邊原始素材仍可編輯。比對原預覽與 V1 恢復、V2 前後 720 DPI 解碼像素完全相同；直接呼叫隔離伺服器重建器核對 720 DPI 與文字佈局，Chromium 前台／伺服器逐像素一致；fake vendor 呼叫為零。
 - .github/tests/test_order_design_postgres.py：隔離 PostgreSQL RLS/權限、immutable V1、8 個並行保存只一筆成功、重試不重建版本。
 - 原有 Smoke、Commerce、Print Center、PostgreSQL、storage compatibility、完整 WebKit/Chromium 套件仍為 PR gates。CI 狀態以 PR 最新 SHA 為準。
 

@@ -95,6 +95,17 @@ def run():
                 original_pixels=page.evaluate('ctx.printBase64')
                 order=page.evaluate("""async()=>{const d=await BenfuwanDesignSources.prepare(cartItem.designJson);const r=await fetch('/api/create_order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({idempotency_key:crypto.randomUUID(),model_id:ctx.modelId,style_id:ctx.styleId,quantity:1,customer_name:'隔離設計測試',payment_method:'現金',print_file:ctx.printBase64,mockup_file:ctx.mockupBase64||ctx.printBase64,design_json:d})});const j=await r.json();if(!r.ok)throw Error(JSON.stringify(j));return j.order_id;}""")
                 original=app.commerce.store.order(order);finance=app.commerce.store.read()
+                production=original['design_json']['production']
+                _,raw,layouts=fixture.fx.editable.render(app,original,{'width_mm':production['printW'],'height_mm':production['printH']},app.print_center._download_artwork)
+                image=Image.open(io.BytesIO(raw));assert abs(image.info['dpi'][0]-720)<.05
+                assert image.size==(round(production['printW']*720/25.4),round(production['printH']*720/25.4))
+                front_layouts=page.evaluate("canvas.getObjects().filter(o=>['text','textbox','i-text'].includes(o.type)).map(o=>({left:o.left,top:o.top,fontSize:o.fontSize,lines:o._textLines.map(a=>a.join(''))}))")
+                assert len(front_layouts)==len(layouts)
+                for front,rendered in zip(front_layouts,layouts):
+                    assert front['lines']==rendered['lines']
+                    for key in ('left','top','fontSize'):assert abs(front[key]-rendered[key])<.000001,(front,rendered)
+                if browser.browser_type.name=='chromium':same_pixels(original_pixels,'data:image/png;base64,'+base64.b64encode(raw).decode())
+                print('SERVER_720_PREVIEW_PARITY_OK',browser.browser_type.name,product,use_template,flush=True)
                 customer.close()
                 def admin_context(desktop=False):
                     context=browser.new_context(viewport={'width':1280,'height':900} if desktop else {'width':390,'height':844},has_touch=not desktop)

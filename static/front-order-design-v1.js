@@ -3,6 +3,17 @@
   'use strict';
   const core=()=>window.BenfuwanEditableSticker;
   for(const key of ['aiOutlineSource','aiRemovalMode','aiOutlineStyle','aiOutlineStrength','aiOutlineWidth','aiOutlineColor'])if(!CUSTOM_PROPS.includes(key))CUSTOM_PROPS.push(key);
+  // Match the isolated production renderer without changing interactive caching.
+  const preview=window.openPreview;let previewWork=null;
+  window.openPreview=function(){
+    if(previewWork)return previewWork;
+    const target=canvas;if(!target)return preview.apply(this,arguments);
+    const objects=target.getObjects().map(o=>[o,o.objectCaching]);
+    const args=arguments;
+    previewWork=(async()=>{try{objects.forEach(([o])=>o.set('objectCaching',false));return await preview.apply(this,args);}
+      finally{objects.forEach(([o,cached])=>o.set('objectCaching',cached));if(canvas===target)target.requestRenderAll();}})().finally(()=>{previewWork=null;});
+    return previewWork;
+  };
   async function serialize(){
     await ensureCanvasFonts();
     const data=canvas.layer_contract_version==='multilayer-v1'?await BenfuwanMultilayer.serialize(canvas,ctx):await core().serialize(canvas,ctx);
