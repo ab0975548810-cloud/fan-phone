@@ -49,11 +49,16 @@ def run(legacy=False):
     fx.addCleanup(setattr,app,'TEMPLATES_FILE',saved_templates)
     server=make_server('127.0.0.1',0,app.app,threaded=True);thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
     base='http://127.0.0.1:'+str(server.server_port)
+    real_film=False
+    def artwork(kind):
+        if real_film:return (ROOT/'.github/tests/fixtures/film'/('preview.png' if kind=='preview' else 'print.png')).read_bytes()
+        return preview_mask() if kind=='preview' else fixture.fx.mask()
     try:
-        with sync_playwright() as p, ExitStack() as history, mock.patch('editable_stickers.public_image',side_effect=lambda app,url:preview_mask() if 'preview' in url else fixture.fx.mask()):
+        with sync_playwright() as p, ExitStack() as history, mock.patch('editable_stickers.public_image',side_effect=lambda app,url:artwork('preview' if 'preview' in url else 'print')):
             browser=getattr(p,os.environ.get('BROWSER_ENGINE','webkit')).launch()
             for product,use_template in (('phone_case',False),('camera_film',False),('phone_case',True),('camera_film',True)):
                 if os.environ.get('TEMPLATE_ONLY') and not use_template:continue
+                real_film=legacy and product=='camera_film'
                 shop=app.cloud_get_json('shop_data',app.DATA_FILE,app.DEFAULT_SHOP_DATA)
                 shop['models'][0]['product_type']=product;shop['styles'][0]['product_type']=product
                 shop['models'][0]['direct_style_id']=fx.style
@@ -69,7 +74,7 @@ def run(legacy=False):
                 security_perf._CACHE.clear();security_perf._HITS.clear()
                 customer=browser.new_context(viewport={'width':390,'height':844},has_touch=True)
                 page=customer.new_page();errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
-                page.route('**/static/dialog-*.png',lambda r:r.fulfill(body=preview_mask() if 'preview' in r.request.url else fixture.fx.mask(),content_type='image/png'))
+                page.route('**/static/dialog-*.png',lambda r:r.fulfill(body=artwork('preview' if 'preview' in r.request.url else 'print'),content_type='image/png'))
                 print('STEP storefront',product,flush=True);page.route('**/static/multi-layer.png',lambda r:r.fulfill(body=fixture.fx.image(),content_type='image/png'))
                 page.goto(base);wait(page,"typeof catalogState!=='undefined' && catalogState==='ready'")
                 print('STEP start editor',flush=True)
@@ -84,8 +89,8 @@ def run(legacy=False):
                 print('STEP add objects',flush=True)
                 photo='data:image/png;base64,'+base64.b64encode(fixture.fx.image()).decode()
                 page.evaluate("""async url=>{try{
-                  for(const [role,x] of [['photo',45],['sticker',100]])await new Promise((resolve,reject)=>fabric.Image.fromURL(url,o=>{try{o.set({role,left:x,top:160,scaleX:.15,scaleY:.15,opacity:.8});canvas.add(o);resolve()}catch(e){reject(e)}}));
-                  await ensureEditorFont('jf-openhuninn','本福丸');canvas.add(new fabric.Textbox('本福丸',{role:'text',fontFamily:'jf-openhuninn',fontSize:18,left:40,top:250,width:100}));recordHistory();
+                  for(const [role,x] of [['photo',45],['sticker',100]])await new Promise((resolve,reject)=>fabric.Image.fromURL(url,o=>{try{const scale=Math.min(.15,canvas.height/1024);o.set({role,left:x,top:Math.min(160,canvas.height*.4),scaleX:scale,scaleY:scale,opacity:.8});canvas.add(o);resolve()}catch(e){reject(e)}}));
+                  await ensureEditorFont('jf-openhuninn','本福丸');canvas.add(new fabric.Textbox('本福丸',{role:'text',fontFamily:'jf-openhuninn',fontSize:18,left:40,top:Math.min(250,canvas.height*.65),width:100}));recordHistory();
                 }catch(e){throw Error(e.stack)}}""",photo)
                 page.evaluate("()=>{canvas.setActiveObject(canvas.getObjects().find(o=>o.role==='sticker'));openAiOutlineSheet()}")
                 page.locator('#sheet-outline-v2 [data-style="pink"]').click()
