@@ -11,6 +11,8 @@
   window.submitOrder=()=>toast('修補模式不建立銷售訂單');window.confirmDesignToCart=()=>save();
   window.openPreview=()=>compare();
   window.startNewDesign=()=>false;
+  // Native bitmap repair has no catalog mask. The server enforces V1 alpha.
+  window.applyCaseBoundaryClip=()=>{if(typeof canvas!=='undefined'&&canvas)canvas.clipPath=null;};
   window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
   const button=(text,id,fn)=>{const b=document.createElement('button');b.textContent=text;b.id=id;b.onclick=fn;return b;};
   function mark(){dirty=true;comparison=null;generation++;}
@@ -72,6 +74,7 @@
     try{
       work=await api('/open');await loadAll();const d=work.design;
       ctx={...ctx,modelId:'pixel-original',styleId:'pixel-original',modelName:'原生產 PNG',styleName:'像素修補',printW:d.size[0]/d.factor/3,printH:d.size[1]/d.factor/3,maskUrl:'',printLineUrl:'',backgroundColor:'transparent',backgroundOpacity:0};
+      document.getElementById('editor-model').textContent=ctx.modelName;document.getElementById('editor-style').textContent=ctx.styleName;
       navigate('page-editor');initCanvas();editorHasSession=true;
       canvas.setDimensions({width:d.size[0]/d.factor,height:d.size[1]/d.factor});canvas.backgroundColor='transparent';canvas.clipPath=null;
       // BackgroundImage is outside the selectable object list and all layer controls.

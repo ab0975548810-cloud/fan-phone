@@ -6,7 +6,8 @@ declare
     d jsonb; s public.print_jobs%rowtype; j public.print_jobs%rowtype;
     prior public.print_requests%rowtype; result jsonb;
 begin
-    if p_version<2 or length(trim(p_reason)) not between 1 and 500 or p_cost<0 or p_cost>100000000 then
+    if p_version is null or p_version<2 or p_reason is null or length(trim(p_reason)) not between 1 and 500 or p_cost is null or p_cost<0 or p_cost>100000000
+       or nullif(p_actor,'') is null or p_key is null or p_key !~ '^[A-Za-z0-9_-]{16,100}$' then
         return jsonb_build_object('ok',false); end if;
     perform pg_advisory_xact_lock(hashtextextended('benfuwan:print-order:'||p_order,0));
     -- Same lock used by append_order_design_version prevents approval racing a save.
@@ -26,16 +27,17 @@ begin
        or jsonb_build_object('sourceJobId',s.id,'sku_id',s.sku_id,'width_mm',s.width_mm,'height_mm',s.height_mm,
           'left_mm',s.left_mm,'top_mm',s.top_mm,'angle',s.angle,'copies',s.copies,'channel',s.channel,'spot_color',s.spot_color)<>d->'profile' then
         return jsonb_build_object('ok',false); end if;
-    result=public.authorize_manual_reprint(p_order,p_key,p_hash,p_actor,'',jsonb_build_object('artwork_token_nonce',gen_random_uuid()::text),false);
-    if not coalesce((result->>'ok')::boolean,false) then return result; end if;
-    update public.print_jobs set artwork_path=d->>'outputPath',artwork_sha256=d->>'outputSha',
-        sku_id=s.sku_id,width_mm=s.width_mm,height_mm=s.height_mm,left_mm=s.left_mm,top_mm=s.top_mm,
-        angle=s.angle,copies=s.copies,channel=s.channel,spot_color=s.spot_color
-        where id=(result->'job'->>'id')::uuid returning * into j;
-    update public.print_events set payload_json=jsonb_build_object('actor',p_actor,'version',p_version,'versionHash',p_hash,
-        'reason',p_reason,'costCents',p_cost,'sourceJobId',s.id,'baseSha',d->>'baseSha','outputSha',d->>'outputSha','parameters',d->'profile'),
-        raw_message='已比較 V1／V2，人工確認像素修補重印'
-        where job_id=j.id and event_type='MANUAL_REPRINT_AUTHORIZED';
+    insert into public.print_jobs(id,order_id,attempt_no,manual_independent,sku_id,artwork_path,artwork_sha256,
+        artwork_token_nonce,profile_complete,width_mm,height_mm,left_mm,top_mm,angle,copies,channel,spot_color,state)
+    values(gen_random_uuid(),p_order,(select coalesce(max(attempt_no),0)+1 from public.print_jobs where order_id=p_order),
+        true,s.sku_id,d->>'outputPath',d->>'outputSha',gen_random_uuid()::text,true,
+        s.width_mm,s.height_mm,s.left_mm,s.top_mm,s.angle,s.copies,s.channel,s.spot_color,'PREPARED') returning * into j;
+    insert into public.print_events(id,job_id,event_key,event_type,raw_message,payload_json)
+    values(gen_random_uuid(),j.id,p_key,'MANUAL_REPRINT_AUTHORIZED','已比較 V1／V2，人工確認像素修補重印',
+        jsonb_build_object('actor',p_actor,'version',p_version,'versionHash',p_hash,
+        'reason',p_reason,'costCents',p_cost,'sourceJobId',s.id,'baseSha',d->>'baseSha','outputSha',d->>'outputSha','parameters',d->'profile'));
+    insert into public.print_requests(request_key,operation,job_id,request_hash,status,response_json)
+    values(p_key,'manual_reprint',j.id,p_hash,'COMPLETED',jsonb_build_object('job_id',j.id));
     return jsonb_build_object('ok',true,'job',to_jsonb(j));
 end;
 $$;
