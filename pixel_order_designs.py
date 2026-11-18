@@ -60,8 +60,11 @@ def _compose(raw, overlay_raw, erase_raw):
     overlay.putalpha(ImageChops.multiply(overlay.getchannel('A'),allowed))
     erased=ImageChops.multiply(erase.getchannel('A').point(lambda x:255 if x else 0),allowed)
     touched=ImageChops.lighter(overlay.getchannel('A').point(lambda x:255 if x else 0),erased)
-    merged=Image.alpha_composite(base,overlay)
-    merged.putalpha(ImageChops.subtract(alpha,erased))
+    # Erase original pixels *before* applying the moved overlay. Otherwise a
+    # relocated object crossing its old bounds was erased again on export.
+    reduced=base.copy()
+    reduced.putalpha(ImageChops.subtract(alpha,erased))
+    merged=Image.alpha_composite(reduced,overlay)
     output=Image.composite(merged,base,touched)
     outside=touched.point(lambda x:0 if x else 255)
     for band in range(4):
