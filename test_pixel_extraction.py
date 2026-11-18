@@ -61,6 +61,16 @@ class ExtractionTests(unittest.TestCase):
         self.assertLessEqual(max(resized.size),1200)
         self.assertEqual(len(raw),len(png(im)))
 
+    def test_transparent_move_is_visible_only_as_unprintable_draft(self):
+        overlay=Image.new('RGBA',self.im.size)
+        ImageDraw.Draw(overlay).rectangle((87,120,100,130),fill=(90,10,200,255))
+        erase=Image.new('RGBA',self.im.size)
+        safe,_=compose(self.raw,png(overlay),png(erase))
+        self.assertEqual(Image.open(io.BytesIO(safe)).getpixel((90,125))[3],0)
+        draft,proof=compose(self.raw,png(overlay),png(erase),allow_draft_expansion=True)
+        self.assertTrue(proof['alphaExpansion'])
+        self.assertEqual(Image.open(io.BytesIO(draft)).getpixel((90,125)),(90,10,200,255))
+
     def test_erase_then_overlay_keeps_moved_component_on_overlap(self):
         im=Image.new('RGBA',(72,144),(20,90,140,255))
         original=png(im)
