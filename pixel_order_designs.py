@@ -42,13 +42,13 @@ def decode(value):
     return base64.b64decode(value.split(',',1)[1],validate=True)
 
 
-def compose(raw, overlay_raw, erase_raw):
+def compose(raw, overlay_raw, erase_raw, allow_draft_expansion=False):
     if not _PIXEL_SLOT.acquire(timeout=5):raise ValueError('像素驗證忙碌，請稍後重試；原圖未變更')
-    try:return _compose(raw,overlay_raw,erase_raw)
+    try:return _compose(raw,overlay_raw,erase_raw,allow_draft_expansion)
     finally:_PIXEL_SLOT.release()
 
 
-def _compose(raw, overlay_raw, erase_raw):
+def _compose(raw, overlay_raw, erase_raw, allow_draft_expansion=False):
     base=png(raw,dpi=True);overlay=png(overlay_raw,base.size);erase=png(erase_raw,base.size)
     # Safari can embed an ICC profile in canvas PNGs. Convert only NEW pixels
     # into the original color space; never transform the original RGBA buffer.
@@ -56,8 +56,12 @@ def _compose(raw, overlay_raw, erase_raw):
         profile=lambda im:ImageCms.ImageCmsProfile(io.BytesIO(im.info['icc_profile'])) if im.info.get('icc_profile') else ImageCms.createProfile('sRGB')
         overlay=ImageCms.profileToProfile(overlay,profile(overlay),profile(base),outputMode='RGBA')
     alpha=base.getchannel('A');allowed=alpha.point(lambda x:255 if x else 0)
-    # No historical mask is inferred: fully transparent original pixels stay exact.
-    overlay.putalpha(ImageChops.multiply(overlay.getchannel('A'),allowed))
+    # V2 design drafts may show moved pixels outside the original alpha, but
+    # they must lose ALL send eligibility until a verified print mask exists.
+    # This never changes V1 and never trusts today's catalog geometry.
+    escaped=ImageChops.multiply(overlay.getchannel('A'),allowed.point(lambda x:0 if x else 255)).getbbox() is not None
+    if not allow_draft_expansion:
+        overlay.putalpha(ImageChops.multiply(overlay.getchannel('A'),allowed))
     erased=ImageChops.multiply(erase.getchannel('A').point(lambda x:255 if x else 0),allowed)
     touched=ImageChops.lighter(overlay.getchannel('A').point(lambda x:255 if x else 0),erased)
     # Erase original pixels *before* applying the moved overlay. Otherwise a
@@ -73,7 +77,7 @@ def _compose(raw, overlay_raw, erase_raw):
     if 'gamma' in base.info:meta.add(b'gAMA',struct.pack('>I',round(base.info['gamma']*100000)))
     if 'srgb' in base.info:meta.add(b'sRGB',bytes([base.info['srgb']]))
     out=io.BytesIO();output.save(out,'PNG',dpi=(720,720),icc_profile=base.info.get('icc_profile'),pnginfo=meta)
-    return out.getvalue(),{'bounds':touched.getbbox(),'changedPixels':sum(touched.histogram()[1:]),'unchangedRGBA':True,'alphaExpansion':False}
+    return out.getvalue(),{'bounds':touched.getbbox(),'changedPixels':sum(touched.histogram()[1:]),'unchangedRGBA':True,'alphaExpansion':bool(escaped and allow_draft_expansion)}
 
 
 def historical_profile(app, order, raw, size):
@@ -179,7 +183,7 @@ def install(app, store, admin, actor, signer):
         base=row(order_id,claim['version'])['document'];raw=read(app,base['basePath'])
         if sha(raw)!=base['baseSha']:raise ValueError('V1 原圖雜湊不符')
         overlay=decode(data.get('overlay'));erase=decode(data.get('erase'))
-        output,proof=compose(raw,overlay,erase)
+        output,proof=compose(raw,overlay,erase,allow_draft_expansion=True)
         if not proof['bounds']:raise ValueError('沒有可保存的修補內容')
         objects=copy.deepcopy(data.get('objects'))
         validate({'render_contract_version':'editable-text-v1','orderDesignVersion':1,'logicalCanvas':dict(zip(('width','height'),[n/base['factor'] for n in base['size']])),'objects':objects})
@@ -189,7 +193,11 @@ def install(app, store, admin, actor, signer):
                 source=decode(o.get('src'));total+=len(source)
                 if total>70000000:raise ValueError('新增素材容量過大')
                 o['src']=persist_asset(app,order_id,source)
-        d={**base,'objects':objects,'outputPath':persist_asset(app,order_id,output),'outputSha':sha(output),'proof':proof}
+        # Preserve the original print snapshot, but a draft that changes pixels
+        # beyond V1's proven alpha cannot be authorized for real vendor send.
+        original_profile=rows(order_id)[0]['document'].get('profile')
+        d={**base,'objects':objects,'outputPath':persist_asset(app,order_id,output),'outputSha':sha(output),
+           'profile':None if proof['alphaExpansion'] else original_profile,'proof':proof}
         result=store.append(order_id,claim['version'],d,actor(),claim['id'])
         if not result['ok']:return app.no_cache_json({'status':'error','msg':'其他店員已保存，請重新開啟；目前畫布仍保留'},409)
         return opened(order_id,row(order_id,result['version']))
