@@ -15,7 +15,7 @@
   window.applyCaseBoundaryClip=()=>{if(typeof canvas!=='undefined'&&canvas)canvas.clipPath=null;};
   window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
   const button=(text,id,fn)=>{const b=document.createElement('button');b.textContent=text;b.id=id;b.onclick=fn;return b;};
-  let selecting=false,originalPreview=null,backgroundRequest=0;
+  let selecting=false,manualSelecting=false,firstCorner=null,originalPreview=null,backgroundRequest=0;
   const fabricImage=url=>new Promise((resolve,reject)=>fabric.Image.fromURL(url,im=>im?resolve(im):reject(Error('提取素材無法載入')),{crossOrigin:'anonymous'}));
   function rebuildBackground(){
     if(!originalPreview||!canvas)return;
@@ -34,11 +34,12 @@
       canvas.setBackgroundImage(new fabric.Image(small,{selectable:false,evented:false}),()=>canvas.requestRenderAll());
     }
   }
-  async function extractAt(point){
+  async function extractAt(point,rectangle=null){
     if(busy||!work)return;
     busy=true;status('正在從原圖提取素材…');
     try{
-      const result=await api('/extract',{work:work.work,x:point.x,y:point.y});
+      const payload=rectangle?{work:work.work,rectangle}:{work:work.work,x:point.x,y:point.y};
+      const result=await api('/extract',payload);
       const bounds=result.bounds,factor=work.design.factor;
       if(canvas.getObjects().some(o=>o.pixelExtractionBounds&&JSON.stringify(o.pixelExtractionBounds)===JSON.stringify(bounds)))
         throw Error('這個圖案已經提取過，請直接移動既有圖層');
@@ -91,7 +92,8 @@
     document.querySelector('#page-editor > .top').after(tools);
     style.textContent+='#page-editor #canvas-shell{border-radius:0!important}#page-editor #safe-guide,#page-editor #phone-mask{display:none!important}';
     tools.append(button('儲存修改','pixel-save',save),button('V1／V2 比較與確認','pixel-review',compare));
-    tools.append(button('點選原圖素材（提取成圖層）','pixel-extract',()=>{selecting=!selecting;status(selecting?'請點一下原始貓咪、荷包蛋或蝴蝶結。可取消選取模式。':'已取消原圖選取。');}));
+    tools.append(button('點選原圖素材（提取成圖層）','pixel-extract',()=>{manualSelecting=false;firstCorner=null;selecting=!selecting;status(selecting?'請點一下原始貓咪、荷包蛋或蝴蝶結。可取消選取模式。':'已取消原圖選取。');}));
+    tools.append(button('手動框選素材（點兩個角落）','pixel-rectangle',()=>{manualSelecting=!manualSelecting;selecting=false;firstCorner=null;status(manualSelecting?'請依序點選圖案範圍的左上、右下兩角；可能會切到相鄰圖案，需人工檢查。':'已取消手動框選。');}));
     tools.append(button('新增局部遮蓋','pixel-cover',()=>{canvas.add(new fabric.Rect({left:10,top:10,width:40,height:40,fill:'#ffffff'}));mark();}));
     tools.append(button('新增擦除區（可移動／縮放）','pixel-erase',()=>{const rect=new fabric.Rect({left:10,top:10,width:40,height:40,fill:'#ff00ff',opacity:1,pixelErase:true});canvas.add(rect);canvas.setActiveObject(rect);mark();}));
     tools.append(button('返回後台','pixel-back',()=>{location.href='/admin';}));
@@ -115,8 +117,15 @@
       canvas.on('object:removed',()=>{mark();rebuildBackground();});
       canvas.on('object:modified',mark);
       canvas.on('mouse:down',event=>{
-        if(!selecting||busy||event.target)return;
-        selecting=false;void extractAt(canvas.getPointer(event.e));
+        if(busy||event.target)return;
+        const point=canvas.getPointer(event.e);
+        if(manualSelecting){
+          if(!firstCorner){firstCorner=point;status('已記錄第一個角落，請點第二個角落。');return;}
+          const rectangle=[firstCorner.x,firstCorner.y,point.x,point.y];
+          manualSelecting=false;firstCorner=null;void extractAt(point,rectangle);return;
+        }
+        if(!selecting)return;
+        selecting=false;void extractAt(point);
       });
       rebuildBackground();
       canvas.on('after:render',()=>{canvas.backgroundColor='transparent';});
