@@ -44,7 +44,7 @@ class ExtractionTests(unittest.TestCase):
         self.assertEqual(erase.getpixel((40,40))[3],255)
         self.assertEqual(piece.getpixel((0,0))[3],0)
         with self.assertRaisesRegex(ValueError,'過大'):
-            select_rectangle(self.raw,[0,0,3,3],1)
+            select_rectangle(self.raw,[0,0,2,2],1)
 
     def test_transparent_and_invalid_points_fail_safe(self):
         with self.assertRaisesRegex(ValueError,'透明背景'):
