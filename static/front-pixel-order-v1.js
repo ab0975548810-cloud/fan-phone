@@ -15,6 +15,43 @@
   window.applyCaseBoundaryClip=()=>{if(typeof canvas!=='undefined'&&canvas)canvas.clipPath=null;};
   window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
   const button=(text,id,fn)=>{const b=document.createElement('button');b.textContent=text;b.id=id;b.onclick=fn;return b;};
+  let selecting=false,originalPreview=null,backgroundRequest=0;
+  const fabricImage=url=>new Promise((resolve,reject)=>fabric.Image.fromURL(url,im=>im?resolve(im):reject(Error('提取素材無法載入')),{crossOrigin:'anonymous'}));
+  function rebuildBackground(){
+    if(!originalPreview||!canvas)return;
+    const seq=++backgroundRequest,w=Math.round(canvas.getWidth()),h=Math.round(canvas.getHeight());
+    const small=document.createElement('canvas');small.width=w;small.height=h;
+    const context=small.getContext('2d');context.drawImage(originalPreview,0,0,w,h);
+    context.globalCompositeOperation='destination-out';
+    for(const obj of canvas.getObjects()){
+      if(obj.pixelExtractionMask&&obj.type==='image'){
+        const source=obj.getElement();
+        if(source)context.drawImage(source,obj.left,obj.top,obj.width*obj.scaleX,obj.height*obj.scaleY);
+      }
+    }
+    context.globalCompositeOperation='source-over';
+    if(seq===backgroundRequest){
+      canvas.setBackgroundImage(new fabric.Image(small,{selectable:false,evented:false}),()=>canvas.requestRenderAll());
+    }
+  }
+  async function extractAt(point){
+    if(busy||!work)return;
+    busy=true;status('正在從原圖提取素材…');
+    try{
+      const result=await api('/extract',{work:work.work,x:point.x,y:point.y});
+      const bounds=result.bounds,factor=work.design.factor;
+      if(canvas.getObjects().some(o=>o.pixelExtractionBounds&&JSON.stringify(o.pixelExtractionBounds)===JSON.stringify(bounds)))
+        throw Error('這個圖案已經提取過，請直接移動既有圖層');
+      const [picture,mask]=await Promise.all([fabricImage(result.cutout),fabricImage(result.erase)]);
+      const placement={left:bounds[0]/factor,top:bounds[1]/factor,scaleX:1/factor,scaleY:1/factor};
+      mask.set({...placement,pixelErase:true,pixelExtractionMask:true,visible:false,selectable:false,evented:false,objectCaching:false});
+      picture.set({...placement,pixelExtractionBounds:bounds,objectCaching:false});
+      canvas.add(mask);canvas.add(picture);canvas.setActiveObject(picture);
+      rebuildBackground();canvas.requestRenderAll();mark();recordHistory();
+      status('已提取 '+result.pixels+' 個像素：現在可以移動、縮放、旋轉或刪除圖層。原始 V1 不變。');
+    }catch(error){status(error.message);}
+    finally{busy=false;}
+  }
   function mark(){dirty=true;comparison=null;generation++;}
   function rasterObject(o){
     const value=o.toObject(CUSTOM_PROPS.concat(['pixelErase']));
@@ -34,7 +71,7 @@
       try{
         canvas.backgroundImage=null;canvas.backgroundColor='transparent';canvas.clipPath=null;canvas.setViewportTransform([1,0,0,1,0,0]);
         settings.forEach(([o,v])=>o.set({visible:v&&!o.pixelErase,objectCaching:false}));overlay=canvas.toDataURL(exportOptions);
-        settings.forEach(([o,v])=>o.set('visible',v&&!!o.pixelErase));erase=canvas.toDataURL(exportOptions);
+        settings.forEach(([o,v])=>o.set('visible',!!o.pixelErase&&(v||!!o.pixelExtractionMask)));erase=canvas.toDataURL(exportOptions);
       }finally{canvas.backgroundImage=originalBackground;canvas.setViewportTransform(view);settings.forEach(([o,v,c])=>o.set({visible:v,objectCaching:c}));canvas.requestRenderAll();}
       const submitted=generation;
       const result=await api('/save',{work:work.work,overlay,erase,objects:objects.map(rasterObject)});
@@ -54,6 +91,7 @@
     document.querySelector('#page-editor > .top').after(tools);
     style.textContent+='#page-editor #canvas-shell{border-radius:0!important}#page-editor #safe-guide,#page-editor #phone-mask{display:none!important}';
     tools.append(button('儲存修改','pixel-save',save),button('V1／V2 比較與確認','pixel-review',compare));
+    tools.append(button('點選原圖素材（提取成圖層）','pixel-extract',()=>{selecting=!selecting;status(selecting?'請點一下原始貓咪、荷包蛋或蝴蝶結。可取消選取模式。':'已取消原圖選取。');}));
     tools.append(button('新增局部遮蓋','pixel-cover',()=>{canvas.add(new fabric.Rect({left:10,top:10,width:40,height:40,fill:'#ffffff'}));mark();}));
     tools.append(button('新增擦除區（可移動／縮放）','pixel-erase',()=>{const rect=new fabric.Rect({left:10,top:10,width:40,height:40,fill:'#ff00ff',opacity:1,pixelErase:true});canvas.add(rect);canvas.setActiveObject(rect);mark();}));
     tools.append(button('返回後台','pixel-back',()=>{location.href='/admin';}));
@@ -65,16 +103,24 @@
       canvas.setDimensions({width:d.size[0]/d.factor,height:d.size[1]/d.factor});canvas.backgroundColor='transparent';canvas.clipPath=null;
       baseClip=new fabric.Rect({left:0,top:0,width:d.size[0]/d.factor,height:d.size[1]/d.factor,absolutePositioned:true});
       // BackgroundImage is outside the selectable object list and all layer controls.
-      await new Promise((ok,no)=>fabric.Image.fromURL(d.basePath,im=>{if(!im)return no(Error('V1 圖片載入失敗'));im.set({scaleX:1/d.factor,scaleY:1/d.factor,selectable:false,evented:false});canvas.setBackgroundImage(im,ok);},{crossOrigin:'anonymous'}));
+      await new Promise((ok,no)=>fabric.Image.fromURL(d.previewPath||d.basePath,im=>{if(!im)return no(Error('V1 預覽圖載入失敗'));originalPreview=im.getElement();im.set({scaleX:canvas.getWidth()/im.width,scaleY:canvas.getHeight()/im.height,selectable:false,evented:false});canvas.setBackgroundImage(im,ok);},{crossOrigin:'anonymous'}));
       await new Promise(ok=>fabric.util.enlivenObjects(d.objects,objects=>{objects.forEach(o=>canvas.add(o));ok();}));
       for(const name of ['applyTemplate','applyTemplateById','setBackgroundColor'])if(typeof window[name]==='function')window[name]=()=>toast('像素修補不套用模板或整張背景，請新增局部遮蓋');
       window.openPreview=compare;window.confirmDesignToCart=save;
       const rehydrate=window.rehydrateCanvas;
       window.rehydrateCanvas=function(){const result=rehydrate.apply(this,arguments);canvas.backgroundImage?.set({selectable:false,evented:false});return result;};
-      CUSTOM_PROPS.push('pixelErase');historyStack=[];historyIndex=-1;recordHistory(true);dirty=false;
-      canvas.on('object:added',mark);canvas.on('object:removed',mark);canvas.on('object:modified',mark);
+      for(const field of ['pixelErase','pixelExtractionMask','pixelExtractionBounds'])if(!CUSTOM_PROPS.includes(field))CUSTOM_PROPS.push(field);
+      historyStack=[];historyIndex=-1;recordHistory(true);dirty=false;
+      canvas.on('object:added',()=>{mark();rebuildBackground();});
+      canvas.on('object:removed',()=>{mark();rebuildBackground();});
+      canvas.on('object:modified',mark);
+      canvas.on('mouse:down',event=>{
+        if(!selecting||busy||event.target)return;
+        selecting=false;void extractAt(canvas.getPointer(event.e));
+      });
+      rebuildBackground();
       canvas.on('after:render',()=>{canvas.backgroundColor='transparent';});
-      window.BenfuwanEditorAccess?.fitCanvas?.();canvas.renderAll();status('正在編輯 V'+work.version+'；原像素 '+d.size.join(' × ')+'，720 DPI。粉紅區表示待擦除範圍，請儲存後核對實際結果。');
+      window.BenfuwanEditorAccess?.fitCanvas?.();canvas.renderAll();status('正在編輯 V'+work.version+'；已使用輕量預覽。原始 720 DPI 保留，提取後可單獨移動。若移入 V1 完全透明區，儲存生產圖會依安全邊界裁切，請核對 V1／V2。');
     }catch(e){navigate('page-editor');status(e.message);document.getElementById('pixel-save').disabled=true;}
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
