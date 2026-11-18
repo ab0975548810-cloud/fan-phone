@@ -102,6 +102,34 @@ def select_component(raw, x, y, factor=1):
     return {'bounds': list(bounds), 'pixels': count, 'cutout': encode(cutout), 'erase': encode(erase)}
 
 
+def select_rectangle(raw, corners, factor=1):
+    """Manual two-corner crop for touching shapes; hard edges need review."""
+    if not isinstance(corners,(list,tuple)) or len(corners)!=4:
+        raise ValueError('請先指定框選區域的兩個角落')
+    if not isinstance(factor,int) or not 1<=factor<=32 or not all(
+        isinstance(v,(int,float)) and math.isfinite(v) for v in corners):
+        raise ValueError('框選資料無效')
+    image=Image.open(io.BytesIO(raw))
+    if image.format!='PNG' or image.width*image.height>MAX_CANVAS_PIXELS:
+        raise ValueError('只支援安全尺寸的 PNG 原生產圖')
+    image=image.convert('RGBA')
+    x1,y1,x2,y2=(int(round(n*factor)) for n in corners)
+    left=max(0,min(x1,x2));top=max(0,min(y1,y2))
+    right=min(image.width,max(x1,x2));bottom=min(image.height,max(y1,y2))
+    if right-left<3 or bottom-top<3 or (right-left)*(bottom-top)>MAX_CONNECTED_PIXELS:
+        raise ValueError('框選範圍太小或過大，請縮小範圍')
+    crop=image.crop((left,top,right,bottom))
+    coverage=crop.getchannel('A').point(lambda n:255 if n else 0)
+    count=coverage.histogram()[255]
+    if count<12:raise ValueError('框選區域沒有足夠的圖案像素')
+    cutout=Image.composite(crop,Image.new('RGBA',crop.size),coverage)
+    erase=Image.new('RGBA',crop.size,(255,0,255,0));erase.putalpha(coverage)
+    def encode(im):
+        out=io.BytesIO();im.save(out,'PNG');return out.getvalue()
+    return {'bounds':[left,top,right,bottom],'pixels':count,
+            'cutout':encode(cutout),'erase':encode(erase)}
+
+
 def preview(raw, max_edge=1200):
     """Small, transparent, browser-only preview; never used for production."""
     im = Image.open(io.BytesIO(raw))
