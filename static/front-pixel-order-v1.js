@@ -154,7 +154,7 @@
       rebuildBackground();
       canvas.on('after:render',({ctx})=>{
         canvas.backgroundColor='transparent';
-        if(!contour?.length||!ctx)return;
+        if(!contour?.length||ctx?.canvas!==canvas.lowerCanvasEl)return;
         ctx.save();ctx.transform(...canvas.viewportTransform);ctx.strokeStyle='#0671ba';ctx.fillStyle='#0671ba';
         ctx.beginPath();contour.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y));ctx.closePath();ctx.stroke();
         for(const [x,y] of contour)ctx.fillRect(x-2,y-2,4,4);ctx.restore();
