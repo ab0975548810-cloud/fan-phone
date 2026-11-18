@@ -49,7 +49,7 @@ def run():
             page.goto(url+path)
             wait(page,"document.querySelector('#pixel-status')?.textContent.includes('正在編輯 V1')")
             assert page.evaluate('canvas.getObjects().length')==0
-            assert page.evaluate("canvas.backgroundImage.getElement().naturalHeight<=1200")
+            assert page.evaluate("(canvas.backgroundImage.getElement().height||canvas.backgroundImage.getElement().naturalHeight)<=1200")
             page.locator('#pixel-extract').click()
             x,y=page.evaluate("""() => {
                 const point=fabric.util.transformPoint(new fabric.Point(50,70),canvas.viewportTransform);
