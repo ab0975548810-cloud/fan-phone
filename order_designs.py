@@ -135,7 +135,10 @@ def asset_paths(design):
 
 def archive(app, order):
     design = copy.deepcopy(order.get('design_json'))
-    check_restore(design)
+    try:check_restore(design)
+    except ValueError:
+        from legacy_order_designs import recover
+        return recover(app,order)
     if design.get('layer_contract_version'):
         from multilayer_templates import verify_seal
         verify_seal(app, design, order['id'])
@@ -237,6 +240,47 @@ def install(app):
         response.headers['Cache-Control']='no-store'
         return response
 
+    @app.app.route('/api/admin/order-design/<order_id>/assessment')
+    @admin
+    def assessment(order_id):
+        from legacy_order_designs import classify
+        order=app.commerce.store.order(order_id)
+        if not order:return app.no_cache_json({'status':'error','msg':'訂單不存在'},404)
+        category,reason=classify(order)
+        return app.no_cache_json({'status':'success','category':category,'reason':reason,'verified':False})
+
+    @app.app.route('/api/admin/order-design/<order_id>/remake',methods=['POST'])
+    @admin
+    def remake(order_id):
+        if not re.fullmatch(r'[A-Za-z0-9-]{1,100}',order_id):raise ValueError('訂單識別無效')
+        if (request.get_json() or {}).get('confirm')!='new-design-current-profile':raise ValueError('請明確確認重新製作，這不是舊圖層恢復')
+        order=app.commerce.store.order(order_id)
+        if not order:return app.no_cache_json({'status':'error','msg':'訂單不存在'},404)
+        from print_center import _complete_model_style_profile
+        from editable_stickers import public_image, VERSION
+        from catalog_products import product_type
+        shop=app.cloud_get_json('shop_data',app.DATA_FILE,app.DEFAULT_SHOP_DATA)
+        model=next((m for m in shop['models'] if m['id']==order['model_id']),None)
+        profile=_complete_model_style_profile(model or {},order['style_id'])
+        if not profile:raise ValueError('目前商品缺少完整設定，無法建立獨立重製草稿')
+        rows=store.rows(order_id)
+        if rows and (len(rows)>1 or not rows[0]['document'].get('legacyOriginal')):raise ValueError('已有設計版本，請重新開啟，避免覆蓋其他店員工作')
+        mask=persist_asset(app,order_id,public_image(app,profile['print_line_img']))
+        preview=persist_asset(app,order_id,public_image(app,profile['preview_mask_img']))
+        d={'version':'5.3.1','render_contract_version':VERSION,'orderDesignVersion':1,'objects':[],'background':'transparent',
+           'modelId':order['model_id'],'styleId':order['style_id'],'logicalCanvas':{'width':round(float(profile['print_w'])*3),'height':round(float(profile['print_h'])*3)},
+           'production':{'printW':float(profile['print_w']),'printH':float(profile['print_h']),'maskPath':mask},
+           'fontHashes':{k:hashlib.sha256((ROOT/v).read_bytes()).hexdigest() for k,v in FONTS.items()},
+           'editorContext':{'modelName':order.get('model_name'),'styleName':order.get('style_name'),'productType':product_type(model),'previewPath':preview,'printX':profile.get('print_x',0),'printY':profile.get('print_y',0),'printAngle':profile.get('print_angle',0)},
+           'remakeNotice':'全新重製草稿，使用建立草稿時設定；不是舊訂單原圖層恢復'}
+        check_restore(d)
+        if not rows:
+            original=store.append(order_id,0,{'legacyOriginal':True,'design_json':order.get('design_json'),'print_path':order.get('print_path'),'mockup_path':order.get('mockup_path')},actor(),'legacy-original')
+            if not original['ok']:raise ValueError('其他店員已建立版本，請重新開啟')
+        result=store.append(order_id,1,d,actor(),'explicit-remake')
+        if not result['ok']:raise ValueError('其他店員已建立版本，請重新開啟')
+        return app.no_cache_json({'status':'success','version':result['version']})
+
     @app.app.route('/api/admin/order-design/<order_id>/open',methods=['POST'])
     @admin
     def open_work(order_id):
@@ -252,14 +296,14 @@ def install(app):
         # Verify all referenced objects exist before any editor canvas is opened.
         for path in asset_paths(latest['document']):image_bytes(read(app,path))
         work=signer.dumps({'order':order_id,'version':latest['version'],'actor':actor(),'id':uuid.uuid4().hex})
-        return app.no_cache_json({'status':'success','orderId':order_id,'version':latest['version'],'work':work,
+        return app.no_cache_json({'status':'success','orderId':order_id,'version':latest['version'],'hash':latest['content_hash'],'work':work,
             'design':materialize(order_id,latest['version'],latest['document']),
             'versions':[{k:r[k] for k in ('version','actor','created_at','content_hash')} for r in rows]})
 
     @app.app.route('/api/admin/order-design/<order_id>/assets/<int:version>/<asset>')
     @admin
     def asset_file(order_id,version,asset):
-        row=next((r for r in store.rows(order_id) if r['version']==version),None)
+        row=next((r for r in store.rows(order_id) if r['version']==version and not r['document'].get('legacyOriginal')),None)
         path=next((p for p in asset_paths(row['document']) if hashlib.sha256(p.encode()).hexdigest()==asset),None) if row else None
         if not path:return app.no_cache_json({'status':'error','msg':'素材不存在'},404)
         raw=read(app,path);image_bytes(raw)
@@ -306,13 +350,24 @@ def install(app):
                 seen[token]=persist_asset(app,order_id,raw)
             o['src']=seen[token];o.pop('sourceRef',None);o.pop('publicSrc',None)
         protect_layers(base,design)
-        for key in ('production','editorContext','editorState','templateBinding'):
+        for key in ('production','editorContext','editorState','templateBinding','remakeNotice','legacyRecovery'):
             if key in base:design[key]=copy.deepcopy(base[key])
             else:design.pop(key,None)
         design.pop('sourceCheckout',None);design.pop('layerSeal',None)
+        # Print proofs are server-owned and bind the entire immutable V2 document.
+        design.pop('revisionPrint',None)
+        from revision_artwork import prepare
+        previous=next((r for r in rows if r['request_id']==claim['id']),None)
+        # Lost-response retries reuse the committed proof even if Storage or
+        # historical job availability changed. append still checks all content.
+        if previous:
+            if 'revisionPrint' in previous['document']:design['revisionPrint']=copy.deepcopy(previous['document']['revisionPrint'])
+        else:design['revisionPrint']=prepare(app,order_id,rows[0]['document'],design)
         result=store.append(order_id,claim['version'],design,actor(),claim['id'])
         if not result['ok']:return app.no_cache_json({'status':'error','msg':'另一位店員已保存新版，或此工作副本已提交不同內容。請重新開啟後再編輯；你的畫布仍保留。'},409)
         next_work=signer.dumps({'order':order_id,'version':result['version'],'actor':actor(),'id':uuid.uuid4().hex})
-        return app.no_cache_json({'status':'success','version':result['version'],'work':next_work,'msg':'已另存設計草稿；原生產圖與列印任務未變更'})
+        return app.no_cache_json({'status':'success','version':result['version'],'hash':digest(design),'work':next_work,'msg':'已另存設計草稿；原生產圖與列印任務未變更'})
 
+    from pixel_order_designs import install as install_pixel
+    install_pixel(app,store,admin,actor,signer)
     app.order_designs=store

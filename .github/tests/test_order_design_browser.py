@@ -8,6 +8,7 @@ import threading
 import time
 from pathlib import Path
 from unittest import mock
+from contextlib import ExitStack
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT));os.chdir(ROOT)
 os.environ.pop('SUPABASE_URL',None);os.environ.pop('SUPABASE_SERVICE_ROLE_KEY',None)
@@ -17,6 +18,14 @@ from werkzeug.serving import make_server
 import test_order_designs as fixture
 import test_multilayer_templates as templates
 app=fixture.app
+
+@app.app.after_request
+def source_upload_diagnostic(response):
+    from flask import request
+    if request.path=='/api/design-sources' and response.status_code>=400:
+        file=request.files.get('file')
+        print('SOURCE_UPLOAD_FAILURE',{'contentLength':request.content_length,'readBytes':file.stream.tell() if file else None,'response':response.get_json()},flush=True)
+    return response
 
 
 def preview_mask():
@@ -42,17 +51,31 @@ def wait(page, expression, timeout=30000):
     raise AssertionError((expression,page.locator("body").inner_text()[:1500]))
 
 
-def run():
+def run(legacy=False):
     fx=fixture.OrderDesignTests();fx.setUp()
     saved_templates=app.TEMPLATES_FILE;app.TEMPLATES_FILE=str(Path(fx.fixture.tmp.name)/'order-templates.json')
     fx.addCleanup(setattr,app,'TEMPLATES_FILE',saved_templates)
     server=make_server('127.0.0.1',0,app.app,threaded=True);thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
     base='http://127.0.0.1:'+str(server.server_port)
+    real_film=False
+    def artwork(kind):
+        if real_film:return (ROOT/'.github/tests/fixtures/film'/('preview.png' if kind=='preview' else 'print.png')).read_bytes()
+        return preview_mask() if kind=='preview' else fixture.fx.mask()
+    real_static=app.app.view_functions['static']
+    def fixture_static(filename):
+        # Keep the browser's actual multipart upload path. Playwright WebKit
+        # interception can discard Blob bytes even when only image routes are
+        # mocked: https://github.com/microsoft/playwright/issues/14624
+        if filename in ('dialog-preview.png','dialog-mask.png','multi-layer.png'):
+            raw=fixture.fx.image() if filename=='multi-layer.png' else artwork('preview' if 'preview' in filename else 'print')
+            return app.app.response_class(raw,mimetype='image/png',headers={'Cache-Control':'no-store'})
+        return real_static(filename=filename)
     try:
-        with sync_playwright() as p, mock.patch('editable_stickers.public_image',side_effect=lambda app,url:preview_mask() if 'preview' in url else fixture.fx.mask()):
+        with sync_playwright() as p, ExitStack() as history, mock.patch.dict(app.app.view_functions,{'static':fixture_static}), mock.patch('editable_stickers.public_image',side_effect=lambda app,url:artwork('preview' if 'preview' in url else 'print')):
             browser=getattr(p,os.environ.get('BROWSER_ENGINE','webkit')).launch()
             for product,use_template in (('phone_case',False),('camera_film',False),('phone_case',True),('camera_film',True)):
                 if os.environ.get('TEMPLATE_ONLY') and not use_template:continue
+                real_film=legacy and product=='camera_film'
                 shop=app.cloud_get_json('shop_data',app.DATA_FILE,app.DEFAULT_SHOP_DATA)
                 shop['models'][0]['product_type']=product;shop['styles'][0]['product_type']=product
                 shop['models'][0]['direct_style_id']=fx.style
@@ -68,8 +91,7 @@ def run():
                 security_perf._CACHE.clear();security_perf._HITS.clear()
                 customer=browser.new_context(viewport={'width':390,'height':844},has_touch=True)
                 page=customer.new_page();errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
-                page.route('**/static/dialog-*.png',lambda r:r.fulfill(body=preview_mask() if 'preview' in r.request.url else fixture.fx.mask(),content_type='image/png'))
-                print('STEP storefront',product,flush=True);page.route('**/static/multi-layer.png',lambda r:r.fulfill(body=fixture.fx.image(),content_type='image/png'))
+                print('STEP storefront',product,flush=True)
                 page.goto(base);wait(page,"typeof catalogState!=='undefined' && catalogState==='ready'")
                 print('STEP start editor',flush=True)
                 page.evaluate("async()=>{await startNewDesign();selectModel(shopData.models[0]);selectStyle(shopData.styles[0]);await startEditor(false)}")
@@ -82,10 +104,10 @@ def run():
                     assert page.evaluate("canvas.layer_contract_version==='multilayer-v1'")
                 print('STEP add objects',flush=True)
                 photo='data:image/png;base64,'+base64.b64encode(fixture.fx.image()).decode()
-                page.evaluate("""async url=>{try{
-                  for(const [role,x] of [['photo',45],['sticker',100]])await new Promise((resolve,reject)=>fabric.Image.fromURL(url,o=>{try{o.set({role,left:x,top:160,scaleX:.15,scaleY:.15,opacity:.8});canvas.add(o);resolve()}catch(e){reject(e)}}));
-                  await ensureEditorFont('jf-openhuninn','本福丸');canvas.add(new fabric.Textbox('本福丸',{role:'text',fontFamily:'jf-openhuninn',fontSize:18,left:40,top:250,width:100}));recordHistory();
-                }catch(e){throw Error(e.stack)}}""",photo)
+                page.evaluate("""async ({url,realFilm})=>{try{
+                  for(const [role,x] of [['photo',45],['sticker',100]])await new Promise((resolve,reject)=>fabric.Image.fromURL(url,o=>{try{const scale=realFilm ? 0.1 : 0.15;o.set({role,left:x,top:realFilm?Math.round(canvas.height*.4):160,scaleX:scale,scaleY:scale,opacity:.8});canvas.add(o);resolve()}catch(e){reject(e)}}));
+                  await ensureEditorFont('jf-openhuninn','本福丸');canvas.add(new fabric.Textbox('本福丸',{role:'text',fontFamily:'jf-openhuninn',fontSize:18,left:40,top:realFilm?Math.round(canvas.height*.65):250,width:100}));recordHistory();
+                }catch(e){throw Error(e.stack)}}""",{'url':photo,'realFilm':real_film})
                 page.evaluate("()=>{canvas.setActiveObject(canvas.getObjects().find(o=>o.role==='sticker'));openAiOutlineSheet()}")
                 page.locator('#sheet-outline-v2 [data-style="pink"]').click()
                 wait(page,"canvas.getActiveObject()?.aiOutlineStyle==='pink'")
@@ -106,6 +128,9 @@ def run():
                     for key in ('left','top','fontSize'):assert abs(front[key]-rendered[key])<.000001,(front,rendered)
                 if browser.browser_type.name=='chromium':same_pixels(original_pixels,'data:image/png;base64,'+base64.b64encode(raw).decode())
                 print('SERVER_720_PREVIEW_PARITY_OK',browser.browser_type.name,product,use_template,flush=True)
+                if legacy:
+                    from legacy_history_fixture import history_order
+                    original=history.enter_context(history_order(app,original,raw))
                 customer.close()
                 def admin_context(desktop=False):
                     context=browser.new_context(viewport={'width':1280,'height':900} if desktop else {'width':390,'height':844},has_touch=not desktop)
@@ -144,15 +169,43 @@ def run():
                 assert not errors,errors
                 again.evaluate("navigate('page-editor')")
                 evidence=ROOT/'__pycache__'/'order-design-evidence';evidence.mkdir(exist_ok=True)
-                again.screenshot(path=str(evidence/(browser.browser_type.name+'-'+product+'-'+str(use_template)+'.png')))
+                again.screenshot(path=str(evidence/(('legacy-' if legacy else '')+browser.browser_type.name+'-'+product+'-'+str(use_template)+'.png')))
                 again.evaluate("()=>{canvas.setActiveObject(canvas.getObjects().find(o=>o.role==='sticker'));openAiOutlineSheet()}")
                 again.locator('#sheet-outline-v2 [data-style="none"]').click()
                 wait(again,"canvas.getActiveObject()?.aiOutlineStyle==='none' && canvas.getActiveObject().width===512")
                 second.close()
                 print('ORDER_DESIGN_CROSS_DEVICE_V2_720_IMMUTABLE_OK',browser.browser_type.name,product,'template='+str(use_template),meta,flush=True)
+                if legacy:
+                    assert app.order_designs.rows(order)[0]['document']['legacyRecovery']['verification']=='rgba-exact-720dpi'
+                    print('LEGACY_VERIFIED_RECOVERY_OK',browser.browser_type.name,product,use_template,flush=True)
+                    if not use_template:
+                        fx.draft['production'].update(printW=profile['print_w'],printH=profile['print_h'])
+                        old=fx.create();untouched=app.commerce.store.order(old);balances=app.commerce.store.read()
+                        remake=admin_context();page=remake.new_page();page.goto(base+'/admin/order-design/'+old)
+                        page.get_by_text('建立獨立重製草稿（不恢復舊圖層）',exact=True).wait_for()
+                        assert '無法重新編輯此訂單' in page.locator('body').inner_text()
+                        page.on('dialog',lambda dialog:dialog.accept())
+                        page.get_by_text('建立獨立重製草稿（不恢復舊圖層）',exact=True).click()
+                        wait(page,"document.querySelector('#order-design-save')?.disabled===false")
+                        assert page.evaluate('canvas.getObjects().length')==0
+                        assert '全新重製' in page.locator('#order-design-status').inner_text()
+                        page.evaluate("()=>{canvas.add(new fabric.Rect({left:20,top:20,width:30,height:40,fill:'red'}));recordHistory()}")
+                        page.locator('#order-design-save').click();wait(page,"document.querySelector('#order-design-status').textContent.includes('V3 草稿已保存')")
+                        page.evaluate('openPreview()');wait(page,'ctx.productionMeta?.dpi===720 && !!ctx.printBase64')
+                        remake_pixels=page.evaluate('ctx.printBase64')
+                        remake.close();desktop=admin_context(desktop=True);page=desktop.new_page();page.goto(base+'/admin/order-design/'+old)
+                        wait(page,"document.querySelector('#order-design-save')?.disabled===false")
+                        assert page.evaluate('canvas.getObjects().length')==1
+                        page.evaluate('openPreview()');wait(page,'ctx.productionMeta?.dpi===720 && !!ctx.printBase64')
+                        same_pixels(remake_pixels,page.evaluate('ctx.printBase64'))
+                        assert app.commerce.store.order(old)==untouched
+                        assert app.commerce.store.read()==balances and fx.fixture.fake.calls==[]
+                        desktop.close();print('LEGACY_EXPLICIT_REMAKE_REOPEN_OK',browser.browser_type.name,product,flush=True)
             browser.close()
     finally:
         server.shutdown();server.server_close();fx.doCleanups()
 
 
-if __name__=='__main__':run()
+if __name__=='__main__':
+    if '--legacy-only' not in sys.argv:run()
+    run(legacy=True)

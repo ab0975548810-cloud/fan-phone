@@ -2034,6 +2034,116 @@ class PrintCenterTests(unittest.TestCase):
         self.assertEqual((job["state"], job["vendor_taskid"]), ("QUEUED", "recovered-auto-task"))
         self.assertEqual(len([path for path, _ in self.fake.calls if path == "/api/Device/receiveTask"]), 1)
 
+    def test_renderer_error_preserves_stage_and_retry_policy_at_service_boundary(self):
+        from editable_stickers import ProductionRenderError
+        self.save_profile()
+        before = copy.deepcopy(app.commerce.read())
+        cases = [('PRODUCTION_RENDERER_TIMEOUT', 'worker', True),
+                 ('PRODUCTION_STORAGE_READ_FAILED', 'sources', True),
+                 ('PRODUCTION_FONT_MISMATCH', 'fonts', False),
+                 ('PRODUCTION_GEOMETRY_MISMATCH', 'geometry', False)]
+        for code, stage, retryable in cases:
+            with self.subTest(code=code), mock.patch('editable_stickers.configured', return_value=True), \
+                    mock.patch('editable_stickers.render', side_effect=ProductionRenderError(
+                        code, stage, 'isolated failure', retryable=retryable)):
+                with self.assertRaises(print_center.PrintError) as caught:
+                    app.print_center._create_prepared_attempt(self.order_id)
+                error = caught.exception
+                self.assertEqual((error.code, error.stage, error.retryable, error.status),
+                                 (code, stage, retryable, 503 if retryable else 422))
+        self.assertIsNone(app.print_center.store.latest_job(self.order_id))
+        self.assertEqual(app.commerce.read(), before)
+        self.assertEqual(self.fake.calls, [])
+
+    def test_renderer_transient_failures_retry_at_most_eight_times_without_vendor(self):
+        from editable_stickers import ProductionRenderError
+        self.save_profile()
+        for index, (code, stage) in enumerate((('PRODUCTION_RENDERER_TIMEOUT', 'worker'),
+                                              ('PRODUCTION_STORAGE_READ_FAILED', 'sources'))):
+            order_id = self.create_order(key=f'renderer-retry-limit-{index:04d}')
+            before = copy.deepcopy(app.commerce.read())
+            with mock.patch('editable_stickers.configured', return_value=True), \
+                    mock.patch('editable_stickers.render', side_effect=ProductionRenderError(
+                        code, stage, 'isolated transient error', retryable=True)) as render:
+                for attempt in range(1, 9):
+                    with self.subTest(code=code, attempt=attempt):
+                        app.print_center.recover_auto_handoffs_once(limit=1)
+                        with app.print_center.store.connection(True) as db:
+                            row = db.execute('SELECT state,attempt_count,last_error_code FROM print_handoffs WHERE order_id=?',
+                                             (order_id,)).fetchone()
+                            self.assertEqual(tuple(row), ('FAILED' if attempt == 8 else 'RETRY', attempt, code))
+                            db.execute("UPDATE print_handoffs SET next_attempt_at='2000-01-01T00:00:00+00:00' WHERE order_id=?", (order_id,))
+                app.print_center.recover_auto_handoffs_once()
+                self.assertEqual(render.call_count, 8)
+            self.assertIsNone(app.print_center.store.latest_job(order_id))
+            self.assertEqual(app.commerce.read(), before)
+        self.assertEqual(self.fake.calls, [])
+
+    def test_renderer_permanent_contract_failures_remain_in_review(self):
+        from editable_stickers import ProductionRenderError
+        self.save_profile()
+        for index, (code, stage) in enumerate((('PRODUCTION_FONT_MISMATCH', 'fonts'),
+                                              ('PRODUCTION_GEOMETRY_MISMATCH', 'geometry'))):
+            order_id = self.create_order(key=f'renderer-review-{index:04d}')
+            before = copy.deepcopy(app.commerce.read())
+            with mock.patch('editable_stickers.configured', return_value=True), \
+                    mock.patch('editable_stickers.render', side_effect=ProductionRenderError(
+                        code, stage, 'isolated invalid contract')) as render:
+                app.print_center.recover_auto_handoffs_once()
+                app.print_center.recover_auto_handoffs_once()
+                self.assertEqual(render.call_count, 1)
+            with app.print_center.store.connection() as db:
+                row = db.execute('SELECT state,attempt_count,last_error_code FROM print_handoffs WHERE order_id=?',
+                                 (order_id,)).fetchone()
+            self.assertEqual(tuple(row), ('REVIEW', 1, code))
+            self.assertIsNone(app.print_center.store.latest_job(order_id))
+            self.assertEqual(app.commerce.read(), before)
+        self.assertEqual(self.fake.calls, [])
+
+    def test_renderer_retry_recovers_and_receives_task_exactly_once(self):
+        from editable_stickers import ProductionRenderError
+        self.save_profile()
+        order_id = self.create_order(key='renderer-recovery-exactly-once')
+        before = copy.deepcopy(app.commerce.read())
+        for code, stage in (('PRODUCTION_RENDERER_TIMEOUT', 'worker'),
+                            ('PRODUCTION_STORAGE_READ_FAILED', 'sources')):
+            with mock.patch('editable_stickers.configured', return_value=True), \
+                    mock.patch('editable_stickers.render', side_effect=ProductionRenderError(
+                        code, stage, 'isolated recovery test', retryable=True)):
+                app.print_center.dispatch_auto_once()
+            self.assertIsNone(app.print_center.store.latest_job(order_id))
+            self.assertEqual(self.fake.calls, [])
+            with app.print_center.store.connection(True) as db:
+                db.execute("UPDATE print_handoffs SET next_attempt_at='2000-01-01T00:00:00+00:00' WHERE order_id=?", (order_id,))
+        self.fake.responses['/api/Device/receiveTask'] = {
+            'code': 0, 'data': {'taskid': 'renderer-recovered-task', 'status': 0}}
+        for _ in range(3):
+            app.print_center.dispatch_auto_once()
+        jobs = [row for row in app.print_center.store.list_jobs() if row['order_id'] == order_id]
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual((jobs[0]['state'], jobs[0]['vendor_taskid']), ('QUEUED', 'renderer-recovered-task'))
+        self.assertEqual(len([path for path, _ in self.fake.calls if path == '/api/Device/receiveTask']), 1)
+        self.assertEqual(app.commerce.read(), before)
+
+    def test_handoff_claims_just_in_time_and_reads_new_checkout_receipt(self):
+        self.save_profile()
+        first = self.create_order(key='handoff-just-in-time-first')
+        created = []
+        original = app.print_center.enqueue_auto
+        def enqueue(order_id):
+            if order_id == first:
+                created.append(self.create_order(key='handoff-committed-during-render'))
+            return original(order_id)
+        with mock.patch.object(app.print_center, 'enqueue_auto', side_effect=enqueue), \
+                mock.patch.object(app.print_center.store, 'claim_handoffs', wraps=app.print_center.store.claim_handoffs) as claim:
+            recovered = app.print_center.recover_auto_handoffs_once(limit=20)
+        self.assertEqual(len(recovered), 2)
+        for call in claim.call_args_list:
+            self.assertEqual(call.kwargs, {'limit': 1, 'lease_seconds': 600})
+        for order_id in [first, *created]:
+            self.assertEqual(app.print_center.store.latest_job(order_id)['state'], 'PREPARED')
+        self.assertEqual(self.fake.calls, [])
+
     def test_committed_checkout_survives_auto_eligibility_read_failure(self):
         self.save_profile()
         key = 'post-commit-eligibility-outage-0001'
@@ -2466,4 +2576,9 @@ class PrintCenterTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    import subprocess, sys
+    subprocess.run([sys.executable, str(Path(__file__).parent / 'test_renderer_recovery.py')],
+                   check=True, env={**os.environ, 'RUN_REAL_RENDERER_TEST': '0'})
+    subprocess.run([sys.executable, str(Path(__file__).parent / 'test_production_storage.py')], check=True)
+    subprocess.run([sys.executable, str(Path(__file__).parent / 'test_print_send_guards.py')], check=True)
     unittest.main(verbosity=2)
