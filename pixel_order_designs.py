@@ -1,5 +1,6 @@
 """Native-pixel repairs: immutable base, explicit edits, no catalog geometry."""
 import base64
+import json
 import copy
 import hashlib
 import io
@@ -11,7 +12,7 @@ import threading
 from PIL import Image, ImageChops, ImageCms, PngImagePlugin
 import struct
 from flask import request, send_file
-from pixel_extraction import select_component, select_rectangle, preview as lightweight_preview
+from pixel_extraction import select_component, select_rectangle, select_polygon, preview as lightweight_preview
 from design_sources import read
 from editable_stickers import image_bytes, nodes, validate
 from order_designs import digest, persist_asset
@@ -154,7 +155,8 @@ def install(app, store, admin, actor, signer):
         original=selected['document']
         raw=read(app,original['basePath'])
         if sha(raw)!=original['baseSha']:raise ValueError('原生產圖片雜湊不符')
-        result=(select_rectangle(raw,data['rectangle'],original['factor'])
+        result=(select_polygon(raw,data['polygon'],original['factor']) if 'polygon' in data else
+                select_rectangle(raw,data['rectangle'],original['factor'])
                 if 'rectangle' in data else select_component(raw,data.get('x'),data.get('y'),original['factor']))
         return app.no_cache_json({'status':'success','bounds':result['bounds'],'pixels':result['pixels'],
              'cutout':'data:image/png;base64,'+base64.b64encode(result['cutout']).decode(),
@@ -178,14 +180,29 @@ def install(app, store, admin, actor, signer):
     @app.app.route(root+'/save',methods=['POST'])
     @admin
     def save(order_id):
-        data=request.get_json() or {};claim=signer.loads(data.get('work',''),max_age=8*3600)
+        multipart = request.mimetype == 'multipart/form-data'
+        data = request.form if multipart else (request.get_json() or {})
+        claim=signer.loads(data.get('work',''),max_age=8*3600)
         if not claim.get('pixel') or claim['order']!=order_id or claim['actor']!=actor():raise ValueError('編輯工作副本不符')
         base=row(order_id,claim['version'])['document'];raw=read(app,base['basePath'])
         if sha(raw)!=base['baseSha']:raise ValueError('V1 原圖雜湊不符')
-        overlay=decode(data.get('overlay'));erase=decode(data.get('erase'))
+        if multipart:
+            def upload(name):
+                file = request.files.get(name)
+                if file is None:
+                    raise ValueError('缺少修補圖')
+                content = file.read(52_500_001)
+                if len(content) > 52_500_000:
+                    raise ValueError('修補圖容量過大')
+                return content
+            overlay, erase = upload('overlay'), upload('erase')
+            metadata = upload('objects')
+            objects = json.loads(metadata)
+        else:
+            overlay, erase = decode(data.get('overlay')), decode(data.get('erase'))
+            objects = copy.deepcopy(data.get('objects'))
         output,proof=compose(raw,overlay,erase,allow_draft_expansion=True)
         if not proof['bounds']:raise ValueError('沒有可保存的修補內容')
-        objects=copy.deepcopy(data.get('objects'))
         validate({'render_contract_version':'editable-text-v1','orderDesignVersion':1,'logicalCanvas':dict(zip(('width','height'),[n/base['factor'] for n in base['size']])),'objects':objects})
         total=0
         for o in nodes({'objects':objects}):

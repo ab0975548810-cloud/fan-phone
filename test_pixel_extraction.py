@@ -2,7 +2,7 @@
 import io
 import unittest
 from PIL import Image, ImageDraw
-from pixel_extraction import select_component, select_rectangle, preview
+from pixel_extraction import select_component, select_rectangle, select_polygon, preview
 from pixel_order_designs import compose
 
 
@@ -53,6 +53,16 @@ class ExtractionTests(unittest.TestCase):
             select_component(self.raw,-5,1,1)
         with self.assertRaisesRegex(ValueError,'比例'):
             select_component(self.raw,25,25,99)
+
+    def test_concave_contour_keeps_neighbour_and_source_alpha(self):
+        art=Image.new('RGBA',(40,40),(80,20,10,115))
+        result=select_polygon(png(art),[[1,1],[12,1],[12,5],[6,5],[6,12],[1,12]],2)
+        cut=Image.open(io.BytesIO(result['cutout']))
+        erase=Image.open(io.BytesIO(result['erase']))
+        self.assertEqual(cut.getpixel((3,18)),(80,20,10,115))
+        self.assertEqual(erase.getpixel((3,18))[3],255)
+        self.assertEqual(cut.getpixel((17,17))[3],0)
+        self.assertEqual(erase.getpixel((17,17))[3],0)
 
     def test_preview_downsamples_without_modifying_v1(self):
         im=Image.new('RGBA',(2030,4241),(0,0,0,0))

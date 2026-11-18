@@ -76,6 +76,7 @@ def run():
             }""")
             page.locator('#pixel-save').click()
             wait(page,"document.querySelector('#pixel-status')?.textContent.includes('V2 已保存')")
+            assert 'pixel=1' in page.url,page.url
             page.reload()
             wait(page,"document.querySelector('#pixel-status')?.textContent.includes('正在編輯 V2')")
             assert page.evaluate("canvas.getObjects().length===2")

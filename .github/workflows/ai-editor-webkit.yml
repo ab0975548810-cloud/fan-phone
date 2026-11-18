@@ -33,3 +33,4 @@ jobs:
         run: |
           python .github/tests/test_multilayer_browser.py
           python .github/tests/test_ai_editor_webkit.py
+          python .github/tests/test_pixel_extraction_browser.py

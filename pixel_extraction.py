@@ -6,7 +6,7 @@ authorize an expanded printable region or alter the original artwork.
 from collections import deque
 import io
 import math
-from PIL import Image
+from PIL import Image, ImageDraw, ImageChops
 
 MAX_CONNECTED_PIXELS = 1_500_000
 MAX_CANVAS_PIXELS = 18_000_000
@@ -120,6 +120,11 @@ def select_rectangle(raw, corners, factor=1):
         raise ValueError('框選範圍太小或過大，請縮小範圍')
     crop=image.crop((left,top,right,bottom))
     coverage=crop.getchannel('A').point(lambda n:255 if n else 0)
+    return _selected_crop(crop, coverage, (left,top,right,bottom))
+
+
+def _selected_crop(crop, coverage, bounds):
+    left,top,right,bottom = bounds
     count=coverage.histogram()[255]
     if count<12:raise ValueError('框選區域沒有足夠的圖案像素')
     cutout=Image.composite(crop,Image.new('RGBA',crop.size),coverage)
@@ -128,6 +133,34 @@ def select_rectangle(raw, corners, factor=1):
         out=io.BytesIO();im.save(out,'PNG');return out.getvalue()
     return {'bounds':[left,top,right,bottom],'pixels':count,
             'cutout':encode(cutout),'erase':encode(erase)}
+
+
+def select_polygon(raw, points, factor=1):
+    """Select only painted source pixels inside the operator's contour."""
+    if not isinstance(points, list) or not 3 <= len(points) <= 256:
+        raise ValueError('圈選需要 3 至 256 個點')
+    image = Image.open(io.BytesIO(raw))
+    if image.format != 'PNG' or image.width * image.height > MAX_CANVAS_PIXELS:
+        raise ValueError('原圖尺寸無效')
+    coords = []
+    for point in points:
+        if not isinstance(point, list) or len(point) != 2 or not all(
+                type(v) in (float, int) and math.isfinite(v) for v in point):
+            raise ValueError('圈選座標無效')
+        x, y = point
+        if not (0 <= x <= image.width / factor and 0 <= y <= image.height / factor):
+            raise ValueError('請在原圖範圍內圈選')
+        coords.append((min(image.width-1, int(x*factor)), min(image.height-1, int(y*factor))))
+    xs, ys = zip(*coords)
+    left, top, right, bottom = min(xs), min(ys), max(xs)+1, max(ys)+1
+    if (right-left)*(bottom-top) > MAX_CONNECTED_PIXELS:
+        raise ValueError('圈選範圍過大')
+    bounds = left, top, right, bottom
+    crop = image.crop(bounds).convert('RGBA')
+    contour = Image.new('L', crop.size)
+    ImageDraw.Draw(contour).polygon([(x-left, y-top) for x,y in coords], fill=255)
+    coverage = ImageChops.multiply(contour, crop.getchannel('A').point(lambda a: 255 if a else 0))
+    return _selected_crop(crop, coverage, bounds)
 
 
 def preview(raw, max_edge=1200):
