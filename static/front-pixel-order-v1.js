@@ -76,7 +76,7 @@
       }finally{canvas.backgroundImage=originalBackground;canvas.setViewportTransform(view);settings.forEach(([o,v,c])=>o.set({visible:v,objectCaching:c}));canvas.requestRenderAll();}
       const submitted=generation;
       const result=await api('/save',{work:work.work,overlay,erase,objects:objects.map(rasterObject)});
-      work=result;dirty=generation!==submitted;comparison=null;status('V'+work.version+' 已保存；V1 原圖未變更，尚未送印'+(dirty?'；另有尚未保存的修改':''));
+      work=result;dirty=generation!==submitted;comparison=null;status('V'+work.version+' 已保存；V1 原圖未變更'+(work.design.proof?.alphaExpansion?'；此版移至原透明區，僅可保存／比較，禁止送印':'；尚未送印')+(dirty?'；另有尚未保存的修改':''));
     }catch(e){status(e.message);}finally{busy=false;}
   }
   async function compare(){
