@@ -11,7 +11,7 @@ import threading
 from PIL import Image, ImageChops, ImageCms, PngImagePlugin
 import struct
 from flask import request, send_file
-from pixel_extraction import select_component, preview as lightweight_preview
+from pixel_extraction import select_component, select_rectangle, preview as lightweight_preview
 from design_sources import read
 from editable_stickers import image_bytes, nodes, validate
 from order_designs import digest, persist_asset
@@ -150,7 +150,8 @@ def install(app, store, admin, actor, signer):
         original=selected['document']
         raw=read(app,original['basePath'])
         if sha(raw)!=original['baseSha']:raise ValueError('原生產圖片雜湊不符')
-        result=select_component(raw,data.get('x'),data.get('y'),original['factor'])
+        result=(select_rectangle(raw,data['rectangle'],original['factor'])
+                if 'rectangle' in data else select_component(raw,data.get('x'),data.get('y'),original['factor']))
         return app.no_cache_json({'status':'success','bounds':result['bounds'],'pixels':result['pixels'],
              'cutout':'data:image/png;base64,'+base64.b64encode(result['cutout']).decode(),
              'erase':'data:image/png;base64,'+base64.b64encode(result['erase']).decode()})
