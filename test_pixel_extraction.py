@@ -2,7 +2,7 @@
 import io
 import unittest
 from PIL import Image, ImageDraw
-from pixel_extraction import select_component, preview
+from pixel_extraction import select_component, select_rectangle, preview
 from pixel_order_designs import compose
 
 
@@ -34,6 +34,17 @@ class ExtractionTests(unittest.TestCase):
         egg=select_component(self.raw,155,60,1)
         self.assertEqual(egg['bounds'],[115,30,186,106])
         self.assertNotEqual(cut['bounds'],egg['bounds'])
+
+    def test_manual_crop_is_bounded_to_selected_box(self):
+        result=select_rectangle(self.raw,[10,15,80,100],1)
+        self.assertEqual(result['bounds'],[10,15,80,100])
+        piece=Image.open(io.BytesIO(result['cutout'])).convert('RGBA')
+        erase=Image.open(io.BytesIO(result['erase'])).convert('RGBA')
+        self.assertEqual(piece.getpixel((40,40)),self.im.getpixel((50,55)))
+        self.assertEqual(erase.getpixel((40,40))[3],255)
+        self.assertEqual(piece.getpixel((0,0))[3],0)
+        with self.assertRaisesRegex(ValueError,'過大'):
+            select_rectangle(self.raw,[0,0,3,3],1)
 
     def test_transparent_and_invalid_points_fail_safe(self):
         with self.assertRaisesRegex(ValueError,'透明背景'):
