@@ -11,6 +11,7 @@ import threading
 from PIL import Image, ImageChops, ImageCms, PngImagePlugin
 import struct
 from flask import request, send_file
+from pixel_extraction import select_component, preview as lightweight_preview
 from design_sources import read
 from editable_stickers import image_bytes, nodes, validate
 from order_designs import digest, persist_asset
@@ -113,6 +114,7 @@ def install(app, store, admin, actor, signer):
             if o.get('type')=='image':o['src']=asset_url(order_id,r['version'],sha(o['src'].encode()))
         for key in ('basePath','outputPath'):
             d[key]=asset_url(order_id,r['version'],key)
+        d['previewPath']=asset_url(order_id,r['version'],'preview')
         token=signer.dumps({'pixel':True,'order':order_id,'version':r['version'],'hash':r['content_hash'],'actor':actor(),'id':uuid.uuid4().hex})
         return app.no_cache_json({'status':'success','design':d,'version':r['version'],'hash':r['content_hash'],'work':token})
 
@@ -131,14 +133,39 @@ def install(app, store, admin, actor, signer):
         if versions[-1]['document'].get('mode')!='pixel-v1':raise ValueError('此訂單已有其他編輯版本，請先核對，避免覆蓋店員工作')
         return opened(order_id,versions[-1])
 
+    @app.app.route(root+'/extract',methods=['POST'])
+    @admin
+    def extract(order_id):
+        data=request.get_json() or {}
+        claim=signer.loads(data.get('work',''),max_age=8*3600)
+        if not claim.get('pixel') or claim['order']!=order_id or claim['actor']!=actor():
+            raise ValueError('編輯工作副本不符')
+        current=rows(order_id)
+        selected=row(order_id,claim['version'])
+        if current[-1]['version']!=claim['version'] or selected['content_hash']!=claim['hash']:
+            raise ValueError('設計已有更新版本，請重新開啟；原稿未變更')
+        original=selected['document']
+        raw=read(app,original['basePath'])
+        if sha(raw)!=original['baseSha']:raise ValueError('原生產圖片雜湊不符')
+        result=select_component(raw,data.get('x'),data.get('y'),original['factor'])
+        return app.no_cache_json({'status':'success','bounds':result['bounds'],'pixels':result['pixels'],
+             'cutout':'data:image/png;base64,'+base64.b64encode(result['cutout']).decode(),
+             'erase':'data:image/png;base64,'+base64.b64encode(result['erase']).decode()})
+
     @app.app.route(root+'/assets/<int:version>/<name>')
     @admin
     def asset(order_id,version,name):
         d=row(order_id,version)['document']
         paths={sha(o['src'].encode()):o['src'] for o in nodes({'objects':d['objects']}) if o.get('type')=='image'}
         paths.update({k:d[k] for k in ('basePath','outputPath')})
-        if name not in paths:raise ValueError('素材不存在')
-        response=send_file(io.BytesIO(read(app,paths[name])),mimetype='image/png');response.headers['Cache-Control']='private, no-store';return response
+        if name=='preview':
+            raw=read(app,d['basePath'])
+            if sha(raw)!=d['baseSha']:raise ValueError('原生產圖片雜湊不符')
+            raw=lightweight_preview(raw)
+        else:
+            if name not in paths:raise ValueError('素材不存在')
+            raw=read(app,paths[name])
+        response=send_file(io.BytesIO(raw),mimetype='image/png');response.headers['Cache-Control']='private, no-store';return response
 
     @app.app.route(root+'/save',methods=['POST'])
     @admin
