@@ -20,6 +20,29 @@
   const stylesForProfiles = () => (shopData.styles || []).filter(row => row && row.status !== false && row.id);
   const completeProfile = profile => window.BenfuwanCaseProfiles?.complete?.(profile) === true;
   const profileFor = (model, styleId) => window.BenfuwanCaseProfiles?.profileFor?.(model, styleId);
+  const modelCollator = new Intl.Collator('zh-TW', {numeric: true, sensitivity: 'base'});
+  const editions = ['e', 'mini', 'air', 'plus', 'fe', 'pro', 'pro xl', 'pro max', 'ultra'];
+
+  function modelOrder(name) {
+    const text = normal(String(name || '').normalize('NFKC')).replace(/\s+/g, ' ');
+    const match = text.match(/^(.*?)[\s-]*(\d+)(.*)$/);
+    if (!match) return {family: text, generation: 0, edition: 0};
+    const suffix = match[3].trim();
+    const index = editions.findIndex(edition => suffix === edition || suffix.startsWith(edition + ' '));
+    // Check longer editions first so Pro Max and Pro XL sort separately.
+    const specific = editions.findIndex(edition => edition.includes(' ') && (suffix === edition || suffix.startsWith(edition + ' ')));
+    return {family: match[1], generation: Number(match[2]), edition: (specific >= 0 ? specific : index) + 1};
+  }
+
+  function compareModels(a, b) {
+    const first = modelOrder(a.name), second = modelOrder(b.name);
+    return modelCollator.compare(clean(a.brand), clean(b.brand))
+      || modelCollator.compare(first.family, second.family)
+      || second.generation - first.generation
+      || first.edition - second.edition
+      || modelCollator.compare(clean(a.name), clean(b.name))
+      || String(a.id).localeCompare(String(b.id));
+  }
 
   function ensureChrome() {
     if (!document.getElementById('bf-product-message')) {
@@ -169,7 +192,7 @@
     refreshBrandFilter();
     const body = document.getElementById('models-body');
     if (!body) return;
-    const models = (shopData.models || []).filter(modelMatches);
+    const models = (shopData.models || []).filter(modelMatches).sort(compareModels);
     const caseStyles = stylesForProfiles();
     body.innerHTML = models.length ? models.map((model, index) => {
       const relevant = caseStyles.filter(s => window.BenfuwanProducts.compatible(model, s));

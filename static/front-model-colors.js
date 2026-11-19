@@ -91,10 +91,10 @@
   if(typeof originalRenderStyles==='function'){
     window.renderStyles=function(){
       originalRenderStyles();
-      const styles=(shopData.styles||[]).filter(s=>s.status!==false);
+      const styles=shopData.styles||[];
       const cards=[...document.querySelectorAll('#style-grid .style-card')];
-      cards.forEach((card,i)=>{
-        const s=styles[i];if(!s)return;
+      cards.forEach(card=>{
+        const s=styles.find(style=>String(style.id)===card.dataset.styleId);if(!s)return;
         const colors=colorsFor(s,ctx.modelId);
         let label='不分顏色';
         if(colors.length){label='可選：'+colors.slice(0,4).join('、')+(colors.length>4?` 等 ${colors.length} 色`:'')}
