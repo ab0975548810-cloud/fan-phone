@@ -2106,13 +2106,16 @@ def admin_test(browser, base):
     # Catalog commit can succeed before production-profile sync fails. The
     # browser must adopt that committed candidate and returned version so its
     # next catalog mutation cannot legally CAS stale data over the model edit.
-    partial_before = page.evaluate("() => ({data:structuredClone(shopData),model:structuredClone(shopData.models[0]),version:shopVersion})")
+    configured_model = model_requests[0]['model_id']
+    partial_before = page.evaluate("""id => ({
+      data:structuredClone(shopData),model:structuredClone(shopData.models.find(m=>m.id===id)),version:shopVersion
+    })""", configured_model)
     primed_catalog = page.request.get(base + '/api/shop_data')
     assert primed_catalog.headers.get('x-benfuwan-cache') == 'HIT', primed_catalog.headers
     assert primed_catalog.json()['version'] == partial_before['version']
     partial_model_name = f'Partial Success 型號 {time.time_ns()}'
     partial_brand = f'部分成功後品牌 {time.time_ns()}'
-    page.evaluate("id => openModelEditor(id)", partial_before['model']['id'])
+    page.evaluate("([id,style]) => openModelEditor(id,style)", [configured_model, model_requests[0]['style_id']])
     page.locator('#model-name').fill(partial_model_name)
     original_save_profiles = app_module.print_center.store.save_profiles
     def fail_profile_sync(_profiles):
