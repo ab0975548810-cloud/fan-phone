@@ -1959,7 +1959,10 @@ def admin_test(browser, base):
     page.locator('.nav button[data-view="models"]').click()
     page.locator('#model-tab-btn').click()
     poll(page, "() => document.getElementById('view-models').classList.contains('active') && document.getElementById('model-admin-view').classList.contains('active') && document.querySelector('#models-body button')")
-    page.locator('#models-body button').first.click()
+    fixture_order = app_module.commerce.store.local_orders()[0]
+    model_id = json.dumps(fixture_order['model_id'])
+    style_id = json.dumps(fixture_order['style_id'])
+    page.locator(f'#models-body button[data-model-id={model_id}][data-model-style={style_id}]').click()
     page.locator('#model-modal.show').wait_for()
     model_text = page.locator('#model-modal').inner_text()
     assert 'A5 有效範圍為 200 × 230 mm' in model_text
