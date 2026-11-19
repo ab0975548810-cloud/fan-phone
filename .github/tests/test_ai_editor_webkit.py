@@ -2256,10 +2256,11 @@ def admin_test(browser, base):
     assert style_stale == {'open':True,'input':'CAS 分頁 B 系列','local':False,'version':stale_shop['version']}, style_stale
     page.locator('#style-modal .mh button').click()
 
-    original_model = stale_shop['data']['models'][0]
-    page.evaluate("id => openModelEditor(id)", original_model['id'])
+    page.evaluate("([id,style]) => openModelEditor(id,style)", [configured_model, model_requests[0]['style_id']])
     page.locator('#model-name').fill('CAS 分頁 B 型號')
-    page.evaluate("() => saveModel()")
+    with page.expect_response('**/api/admin/print/model-profiles') as stale_model_response:
+        page.evaluate("() => saveModel()")
+    assert stale_model_response.value.status == 409
     model_stale = page.evaluate("""() => ({
       open:document.getElementById('model-modal').classList.contains('show'),
       input:document.getElementById('model-name').value,
