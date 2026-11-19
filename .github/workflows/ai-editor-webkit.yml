@@ -6,8 +6,8 @@ on:
 
 jobs:
   webkit-ai-editor:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -23,11 +23,46 @@ jobs:
           python test_editable_stickers.py
           python test_multilayer_templates.py
           python test_order_storage_compatibility.py
+          python test_pixel_extraction.py
           python .github/tests/test_multilayer_browser.py
           python .github/tests/test_ai_editor_webkit.py
+
+  chromium-admin-storefront:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install app and Playwright
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt playwright
+          python -m playwright install --with-deps chromium
       - name: Run Chromium admin/storefront regression test
         env:
           BROWSER_ENGINE: chromium
         run: |
           python .github/tests/test_multilayer_browser.py
           python .github/tests/test_ai_editor_webkit.py
+
+  pixel-extraction:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [webkit, chromium]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - run: python -m playwright install --with-deps ${{ matrix.engine }}
+      - run: |
+          python .github/tests/test_pixel_extraction_browser.py
+          python .github/tests/test_pixel_recovery_browser.py
+        env:
+          BROWSER_ENGINE: ${{ matrix.engine }}
