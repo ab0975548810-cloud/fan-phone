@@ -1,11 +1,44 @@
 (() => {
+  if(window.__iphoneQaMetrics)return;
+  window.__iphoneQaMetrics=true;
   const send = window.fetch.bind(window);
+  const marker='iphone-qa-editor-lifecycle-v2';
+  const mark=state=>{try{sessionStorage.setItem(marker,JSON.stringify({loadId,state}));}catch{}};
+  let previous;
+  try{previous=JSON.parse(sessionStorage.getItem(marker));}catch{}
   const loadId = crypto.randomUUID();
   const device = /iPhone/.test(navigator.userAgent) ? 'iPhone' : 'other';
   const log = row => {
     const body = JSON.stringify({loadId,device,width:innerWidth,height:innerHeight,...row});
     void send('/qa/metrics',{method:'POST',headers:{'Content-Type':'application/json'},body,keepalive:true}).catch(()=>{});
   };
+  mark('active');
+  const navigation=performance.getEntriesByType('navigation')[0]?.type||'unknown';
+  log({kind:'lifecycle',name:'navigation',navigation,previousLoad:previous?.loadId,previousState:previous?.state});
+  window.addEventListener('pagehide',event=>{
+    mark(event.persisted?'cached':'left');
+    log({kind:'pagehide',ms:performance.now(),persisted:event.persisted});
+  });
+  window.addEventListener('pageshow',event=>{
+    if(event.persisted){mark('active');log({kind:'lifecycle',name:'bfcache-restore'});}
+  });
+  document.addEventListener('visibilitychange',()=>{
+    log({kind:'lifecycle',name:document.visibilityState});
+  });
+  window.addEventListener('error',event=>{
+    if(!event.error)return;
+    const file=new URL(event.filename||location.pathname,location.href);
+    log({kind:'js-error',name:event.error.name||'Error',file:file.pathname.split('/').pop(),line:event.lineno});
+  });
+  window.addEventListener('unhandledrejection',event=>{
+    log({kind:'js-error',name:event.reason?.name||'UnhandledRejection'});
+  });
+  document.addEventListener('contextlost',()=>{
+    log({kind:'lifecycle',name:'canvas-context-lost'});
+  },true);
+  window.addEventListener('pixel-editor-diagnostic',event=>{
+    log({kind:'editor',...event.detail});
+  });
   const memory = name => {
     const bytes=performance.memory?.usedJSHeapSize;
     log({kind:'memory',name,supported:Number.isFinite(bytes),heapBytes:bytes});
@@ -51,5 +84,5 @@
     log({kind:'gesture',name,ms:performance.now()-gesture.start,frameGapMs:gesture.max});
     gesture=null;
   },{passive:true,capture:true});
-  window.addEventListener('pagehide',()=>log({kind:'pagehide',ms:performance.now()}));
+
 })();

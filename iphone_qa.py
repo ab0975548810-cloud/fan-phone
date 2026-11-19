@@ -116,7 +116,7 @@ def tag_qa(response):
     if request.path == EDITOR and response.status_code == 200:
         response.direct_passthrough=False
         html=response.get_data(as_text=True).replace(
-            'const fixes=[','const fixes=[\n      \'<script src="/static/iphone-qa-metrics.js"><\\/script>\',')
+            'const fixes=[','const fixes=[\n      \'<script src="/static/iphone-qa-metrics.js?v=20261119p0"><\\/script>\',')
         response.set_data(html)
     if session.get('logged_in') and hasattr(g,'qa_start') and request.path in (API+'/pixel/extract',API+'/pixel/save',API+'/pixel/open'):
         ms=round((time.monotonic()-g.qa_start)*1000,1)
@@ -158,9 +158,9 @@ def qa_metrics():
     if not request.content_length or request.content_length > 4096:
         abort(413)
     row=request.get_json(silent=True)
-    if not isinstance(row,dict) or row.get('kind') not in ('ready','fetch','gesture','pagehide','memory'):
+    if not isinstance(row,dict) or row.get('kind') not in ('ready','fetch','gesture','pagehide','memory','lifecycle','js-error','editor'):
         abort(400)
-    safe={k:v for k,v in row.items() if k in ('kind','name','ms','uploadBytes','frameGapMs','heapBytes','supported','status','device','width','height','serverMs','uploadEstimateMs','loadId')
+    safe={k:v for k,v in row.items() if k in ('kind','name','ms','uploadBytes','frameGapMs','heapBytes','supported','status','device','width','height','serverMs','uploadEstimateMs','loadId','previousLoad','previousState','persisted','navigation','file','line','pixels')
           and type(v) in (str,int,float,bool) and (not isinstance(v,str) or len(v)<=120)}
     append(safe)
     return '',204
