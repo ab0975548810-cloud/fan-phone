@@ -17,6 +17,7 @@ from design_sources import read
 from editable_stickers import image_bytes, nodes, validate
 from order_designs import digest, persist_asset
 
+TILE_EDGE=1024
 FIELDS=('sku_id','width_mm','height_mm','left_mm','top_mm','angle','copies','channel','spot_color')
 _PIXEL_SLOT=threading.BoundedSemaphore(1)
 
@@ -49,8 +50,41 @@ def compose(raw, overlay_raw, erase_raw, allow_draft_expansion=False):
     finally:_PIXEL_SLOT.release()
 
 
+def upload_png(files, name):
+    file = files.get(name)
+    if file is None:
+        raise ValueError('缺少修補圖')
+    content = file.read(52_500_001)
+    if len(content) > 52_500_000:
+        raise ValueError('修補圖容量過大')
+    return content
+
+
+def tiled_layer(files, name, size):
+    if isinstance(files, bytes):
+        return png(files, size)
+    width, height = size
+    layer = Image.new('RGBA', size)
+    profile = None
+    for y in range(0, height, TILE_EDGE):
+        for x in range(0, width, TILE_EDGE):
+            tile = png(upload_png(files, f'{name}-{x}-{y}'),
+                       (min(TILE_EDGE, width-x), min(TILE_EDGE, height-y)))
+            tile_profile = tile.info.get('icc_profile')
+            if x == y == 0:
+                profile = tile_profile
+            if tile_profile != profile:
+                raise ValueError('修補圖片色彩設定不一致')
+            layer.paste(tile, (x, y))
+    if profile:
+        layer.info['icc_profile'] = profile
+    return layer
+
+
 def _compose(raw, overlay_raw, erase_raw, allow_draft_expansion=False):
-    base=png(raw,dpi=True);overlay=png(overlay_raw,base.size);erase=png(erase_raw,base.size)
+    base = png(raw, dpi=True)
+    overlay = tiled_layer(overlay_raw, 'overlay', base.size)
+    erase = tiled_layer(erase_raw, 'erase', base.size)
     # Safari can embed an ICC profile in canvas PNGs. Convert only NEW pixels
     # into the original color space; never transform the original RGBA buffer.
     if overlay.info.get('icc_profile')!=base.info.get('icc_profile'):
@@ -160,7 +194,8 @@ def install(app, store, admin, actor, signer):
                 if 'rectangle' in data else select_component(raw,data.get('x'),data.get('y'),original['factor']))
         return app.no_cache_json({'status':'success','bounds':result['bounds'],'pixels':result['pixels'],
              'cutout':'data:image/png;base64,'+base64.b64encode(result['cutout']).decode(),
-             'erase':'data:image/png;base64,'+base64.b64encode(result['erase']).decode()})
+             'erase':'data:image/png;base64,'+base64.b64encode(result['erase']).decode(),
+             'eraseHash':sha(result['erase'])})
 
     @app.app.route(root+'/assets/<int:version>/<name>')
     @admin
@@ -189,16 +224,11 @@ def install(app, store, admin, actor, signer):
         base=current['document'];raw=read(app,base['basePath'])
         if sha(raw)!=base['baseSha']:raise ValueError('V1 原圖雜湊不符')
         if multipart:
-            def upload(name):
-                file = request.files.get(name)
-                if file is None:
-                    raise ValueError('缺少修補圖')
-                content = file.read(52_500_001)
-                if len(content) > 52_500_000:
-                    raise ValueError('修補圖容量過大')
-                return content
-            overlay, erase = upload('overlay'), upload('erase')
-            metadata = upload('objects')
+            if data.get('tiles') == str(TILE_EDGE):
+                overlay = erase = request.files
+            else:
+                overlay, erase = (upload_png(request.files, name) for name in ('overlay', 'erase'))
+            metadata = upload_png(request.files, 'objects')
             objects = json.loads(metadata)
         else:
             overlay, erase = decode(data.get('overlay')), decode(data.get('erase'))
@@ -207,8 +237,9 @@ def install(app, store, admin, actor, signer):
         if not proof['bounds']:raise ValueError('沒有可保存的修補內容')
         validate({'render_contract_version':'editable-text-v1','orderDesignVersion':1,'logicalCanvas':dict(zip(('width','height'),[n/base['factor'] for n in base['size']])),'objects':objects})
         archived = {
-            asset_url(order_id, current['version'], sha(o['src'].encode())): o['src']
-            for o in nodes({'objects':base['objects']}) if o.get('type')=='image'
+            asset_url(order_id, version['version'], sha(o['src'].encode())): o['src']
+            for version in rows(order_id) if version['document'].get('mode') == 'pixel-v1'
+            for o in nodes({'objects':version['document']['objects']}) if o.get('type')=='image'
         }
         total=0
         for o in nodes({'objects':objects}):
@@ -216,7 +247,13 @@ def install(app, store, admin, actor, signer):
                 if isinstance(o.get('src'),str) and o['src'] in archived:
                     o['src']=archived[o['src']]
                     continue
-                source=decode(o.get('src'));total+=len(source)
+                ref=o.get('src')
+                if multipart and isinstance(ref,str) and re.fullmatch(r'layer-[0-9]+',ref):
+                    source=upload_png(request.files,ref)
+                    png(source)
+                else:
+                    source=decode(ref)
+                total+=len(source)
                 if total>70000000:raise ValueError('新增素材容量過大')
                 o['src']=persist_asset(app,order_id,source)
         # Preserve the original print snapshot, but a draft that changes pixels
@@ -239,6 +276,8 @@ def install(app, store, admin, actor, signer):
         return app.no_cache_json({'status':'success','version':r['version'],'hash':r['content_hash'],
             'design':{'basePath':f'/api/admin/order-design/{order_id}/revision/assets/{r["version"]}/basePath',
                       'outputPath':f'/api/admin/order-design/{order_id}/revision/assets/{r["version"]}/outputPath',
+                      'basePreview':f'/api/admin/order-design/{order_id}/revision/assets/{r["version"]}/basePreview',
+                      'outputPreview':f'/api/admin/order-design/{order_id}/revision/assets/{r["version"]}/outputPreview',
                       'profile':bool(d.get('profile'))},
             'enabled':os.environ.get('ORDER_PIXEL_REPRINT_ENABLED')=='true'})
 
@@ -246,12 +285,16 @@ def install(app, store, admin, actor, signer):
     @admin
     def revision_asset(order_id,version,name):
         r=next((r for r in rows(order_id) if r['version']==version),None)
+        preview_key = {'basePreview':'basePath', 'outputPreview':'outputPath'}.get(name)
+        name = preview_key or name
         if not r or name not in ('basePath','outputPath'):raise ValueError('生產圖不存在')
         d=artwork_document(r['document']);path=d.get(name)
         if not path:raise ValueError('生產圖尚未通過驗證')
         raw=read(app,path)
         if sha(raw)!=d['baseSha' if name=='basePath' else 'outputSha']:raise ValueError('生產圖雜湊不符')
         png(raw,d['size'],True)
+        if preview_key:
+            raw = lightweight_preview(raw)
         response=send_file(io.BytesIO(raw),mimetype='image/png');response.headers['Cache-Control']='private, no-store';response.headers['X-Content-Type-Options']='nosniff';return response
 
     def print_version(order_id,data):

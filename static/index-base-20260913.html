@@ -364,7 +364,7 @@ function initCanvas(){
   const availH=Math.max(160,window.innerHeight-58-78-50-32),availW=Math.max(160,Math.min(window.innerWidth,480)-38);const ratio=Math.min(availH/h,availW/w);
   const shell=$('canvas-shell');shell.style.width=(w*ratio)+'px';shell.style.height=(h*ratio)+'px';
   if(canvas){canvas.dispose();canvas=null}
-  canvas=new fabric.Canvas('main-canvas',{width:w,height:h,backgroundColor:backgroundRgba(),preserveObjectStacking:true,selection:true,stopContextMenu:true});
+  canvas=new fabric.Canvas('main-canvas',{width:w,height:h,enableRetinaScaling:!window.BenfuwanPixelEditor,backgroundColor:backgroundRgba(),preserveObjectStacking:true,selection:true,stopContextMenu:true});
   baseClip=new fabric.Rect({left:0,top:0,width:w,height:h,absolutePositioned:true});
   applyCaseBoundaryClip();
   canvas.wrapperEl.style.transformOrigin='top left';canvas.wrapperEl.style.transform=`scale(${ratio})`;canvas.wrapperEl.style.position='absolute';canvas.wrapperEl.style.left='0';canvas.wrapperEl.style.top='0';
