@@ -2,11 +2,13 @@
 import os
 import time
 from pathlib import Path
+from test_launch_acceptance import serve_picker_catalog
 
 
 def model_cat_icon_test(browser, base, poll):
     for width, height in ((390, 844), (768, 1024), (1180, 900)):
         page = browser.new_page(viewport=dict(width=width, height=height), device_scale_factor=3, has_touch=True)
+        serve_picker_catalog(page)
         icon_requests=[]
         page.on('request',lambda request:icon_requests.append(request.url) if '/static/images/benfuwan-cat-peek.png' in request.url else None)
         page.goto(base+'/', wait_until='domcontentloaded')
@@ -62,6 +64,7 @@ def model_cat_icon_test(browser, base, poll):
 
     for response_status in (200, 404):
         page=browser.new_page(viewport=dict(width=390,height=844))
+        serve_picker_catalog(page)
         pending=[]
         released=False
         def fulfill_icon(route):

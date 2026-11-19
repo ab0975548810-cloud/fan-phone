@@ -4,8 +4,23 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 
+def serve_picker_catalog(page):
+    # A fresh local installation has no production settings.
+    profile = dict(preview_mask_img='/fixture-preview.png', print_line_img='/fixture-print.png',
+                   print_w=70, print_h=145)
+    models = [dict(id='case-13', name='iPhone 13', brand='Apple'),
+              dict(id='case-14', name='iPhone 14', brand='Apple'),
+              dict(id='case-s25', name='Galaxy S25', brand='Samsung')]
+    for model in models:
+        model['case_profiles'] = {'case': profile}
+    catalog = dict(brands=['Apple', 'Samsung'], models=models,
+                   styles=[dict(id='case', name='手機殼', price=390)])
+    page.route('**/api/shop_data', lambda route: route.fulfill(json={'status':'success','data':catalog}))
+
+
 def launch_acceptance_test(browser, base, poll):
     page = browser.new_page(viewport={'width': 390, 'height': 844}, device_scale_factor=3, has_touch=True)
+    serve_picker_catalog(page)
     errors = []
     requests = []
     page.on('pageerror', lambda error: errors.append(str(error)))
@@ -61,6 +76,7 @@ def launch_acceptance_test(browser, base, poll):
     assert '載入失敗' in failed.locator('#model-list').inner_text()
     assert '找不到符合' not in failed.locator('#model-list').inner_text()
     failed.unroute('**/api/shop_data')
+    serve_picker_catalog(failed)
     failed.locator('#model-list button').click()
     poll(failed, "() => document.querySelectorAll('.model-item').length>0 && document.querySelector('#page-model.active')")
     failed.close()

@@ -324,7 +324,9 @@ function renderModels(){
     return;
   }
   const q=($('model-search')?.value||'').trim().toLowerCase();
-  const list=(shopData.models||[]).filter(m=>m.status!==false&&(!activeBrand||m.brand===activeBrand)&&(!q||(m.name||'').toLowerCase().includes(q)));
+  const selected=(shopData.models||[]).find(m=>m.id===ctx.modelId);
+  $('model-next').disabled=!window.BenfuwanModelProfile?.availableStyles(selected).length;
+  const list=(shopData.models||[]).filter(m=>m.status!==false&&window.BenfuwanModelProfile?.availableStyles(m).length&&(!activeBrand||m.brand===activeBrand)&&(!q||(m.name||'').toLowerCase().includes(q)));
   const groups={};list.forEach(m=>(groups[seriesName(m.name)]??=[]).push(m));box.innerHTML='';
   Object.entries(groups).forEach(([g,arr])=>{
     const wrap=document.createElement('div');wrap.className='model-group';wrap.innerHTML=`<div class="model-group-title">${escapeHtml(g)}</div>`;
@@ -342,10 +344,10 @@ function renderModels(){
       row.onclick=()=>selectModel(m);wrap.appendChild(row);
     });box.appendChild(wrap);
   });
-  if(!list.length)box.innerHTML='<div role="status" style="padding:50px;text-align:center;color:#aaa">找不到符合的型號</div>';
+  if(!list.length)box.innerHTML='<div role="status" style="padding:50px;text-align:center;color:#aaa">'+(q?'找不到符合的型號':'此品牌目前沒有可選購的型號')+'</div>';
 }
 function selectModel(m){ctx.modelId=m.id;ctx.modelName=m.name;ctx.styleId=null;ctx.styleName=null;ctx.maskUrl=m.preview_mask_img||m.mask_img||'';ctx.printLineUrl=m.print_line_img||m.line_img||'';ctx.printX=num(m.print_x,0);ctx.printY=num(m.print_y,0);ctx.printW=num(m.print_w,80);ctx.printH=num(m.print_h,160);ctx.mockupBase64=null;ctx.printBase64=null;editorHasSession=false;$('chosen-model').textContent=m.name;$('model-next').disabled=false;renderModels();renderStyles()}
-function renderStyles(){const box=$('style-grid');if(!box)return;box.innerHTML='';(shopData.styles||[]).filter(s=>s.status!==false).forEach(s=>{const card=document.createElement('div');card.className='card style-card'+(ctx.styleId===s.id?' selected':'');let visual=s.mask_img?`<img src="${attr(s.mask_img)}" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><div class="style-placeholder" style="display:none"><i class="fa-regular fa-mobile-screen"></i></div>`:`<div class="style-placeholder"><i class="fa-regular fa-mobile-screen"></i></div>`;card.innerHTML=`<div class="preview">${visual}</div><div class="style-name">${escapeHtml(s.name)}</div><div class="price">NT$ ${parseInt(s.price)||390}</div>${ctx.styleId===s.id?'<div class="selected-badge"><i class="fa-solid fa-check"></i></div>':''}`;card.onclick=()=>selectStyle(s);box.appendChild(card)})}
+function renderStyles(){const box=$('style-grid');if(!box)return;box.innerHTML='';const model=(shopData.models||[]).find(m=>m.id===ctx.modelId);const styles=window.BenfuwanModelProfile?.availableStyles(model)||[];if(!styles.some(s=>s.id===ctx.styleId))$('style-next').disabled=true;if(model&&!styles.length)box.textContent='此型號目前沒有可選購的殼款';styles.forEach(s=>{const card=document.createElement('div');card.dataset.styleId=s.id;card.className='card style-card'+(ctx.styleId===s.id?' selected':'');let visual=s.mask_img?`<img src="${attr(s.mask_img)}" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><div class="style-placeholder" style="display:none"><i class="fa-regular fa-mobile-screen"></i></div>`:`<div class="style-placeholder"><i class="fa-regular fa-mobile-screen"></i></div>`;card.innerHTML=`<div class="preview">${visual}</div><div class="style-name">${escapeHtml(s.name)}</div><div class="price">NT$ ${parseInt(s.price)||390}</div>${ctx.styleId===s.id?'<div class="selected-badge"><i class="fa-solid fa-check"></i></div>':''}`;card.onclick=()=>selectStyle(s);box.appendChild(card)})}
 function selectStyle(s){ctx.styleId=s.id;ctx.styleName=s.name;ctx.price=parseInt(s.price)||390;const m=(shopData.models||[]).find(x=>x.id===ctx.modelId)||{};ctx.maskUrl=m.preview_mask_img||m.mask_img||s.mask_img||'';ctx.printLineUrl=m.print_line_img||m.line_img||s.line_img||'';ctx.printX=num(m.print_x??s.print_x,0);ctx.printY=num(m.print_y??s.print_y,0);ctx.printW=num(m.print_w??s.print_w,80);ctx.printH=num(m.print_h??s.print_h,160);ctx.mockupBase64=null;ctx.printBase64=null;editorHasSession=false;$('style-next').disabled=false;renderStyles()}
 
 function openTemplatesFromStyle(){templateEntry='style';selectedTpl=null;$('tpl-next').disabled=true;renderTplCats();renderTemplates();navigate('page-template')}
