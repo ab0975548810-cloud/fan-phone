@@ -160,7 +160,7 @@ def qa_metrics():
     row=request.get_json(silent=True)
     if not isinstance(row,dict) or row.get('kind') not in ('ready','fetch','gesture','pagehide','memory','lifecycle','js-error','editor'):
         abort(400)
-    safe={k:v for k,v in row.items() if k in ('kind','name','ms','uploadBytes','frameGapMs','heapBytes','supported','status','device','width','height','serverMs','uploadEstimateMs','loadId','previousLoad','previousState','persisted','navigation','file','line','pixels')
+    safe={k:v for k,v in row.items() if k in ('kind','name','ms','uploadBytes','frameGapMs','heapBytes','supported','status','device','width','height','serverMs','uploadEstimateMs','loadId','previousLoad','previousState','persisted','navigation','file','line','pixels','cause')
           and type(v) in (str,int,float,bool) and (not isinstance(v,str) or len(v)<=120)}
     append(safe)
     return '',204
