@@ -147,7 +147,9 @@
     if (film && ['page-style','page-template'].includes(id)) id = 'page-model';
     const templatesButton = document.querySelector('[onclick="openTemplatesInEditor()"]');
     if (templatesButton) templatesButton.style.display = film ? 'none' : '';
-    return originalShowPage.call(this, id);
+    const result = originalShowPage.call(this, id);
+    if (id === 'page-model') renderModels();
+    return result;
   };
   const originalOpenTemplates = window.openTemplatesInEditor;
   window.openTemplatesInEditor = function () {
