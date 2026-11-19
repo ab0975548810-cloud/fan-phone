@@ -61,8 +61,8 @@
     const missing = [];
     if (!previewUrl) missing.push('preview_mask_img');
     if (!printUrl) missing.push('print_line_img');
-    if (!(printW > 0)) missing.push('print_w');
-    if (!(printH > 0)) missing.push('print_h');
+    if (!Number.isFinite(printW) || printW <= 0) missing.push('print_w');
+    if (!Number.isFinite(printH) || printH <= 0) missing.push('print_h');
     return Object.freeze({
       ready: missing.length === 0, missing, previewUrl, printUrl, printW, printH,
       printX: Number(raw && raw.print_x) || 0,
@@ -91,45 +91,38 @@
     return (shopData.styles || []).find(caseStyle => String(caseStyle.id) === String(ctx.styleId)) || null;
   }
 
+  function available(model, caseStyle) {
+    return Boolean(model && caseStyle && model.status !== false && caseStyle.status !== false
+      && products.ready(model, caseStyle) && profileFor(model, caseStyle.id).ready);
+  }
+
+  function availableStyles(model, styles = shopData.styles || []) {
+    return styles.filter(caseStyle => available(model, caseStyle));
+  }
+
   function blockUnconfigured(model, caseStyle) {
-    const profile = profileFor(model, caseStyle && caseStyle.id);
-    if (profile.ready && products.ready(model, caseStyle)) return false;
+    if (available(model, caseStyle)) return false;
     const name = model && model.name ? `「${model.name}」` : '這個型號';
     const styleName = caseStyle && caseStyle.name ? `的「${caseStyle.name}」` : '的這個殼款';
     toast(`${name}${styleName}尚未完成生產設定，請選擇其他殼款或聯絡店家。`);
     return true;
   }
 
-  const style = document.createElement('style');
-  style.textContent = '.style-card.bf-style-unconfigured{opacity:.58}.bf-style-config-badge{position:absolute;left:9px;top:9px;font-size:10px;font-weight:800;color:#9a747f;background:#fff;border:1px solid #eadce1;border-radius:999px;padding:3px 7px;z-index:2}';
-  document.head.appendChild(style);
-
-  const originalRenderStyles = window.renderStyles;
-  window.renderStyles = function () {
-    originalRenderStyles.apply(this, arguments);
-    const model = currentModel();
-    const styles = (shopData.styles || []).filter(caseStyle => caseStyle && caseStyle.status !== false);
-    document.querySelectorAll('#style-grid .style-card').forEach((card, index) => {
-      const caseStyle = styles[index];
-      if (!products.compatible(model, caseStyle)) { card.remove(); return; }
-      if (profileFor(model, caseStyle.id).ready) return;
-      card.classList.add('bf-style-unconfigured');
-      card.setAttribute('aria-disabled', 'true');
-      card.onclick = () => blockUnconfigured(model, caseStyle);
-      const badge = document.createElement('small');
-      badge.className = 'bf-style-config-badge';
-      badge.textContent = '尚未配置';
-      card.appendChild(badge);
-    });
-  };
-
   const originalSelectModel = window.selectModel;
   window.selectModel = function (model) {
+    if (!availableStyles(model).length) {
+      toast('此型號尚未完成生產設定，請選擇其他型號。');
+      return false;
+    }
     originalSelectModel.apply(this, arguments);
     const next = document.getElementById('model-next');
     if (next) {
       next.textContent = isFilm(model) ? '開始設計' : '下一步';
-      next.onclick = () => isFilm(currentModel()) ? startFilm() : navigate('page-style');
+      next.onclick = () => {
+        const selected = currentModel();
+        if (!availableStyles(selected).length) return;
+        return isFilm(selected) ? startFilm() : navigate('page-style');
+      };
     }
     return true;
   };
@@ -154,7 +147,9 @@
     if (film && ['page-style','page-template'].includes(id)) id = 'page-model';
     const templatesButton = document.querySelector('[onclick="openTemplatesInEditor()"]');
     if (templatesButton) templatesButton.style.display = film ? 'none' : '';
-    return originalShowPage.call(this, id);
+    const result = originalShowPage.call(this, id);
+    if (id === 'page-model') renderModels();
+    return result;
   };
   const originalOpenTemplates = window.openTemplatesInEditor;
   window.openTemplatesInEditor = function () {
@@ -196,5 +191,9 @@
     };
   }
 
-  window.BenfuwanModelProfile = Object.freeze({ LEGACY_CRYSTAL_STYLE_ID, profileFor, audit, isFilm, editorGeometry, prepareEditorGeometry });
+  window.BenfuwanModelProfile = Object.freeze({ LEGACY_CRYSTAL_STYLE_ID, profileFor, audit, availableStyles, isFilm, editorGeometry, prepareEditorGeometry });
+  if (catalogState === 'ready') {
+    renderModels();
+    renderStyles();
+  }
 })();

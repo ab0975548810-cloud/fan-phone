@@ -391,11 +391,11 @@ def front_test(browser, base):
     blocked_profile = page.evaluate("""({models,crystal}) => {
       shopData.models=models;shopData.styles=[crystal];activeBrand='';resetDesignState(false);renderModels();
       const model=models.find(row=>row.id==='model_apple_11'),selected=selectModel(model),styled=selectStyle(crystal);
-      return {selected,styled,modelId:ctx.modelId,styleId:ctx.styleId,modelNext:document.getElementById('model-next').disabled,styleNext:document.getElementById('style-next').disabled,badges:document.querySelectorAll('.bf-style-unconfigured .bf-style-config-badge').length,toast:document.getElementById('toast').textContent};
+      return {selected,styled,styleId:ctx.styleId,modelNext:document.getElementById('model-next').disabled,styleNext:document.getElementById('style-next').disabled,cards:document.querySelectorAll('#style-grid .style-card').length,toast:document.getElementById('toast').textContent};
     }""", {'models':fixture_models,'crystal':crystal_style})
-    assert blocked_profile['selected'] is True and blocked_profile['styled'] is False, blocked_profile
-    assert blocked_profile['modelId'] == 'model_apple_11' and blocked_profile['styleId'] is None, blocked_profile
-    assert not blocked_profile['modelNext'] and blocked_profile['styleNext'] and blocked_profile['badges'] == 1 and '尚未完成生產設定' in blocked_profile['toast'], blocked_profile
+    assert blocked_profile['selected'] is False and blocked_profile['styled'] is False, blocked_profile
+    assert blocked_profile['styleId'] is None and blocked_profile['cards'] == 0, blocked_profile
+    assert blocked_profile['modelNext'] and blocked_profile['styleNext'] and '尚未完成生產設定' in blocked_profile['toast'], blocked_profile
     print('FRONT_MODEL_STYLE_PROFILE_AUDIT_FAIL_CLOSED_OK', profile_audit, blocked_profile)
     legacy_crystal_only = page.evaluate("""({models,crystal}) => {
       const model=models.find(row=>row.id==='model_apple_14_pro_max');
@@ -1857,7 +1857,7 @@ def admin_test(browser, base):
     model_profile_src = page.locator('script[src*="admin-model-profiles.js"]').get_attribute('src')
     assert model_profile_src and 'v=20261025filmflow1' in model_profile_src, model_profile_src
     product_workspace_src = page.locator('script[src*="admin-product-workspace-v1.js"]').get_attribute('src')
-    assert product_workspace_src and 'v=20261025filmflow1' in product_workspace_src, product_workspace_src
+    assert product_workspace_src and 'v=20261119catalog' in product_workspace_src, product_workspace_src
     asset_category_src = page.locator('script[src*="admin-asset-categories.js"]').get_attribute('src')
     assert asset_category_src and 'v=20261012lazyfix1' in asset_category_src, asset_category_src
     template_loader_src = page.locator('script[src*="admin-template-loader.js"]').get_attribute('src')
@@ -1959,7 +1959,10 @@ def admin_test(browser, base):
     page.locator('.nav button[data-view="models"]').click()
     page.locator('#model-tab-btn').click()
     poll(page, "() => document.getElementById('view-models').classList.contains('active') && document.getElementById('model-admin-view').classList.contains('active') && document.querySelector('#models-body button')")
-    page.locator('#models-body button').first.click()
+    fixture_order = app_module.commerce.store.local_orders()[0]
+    model_id = json.dumps(fixture_order['model_id'])
+    style_id = json.dumps(fixture_order['style_id'])
+    page.locator(f'#models-body button[data-model-id={model_id}][data-model-style={style_id}]').click()
     page.locator('#model-modal.show').wait_for()
     model_text = page.locator('#model-modal').inner_text()
     assert 'A5 有效範圍為 200 × 230 mm' in model_text
@@ -2106,13 +2109,16 @@ def admin_test(browser, base):
     # Catalog commit can succeed before production-profile sync fails. The
     # browser must adopt that committed candidate and returned version so its
     # next catalog mutation cannot legally CAS stale data over the model edit.
-    partial_before = page.evaluate("() => ({data:structuredClone(shopData),model:structuredClone(shopData.models[0]),version:shopVersion})")
+    configured_model = model_requests[0]['model_id']
+    partial_before = page.evaluate("""id => ({
+      data:structuredClone(shopData),model:structuredClone(shopData.models.find(m=>m.id===id)),version:shopVersion
+    })""", configured_model)
     primed_catalog = page.request.get(base + '/api/shop_data')
     assert primed_catalog.headers.get('x-benfuwan-cache') == 'HIT', primed_catalog.headers
     assert primed_catalog.json()['version'] == partial_before['version']
     partial_model_name = f'Partial Success 型號 {time.time_ns()}'
     partial_brand = f'部分成功後品牌 {time.time_ns()}'
-    page.evaluate("id => openModelEditor(id)", partial_before['model']['id'])
+    page.evaluate("([id,style]) => openModelEditor(id,style)", [configured_model, model_requests[0]['style_id']])
     page.locator('#model-name').fill(partial_model_name)
     original_save_profiles = app_module.print_center.store.save_profiles
     def fail_profile_sync(_profiles):
@@ -2253,10 +2259,11 @@ def admin_test(browser, base):
     assert style_stale == {'open':True,'input':'CAS 分頁 B 系列','local':False,'version':stale_shop['version']}, style_stale
     page.locator('#style-modal .mh button').click()
 
-    original_model = stale_shop['data']['models'][0]
-    page.evaluate("id => openModelEditor(id)", original_model['id'])
+    page.evaluate("([id,style]) => openModelEditor(id,style)", [configured_model, model_requests[0]['style_id']])
     page.locator('#model-name').fill('CAS 分頁 B 型號')
-    page.evaluate("() => saveModel()")
+    with page.expect_response('**/api/admin/print/model-profiles') as stale_model_response:
+        page.evaluate("() => saveModel()")
+    assert stale_model_response.value.status == 409
     model_stale = page.evaluate("""() => ({
       open:document.getElementById('model-modal').classList.contains('show'),
       input:document.getElementById('model-name').value,
@@ -3249,13 +3256,86 @@ def cart_request_recovery_test(browser, base):
         context.close()
 
 
+def catalog_visibility_and_sort_test(browser, base):
+    profile = dict(preview_mask_img='/fixture-preview.png', print_line_img='/fixture-print.png',
+                   print_w=70, print_h=145, print_x=0, print_y=0, print_angle=0)
+    models = [
+        dict(id='m9', name='iPhone 9 Pro', brand='Apple'),
+        dict(id='m17max', name='iPhone 17 Pro Max', brand='Apple',
+             case_profiles={'clear':profile, 'mirror':profile, 'disabled':profile,
+                            'bad':dict(profile, print_w='Infinity')}),
+        dict(id='m17', name='iPhone 17', brand='Apple', case_profiles={'clear':profile}),
+        dict(id='m10', name='iPhone 10', brand='Apple',
+             **profile),  # Root settings are only for the historical crystal style.
+        dict(id='m17pro', name='iPhone 17 Pro', brand='Apple', status=False,
+             case_profiles={'clear':profile}),
+        dict(id='film-bad', name='iPhone 16 底膜', brand='Apple', product_type='camera_film',
+             direct_style_id='film', case_profiles={'film':dict(profile, print_angle=None)}),
+        dict(id='film-ok', name='iPhone 18 底膜', brand='Apple', product_type='camera_film',
+             direct_style_id='film', case_profiles={'film':profile}),
+    ]
+    styles = [
+        dict(id='bad', name='設定不完整', colors=['紅']),
+        dict(id='clear', name='透明殼', colors=['白'], price=390),
+        dict(id='disabled', name='下架殼款', status=False),
+        dict(id='mirror', name='鏡面殼', colors=['銀'], price=490),
+        dict(id='style_1789287807818', name='舊版晶彩', price=590),
+        dict(id='film', name='鏡頭底膜', product_type='camera_film', price=490, colors=[]),
+    ]
+    catalog = dict(brands=['Apple'], models=models, styles=styles)
+    page = browser.new_page(viewport={'width':390,'height':844})
+    try:
+        page.route('**/api/shop_data',lambda route: route.fulfill(json={'status':'success','data':catalog}))
+        page.goto(base)
+        poll(page,"() => window.BenfuwanFrontHomeV1?.isCatalogReady()")
+        page.locator('.bf-home-primary').click()
+        names = page.locator('.model-item').all_inner_texts()
+        assert set(names)=={'iPhone 17 Pro Max','iPhone 17','iPhone 10','iPhone 18 底膜'}, names
+        page.locator('.model-item').filter(has_text='iPhone 17 Pro Max').click()
+        page.locator('#model-next').click()
+        cards=page.locator('#style-grid .style-card')
+        assert cards.evaluate_all("rows=>rows.map(r=>r.dataset.styleId)")==['clear','mirror']
+        assert '可選：銀' in cards.last.inner_text()
+        cards.last.click()
+        assert page.evaluate("() => [ctx.styleId,ctx.colorName,ctx.price]")==['mirror','銀',490]
+        page.evaluate("showPage('page-model')")
+        page.locator('.model-item').filter(has_text='iPhone 10').click()
+        page.locator('#model-next').click()
+        assert cards.evaluate_all("rows=>rows.map(r=>r.dataset.styleId)")==['style_1789287807818']
+    finally:
+        page.close()
+
+    page = browser.new_page()
+    try:
+        page.goto(base+'/login')
+        if not page.locator('#password-form').is_visible():
+            page.locator('#password-toggle').click()
+        page.locator('input[name="password"]').fill('fan123')
+        page.locator('button[type="submit"]').first.click()
+        page.wait_for_url('**/admin')
+        poll(page,"() => !!window.BenfuwanAdminProductWorkspace")
+        order = page.evaluate("""data=>{
+          shopData=structuredClone(data);
+          renderModels();
+          return {
+            displayed:[...document.querySelectorAll('#models-body tr[data-model-id]')].map(r=>r.dataset.modelId),
+            persistedOrder:shopData.models.map(m=>m.id)
+          };
+        }""", catalog)
+        assert order['displayed']==['film-ok','m17','m17pro','m17max','film-bad','m10','m9'], order
+        assert order['persistedOrder']==[m['id'] for m in models], order
+    finally:
+        page.close()
+    print('CATALOG_GENERATION_ORDER_AND_AVAILABLE_COMBINATIONS_OK',browser.browser_type.name)
+
+
 def main():
     server = ServerThread();server.start();time.sleep(.8)
     try:
         with sync_playwright() as p:
             browser = getattr(p, os.environ.get('BROWSER_ENGINE', 'webkit')).launch()
             try:
-                base=f'http://127.0.0.1:{BROWSER_TEST_PORT}';passkey_login_test(browser,base);front_test(browser,base);cart_request_recovery_test(browser,base);home_draft_catalog_race_test(browser,base);design_draft_test(browser,base);checkout_test(browser,base);admin_test(browser,base);order_print_workspace_test(browser,base,poll)
+                base=f'http://127.0.0.1:{BROWSER_TEST_PORT}';passkey_login_test(browser,base);catalog_visibility_and_sort_test(browser,base);front_test(browser,base);cart_request_recovery_test(browser,base);home_draft_catalog_race_test(browser,base);design_draft_test(browser,base);checkout_test(browser,base);admin_test(browser,base);order_print_workspace_test(browser,base,poll)
                 import runpy
                 runpy.run_path(str(ROOT / '.github/tests/test_sticker_loading.py'))['sticker_loading_test'](browser,base,poll)
                 runpy.run_path(str(ROOT / '.github/tests/test_mobile_editor_tools.py'))['mobile_editor_tools_test'](browser,base,poll)

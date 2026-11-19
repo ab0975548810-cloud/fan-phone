@@ -91,8 +91,8 @@ def film_density_test(browser, base, poll, dpr):
     page.locator('#style-next').click()
     assert page.locator('#page-template').is_visible()
     # Known legacy film cannot accidentally continue using the old crystal SKU.
-    page.evaluate("async () => {await startNewDesign();shopData.models[0].direct_style_id='';selectModel(shopData.models[0])}")
-    page.locator('#model-next').click()
+    assert not page.evaluate("async () => {await startNewDesign();shopData.models[0].direct_style_id='';return selectModel(shopData.models[0])}")
+    assert page.locator('#model-next').is_disabled()
     assert page.locator('#page-model').is_visible() and not page.locator('#page-style').is_visible()
     page.evaluate("() => {shopData.models[0].direct_style_id='film';selectModel(shopData.models[0])}")
     page.locator('#model-next').click()
