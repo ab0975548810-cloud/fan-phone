@@ -49,19 +49,30 @@
   }
   async function save(){
     if(!work||saving||!ready)return;
-    saving=true;let uploaded=null;
-    const button=document.getElementById('order-design-save');button.disabled=true;
+    saving=true;
+    let uploaded=null, message, notice;
+    const button=document.getElementById('order-design-save');
+    const review=document.getElementById('order-design-review');
+    button.disabled=review.disabled=true;
     try{
+      clearTimeout(historyTimer);
+      recordHistory();
       const submitted=generation;
       const design=await serialize();uploaded=await BenfuwanDesignSources.prepare(design);
       const result=await api('/save',{work:work.work,design:uploaded});
-      document.getElementById('order-design-status').textContent=`V${result.version} 草稿已保存；原生產圖未變更`;
-      toast(result.msg);
+      message=`V${result.version} 草稿已保存；原生產圖未變更`;
+      notice=result.msg;
       // The append response binds the next edit to exactly this saved version.
-      // No second network request can strand the editor or adopt another staff member's version.
       work={...work,version:result.version,hash:result.hash,work:result.work};dirty=generation!==submitted;
-    }catch(error){toast(error.message);document.getElementById('order-design-status').textContent=error.message;}
-    finally{if(uploaded)await BenfuwanDesignSources.release(uploaded);saving=false;button.disabled=false;}
+    }catch(error){message=notice=error.message;}
+    finally{
+      try{if(uploaded)await BenfuwanDesignSources.release(uploaded);}
+      finally{
+        saving=false;button.disabled=review.disabled=false;
+        document.getElementById('order-design-status').textContent=message;
+        if(notice)toast(notice);
+      }
+    }
   }
   async function compare(){
     if(!work||saving||!ready)return;
