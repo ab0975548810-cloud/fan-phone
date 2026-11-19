@@ -52,7 +52,7 @@ def workspace_html():
         filename = src.split('?', 1)[0].rsplit('/', 1)[-1]
         if filename in EDITOR_SCRIPTS:
             if filename in ('front-pixel-order-v1.js', 'front-order-design-v1.js'):
-                src += '&workspace=1'
+                src += '&workspace=2'
             src = escape(src, quote=True)
             if filename.endswith('.css'):
                 modules.append(f'<link rel="stylesheet" href="{src}">')

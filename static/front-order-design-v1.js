@@ -70,6 +70,20 @@
     try{await BenfuwanRevisionReview.open({orderId,work:reviewed,valid:()=>!dirty&&work.hash===reviewed.hash&&JSON.stringify(canvas.toJSON(CUSTOM_PROPS))===stamp});}
     catch(error){toast(error.message);document.getElementById('order-design-status').textContent=error.message;}
   }
+  async function preloadSceneFonts(objects){
+    const tasks=[];
+    function visit(item){
+      if(['text','textbox','i-text'].includes(item.type)){
+        tasks.push(item.role==='editable-sticker-text'
+          ?core().font(item.fontFamily,item.text)
+          :core().ordinaryFont(item.fontFamily,item.text));
+      }
+      (item.objects||[]).forEach(visit);
+      if(item.clipPath)visit(item.clipPath);
+    }
+    objects.forEach(visit);
+    await Promise.all(tasks);
+  }
   async function boot(){
     const panel=document.createElement('div');panel.id='order-design-banner';
     panel.innerHTML='<strong>訂單設計修改</strong> <span id="order-design-status" role="status">正在驗證原始設計…</span><button id="order-design-save" disabled>儲存修改</button><button id="order-design-review" disabled>V1／V2 比較與確認</button>';
@@ -89,6 +103,7 @@
       restoringHistory=true;
       canvas.setDimensions(d.logicalCanvas);
       const originalObjects=d.objects.concat(d.emptyTemplateSlots||[],d.editorGuides||[]);
+      await preloadSceneFonts(originalObjects);
       await new Promise(resolve=>canvas.loadFromJSON({...d,objects:originalObjects,templateState:d.editorState},resolve));
       const intact=(expected,loaded)=>expected.length===loaded.length&&expected.every((item,i)=>{
         const object=loaded[i];
