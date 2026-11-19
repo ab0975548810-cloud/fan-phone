@@ -1,5 +1,6 @@
 """Native-pixel repairs: immutable base, explicit edits, no catalog geometry."""
 import base64
+import json
 import copy
 import hashlib
 import io
@@ -11,6 +12,7 @@ import threading
 from PIL import Image, ImageChops, ImageCms, PngImagePlugin
 import struct
 from flask import request, send_file
+from pixel_extraction import select_component, select_rectangle, select_polygon, preview as lightweight_preview
 from design_sources import read
 from editable_stickers import image_bytes, nodes, validate
 from order_designs import digest, persist_asset
@@ -41,13 +43,13 @@ def decode(value):
     return base64.b64decode(value.split(',',1)[1],validate=True)
 
 
-def compose(raw, overlay_raw, erase_raw):
+def compose(raw, overlay_raw, erase_raw, allow_draft_expansion=False):
     if not _PIXEL_SLOT.acquire(timeout=5):raise ValueError('像素驗證忙碌，請稍後重試；原圖未變更')
-    try:return _compose(raw,overlay_raw,erase_raw)
+    try:return _compose(raw,overlay_raw,erase_raw,allow_draft_expansion)
     finally:_PIXEL_SLOT.release()
 
 
-def _compose(raw, overlay_raw, erase_raw):
+def _compose(raw, overlay_raw, erase_raw, allow_draft_expansion=False):
     base=png(raw,dpi=True);overlay=png(overlay_raw,base.size);erase=png(erase_raw,base.size)
     # Safari can embed an ICC profile in canvas PNGs. Convert only NEW pixels
     # into the original color space; never transform the original RGBA buffer.
@@ -55,12 +57,19 @@ def _compose(raw, overlay_raw, erase_raw):
         profile=lambda im:ImageCms.ImageCmsProfile(io.BytesIO(im.info['icc_profile'])) if im.info.get('icc_profile') else ImageCms.createProfile('sRGB')
         overlay=ImageCms.profileToProfile(overlay,profile(overlay),profile(base),outputMode='RGBA')
     alpha=base.getchannel('A');allowed=alpha.point(lambda x:255 if x else 0)
-    # No historical mask is inferred: fully transparent original pixels stay exact.
-    overlay.putalpha(ImageChops.multiply(overlay.getchannel('A'),allowed))
+    # V2 design drafts may show moved pixels outside the original alpha, but
+    # they must lose ALL send eligibility until a verified print mask exists.
+    # This never changes V1 and never trusts today's catalog geometry.
+    escaped=ImageChops.multiply(overlay.getchannel('A'),allowed.point(lambda x:0 if x else 255)).getbbox() is not None
+    if not allow_draft_expansion:
+        overlay.putalpha(ImageChops.multiply(overlay.getchannel('A'),allowed))
     erased=ImageChops.multiply(erase.getchannel('A').point(lambda x:255 if x else 0),allowed)
     touched=ImageChops.lighter(overlay.getchannel('A').point(lambda x:255 if x else 0),erased)
-    merged=Image.alpha_composite(base,overlay)
-    merged.putalpha(ImageChops.subtract(alpha,erased))
+    # Erase original pixels *before* applying the moved overlay. Otherwise a
+    # relocated object crossing its old bounds was erased again on export.
+    reduced=base.copy()
+    reduced.putalpha(ImageChops.subtract(alpha,erased))
+    merged=Image.alpha_composite(reduced,overlay)
     output=Image.composite(merged,base,touched)
     outside=touched.point(lambda x:0 if x else 255)
     for band in range(4):
@@ -69,7 +78,7 @@ def _compose(raw, overlay_raw, erase_raw):
     if 'gamma' in base.info:meta.add(b'gAMA',struct.pack('>I',round(base.info['gamma']*100000)))
     if 'srgb' in base.info:meta.add(b'sRGB',bytes([base.info['srgb']]))
     out=io.BytesIO();output.save(out,'PNG',dpi=(720,720),icc_profile=base.info.get('icc_profile'),pnginfo=meta)
-    return out.getvalue(),{'bounds':touched.getbbox(),'changedPixels':sum(touched.histogram()[1:]),'unchangedRGBA':True,'alphaExpansion':False}
+    return out.getvalue(),{'bounds':touched.getbbox(),'changedPixels':sum(touched.histogram()[1:]),'unchangedRGBA':True,'alphaExpansion':bool(escaped and allow_draft_expansion)}
 
 
 def historical_profile(app, order, raw, size):
@@ -113,6 +122,7 @@ def install(app, store, admin, actor, signer):
             if o.get('type')=='image':o['src']=asset_url(order_id,r['version'],sha(o['src'].encode()))
         for key in ('basePath','outputPath'):
             d[key]=asset_url(order_id,r['version'],key)
+        d['previewPath']=asset_url(order_id,r['version'],'preview')
         token=signer.dumps({'pixel':True,'order':order_id,'version':r['version'],'hash':r['content_hash'],'actor':actor(),'id':uuid.uuid4().hex})
         return app.no_cache_json({'status':'success','design':d,'version':r['version'],'hash':r['content_hash'],'work':token})
 
@@ -131,34 +141,89 @@ def install(app, store, admin, actor, signer):
         if versions[-1]['document'].get('mode')!='pixel-v1':raise ValueError('此訂單已有其他編輯版本，請先核對，避免覆蓋店員工作')
         return opened(order_id,versions[-1])
 
+    @app.app.route(root+'/extract',methods=['POST'])
+    @admin
+    def extract(order_id):
+        data=request.get_json() or {}
+        claim=signer.loads(data.get('work',''),max_age=8*3600)
+        if not claim.get('pixel') or claim['order']!=order_id or claim['actor']!=actor():
+            raise ValueError('編輯工作副本不符')
+        current=rows(order_id)
+        selected=row(order_id,claim['version'])
+        if current[-1]['version']!=claim['version'] or selected['content_hash']!=claim['hash']:
+            raise ValueError('設計已有更新版本，請重新開啟；原稿未變更')
+        original=selected['document']
+        raw=read(app,original['basePath'])
+        if sha(raw)!=original['baseSha']:raise ValueError('原生產圖片雜湊不符')
+        result=(select_polygon(raw,data['polygon'],original['factor']) if 'polygon' in data else
+                select_rectangle(raw,data['rectangle'],original['factor'])
+                if 'rectangle' in data else select_component(raw,data.get('x'),data.get('y'),original['factor']))
+        return app.no_cache_json({'status':'success','bounds':result['bounds'],'pixels':result['pixels'],
+             'cutout':'data:image/png;base64,'+base64.b64encode(result['cutout']).decode(),
+             'erase':'data:image/png;base64,'+base64.b64encode(result['erase']).decode()})
+
     @app.app.route(root+'/assets/<int:version>/<name>')
     @admin
     def asset(order_id,version,name):
         d=row(order_id,version)['document']
         paths={sha(o['src'].encode()):o['src'] for o in nodes({'objects':d['objects']}) if o.get('type')=='image'}
         paths.update({k:d[k] for k in ('basePath','outputPath')})
-        if name not in paths:raise ValueError('素材不存在')
-        response=send_file(io.BytesIO(read(app,paths[name])),mimetype='image/png');response.headers['Cache-Control']='private, no-store';return response
+        if name=='preview':
+            raw=read(app,d['basePath'])
+            if sha(raw)!=d['baseSha']:raise ValueError('原生產圖片雜湊不符')
+            raw=lightweight_preview(raw)
+        else:
+            if name not in paths:raise ValueError('素材不存在')
+            raw=read(app,paths[name])
+        response=send_file(io.BytesIO(raw),mimetype='image/png');response.headers['Cache-Control']='private, no-store';return response
 
     @app.app.route(root+'/save',methods=['POST'])
     @admin
     def save(order_id):
-        data=request.get_json() or {};claim=signer.loads(data.get('work',''),max_age=8*3600)
+        multipart = request.mimetype == 'multipart/form-data'
+        data = request.form if multipart else (request.get_json() or {})
+        claim=signer.loads(data.get('work',''),max_age=8*3600)
         if not claim.get('pixel') or claim['order']!=order_id or claim['actor']!=actor():raise ValueError('編輯工作副本不符')
-        base=row(order_id,claim['version'])['document'];raw=read(app,base['basePath'])
+        current=row(order_id,claim['version'])
+        if current['content_hash']!=claim['hash']:raise ValueError('編輯工作副本不符')
+        base=current['document'];raw=read(app,base['basePath'])
         if sha(raw)!=base['baseSha']:raise ValueError('V1 原圖雜湊不符')
-        overlay=decode(data.get('overlay'));erase=decode(data.get('erase'))
-        output,proof=compose(raw,overlay,erase)
+        if multipart:
+            def upload(name):
+                file = request.files.get(name)
+                if file is None:
+                    raise ValueError('缺少修補圖')
+                content = file.read(52_500_001)
+                if len(content) > 52_500_000:
+                    raise ValueError('修補圖容量過大')
+                return content
+            overlay, erase = upload('overlay'), upload('erase')
+            metadata = upload('objects')
+            objects = json.loads(metadata)
+        else:
+            overlay, erase = decode(data.get('overlay')), decode(data.get('erase'))
+            objects = copy.deepcopy(data.get('objects'))
+        output,proof=compose(raw,overlay,erase,allow_draft_expansion=True)
         if not proof['bounds']:raise ValueError('沒有可保存的修補內容')
-        objects=copy.deepcopy(data.get('objects'))
         validate({'render_contract_version':'editable-text-v1','orderDesignVersion':1,'logicalCanvas':dict(zip(('width','height'),[n/base['factor'] for n in base['size']])),'objects':objects})
+        archived = {
+            asset_url(order_id, current['version'], sha(o['src'].encode())): o['src']
+            for o in nodes({'objects':base['objects']}) if o.get('type')=='image'
+        }
         total=0
         for o in nodes({'objects':objects}):
             if o.get('type')=='image':
+                if isinstance(o.get('src'),str) and o['src'] in archived:
+                    o['src']=archived[o['src']]
+                    continue
                 source=decode(o.get('src'));total+=len(source)
                 if total>70000000:raise ValueError('新增素材容量過大')
                 o['src']=persist_asset(app,order_id,source)
-        d={**base,'objects':objects,'outputPath':persist_asset(app,order_id,output),'outputSha':sha(output),'proof':proof}
+        # Preserve the original print snapshot, but a draft that changes pixels
+        # beyond V1's proven alpha cannot be authorized for real vendor send.
+        original_profile=rows(order_id)[0]['document'].get('profile')
+        d={**base,'objects':objects,'outputPath':persist_asset(app,order_id,output),'outputSha':sha(output),
+           'profile':None if proof['alphaExpansion'] else original_profile,'proof':proof}
         result=store.append(order_id,claim['version'],d,actor(),claim['id'])
         if not result['ok']:return app.no_cache_json({'status':'error','msg':'其他店員已保存，請重新開啟；目前畫布仍保留'},409)
         return opened(order_id,row(order_id,result['version']))
@@ -197,13 +262,19 @@ def install(app, store, admin, actor, signer):
         if r['version']<2 or r['content_hash']!=data.get('hash'):raise ValueError('請重新比較並確認此版本')
         if versions[-1]['version']!=r['version']:raise ValueError('已有更新設計版本，請重新比較並確認')
         d=artwork_document(r['document'])
+        if d.get('mode')=='pixel-v1' and (d.get('proof') or {}).get('alphaExpansion'):
+            raise ValueError('修改版超出 V1 透明邊界，禁止送印')
         if not d.get('profile'):raise ValueError('缺少與 V1 雜湊相符的歷史列印定位，禁止送印')
         raw=read(app,d['outputPath'])
         if sha(raw)!=d['outputSha']:raise ValueError('V2 生產圖雜湊不符')
-        png(raw,d['size'],True)
+        output_image=png(raw,d['size'],True)
         original=read(app,d['basePath'])
         if sha(original)!=d['baseSha']:raise ValueError('V1 生產圖雜湊不符')
-        png(original,d['size'],True)
+        original_image=png(original,d['size'],True)
+        if d.get('mode')=='pixel-v1':
+            transparent=original_image.getchannel('A').point(lambda a: 0 if a else 255)
+            if ImageChops.multiply(output_image.getchannel('A'),transparent).getbbox():
+                raise ValueError('修改版超出 V1 透明邊界，禁止送印')
         app.print_center._assert_order_printable(app.print_center._order(order_id))
         return r
 

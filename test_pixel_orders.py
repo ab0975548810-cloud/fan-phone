@@ -47,6 +47,44 @@ class PixelTests(unittest.TestCase):
         r=self.client.post(self.url+'/save',headers=HEAD,json={'work':work['work'],'overlay':data(encode(overlay)),'erase':data(encode(erase)),'objects':[{'type':'rect','left':20,'top':30,'width':10,'height':10,'fill':'red'}]})
         self.assertEqual(r.status_code,200,r.json);return r.json
 
+    def test_alpha_expansion_saved_as_unprintable_draft(self):
+        first=self.open()
+        overlay=Image.new('RGBA',(72,144))
+        ImageDraw.Draw(overlay).rectangle((0,0,8,8),fill='red')
+        erase=Image.new('RGBA',(72,144))
+        result=self.client.post(self.url+'/save',headers=HEAD,json={
+            'work':first['work'],'overlay':data(encode(overlay)),
+            'erase':data(encode(erase)),
+            'objects':[{'type':'rect','left':0,'top':0,'width':9,'height':9,'fill':'red'}]})
+        self.assertEqual(result.status_code,200,result.json)
+        self.assertTrue(result.json['design']['proof']['alphaExpansion'])
+        self.assertIsNone(result.json['design']['profile'])
+        output=self.client.get(result.json['design']['outputPath'])
+        self.assertEqual(Image.open(io.BytesIO(output.data)).getpixel((3,3)),(255,0,0,255))
+        blocked=self.client.post(self.url+'/confirm',headers=HEAD,json={
+            'version':result.json['version'],'hash':result.json['hash'],
+            'confirm':'compared-v1-v2','reason':'transparent move','costCents':100})
+        self.assertEqual(blocked.status_code,422,blocked.json)
+        self.assertEqual(app.commerce.read(),self.finance)
+        self.assertEqual(len(app.print_center.store.jobs_for_order(self.order)),1)
+
+    def test_private_extract_and_lightweight_preview(self):
+        first=self.open()
+        result=self.client.post(self.url+'/extract',headers=HEAD,json={
+            'work':first['work'],'x':22,'y':31})
+        self.assertEqual(result.status_code,200,result.json)
+        self.assertEqual(result.json['status'],'success')
+        self.assertGreater(result.json['pixels'],100)
+        self.assertTrue(result.json['cutout'].startswith('data:image/png;base64,'))
+        preview=self.client.get(first['design']['previewPath'])
+        self.assertEqual(preview.status_code,200)
+        self.assertEqual(Image.open(io.BytesIO(preview.data)).size,(72,144))
+        blocked=self.client.post(self.url+'/extract',json={
+            'work':first['work'],'x':22,'y':31})
+        self.assertEqual(blocked.status_code,403)
+        self.assertEqual(app.commerce.store.order(self.order),self.original)
+        self.assertEqual(app.commerce.read(),self.finance)
+
     def test_pixels_no_expansion_and_wrong_size(self):
         overlay=Image.new('RGBA',(72,144),(200,0,0,255));erase=Image.new('RGBA',(72,144))
         out,proof=compose(self.raw,encode(overlay),encode(erase));result=Image.open(io.BytesIO(out))
