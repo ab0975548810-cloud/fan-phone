@@ -71,6 +71,14 @@ class ExtractionTests(unittest.TestCase):
         self.assertLessEqual(max(resized.size),1200)
         self.assertEqual(len(raw),len(png(im)))
 
+    def test_invalid_contour_never_produces_an_erase_mask(self):
+        for points in ([[10,20],[20,30],[30,40]],
+                       [[10,20],[30,20],[10,20],[30,40]]):
+            with self.subTest(points=points), self.assertRaises(ValueError):
+                select_polygon(self.raw,points)
+        with self.assertRaisesRegex(ValueError,'比例'):
+            select_polygon(self.raw,[[10,20],[20,30],[30,20]],0)
+
     def test_transparent_move_is_visible_only_as_unprintable_draft(self):
         overlay=Image.new('RGBA',self.im.size)
         ImageDraw.Draw(overlay).rectangle((87,120,100,130),fill=(90,10,200,255))

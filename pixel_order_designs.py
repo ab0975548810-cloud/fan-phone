@@ -184,7 +184,9 @@ def install(app, store, admin, actor, signer):
         data = request.form if multipart else (request.get_json() or {})
         claim=signer.loads(data.get('work',''),max_age=8*3600)
         if not claim.get('pixel') or claim['order']!=order_id or claim['actor']!=actor():raise ValueError('編輯工作副本不符')
-        base=row(order_id,claim['version'])['document'];raw=read(app,base['basePath'])
+        current=row(order_id,claim['version'])
+        if current['content_hash']!=claim['hash']:raise ValueError('編輯工作副本不符')
+        base=current['document'];raw=read(app,base['basePath'])
         if sha(raw)!=base['baseSha']:raise ValueError('V1 原圖雜湊不符')
         if multipart:
             def upload(name):
@@ -204,9 +206,16 @@ def install(app, store, admin, actor, signer):
         output,proof=compose(raw,overlay,erase,allow_draft_expansion=True)
         if not proof['bounds']:raise ValueError('沒有可保存的修補內容')
         validate({'render_contract_version':'editable-text-v1','orderDesignVersion':1,'logicalCanvas':dict(zip(('width','height'),[n/base['factor'] for n in base['size']])),'objects':objects})
+        archived = {
+            asset_url(order_id, current['version'], sha(o['src'].encode())): o['src']
+            for o in nodes({'objects':base['objects']}) if o.get('type')=='image'
+        }
         total=0
         for o in nodes({'objects':objects}):
             if o.get('type')=='image':
+                if isinstance(o.get('src'),str) and o['src'] in archived:
+                    o['src']=archived[o['src']]
+                    continue
                 source=decode(o.get('src'));total+=len(source)
                 if total>70000000:raise ValueError('新增素材容量過大')
                 o['src']=persist_asset(app,order_id,source)
@@ -253,13 +262,19 @@ def install(app, store, admin, actor, signer):
         if r['version']<2 or r['content_hash']!=data.get('hash'):raise ValueError('請重新比較並確認此版本')
         if versions[-1]['version']!=r['version']:raise ValueError('已有更新設計版本，請重新比較並確認')
         d=artwork_document(r['document'])
+        if d.get('mode')=='pixel-v1' and (d.get('proof') or {}).get('alphaExpansion'):
+            raise ValueError('修改版超出 V1 透明邊界，禁止送印')
         if not d.get('profile'):raise ValueError('缺少與 V1 雜湊相符的歷史列印定位，禁止送印')
         raw=read(app,d['outputPath'])
         if sha(raw)!=d['outputSha']:raise ValueError('V2 生產圖雜湊不符')
-        png(raw,d['size'],True)
+        output_image=png(raw,d['size'],True)
         original=read(app,d['basePath'])
         if sha(original)!=d['baseSha']:raise ValueError('V1 生產圖雜湊不符')
-        png(original,d['size'],True)
+        original_image=png(original,d['size'],True)
+        if d.get('mode')=='pixel-v1':
+            transparent=original_image.getchannel('A').point(lambda a: 0 if a else 255)
+            if ImageChops.multiply(output_image.getchannel('A'),transparent).getbbox():
+                raise ValueError('修改版超出 V1 透明邊界，禁止送印')
         app.print_center._assert_order_printable(app.print_center._order(order_id))
         return r
 

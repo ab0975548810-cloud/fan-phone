@@ -137,6 +137,8 @@ def _selected_crop(crop, coverage, bounds):
 
 def select_polygon(raw, points, factor=1):
     """Select only painted source pixels inside the operator's contour."""
+    if type(factor) is not int or not 1 <= factor <= 32:
+        raise ValueError('編輯縮放比例無效')
     if not isinstance(points, list) or not 3 <= len(points) <= 256:
         raise ValueError('圈選需要 3 至 256 個點')
     image = Image.open(io.BytesIO(raw))
@@ -151,6 +153,13 @@ def select_polygon(raw, points, factor=1):
         if not (0 <= x <= image.width / factor and 0 <= y <= image.height / factor):
             raise ValueError('請在原圖範圍內圈選')
         coords.append((min(image.width-1, int(x*factor)), min(image.height-1, int(y*factor))))
+    if coords[0] == coords[-1]:
+        coords.pop()
+    if len(set(coords)) != len(coords) or len(coords) < 3:
+        raise ValueError('圈選輪廓需要至少三個不同的點')
+    area = sum(x1*y2-y1*x2 for (x1,y1),(x2,y2) in zip(coords, coords[1:]+coords[:1]))
+    if not area:
+        raise ValueError('圈選輪廓沒有面積，請重新沿邊緣點選')
     xs, ys = zip(*coords)
     left, top, right, bottom = min(xs), min(ys), max(xs)+1, max(ys)+1
     if (right-left)*(bottom-top) > MAX_CONNECTED_PIXELS:
@@ -171,5 +180,5 @@ def preview(raw, max_edge=1200):
     im = im.convert('RGBA')
     im.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
     out = io.BytesIO()
-    im.save(out, format='PNG', optimize=True)
+    im.save(out, format='PNG', compress_level=3)
     return out.getvalue()
