@@ -2,11 +2,62 @@
 (function(){
   'use strict';
   if(!window.__bfOrderDesignMode||new URLSearchParams(location.search).get('pixel')!=='1')return;
+  if(window.BenfuwanPixelEditor)return;
   window.BenfuwanPixelEditor=true;
   window.idbGet=async()=>null;window.idbSet=async()=>{};window.idbDel=async()=>{};
   const editorURL = new URL(location.href);
   const order=decodeURIComponent(location.pathname.split('/').pop()),root='/api/admin/order-design/'+encodeURIComponent(order)+'/pixel';
-  let work,busy=false,dirty=false,comparison,generation=0;
+  let work,busy=false,dirty=false,generation=0,checkpointQueued=false,durableGeneration=-1;
+  let checkpointWrite=Promise.resolve(), recoveryReady=false, recoveryUnavailable=false;
+  const localImages=new Map();
+  const props=()=>CUSTOM_PROPS.concat(['pixelErase','pixelExtractionMask','pixelExtractionBounds','pixelExtractionMaskKey']);
+  const emit=(name,details={})=>window.dispatchEvent(new CustomEvent('pixel-editor-diagnostic',{detail:{name,...details}}));
+  const reportRecovery=()=>{
+    const el=document.getElementById('pixel-recovery');
+    if(el)el.textContent=recoveryUnavailable?'本機草稿暫存失敗，請先儲存修改再離開。':dirty?(durableGeneration===generation?'已暫存至此裝置。重新載入後可繼續編輯。':'正在暫存本機草稿…'):'';
+  };
+  function checkpoint(){
+    if(!recoveryReady||!dirty||checkpointQueued)return;
+    checkpointQueued=true;reportRecovery();
+    queueMicrotask(()=>{
+      checkpointQueued=false;
+      if(!dirty||restoringHistory||!canvas)return;
+      const objects=canvas.getObjects().map(o=>o.toObject(props()));
+      const serialized=JSON.stringify(objects);
+      const assets=[...localImages].filter(([url])=>serialized.includes(url));
+      const captured=generation,record={hash:work.hash,objects,assets};
+      checkpointWrite=checkpointWrite.catch(()=>{}).then(async()=>{
+        await BenfuwanPixelRecovery.write(order,record);
+        durableGeneration=captured;recoveryUnavailable=false;reportRecovery();
+      }).catch(()=>{recoveryUnavailable=true;reportRecovery();emit('checkpoint-error');});
+    });
+  }
+  function reviveSources(value, urls){
+    if(typeof value==='string')return urls.get(value)||value;
+    if(Array.isArray(value))return value.map(item=>reviveSources(item,urls));
+    if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([key,item])=>[key,reviveSources(item,urls)]));
+    return value;
+  }
+  async function restoreDraft(design){
+    const draft=await BenfuwanPixelRecovery.read(order);
+    if(!draft||draft.hash!==design.hash)return false;
+    const urls=new Map();
+    for(const [src,blob] of draft.assets){
+      const url=URL.createObjectURL(blob);urls.set(src,url);localImages.set(url,blob);
+    }
+    const objects=await enliven(reviveSources(draft.objects,urls));
+    canvas.getObjects().slice().forEach(obj=>canvas.remove(obj));
+    objects.forEach(obj=>canvas.add(obj));
+    dirty=true;return true;
+  }
+  const enliven=objects=>new Promise((ok,no)=>fabric.util.enlivenObjects(objects,ready=>
+    ready.length===objects.length?ok(ready):no(Error('部分素材無法復原，請重新開啟'))));
+  function pruneImages(){
+    for(const [url] of localImages){
+      if(historyStack.some(scene=>scene.includes(url)))continue;
+      URL.revokeObjectURL(url);localImages.delete(url);
+    }
+  }
   const api=async(path,data)=>{const binary=data instanceof FormData;const r=await fetch(root+path,{method:'POST',headers:binary?{'X-Order-Design':'1'}:{'Content-Type':'application/json','X-Order-Design':'1'},body:binary?data:JSON.stringify(data||{})});if(r.status===413)throw Error('修改內容超過上傳容量，請減少新增圖片後再儲存');const j=await r.json();if(!r.ok||j.status!=='success')throw Error(j.msg||'操作失敗，原圖未變更');return j;};
   const status=message=>{document.getElementById('pixel-status').textContent=message;};
   window.submitOrder=()=>toast('修補模式不建立銷售訂單');window.confirmDesignToCart=()=>save();
@@ -14,9 +65,9 @@
   window.startNewDesign=()=>false;
   // Native bitmap repair has no catalog mask. The server enforces V1 alpha.
   window.applyCaseBoundaryClip=()=>{if(typeof canvas!=='undefined'&&canvas)canvas.clipPath=null;};
-  window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
+  window.addEventListener('beforeunload',e=>{if(dirty&&durableGeneration!==generation){e.preventDefault();e.returnValue='';}});
   const button=(text,id,fn)=>{const b=document.createElement('button');b.textContent=text;b.id=id;b.onclick=fn;return b;};
-  let selecting=false,manualSelecting=false,firstCorner=null,originalPreview=null;
+  let selecting=false,manualSelecting=false,firstCorner=null,originalPreview=null,previewBitmap=null,previewBackground=null,originalBackground=null;
   const fabricImage=url=>new Promise((resolve,reject)=>fabric.Image.fromURL(url,im=>im?resolve(im):reject(Error('提取素材無法載入')),{crossOrigin:'anonymous'}));
   let contour=null;
   function updateSelectionMode(){
@@ -29,14 +80,20 @@
     const masks=canvas.getObjects().filter(obj=>obj.pixelExtractionMask&&obj.type==='image');
     const w=canvas.getWidth(),h=canvas.getHeight();
     if(!masks.length){
-      canvas.setBackgroundImage(new fabric.Image(originalPreview,{
-        scaleX:w/originalPreview.naturalWidth,scaleY:h/originalPreview.naturalHeight,
-        selectable:false,evented:false
-      }),()=>canvas.requestRenderAll());
+      canvas.setBackgroundImage(originalBackground,()=>canvas.requestRenderAll());
       return;
     }
-    const small=document.createElement('canvas');small.width=Math.ceil(w);small.height=Math.ceil(h);
-    const context=small.getContext('2d');context.scale(small.width/w,small.height/h);
+    if(!previewBitmap){
+      previewBitmap=document.createElement('canvas');
+      previewBitmap.width=Math.ceil(w);previewBitmap.height=Math.ceil(h);
+      previewBackground=new fabric.Image(previewBitmap,{
+        scaleX:w/previewBitmap.width,scaleY:h/previewBitmap.height,
+        selectable:false,evented:false,objectCaching:false
+      });
+    }
+    const context=previewBitmap.getContext('2d');
+    context.setTransform(previewBitmap.width/w,0,0,previewBitmap.height/h,0,0);
+    context.clearRect(0,0,w,h);
     context.drawImage(originalPreview,0,0,w,h);
     context.globalCompositeOperation='destination-out';
     for(const obj of masks){
@@ -44,79 +101,144 @@
       if(source)context.drawImage(source,obj.left,obj.top,obj.width*obj.scaleX,obj.height*obj.scaleY);
     }
     context.globalCompositeOperation='source-over';
-    canvas.setBackgroundImage(new fabric.Image(small,{scaleX:w/small.width,scaleY:h/small.height,selectable:false,evented:false}),()=>canvas.requestRenderAll());
+    canvas.setBackgroundImage(previewBackground,()=>canvas.requestRenderAll());
+  }
+  async function extractionImage(source){
+    const prefix='data:image/png;base64,', parts=[];
+    if(!source.startsWith(prefix))throw Error('提取素材格式錯誤');
+    for(let i=prefix.length;i<source.length;i+=32768){
+      const segment=atob(source.slice(i,i+32768));
+      parts.push(Uint8Array.from(segment,ch=>ch.charCodeAt(0)));
+    }
+    const blob=new Blob(parts,{type:'image/png'});
+    const url=URL.createObjectURL(blob);
+    try{return {image:await fabricImage(url),url,blob};}
+    catch(error){URL.revokeObjectURL(url);throw error;}
   }
   async function extractAt(point,rectangle=null,polygon=null){
     if(busy||!work)return;
     busy=true;status('正在從原圖提取素材…');
+    const loaded=[];
     try{
       const payload=polygon?{work:work.work,polygon}:rectangle?{work:work.work,rectangle}:{work:work.work,x:point.x,y:point.y};
       const result=await api('/extract',payload);
       const bounds=result.bounds,factor=work.design.factor;
       if(canvas.getObjects().some(o=>o.pixelExtractionBounds&&JSON.stringify(o.pixelExtractionBounds)===JSON.stringify(bounds)))
         throw Error('這個圖案已經提取過，請直接移動既有圖層');
-      const [picture,mask]=await Promise.all([fabricImage(result.cutout),fabricImage(result.erase)]);
+      loaded.push(await extractionImage(result.cutout));
+      const picture=loaded[0].image;
+      const key=result.eraseHash+':'+bounds.join(',');
+      const existing=canvas.getObjects().find(o=>o.pixelExtractionMaskKey===key);
+      if(!existing)loaded.push(await extractionImage(result.erase));
+      for(const asset of loaded)localImages.set(asset.url,asset.blob);
+      const mask=existing||loaded[1].image;
       const placement={left:bounds[0]/factor,top:bounds[1]/factor,scaleX:1/factor,scaleY:1/factor};
-      mask.set({...placement,pixelErase:true,pixelExtractionMask:true,visible:false,selectable:false,evented:false,objectCaching:false});
+      mask.set({...placement,pixelErase:true,pixelExtractionMask:true,pixelExtractionMaskKey:key,visible:false,selectable:false,evented:false,objectCaching:false});
       picture.set({...placement,pixelExtractionBounds:bounds,objectCaching:false});
-      canvas.add(mask);canvas.add(picture);canvas.setActiveObject(picture);
+      if(!existing)canvas.add(mask);
+      canvas.add(picture);canvas.setActiveObject(picture);
       rebuildBackground();canvas.requestRenderAll();mark();recordHistory();
       status('已提取 '+result.pixels+' 個像素：現在可以移動、縮放、旋轉或刪除圖層。原始 V1 不變。');
     }catch(error){status(error.message);}
-    finally{busy=false;}
+    finally{
+      for(const asset of loaded)if(!localImages.has(asset.url))URL.revokeObjectURL(asset.url);
+      busy=false;pruneImages();
+    }
   }
-  function mark(){dirty=true;comparison=null;generation++;}
-  function rasterObject(o){
-    const value=o.toObject(CUSTOM_PROPS.concat(['pixelErase']));
+  function mark(){dirty=true;generation++;checkpoint();}
+  async function rasterObject(o,form,uploads){
+    const value=o.toObject(props());
     if(o.type==='image' && !/^data:image\/png;base64,/.test(value.src)){
       const src=new URL(value.src,location.href);
       const archived=root+'/assets/';
-      const reference=src.pathname.slice(archived.length).match(/^\d+\/([a-f0-9]{64})$/);
+      const reference=src.pathname.slice(archived.length).match(/^\d+\/[a-f0-9]{64}$/);
       if(src.origin===location.origin&&src.pathname.startsWith(archived)&&reference){
-        value.src=archived+work.version+'/'+reference[1];
+        value.src=src.pathname;
       }else{
-        const el=o.getElement(),bitmap=document.createElement('canvas');
-        bitmap.width=el.naturalWidth||el.width;bitmap.height=el.naturalHeight||el.height;
-        try{bitmap.getContext('2d').drawImage(el,0,0);value.src=bitmap.toDataURL('image/png');}
-        finally{bitmap.width=bitmap.height=0;}
+        let name=uploads.get(value.src);
+        if(!name){
+          name='layer-'+uploads.size;
+          let blob=localImages.get(value.src);
+          if(!blob){
+            const el=o.getElement(),bitmap=document.createElement('canvas');
+            bitmap.width=el.naturalWidth||el.width;bitmap.height=el.naturalHeight||el.height;
+            try{bitmap.getContext('2d').drawImage(el,0,0);blob=await pngBlob(bitmap);}
+            finally{bitmap.width=bitmap.height=0;}
+          }
+          form.append(name,blob,name+'.png');
+          uploads.set(value.src,name);
+        }
+        value.src=name;
       }
     }
-    if(o._objects)value.objects=o._objects.map(rasterObject);
-    if(o.clipPath)value.clipPath=rasterObject(o.clipPath);
+    if(o._objects){
+      value.objects=[];
+      for(const child of o._objects)value.objects.push(await rasterObject(child,form,uploads));
+    }
+    if(o.clipPath)value.clipPath=await rasterObject(o.clipPath,form,uploads);
     return value;
+  }
+  const pngBlob=bitmap=>new Promise((ok,no)=>bitmap.toBlob(
+    blob=>blob?.size?ok(blob):no(Error('圖片編碼失敗，請重試')),'image/png'));
+  const tileEdge=1024;
+  function renderTile(design,objects,name,x,y,width,height){
+    const background=canvas.backgroundImage,view=canvas.viewportTransform.slice();
+    const skip=canvas.skipOffscreen;
+    const settings=objects.map(o=>[o,o.visible,o.objectCaching]);
+    try{
+      canvas.backgroundImage=null;
+      canvas.skipOffscreen=false;
+      canvas.setViewportTransform([1,0,0,1,0,0]);
+      settings.forEach(([o,v])=>o.set({visible:name==='erase'?!!o.pixelErase&&(v||!!o.pixelExtractionMask):v&&!o.pixelErase,objectCaching:false}));
+      return canvas.toCanvasElement(design.factor,{
+        left:x/design.factor,top:y/design.factor,
+        width:(width+.001)/design.factor,height:(height+.001)/design.factor
+      });
+    }finally{
+      canvas.backgroundImage=background;canvas.skipOffscreen=skip;canvas.setViewportTransform(view);
+      settings.forEach(([o,v,c])=>o.set({visible:v,objectCaching:c}));canvas.requestRenderAll();
+    }
   }
   async function save(){
     if(busy)return;busy=true;
     try{
       await ensureCanvasFonts();canvas.discardActiveObject();
+      clearTimeout(historyTimer);recordHistory();
       const submitted=generation, objects=canvas.getObjects().slice(), design=work.design;
       const form=new FormData();
       form.append('work',work.work);
-      form.append('objects',new Blob([JSON.stringify(objects.map(rasterObject))],{type:'application/json'}),'objects.json');
+      await Promise.resolve();await checkpointWrite;
+      const uploads=new Map(), serial=[];
+      for(const object of objects)serial.push(await rasterObject(object,form,uploads));
+      form.append('objects',new Blob([JSON.stringify(serial)],{type:'application/json'}),'objects.json');
+      form.append('tiles','1024');
+      const [fullWidth,fullHeight]=design.size;
+      const exportStart=performance.now();
       for(const name of ['overlay','erase']){
-        if(generation!==submitted||restoringHistory)throw Error('畫布已變更，請重新儲存');
         status(name==='overlay'?'正在儲存圖層…':'正在儲存擦除範圍…');
-        const background=canvas.backgroundImage, view=canvas.viewportTransform.slice();
-        const settings=objects.map(o=>[o,o.visible,o.objectCaching]);
-        let bitmap;
-        try{
-          canvas.backgroundImage=null;
-          canvas.setViewportTransform([1,0,0,1,0,0]);
-          settings.forEach(([o,v])=>o.set({visible:name==='erase'?!!o.pixelErase&&(v||!!o.pixelExtractionMask):v&&!o.pixelErase,objectCaching:false}));
-          bitmap=canvas.toCanvasElement(design.factor,{width:(design.size[0]+.001)/design.factor,height:(design.size[1]+.001)/design.factor});
-        }finally{
-          canvas.backgroundImage=background;canvas.setViewportTransform(view);
-          settings.forEach(([o,v,c])=>o.set({visible:v,objectCaching:c}));canvas.requestRenderAll();
+        for(let y=0;y<fullHeight;y+=tileEdge){
+          for(let x=0;x<fullWidth;x+=tileEdge){
+            if(generation!==submitted||restoringHistory)throw Error('畫布已變更，請重新儲存');
+            const width=Math.min(tileEdge,fullWidth-x),height=Math.min(tileEdge,fullHeight-y);
+            const bitmap=renderTile(design,objects,name,x,y,width,height);
+            try{
+              if(bitmap.width!==width||bitmap.height!==height)throw Error('高解析度畫布尺寸不符，請重新開啟再試');
+              form.append(name+'-'+x+'-'+y,await pngBlob(bitmap),name+'.png');
+            }finally{bitmap.width=bitmap.height=0;}
+          }
         }
-        try{
-          if(bitmap.width!==design.size[0]||bitmap.height!==design.size[1])throw Error('高解析度畫布尺寸不符，請重新開啟再試');
-          const blob=await new Promise((ok,no)=>bitmap.toBlob(b=>b?.size?ok(b):no(Error('圖片編碼失敗，請重試')),'image/png'));
-          form.append(name,blob,name+'.png');
-        }finally{bitmap.width=bitmap.height=0;}
       }
+      emit('export',{ms:performance.now()-exportStart,pixels:tileEdge*tileEdge});
       if(generation!==submitted||restoringHistory)throw Error('畫布已變更，請重新儲存');
       const result=await api('/save',form);
-      work=result;dirty=generation!==submitted;comparison=null;status('V'+work.version+' 已保存；V1 原圖未變更'+(work.design.proof?.alphaExpansion?'；此版移至原透明區，僅可保存／比較，禁止送印':'；尚未送印')+(dirty?'；另有尚未保存的修改':''));
+      work=result;dirty=generation!==submitted;
+      if(dirty){checkpoint();}
+      else{
+        try{await BenfuwanPixelRecovery.remove(order);}
+        catch(e){emit('checkpoint-error');}
+        reportRecovery();
+      }
+      status('V'+work.version+' 已保存；V1 原圖未變更'+(work.design.proof?.alphaExpansion?'；此版移至原透明區，僅可保存／比較，禁止送印':'；尚未送印')+(dirty?'；另有尚未保存的修改':''));
     }catch(e){status(e.message);}finally{busy=false;}
   }
   async function compare(){
@@ -129,7 +251,7 @@
   }
   async function boot(){
     const style=document.createElement('style');style.textContent='#pixel-tools{padding:8px;background:#fff3db;font-size:12px;flex:0 0 auto;max-height:34vh;overflow:auto}#pixel-tools button,#pixel-compare button{min-height:44px;margin:4px;max-width:100%}#pixel-compare{max-width:95vw;max-height:90vh;overflow:auto}#pixel-compare input{font-size:16px;min-height:44px;max-width:100%}.pixel-pair{display:flex;gap:8px}.pixel-pair a{width:50%;min-width:0;text-align:center}.pixel-pair img{display:block;width:100%;height:45vh;object-fit:contain;background:repeating-conic-gradient(#ddd 0% 25%,#fff 0% 50%) 0/12px 12px}';document.head.append(style);
-    const tools=document.createElement('div');tools.id='pixel-tools';tools.innerHTML='<strong>原生產圖像素修補</strong><p>點選獨立圖案，或沿相連素材的邊緣圈選，再拖曳調整位置。</p><p id="pixel-status" role="status">正在讀取原生產圖…</p>';
+    const tools=document.createElement('div');tools.id='pixel-tools';tools.innerHTML='<strong>原生產圖像素修補</strong><p>點選獨立圖案，或沿相連素材的邊緣圈選，再拖曳調整位置。</p><p id="pixel-status" role="status">正在讀取原生產圖…</p><p id="pixel-recovery" aria-live="polite"></p>';
     document.querySelector('#page-editor > .top').after(tools);
     style.textContent+='#page-editor #canvas-shell{border-radius:0!important}#page-editor #safe-guide,#page-editor #phone-mask{display:none!important}';
     tools.append(button('儲存修改','pixel-save',save),button('V1／V2 比較與確認','pixel-review',compare));
@@ -148,7 +270,13 @@
     }));
     tools.append(button('新增局部遮蓋','pixel-cover',()=>{canvas.add(new fabric.Rect({left:10,top:10,width:40,height:40,fill:'#ffffff'}));mark();}));
     tools.append(button('新增擦除區（可移動／縮放）','pixel-erase',()=>{const rect=new fabric.Rect({left:10,top:10,width:40,height:40,fill:'#ff00ff',opacity:1,pixelErase:true});canvas.add(rect);canvas.setActiveObject(rect);mark();}));
-    tools.append(button('返回後台','pixel-back',()=>{location.href='/admin';}));
+    tools.append(button('返回後台','pixel-back',async()=>{
+      if(busy||restoringHistory)return;
+      clearTimeout(historyTimer);recordHistory();
+      await Promise.resolve();await checkpointWrite;
+      if(recoveryUnavailable&&dirty&&!confirm('本機草稿尚未備妥，確定離開？'))return;
+      location.href='/admin';
+    }));
     try{
       work=await api('/open');await loadAll();const d=work.design;
       ctx={...ctx,modelId:'pixel-original',styleId:'pixel-original',modelName:'原生產 PNG',styleName:'像素修補',printW:d.size[0]/d.factor/3,printH:d.size[1]/d.factor/3,maskUrl:'',printLineUrl:'',backgroundColor:'transparent',backgroundOpacity:0};
@@ -157,8 +285,11 @@
       canvas.setDimensions({width:d.size[0]/d.factor,height:d.size[1]/d.factor});canvas.backgroundColor='transparent';canvas.clipPath=null;
       baseClip=new fabric.Rect({left:0,top:0,width:d.size[0]/d.factor,height:d.size[1]/d.factor,absolutePositioned:true});
       // BackgroundImage is outside the selectable object list and all layer controls.
-      await new Promise((ok,no)=>fabric.Image.fromURL(d.previewPath||d.basePath,im=>{if(!im)return no(Error('V1 預覽圖載入失敗'));originalPreview=im.getElement();im.set({scaleX:canvas.getWidth()/im.width,scaleY:canvas.getHeight()/im.height,selectable:false,evented:false});canvas.setBackgroundImage(im,ok);},{crossOrigin:'anonymous'}));
-      await new Promise(ok=>fabric.util.enlivenObjects(d.objects,objects=>{objects.forEach(o=>canvas.add(o));ok();}));
+      await new Promise((ok,no)=>fabric.Image.fromURL(d.previewPath||d.basePath,im=>{if(!im)return no(Error('V1 預覽圖載入失敗'));originalPreview=im.getElement();im.set({scaleX:canvas.getWidth()/im.width,scaleY:canvas.getHeight()/im.height,selectable:false,evented:false});originalBackground=im;im.objectCaching=false;canvas.setBackgroundImage(im,ok);},{crossOrigin:'anonymous'}));
+      (await enliven(d.objects)).forEach(o=>canvas.add(o));
+      let recovered=false;
+      try{recovered=await restoreDraft(work);}
+      catch(e){recoveryUnavailable=true;reportRecovery();emit('checkpoint-error');}
       for(const name of ['applyTemplate','applyTemplateById','setBackgroundColor'])if(typeof window[name]==='function')window[name]=()=>toast('像素修補不套用模板或整張背景，請新增局部遮蓋');
       window.openPreview=compare;window.confirmDesignToCart=save;
       const rehydrate=window.rehydrateCanvas;
@@ -166,21 +297,42 @@
         const result=rehydrate.apply(this,arguments);
         for(const obj of canvas.getObjects()){
           if(obj.pixelExtractionMask)obj.set({visible:false,selectable:false,evented:false});
+          obj.objectCaching=false;
         }
-        rebuildBackground();mark();
+        rebuildBackground();
+        mark();
         return result;
       };
       const originalRecord=window.recordHistory;
       window.recordHistory=function(...args){
         const background=canvas.backgroundImage;
         canvas.backgroundImage=null;
+        const previous=historyStack[historyIndex];
         try{return originalRecord.apply(this,args);}
-        finally{canvas.backgroundImage=background;}
+        finally{
+          canvas.backgroundImage=background;
+          if(recoveryReady&&historyStack[historyIndex]!==previous)mark();
+          pruneImages();
+        }
       };
-      for(const field of ['pixelErase','pixelExtractionMask','pixelExtractionBounds'])if(!CUSTOM_PROPS.includes(field))CUSTOM_PROPS.push(field);
-      historyStack=[];historyIndex=-1;recordHistory(true);dirty=false;
+      for(const field of ['pixelErase','pixelExtractionMask','pixelExtractionBounds','pixelExtractionMaskKey'])if(!CUSTOM_PROPS.includes(field))CUSTOM_PROPS.push(field);
+      historyStack=[];historyIndex=-1;
+      window.rehydrateCanvas();dirty=recovered;recordHistory(true);recoveryReady=true;
+      if(recovered)durableGeneration=generation;
+      if(recovered||recoveryUnavailable)reportRecovery();
+      for(const name of ['undoCanvas','redoCanvas']){
+        const original=window[name];
+        window[name]=function(){
+          if(!busy&&!restoringHistory){
+            clearTimeout(historyTimer);
+            recordHistory();
+            return original.apply(this,arguments);
+          }
+        };
+      }
       const layerChanged=event=>{
         if(restoringHistory)return;
+        if(event.target)event.target.objectCaching=false;
         mark();
         if(event.target?.pixelExtractionMask)rebuildBackground();
       };
@@ -210,8 +362,20 @@
         ctx.beginPath();contour.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y));ctx.closePath();ctx.stroke();
         for(const [x,y] of contour)ctx.fillRect(x-2,y-2,4,4);ctx.restore();
       });
-      window.BenfuwanEditorAccess?.fitCanvas?.();canvas.renderAll();status('正在編輯 V'+work.version+'；已使用輕量預覽。原始 720 DPI 保留，提取後可單獨移動。若移入 V1 完全透明區，可保存與比較，但無法送印。');
+      window.BenfuwanEditorAccess?.fitCanvas?.();canvas.renderAll();status('正在編輯 V'+work.version+'；已使用輕量預覽。原始 720 DPI 保留，提取後可單獨移動。若移入 V1 完全透明區，可保存與比較，但無法送印。'+(recovered?' 已復原此裝置的未儲存草稿。':''));
     }catch(e){navigate('page-editor');status(e.message);document.getElementById('pixel-save').disabled=true;}
   }
+  window.addEventListener('pagehide',event=>{
+    if(event.persisted)return;
+    for(const [url] of localImages)URL.revokeObjectURL(url);
+    localImages.clear();
+    if(canvas){
+      canvas.backgroundImage=null;
+      canvas.dispose();
+      canvas=null;
+    }
+    if(previewBitmap)previewBitmap.width=previewBitmap.height=0;
+    previewBitmap=previewBackground=originalPreview=originalBackground=null;
+  });
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
