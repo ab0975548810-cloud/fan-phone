@@ -85,6 +85,52 @@ class PixelTests(unittest.TestCase):
         self.assertEqual(app.commerce.store.order(self.order),self.original)
         self.assertEqual(app.commerce.read(),self.finance)
 
+    def test_last_overlay_can_be_deleted_without_retaining_previous_output(self):
+        initial=self.open()
+        added=self.save(initial)
+        blank=data(encode(Image.new('RGBA',(72,144))))
+        cleared=self.client.post(self.url+'/save',headers=HEAD,json={
+            'work':added['work'],'overlay':blank,'erase':blank,'objects':[]})
+        self.assertEqual(cleared.status_code,200,cleared.json)
+        self.assertEqual(self.open()['design']['objects'],[])
+        self.assertEqual(self.client.get(initial['design']['basePath']).data,self.raw)
+        output=self.client.get(cleared.json['design']['outputPath'])
+        self.assertEqual(png(output.data,dpi=True).tobytes(),png(self.raw,dpi=True).tobytes())
+        self.assertIsNone(cleared.json['design']['profile'])
+
+    def test_alignment_uses_order_owned_original_and_reports_current_difference(self):
+        self.open()
+        order=copy.deepcopy(self.original)
+        path=f'orders_{self.order}_sources_original-mask.png'
+        order['design_json']={'modelId':order['model_id'],'styleId':order['style_id'],
+            'production':{'maskPath':path,'printW':2.54,'printH':5.08},
+            'editorContext':{'printX':self.source['left_mm'],'printY':self.source['top_mm'],'printAngle':self.source['angle']}}
+        mask=Image.new('RGBA',(90,165))
+        shape=ImageDraw.Draw(mask)
+        shape.rectangle((10,10,81,153),fill='white')
+        shape.rectangle((20,20,42,41),fill=(0,0,0,0))
+        profile={'print_line_img':'/static/current.png','preview_mask_img':'/static/current.png',
+                 'print_w':2.54,'print_h':5.08,'print_x':self.source['left_mm'],'print_y':self.source['top_mm'],'print_angle':self.source['angle']}
+        catalog={'models':[{'id':order['model_id'],'case_profiles':{order['style_id']:profile}}]}
+        with mock.patch.object(app.commerce.store,'order',return_value=order), \
+             mock.patch('order_design_alignment.read',return_value=encode(mask)) as read_mask, \
+             mock.patch('order_design_alignment.public_image',return_value=self.raw), \
+             mock.patch.object(app,'cloud_get_json',return_value=catalog):
+            result=self.client.get(self.url+'/alignment')
+            self.assertEqual(result.status_code,200,result.json)
+            self.assertIn('已不同',result.json['note'])
+            read_mask.assert_called_once_with(app,path)
+            guide=Image.open(io.BytesIO(base64.b64decode(result.json['guide'].split(',')[1])))
+            self.assertEqual(guide.size,(72,144))
+            self.assertEqual(guide.getpixel((20,20))[3],0)
+            self.assertGreater(guide.getpixel((0,0))[3],0)
+            order['design_json']['production']['maskPath']='orders_foreign_sources_mask.png'
+            rejected=self.client.get(self.url+'/alignment')
+            self.assertEqual(rejected.status_code,200)
+            self.assertNotIn('guide',rejected.json)
+            self.assertEqual(read_mask.call_count,1)
+        self.assertEqual(app.app.test_client().get(self.url+'/alignment').status_code,401)
+
     def test_pixels_no_expansion_and_wrong_size(self):
         overlay=Image.new('RGBA',(72,144),(200,0,0,255));erase=Image.new('RGBA',(72,144))
         out,proof=compose(self.raw,encode(overlay),encode(erase));result=Image.open(io.BytesIO(out))

@@ -236,9 +236,19 @@ def install(app):
     @app.app.route('/admin/order-design/<order_id>')
     @admin
     def page(order_id):
-        response=app.send_from_directory(str(ROOT),'index.html')
+        from order_design_workspace import workspace_html
+        response=app.app.response_class(workspace_html(), mimetype='text/html')
         response.headers['Cache-Control']='no-store'
         return response
+
+    @app.app.route('/api/admin/order-design/<order_id>/alignment')
+    @admin
+    def alignment_note(order_id):
+        order = app.commerce.store.order(order_id)
+        if not order:
+            raise ValueError('訂單不存在')
+        from order_design_alignment import alignment
+        return app.no_cache_json(alignment(app, order))
 
     @app.app.route('/api/admin/order-design/<order_id>/assessment')
     @admin

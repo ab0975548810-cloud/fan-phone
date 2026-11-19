@@ -175,6 +175,20 @@ def install(app, store, admin, actor, signer):
         if versions[-1]['document'].get('mode')!='pixel-v1':raise ValueError('此訂單已有其他編輯版本，請先核對，避免覆蓋店員工作')
         return opened(order_id,versions[-1])
 
+    @app.app.route(root+'/alignment')
+    @admin
+    def pixel_alignment(order_id):
+        latest = next(iter(rows(order_id)), None)
+        if not latest or latest['document'].get('mode') != 'pixel-v1':
+            raise ValueError('找不到原始生產圖')
+        order = app.commerce.store.order(order_id)
+        if not order:
+            raise ValueError('訂單不存在')
+        from order_design_alignment import alignment
+        original = latest['document']
+        return app.no_cache_json({**alignment(app, order, original['size'], original.get('profile')),
+            'modelName':order.get('model_name'), 'styleName':order.get('style_name')})
+
     @app.app.route(root+'/extract',methods=['POST'])
     @admin
     def extract(order_id):
@@ -192,10 +206,12 @@ def install(app, store, admin, actor, signer):
         result=(select_polygon(raw,data['polygon'],original['factor']) if 'polygon' in data else
                 select_rectangle(raw,data['rectangle'],original['factor'])
                 if 'rectangle' in data else select_component(raw,data.get('x'),data.get('y'),original['factor']))
-        return app.no_cache_json({'status':'success','bounds':result['bounds'],'pixels':result['pixels'],
-             'cutout':'data:image/png;base64,'+base64.b64encode(result['cutout']).decode(),
-             'erase':'data:image/png;base64,'+base64.b64encode(result['erase']).decode(),
-             'eraseHash':sha(result['erase'])})
+        response = {'status':'success','bounds':result['bounds'],'pixels':result['pixels'],
+                    'erase':'data:image/png;base64,'+base64.b64encode(result['erase']).decode(),
+                    'eraseHash':sha(result['erase'])}
+        if data.get('clear') is not True:
+            response['cutout'] = 'data:image/png;base64,'+base64.b64encode(result['cutout']).decode()
+        return app.no_cache_json(response)
 
     @app.app.route(root+'/assets/<int:version>/<name>')
     @admin
@@ -234,7 +250,8 @@ def install(app, store, admin, actor, signer):
             overlay, erase = decode(data.get('overlay')), decode(data.get('erase'))
             objects = copy.deepcopy(data.get('objects'))
         output,proof=compose(raw,overlay,erase,allow_draft_expansion=True)
-        if not proof['bounds']:raise ValueError('沒有可保存的修補內容')
+        if not proof['bounds'] and (current['version']==1 or not base['objects']):
+            raise ValueError('沒有可保存的修補內容')
         validate({'render_contract_version':'editable-text-v1','orderDesignVersion':1,'logicalCanvas':dict(zip(('width','height'),[n/base['factor'] for n in base['size']])),'objects':objects})
         archived = {
             asset_url(order_id, version['version'], sha(o['src'].encode())): o['src']
@@ -260,7 +277,7 @@ def install(app, store, admin, actor, signer):
         # beyond V1's proven alpha cannot be authorized for real vendor send.
         original_profile=rows(order_id)[0]['document'].get('profile')
         d={**base,'objects':objects,'outputPath':persist_asset(app,order_id,output),'outputSha':sha(output),
-           'profile':None if proof['alphaExpansion'] else original_profile,'proof':proof}
+           'profile':None if proof['alphaExpansion'] or not proof['bounds'] else original_profile,'proof':proof}
         result=store.append(order_id,claim['version'],d,actor(),claim['id'])
         if not result['ok']:return app.no_cache_json({'status':'error','msg':'其他店員已保存，請重新開啟；目前畫布仍保留'},409)
         return opened(order_id,row(order_id,result['version']))
