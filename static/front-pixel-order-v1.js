@@ -24,12 +24,16 @@
       if(!dirty||restoringHistory||!canvas)return;
       const objects=canvas.getObjects().map(o=>o.toObject(props()));
       const serialized=JSON.stringify(objects);
-      const assets=[...localImages].filter(([url])=>serialized.includes(url));
+      const assets=[...localImages].filter(([url])=>serialized.includes(url))
+        .map(([url,asset])=>[url,asset.bytes]);
       const captured=generation,record={hash:work.hash,objects,assets};
       checkpointWrite=checkpointWrite.catch(()=>{}).then(async()=>{
         await BenfuwanPixelRecovery.write(order,record);
         durableGeneration=captured;recoveryUnavailable=false;reportRecovery();
-      }).catch(()=>{recoveryUnavailable=true;reportRecovery();emit('checkpoint-error');});
+      }).catch(error=>{
+        recoveryUnavailable=true;reportRecovery();
+        emit('checkpoint-error',{cause:error.name});
+      });
     });
   }
   function reviveSources(value, urls){
@@ -42,8 +46,11 @@
     const draft=await BenfuwanPixelRecovery.read(order);
     if(!draft||draft.hash!==design.hash)return false;
     const urls=new Map();
-    for(const [src,blob] of draft.assets){
-      const url=URL.createObjectURL(blob);urls.set(src,url);localImages.set(url,blob);
+    for(const [src,stored] of draft.assets){
+      const bytes=stored instanceof Blob?await stored.arrayBuffer():stored;
+      const blob=new Blob([bytes],{type:'image/png'});
+      const url=URL.createObjectURL(blob);
+      urls.set(src,url);localImages.set(url,{blob,bytes});
     }
     const objects=await enliven(reviveSources(draft.objects,urls));
     canvas.getObjects().slice().forEach(obj=>canvas.remove(obj));
@@ -112,7 +119,7 @@
     }
     const blob=new Blob(parts,{type:'image/png'});
     const url=URL.createObjectURL(blob);
-    try{return {image:await fabricImage(url),url,blob};}
+    try{return {image:await fabricImage(url),url,blob,bytes:await blob.arrayBuffer()};}
     catch(error){URL.revokeObjectURL(url);throw error;}
   }
   async function extractAt(point,rectangle=null,polygon=null){
@@ -130,7 +137,7 @@
       const key=result.eraseHash+':'+bounds.join(',');
       const existing=canvas.getObjects().find(o=>o.pixelExtractionMaskKey===key);
       if(!existing)loaded.push(await extractionImage(result.erase));
-      for(const asset of loaded)localImages.set(asset.url,asset.blob);
+      for(const {url,blob,bytes} of loaded)localImages.set(url,{blob,bytes});
       const mask=existing||loaded[1].image;
       const placement={left:bounds[0]/factor,top:bounds[1]/factor,scaleX:1/factor,scaleY:1/factor};
       mask.set({...placement,pixelErase:true,pixelExtractionMask:true,pixelExtractionMaskKey:key,visible:false,selectable:false,evented:false,objectCaching:false});
@@ -158,7 +165,7 @@
         let name=uploads.get(value.src);
         if(!name){
           name='layer-'+uploads.size;
-          let blob=localImages.get(value.src);
+          let blob=localImages.get(value.src)?.blob;
           if(!blob){
             const el=o.getElement(),bitmap=document.createElement('canvas');
             bitmap.width=el.naturalWidth||el.width;bitmap.height=el.naturalHeight||el.height;
@@ -289,7 +296,7 @@
       (await enliven(d.objects)).forEach(o=>canvas.add(o));
       let recovered=false;
       try{recovered=await restoreDraft(work);}
-      catch(e){recoveryUnavailable=true;reportRecovery();emit('checkpoint-error');}
+      catch(e){recoveryUnavailable=true;reportRecovery();emit('checkpoint-error',{cause:e.name});}
       for(const name of ['applyTemplate','applyTemplateById','setBackgroundColor'])if(typeof window[name]==='function')window[name]=()=>toast('像素修補不套用模板或整張背景，請新增局部遮蓋');
       window.openPreview=compare;window.confirmDesignToCart=save;
       const rehydrate=window.rehydrateCanvas;
