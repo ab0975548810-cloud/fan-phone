@@ -52,6 +52,11 @@
     saving=true;let uploaded=null;
     const button=document.getElementById('order-design-save');button.disabled=true;
     try{
+      if(window.__privateReedit&&!dirty){
+        if(work.version>1)await window.privateReeditFinished(orderId,work);
+        else toast('請先調整設計，再完成測試製作');
+        return;
+      }
       const submitted=generation;
       const design=await serialize();uploaded=await BenfuwanDesignSources.prepare(design);
       const result=await api('/save',{work:work.work,design:uploaded});
@@ -60,6 +65,7 @@
       // The append response binds the next edit to exactly this saved version.
       // No second network request can strand the editor or adopt another staff member's version.
       work={...work,version:result.version,hash:result.hash,work:result.work};dirty=generation!==submitted;
+      if(window.__privateReedit&&!dirty)await window.privateReeditFinished(orderId,work);
     }catch(error){toast(error.message);document.getElementById('order-design-status').textContent=error.message;}
     finally{if(uploaded)await BenfuwanDesignSources.release(uploaded);saving=false;button.disabled=false;}
   }

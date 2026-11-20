@@ -207,8 +207,13 @@
     }
   }
   async function save(){
-    if(busy)return;busy=true;
+    if(busy||!work)return;busy=true;
     try{
+      if(window.__privateReedit&&!dirty){
+        if(work.version>1)await window.privateReeditFinished(order,work);
+        else status('請先調整設計，再完成測試製作');
+        return;
+      }
       await ensureCanvasFonts();canvas.discardActiveObject();
       clearTimeout(historyTimer);recordHistory();
       const submitted=generation, objects=canvas.getObjects().slice(), design=work.design;
@@ -239,13 +244,15 @@
       if(generation!==submitted||restoringHistory)throw Error('畫布已變更，請重新儲存');
       const result=await api('/save',form);
       work=result;dirty=generation!==submitted;
+      if(window.__privateReedit&&!dirty)await window.privateReeditFinished(order,work);
       if(dirty){checkpoint();}
       else{
         try{await BenfuwanPixelRecovery.remove(order);}
         catch(e){emit('checkpoint-error');}
         reportRecovery();
       }
-      status('V'+work.version+' 已保存；V1 原圖未變更'+(work.design.proof?.alphaExpansion?'；此版移至原透明區，僅可保存／比較，禁止送印':'；尚未送印')+(dirty?'；另有尚未保存的修改':''));
+      if(window.__privateReedit)status('V'+work.version+' 測試副本已保存'+(dirty?'；另有尚未保存的修改':''));
+      else status('V'+work.version+' 已保存；V1 原圖未變更'+(work.design.proof?.alphaExpansion?'；此版移至原透明區，僅可保存／比較，禁止送印':'；尚未送印')+(dirty?'；另有尚未保存的修改':''));
     }catch(e){status(e.message);}finally{busy=false;}
   }
   async function compare(){

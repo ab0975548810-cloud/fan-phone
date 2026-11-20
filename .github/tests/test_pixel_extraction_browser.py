@@ -141,3 +141,5 @@ def run():
 
 if __name__=='__main__':
     run()
+    from test_private_reedit_browser import run as run_private_handoff
+    run_private_handoff()
