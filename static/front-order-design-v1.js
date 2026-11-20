@@ -58,13 +58,15 @@
       clearTimeout(historyTimer);
       recordHistory();
       const submitted=generation;
+      if(work.version>=2&&!dirty){message=await BenfuwanOrderWorkspace.finish(orderId,work);return;}
       const design=await serialize();uploaded=await BenfuwanDesignSources.prepare(design);
       const result=await api('/save',{work:work.work,design:uploaded});
       message=`V${result.version} 草稿已保存；原生產圖未變更`;
       notice=result.msg;
       // The append response binds the next edit to exactly this saved version.
       work={...work,version:result.version,hash:result.hash,work:result.work};dirty=generation!==submitted;
-    }catch(error){message=notice=error.message;}
+      if(!dirty)message+='；'+await BenfuwanOrderWorkspace.finish(orderId,work);
+    }catch(error){notice=error.message;message=[message,notice].filter(Boolean).join('；');}
     finally{
       try{if(uploaded)await BenfuwanDesignSources.release(uploaded);}
       finally{
@@ -97,7 +99,7 @@
   }
   async function boot(){
     const panel=document.createElement('div');panel.id='order-design-banner';
-    panel.innerHTML='<strong>訂單設計修改</strong> <span id="order-design-status" role="status">正在驗證原始設計…</span><button id="order-design-save" disabled>儲存修改</button><button id="order-design-review" disabled>V1／V2 比較與確認</button>';
+    panel.innerHTML='<strong>訂單設計修改</strong> <span id="order-design-status" role="status">正在驗證原始設計…</span><button id="order-design-save" disabled>完成製作</button><button id="order-design-review" disabled>版本紀錄</button>';
     const style=document.createElement('style');style.textContent='#order-design-banner{background:#fff3db;padding:8px;font-size:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}#order-design-save{margin-left:auto;min-height:40px;border:1px solid #ad4770;background:white;border-radius:12px;color:#ad4770;padding:6px 12px}#page-editor .topbar{flex-wrap:wrap}';document.head.append(style);
     document.querySelector('#page-editor > .top')?.after(panel);
     document.getElementById('order-design-save').onclick=save;

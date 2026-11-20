@@ -236,6 +236,7 @@
   async function save(){
     if(busy)return;busy=true;
     try{
+      if(work.version>=2&&!dirty){status(await BenfuwanOrderWorkspace.finish(order,work));return;}
       await ensureCanvasFonts();canvas.discardActiveObject();
       clearTimeout(historyTimer);recordHistory();
       const submitted=generation, objects=canvas.getObjects().slice(), design=work.design;
@@ -273,7 +274,8 @@
         catch(e){emit('checkpoint-error');}
         reportRecovery();
       }
-      status('V'+work.version+' 已保存；V1 原圖未變更'+(work.design.proof?.alphaExpansion?'；此版移至原透明區，僅可保存／比較，禁止送印':'；尚未送印')+(dirty?'；另有尚未保存的修改':''));
+      if(dirty)status('V'+work.version+' 已保存；V1 原圖未變更'+(work.design.proof?.alphaExpansion?'；此版移至原透明區，僅可保存／比較，禁止送印':'；尚未送印')+(dirty?'；另有尚未保存的修改':''));
+      if(!dirty)status(await BenfuwanOrderWorkspace.finish(order,work));
     }catch(e){status(e.message);}finally{busy=false;}
   }
   async function compare(){
@@ -289,7 +291,7 @@
     const tools=document.createElement('div');tools.id='pixel-tools';tools.innerHTML='<strong>原生產圖像素修補</strong><p>點選獨立圖案，或沿相連素材的邊緣圈選，再拖曳調整位置。</p><p id="pixel-status" role="status">正在讀取原生產圖…</p><p id="pixel-recovery" aria-live="polite"></p>';
     document.querySelector('#page-editor > .top').after(tools);
     style.textContent+='#page-editor #canvas-shell{border-radius:0!important}#page-editor #safe-guide,#page-editor #phone-mask{display:none!important}';
-    tools.append(button('儲存修改','pixel-save',save),button('V1／V2 比較與確認','pixel-review',compare));
+    tools.append(button('完成製作','pixel-save',save),button('版本紀錄','pixel-review',compare));
     document.querySelectorAll('button[onclick="deleteActive()"]').forEach(b=>{b.textContent='刪除選取圖層';});
     const extra=document.createElement('details');extra.id='pixel-extra';extra.innerHTML='<summary>更多操作／手動圈選</summary>';tools.append(extra);
     extra.append(button('手動框選素材（點兩個角落）','pixel-rectangle',()=>{if(!work||busy)return;contour=null;manualSelecting=!manualSelecting;selecting=false;firstCorner=null;updateSelectionMode();status(manualSelecting?'請依序點選圖案範圍的左上、右下兩角；可能會切到相鄰圖案，需人工檢查。':'已取消手動框選。');}));
@@ -339,7 +341,7 @@
       try{recovered=await restoreDraft(work);}
       catch(e){recoveryUnavailable=true;reportRecovery();emit('checkpoint-error',{cause:e.name});}
       for(const name of ['applyTemplate','applyTemplateById','setBackgroundColor'])if(typeof window[name]==='function')window[name]=()=>toast('像素修補不套用模板或整張背景，請新增局部遮蓋');
-      window.openPreview=compare;window.confirmDesignToCart=save;
+      window.openPreview=save;window.confirmDesignToCart=save;
       const rehydrate=window.rehydrateCanvas;
       window.rehydrateCanvas=function(){
         const result=rehydrate.apply(this,arguments);

@@ -220,6 +220,18 @@ def install(app):
                 return app.no_cache_json({'status':'error','msg':'設計版本或私有素材暫時無法讀取／保存，請確認 Migration 與儲存服務後重試；原訂單未變更'},503)
         return wrapped
 
+    @app.app.get('/api/admin/order-design/stickers')
+    @admin
+    def workspace_stickers():
+        catalog, version = app.cloud_get_json_versioned('assets', app.ASSETS_FILE, app.DEFAULT_ASSETS)
+        if request.if_none_match.contains(version):
+            response = app.app.response_class(status=304)
+        else:
+            response = app.app.json.response(data=catalog)
+        response.set_etag(version)
+        response.headers['Cache-Control'] = 'private, no-cache'
+        return response
+
     def actor():
         return str(session.get('passkey_credential_id') or 'admin:'+owner(app))
 

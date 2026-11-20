@@ -338,6 +338,73 @@ def install(app, store, admin, actor, signer):
         app.print_center._assert_order_printable(app.print_center._order(order_id))
         return r
 
+    @app.app.route(revision_root+'/finish',methods=['POST'])
+    @admin
+    def finish(order_id):
+        from production_orders import create
+        from order_design_alignment import alignment
+        from pixel_print_store import authorize
+        from print_center import PrintError
+        data = request.get_json() or {}
+        versions = rows(order_id)
+        r = versions[-1] if versions else {}
+        if r.get('version', 0) < 2 or (r['version'], r['content_hash']) != (data.get('version'), data.get('hash')):
+            raise ValueError('版本已變更，請重新開啟')
+        d = artwork_document(r['document'])
+        if not d.get('outputPath'):
+            raise ValueError(d.get('reason') or '缺少可驗證的生產圖')
+        raw = read(app, d['outputPath'])
+        if sha(raw) != d['outputSha']:
+            raise ValueError('修改版生產圖雜湊不符')
+        png(raw, d['size'], True)
+        del raw
+        number = create(app, order_id, r, actor())
+        def result(state, message):
+            return app.no_cache_json(dict(status='success', productionOrder=number, state=state, msg=message))
+        key = 'pixel-'+digest([order_id,r['version'],r['content_hash']])[:64]
+        def current(job):
+            state = job['state']
+            if state == 'UNKNOWN' or job.get('ambiguous_operation'):
+                return result('UNKNOWN','瑞印回應不明，待列印中心核對')
+            if state == 'SENDING':
+                return result(state,'送印中')
+            if job.get('vendor_taskid'):
+                return result(state,'瑞印已接收，任務狀態 '+state)
+            return result(state,job.get('last_error') or '已建立送印任務，請在列印中心查核')
+        prior = app.print_center.store.request(key)
+        if prior:
+            return current(app.print_center.store.job(prior['job_id']))
+        if not d.get('profile') or not alignment(app,app.commerce.store.order(order_id),d['size'],d['profile']).get('guide'):
+            return result('REVIEW','請核對歷史刀模、定位及透明區')
+        if os.environ.get('ORDER_PIXEL_REPRINT_ENABLED') != 'true':
+            return result('DISABLED','修改版送印尚未啟用')
+        print_version(order_id,data)
+        output = png(read(app,d['outputPath']),d['size'],True)
+        original = png(read(app,d['basePath']),d['size'],True)
+        if d.get('mode') != 'pixel-v1':
+            outside = original.getchannel('A').point(lambda a: 0 if a else 255)
+            if ImageChops.multiply(output.getchannel('A'),outside).getbbox():
+                return result('REVIEW','修改版超出原圖透明邊界')
+        order = app.commerce.store.order(order_id)
+        path = order['design_json']['production']['maskPath']
+        with Image.open(io.BytesIO(read(app,path))) as image:
+            alpha = image.convert('RGBA').getchannel('A')
+        allowed = alpha.crop(alpha.getbbox()).resize(output.size,Image.Resampling.NEAREST)
+        outside = allowed.point(lambda a: 0 if a else 255)
+        if ImageChops.multiply(output.getchannel('A'),outside).getbbox():
+            return result('REVIEW','生產圖超出歷史刀模或覆蓋孔位')
+        approved = authorize(app,order_id,r,actor(),'後台完成製作',0)
+        if not approved.get('ok'):
+            return result('REVIEW','版本或既有任務需核對')
+        job = approved['job']
+        try:
+            job = app.print_center.send(job['id'],'pixel-send-'+digest(key)[:64],manual_reprint=True)
+        except PrintError as exc:
+            job = app.print_center.store.job(job['id'])
+            if job['state'] == 'PREPARED':
+                return result('BLOCKED',str(exc))
+        return current(job)
+
     @app.app.route(revision_root+'/confirm',methods=['POST'])
     @app.app.route(root+'/confirm',methods=['POST'])
     @admin
