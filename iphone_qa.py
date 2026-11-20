@@ -59,7 +59,7 @@ SIZE = (2030, 4241)
 MODEL = 'qa-116-phone'
 STYLE = 'qa-116-case'
 PRINT_W, PRINT_H = (pixels * 25.4 / 720 for pixels in SIZE)
-BUILD = 'eee2b9c598b47e325ab2055d367778f9f0c57c96'
+BUILD = 'f0ab0a1fee3957f5bf010979f6741ea07042dcd5'
 DIAG = data / 'diagnostics.jsonl'
 lock = threading.Lock()
 
@@ -169,7 +169,7 @@ def restrict_routes():
     if order and (
         request.method == 'POST' and tail in ('pixel/open','pixel/extract','pixel/save','revision/review','revision/finish')
         or request.method == 'GET' and (
-            tail == 'pixel/alignment' or tail.startswith(('pixel/assets/','revision/assets/'))
+            tail in ('pixel/alignment','production-orders') or tail.startswith(('pixel/assets/','revision/assets/'))
         )
     ):
         return None
@@ -224,6 +224,16 @@ def qa_home():
       <li><a data-qa-action="open-no-mask" href="/admin/order-design/IPHONE-QA-116-NO-MASK?pixel=1">無歷史封存蒙版</a>。測試缺少歷史證據的提示。</li>
     </ul>
     <p>可先新增素材並刪除，再用「清除原圖選取區」處理荷包蛋，儲存 V2 後返回這頁再開啟。</p>
+    <details><summary>補印製作單</summary><div id="family"></div></details>
+    <script>document.querySelector('details').ontoggle=async function(){
+      if(!this.open)return;
+      const box=document.querySelector('#family');box.replaceChildren();
+      for(const root of ['IPHONE-QA-116-MASK','IPHONE-QA-116-NO-MASK']){
+        const data=await (await fetch('/api/admin/order-design/'+root+'/production-orders')).json();
+        for(const order of data.orders){const a=document.createElement('a');a.href='/admin/order-design/'+encodeURIComponent(order.id);a.textContent=order.source+' → '+order.id+' · '+order.state;box.append(a,document.createElement('br'));}
+      }
+      if(!box.childNodes.length)box.textContent='尚無補印製作單';
+    };</script>
     <p><a href="/qa/results">查看效能紀錄</a></p>
     <form action="/logout" method="post"><button>登出</button></form></main></body></html>"""
 
