@@ -7,6 +7,7 @@
   window.idbGet=async()=>null;window.idbSet=async()=>{};window.idbDel=async()=>{};
   const editorURL = new URL(location.href);
   const order=decodeURIComponent(location.pathname.split('/').pop()),root='/api/admin/order-design/'+encodeURIComponent(order)+'/pixel';
+  const recoveryOrder=new URLSearchParams(location.search).get('source')||order;
   let work,busy=false,dirty=false,generation=0,checkpointQueued=false,durableGeneration=-1;
   let checkpointWrite=Promise.resolve(), recoveryReady=false, recoveryUnavailable=false;
   const localImages=new Map();
@@ -28,7 +29,7 @@
         .map(([url,asset])=>[url,asset.bytes]);
       const captured=generation,record={hash:work.hash,objects,assets};
       checkpointWrite=checkpointWrite.catch(()=>{}).then(async()=>{
-        await BenfuwanPixelRecovery.write(order,record);
+        await BenfuwanPixelRecovery.write(recoveryOrder,record);
         durableGeneration=captured;recoveryUnavailable=false;reportRecovery();
       }).catch(error=>{
         recoveryUnavailable=true;reportRecovery();
@@ -43,7 +44,7 @@
     return value;
   }
   async function restoreDraft(design){
-    const draft=await BenfuwanPixelRecovery.read(order);
+    const draft=await BenfuwanPixelRecovery.read(recoveryOrder);
     if(!draft||draft.hash!==design.hash)return false;
     const urls=new Map();
     for(const [src,stored] of draft.assets){
@@ -270,7 +271,7 @@
       work=result;dirty=generation!==submitted;
       if(dirty){checkpoint();}
       else{
-        try{await BenfuwanPixelRecovery.remove(order);}
+        try{await BenfuwanPixelRecovery.remove(recoveryOrder);}
         catch(e){emit('checkpoint-error');}
         reportRecovery();
       }
@@ -326,7 +327,7 @@
       location.href='/admin';
     }));
     try{
-      work=await api('/open');const d=work.design;
+      work=await api('/open',{source:new URLSearchParams(location.search).get('source')});const d=work.design;
       ctx={...ctx,modelId:'pixel-original',styleId:'pixel-original',modelName:'原生產 PNG',styleName:'像素修補',printW:d.size[0]/d.factor/3,printH:d.size[1]/d.factor/3,maskUrl:'',printLineUrl:'',backgroundColor:'transparent',backgroundOpacity:0};
       document.getElementById('editor-model').textContent=ctx.modelName;document.getElementById('editor-style').textContent=ctx.styleName;
       if(window.BenfuwanOrderWorkspace)BenfuwanOrderWorkspace.openEditor();

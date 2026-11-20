@@ -249,6 +249,13 @@ def install(app):
     @admin
     def page(order_id):
         from editable_stickers import ROOT
+        if order_id.startswith('MK-'):
+            from production_orders import lookup
+            from flask import redirect, url_for
+            record = lookup(app,order_id)
+            if not record: raise ValueError('補印單不存在')
+            revision = next(r for r in store.rows(record['order_id']) if r['version']==record['version'])
+            return redirect(url_for('page',order_id=record['order_id'],source=order_id,pixel=int(revision['document'].get('mode')=='pixel-v1')))
         response=app.app.response_class((ROOT / 'index.html').read_bytes(), mimetype='text/html')
         response.headers['Cache-Control']='no-store'
         return response
@@ -314,10 +321,12 @@ def install(app):
             design=archive(app,order)
             store.append(order_id,0,design,actor(),'original')
             rows=store.rows(order_id)
-        latest=rows[-1];check_restore(latest['document'])
+        from production_orders import starting_revision
+        source=(request.get_json(silent=True) or {}).get('source')
+        latest=starting_revision(app,order_id,rows,source);check_restore(latest['document'])
         # Verify all referenced objects exist before any editor canvas is opened.
         for path in asset_paths(latest['document']):image_bytes(read(app,path))
-        work=signer.dumps({'order':order_id,'version':latest['version'],'actor':actor(),'id':uuid.uuid4().hex})
+        work=signer.dumps({'order':order_id,'version':latest['version'],'expected':rows[-1]['version'],'source':source,'actor':actor(),'id':uuid.uuid4().hex})
         return app.no_cache_json({'status':'success','orderId':order_id,'version':latest['version'],'hash':latest['content_hash'],'work':work,
             'design':materialize(order_id,latest['version'],latest['document']),
             'versions':[{k:r[k] for k in ('version','actor','created_at','content_hash')} for r in rows]})
@@ -385,7 +394,8 @@ def install(app):
         if previous:
             if 'revisionPrint' in previous['document']:design['revisionPrint']=copy.deepcopy(previous['document']['revisionPrint'])
         else:design['revisionPrint']=prepare(app,order_id,rows[0]['document'],design)
-        result=store.append(order_id,claim['version'],design,actor(),claim['id'])
+        design['productionParent']=claim.get('source') or order_id
+        result=store.append(order_id,claim.get('expected',claim['version']),design,actor(),claim['id'])
         if not result['ok']:return app.no_cache_json({'status':'error','msg':'另一位店員已保存新版，或此工作副本已提交不同內容。請重新開啟後再編輯；你的畫布仍保留。'},409)
         next_work=signer.dumps({'order':order_id,'version':result['version'],'actor':actor(),'id':uuid.uuid4().hex})
         return app.no_cache_json({'status':'success','version':result['version'],'hash':digest(design),'work':next_work,'msg':'已另存設計草稿；原生產圖與列印任務未變更'})

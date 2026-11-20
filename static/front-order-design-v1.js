@@ -105,7 +105,7 @@
     document.getElementById('order-design-save').onclick=save;
     document.getElementById('order-design-review').onclick=compare;
     try{
-      work=await api('/open');const d=work.design,p=d.production,c=d.editorContext||{};
+      work=await api('/open',{source:new URLSearchParams(location.search).get('source')});const d=work.design,p=d.production,c=d.editorContext||{};
       const profile={preview_mask_img:c.previewPath||p.maskPath,print_line_img:p.maskPath,print_w:p.printW,print_h:p.printH,print_x:c.printX||0,print_y:c.printY||0,print_angle:c.printAngle||0};
       const model={id:d.modelId,name:c.modelName||d.modelId,status:true,brand:'訂單快照',product_type:c.productType||'phone_case',direct_style_id:d.styleId,case_profiles:{[d.styleId]:profile}};
       const style={id:d.styleId,name:c.styleName||d.styleId,status:true,product_type:model.product_type,price:1,colors:[]};

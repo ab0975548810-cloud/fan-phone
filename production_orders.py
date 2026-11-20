@@ -19,3 +19,24 @@ def create(app, parent, revision, actor):
                 (id,order_id,version,content_hash,actor) VALUES (?,?,?,?,?)
                 ON CONFLICT(id) DO NOTHING""", tuple(record.values()))
     return key
+
+def lookup(app, key):
+    if app.USE_SUPABASE:
+        records = app.SUPABASE.table('design_production_orders').select('*').eq('id',key).limit(1).execute().data
+        return records[0] if records else None
+    with app.print_center.store.connection() as db:
+        if not db.execute("SELECT 1 FROM sqlite_master WHERE name='design_production_orders'").fetchone():
+            return None
+        record = db.execute('SELECT * FROM design_production_orders WHERE id=?',(key,)).fetchone()
+        return dict(record) if record else None
+
+
+def starting_revision(app, root, rows, source):
+    if not source:
+        return rows[-1]
+    record = lookup(app,source)
+    if record and record['order_id']==root:
+        for row in rows:
+            if row['version']==record['version'] and row['content_hash']==record['content_hash']:
+                return row
+    raise ValueError('找不到此補印單的原始設計')

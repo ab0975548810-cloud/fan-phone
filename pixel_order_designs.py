@@ -150,14 +150,14 @@ def install(app, store, admin, actor, signer):
         if not r or r['document'].get('mode')!='pixel-v1':raise ValueError('找不到像素修補版本')
         return r
     def asset_url(order_id,version,name):return f'/api/admin/order-design/{order_id}/pixel/assets/{version}/{name}'
-    def opened(order_id,r):
+    def opened(order_id,r,source=None,expected=None):
         d=copy.deepcopy(r['document'])
         for o in nodes({'objects':d.get('objects',[])}):
             if o.get('type')=='image':o['src']=asset_url(order_id,r['version'],sha(o['src'].encode()))
         for key in ('basePath','outputPath'):
             d[key]=asset_url(order_id,r['version'],key)
         d['previewPath']=asset_url(order_id,r['version'],'preview')
-        token=signer.dumps({'pixel':True,'order':order_id,'version':r['version'],'hash':r['content_hash'],'actor':actor(),'id':uuid.uuid4().hex})
+        token=signer.dumps({'pixel':True,'expected':expected or r['version'],'source':source,'order':order_id,'version':r['version'],'hash':r['content_hash'],'actor':actor(),'id':uuid.uuid4().hex})
         return app.no_cache_json({'status':'success','design':d,'version':r['version'],'hash':r['content_hash'],'work':token})
 
     @app.app.route(root+'/open',methods=['POST'])
@@ -173,7 +173,9 @@ def install(app, store, admin, actor, signer):
             store.append(order_id,0,d,actor(),'pixel-original')
             versions=rows(order_id)
         if versions[-1]['document'].get('mode')!='pixel-v1':raise ValueError('此訂單已有其他編輯版本，請先核對，避免覆蓋店員工作')
-        return opened(order_id,versions[-1])
+        from production_orders import starting_revision
+        source=(request.get_json(silent=True) or {}).get('source')
+        return opened(order_id,starting_revision(app,order_id,versions,source),source,versions[-1]['version'])
 
     @app.app.route(root+'/alignment')
     @admin
@@ -278,7 +280,8 @@ def install(app, store, admin, actor, signer):
         original_profile=rows(order_id)[0]['document'].get('profile')
         d={**base,'objects':objects,'outputPath':persist_asset(app,order_id,output),'outputSha':sha(output),
            'profile':None if proof['alphaExpansion'] or not proof['bounds'] else original_profile,'proof':proof}
-        result=store.append(order_id,claim['version'],d,actor(),claim['id'])
+        d['productionParent']=claim.get('source') or order_id
+        result=store.append(order_id,claim.get('expected',claim['version']),d,actor(),claim['id'])
         if not result['ok']:return app.no_cache_json({'status':'error','msg':'其他店員已保存，請重新開啟；目前畫布仍保留'},409)
         return opened(order_id,row(order_id,result['version']))
 
@@ -347,7 +350,7 @@ def install(app, store, admin, actor, signer):
         from print_center import PrintError
         data = request.get_json() or {}
         versions = rows(order_id)
-        r = versions[-1] if versions else {}
+        r = next((item for item in versions if item['version']==data.get('version')), {})
         if r.get('version', 0) < 2 or (r['version'], r['content_hash']) != (data.get('version'), data.get('hash')):
             raise ValueError('版本已變更，請重新開啟')
         d = artwork_document(r['document'])
@@ -374,6 +377,8 @@ def install(app, store, admin, actor, signer):
         prior = app.print_center.store.request(key)
         if prior:
             return current(app.print_center.store.job(prior['job_id']))
+        if r['version']!=versions[-1]['version']:
+            return result('REVIEW','已有後續版本，保留此製作單供重新編輯')
         if not d.get('profile') or not alignment(app,app.commerce.store.order(order_id),d['size'],d['profile']).get('guide'):
             return result('REVIEW','請核對歷史刀模、定位及透明區')
         if os.environ.get('ORDER_PIXEL_REPRINT_ENABLED') != 'true':

@@ -28,6 +28,14 @@
       });
       const data=await response.json();
       if(!response.ok||data.status!=='success')throw Error(data.msg||'請到列印中心核對製作狀態');
+      let link=document.getElementById('production-order-edit');
+      if(!link){
+        link=document.createElement('a');
+        link.id='production-order-edit';
+        document.querySelector('#pixel-tools,#order-design-banner').append(link);
+      }
+      link.href='/admin/order-design/'+encodeURIComponent(data.productionOrder);
+      link.textContent='重新編輯 '+data.productionOrder;
       return 'V'+work.version+' 已保存；製作單 '+data.productionOrder+' · '+data.msg;
     },
     openEditor() {

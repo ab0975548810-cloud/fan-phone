@@ -1,4 +1,4 @@
-create table public.design_production_orders (
+create table if not exists public.design_production_orders (
     id text primary key,
     order_id text not null,
     version integer not null check (version >= 2),
