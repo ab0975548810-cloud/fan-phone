@@ -425,4 +425,6 @@ def install(app_module):
     app.add_url_rule("/api/admin/passkey/register/options", "admin_passkey_register_options", service.registration_options, methods=["POST"])
     app.add_url_rule("/api/admin/passkey/register/verify", "admin_passkey_register_verify", service.verify_registration, methods=["POST"])
     app.add_url_rule("/api/admin/passkeys/revoke", "admin_passkey_revoke", service.revoke, methods=["POST"])
+    from reedit_transport import install as install_test_handoff
+    install_test_handoff(app_module, service)
     return service

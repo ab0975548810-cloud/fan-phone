@@ -25,6 +25,7 @@ os.environ.pop("SUPABASE_SERVICE_ROLE_KEY", None)
 
 import app as app_module
 from test_reedit_handoffs import HandoffTests
+from test_private_reedit_http import PrivateHttpTests
 from passkey_auth import CeremonyRegistry, PasskeyConfig, install as install_passkey_auth
 from security_perf import install as install_security
 

@@ -60,6 +60,7 @@
       // The append response binds the next edit to exactly this saved version.
       // No second network request can strand the editor or adopt another staff member's version.
       work={...work,version:result.version,hash:result.hash,work:result.work};dirty=generation!==submitted;
+      if(window.__privateReedit&&!dirty)await window.privateReeditFinished(orderId,work);
     }catch(error){toast(error.message);document.getElementById('order-design-status').textContent=error.message;}
     finally{if(uploaded)await BenfuwanDesignSources.release(uploaded);saving=false;button.disabled=false;}
   }

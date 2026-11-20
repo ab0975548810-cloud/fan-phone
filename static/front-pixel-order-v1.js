@@ -239,6 +239,7 @@
       if(generation!==submitted||restoringHistory)throw Error('畫布已變更，請重新儲存');
       const result=await api('/save',form);
       work=result;dirty=generation!==submitted;
+      if(window.__privateReedit&&!dirty)await window.privateReeditFinished(order,work);
       if(dirty){checkpoint();}
       else{
         try{await BenfuwanPixelRecovery.remove(order);}

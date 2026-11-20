@@ -21,16 +21,26 @@ class HandoffTests(unittest.TestCase):
             for key in ('print_path','mockup_path'):
                 (Path(folder)/row[key]).write_bytes(buf.getvalue())
             def disk():return {p.name:p.read_bytes() for p in Path(folder).iterdir()}
+            import json
+            import sqlite3
+            from contextlib import closing
+            database=Path(folder)/'source.db'
+            def persist():
+                with closing(sqlite3.connect(database)) as db,db:
+                    db.execute('create table if not exists orders(id text primary key,value text)')
+                    db.execute('insert or replace into orders values (?,?)',('A',json.dumps(row)))
+            persist()
             before=disk()
             store=Mock()
-            store.order.return_value=row
+            store.path=database
             app=SimpleNamespace(USE_SUPABASE=False,SAVE_DIR=folder,commerce=SimpleNamespace(store=store))
             manifest,assets=export_artwork(app,'A')
             self.assertNotIn('customer_name',manifest)
             self.assertEqual(assets[manifest['print']['sha256']],buf.getvalue())
-            store.order.assert_called_once_with('A')
+            store.order.assert_not_called()
             self.assertEqual(disk(),before)
             row['mockup_path']='orders_B_preview.png'
+            persist()
             with self.assertRaises(ValueError):export_artwork(app,'A')
 
     def test_concurrent_redeem_and_disable(self):

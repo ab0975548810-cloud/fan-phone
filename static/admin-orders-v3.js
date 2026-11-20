@@ -7,6 +7,7 @@
   const STATUSES=['待處理','製作中','待列印','列印中','已完成','作廢'];
   const PRINT_REQUIRED=new Set(['待列印','列印中','已完成']);
   let rows=[];
+  let reeditTestEnabled=false;
   let loading=false,hasMore=false,nextOffset=0,before=0,requestVersion=0,exactOrderId='',activeRequest=null;
   let dateMode='today';
   let exactDate='';
@@ -75,6 +76,9 @@
       <div class="bf-order-summary" id="bf-order-summary"></div>
       <div id="bf-order-list"><div class="bf-order-empty">讀取訂單中…</div></div><div id="bf-order-page" class="bf-order-page" aria-live="polite"><span data-order-page-label></span><button type="button" data-order-more hidden>顯示更多</button></div>
     </div>`;
+    fetch('/api/admin/reedit-test/access',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(result=>{
+      if(result?.enabled===true){reeditTestEnabled=true;render();}
+    }).catch(()=>{});
     let searchTimer;document.getElementById('bf-order-search').addEventListener('input',ev=>{query=ev.target.value.trim();exactOrderId='';clearTimeout(searchTimer);searchTimer=setTimeout(()=>refreshOrders(true),300)});
     document.querySelectorAll('[data-range]').forEach(b=>b.onclick=()=>{dateMode=b.dataset.range;exactDate='';exactOrderId='';document.getElementById('bf-order-date').value='';document.querySelectorAll('[data-range]').forEach(x=>x.classList.toggle('active',x===b));refreshOrders(true)});
     document.getElementById('bf-order-date').onchange=ev=>{exactDate=ev.target.value||'';exactOrderId='';if(exactDate){dateMode='exact';document.querySelectorAll('[data-range]').forEach(x=>x.classList.remove('active'));}refreshOrders(true)};
@@ -88,6 +92,18 @@
     });
     document.getElementById('bf-order-manager').addEventListener('click',ev=>{
       const btn=ev.target.closest('[data-order-action]');if(!btn)return;
+      if(btn.dataset.orderAction==='reedit-test'){
+        btn.disabled=true;
+        const status=btn.parentElement.querySelector('[role=status]');
+        status.textContent='正在複製設計到隔離測試站…';
+        fetch('/api/admin/reedit-test/'+encodeURIComponent(btn.dataset.orderId)+'/start',{
+          method:'POST',cache:'no-store',headers:{'X-Reedit-Test':'1'}
+        }).then(async r=>{
+          if(!r.ok)throw Error(r.status===403?'測試授權已失效，請重新以獲准的 Passkey 登入':'無法交接設計，請稍後重試');
+          location.assign((await r.json()).location);
+        }).catch(err=>{btn.disabled=false;status.textContent=err.message;});
+        return;
+      }
       if(btn.dataset.orderAction==='print')return window.BenfuwanPrintCenter?.openOrder(btn.dataset.orderId);
       if(btn.dataset.orderAction==='print-resend'&&ev.detail>1)return;
       if(btn.dataset.orderAction.startsWith('print-'))return runPrintAction(btn.dataset.orderId,btn.dataset.orderAction);
@@ -169,6 +185,7 @@
         ${isVoid?'':`<div class="bf-order-status-row"><span style="font-size:10px;color:#887a80">生產狀態</span><select data-order-status="${e(o.order_id)}" data-current-status="${e(current)}">${statusOptions(o)}</select></div>`}
         <div class="bf-order-actions">
           <a href="/admin/order-design/${encodeURIComponent(o.order_id)}" target="_self">重新編輯設計</a>
+          ${reeditTestEnabled? `<button type="button" data-order-action="reedit-test" data-order-id="${e(o.order_id)}">重新編輯（測試）</button>`:''}
           ${o.print_url?`<a href="${e(o.print_url)}" target="_blank" rel="noopener"><i class="fa-solid fa-file-arrow-down"></i> 生產圖</a>`:''}
           ${!isVoid&&o.has_print?`<button data-order-action="print" data-order-id="${e(o.order_id)}">前往列印中心</button>`:''}
           ${printAction}
