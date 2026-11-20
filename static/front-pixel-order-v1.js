@@ -132,10 +132,9 @@
       if(clearOriginal)payload.clear=true;
       const result=await api('/extract',payload);
       const bounds=result.bounds,factor=work.design.factor;
-      if(!clearOriginal&&canvas.getObjects().some(o=>o.pixelExtractionBounds&&JSON.stringify(o.pixelExtractionBounds)===JSON.stringify(bounds)))
-        throw Error('這個圖案已經提取過，請直接移動既有圖層');
       const key=result.eraseHash+':'+bounds.join(',');
       const existing=canvas.getObjects().find(o=>o.pixelExtractionMaskKey===key);
+      if(existing&&!clearOriginal&&!rectangle&&!polygon){status('原圖此處已清除，可點選移動後的圖層。');return;}
       if(clearOriginal&&existing){status('原圖選取區已清除；後加圖層可分開刪除。');return;}
       const pictureAsset=clearOriginal?null:await extractionImage(result.cutout);
       if(pictureAsset)loaded.push(pictureAsset);
@@ -291,9 +290,10 @@
     document.querySelector('#page-editor > .top').after(tools);
     style.textContent+='#page-editor #canvas-shell{border-radius:0!important}#page-editor #safe-guide,#page-editor #phone-mask{display:none!important}';
     tools.append(button('儲存修改','pixel-save',save),button('V1／V2 比較與確認','pixel-review',compare));
-    tools.append(button('點選原圖素材（提取成圖層）','pixel-extract',()=>{if(!work||busy)return;contour=null;manualSelecting=false;firstCorner=null;selecting=clearOriginal||!selecting;clearOriginal=false;document.getElementById('pixel-clear-original').setAttribute('aria-pressed','false');updateSelectionMode();status(selecting?'請點一下原始圖案。再次按此鍵取消。':'已取消原圖選取。');}));
-    tools.append(button('手動框選素材（點兩個角落）','pixel-rectangle',()=>{if(!work||busy)return;contour=null;manualSelecting=!manualSelecting;selecting=false;firstCorner=null;updateSelectionMode();status(manualSelecting?'請依序點選圖案範圍的左上、右下兩角；可能會切到相鄰圖案，需人工檢查。':'已取消手動框選。');}));
-    tools.append(button('沿輪廓點選','pixel-contour',()=>{
+    document.querySelectorAll('button[onclick="deleteActive()"]').forEach(b=>{b.textContent='刪除選取圖層';});
+    const extra=document.createElement('details');extra.id='pixel-extra';extra.innerHTML='<summary>更多操作／手動圈選</summary>';tools.append(extra);
+    extra.append(button('手動框選素材（點兩個角落）','pixel-rectangle',()=>{if(!work||busy)return;contour=null;manualSelecting=!manualSelecting;selecting=false;firstCorner=null;updateSelectionMode();status(manualSelecting?'請依序點選圖案範圍的左上、右下兩角；可能會切到相鄰圖案，需人工檢查。':'已取消手動框選。');}));
+    extra.append(button('沿輪廓點選','pixel-contour',()=>{
       if(!work||busy)return;
       selecting=manualSelecting=false;firstCorner=null;contour=contour?null:[];
       updateSelectionMode();status(contour?'沿素材邊緣依序點選，再按「完成圈選」。再次按此鍵可取消。':'已取消圈選');
@@ -313,9 +313,9 @@
       status(clearOriginal?'清除模式：可點選原圖、手動框選或沿輪廓圈選。只清除原圖選取區。':'已離開原圖清除模式。');
     });
     clearButton.setAttribute('aria-pressed','false');
-    tools.insertBefore(clearButton,document.getElementById('pixel-extract'));
-    tools.append(button('新增局部遮蓋','pixel-cover',()=>{canvas.add(new fabric.Rect({left:10,top:10,width:40,height:40,fill:'#ffffff'}));mark();}));
-    tools.append(button('新增擦除區（可移動／縮放）','pixel-erase',()=>{const rect=new fabric.Rect({left:10,top:10,width:40,height:40,fill:'#ff00ff',opacity:1,pixelErase:true});canvas.add(rect);canvas.setActiveObject(rect);mark();}));
+    extra.append(clearButton);
+    extra.append(button('新增局部遮蓋','pixel-cover',()=>{canvas.add(new fabric.Rect({left:10,top:10,width:40,height:40,fill:'#ffffff'}));mark();}));
+    extra.append(button('新增擦除區（可移動／縮放）','pixel-erase',()=>{const rect=new fabric.Rect({left:10,top:10,width:40,height:40,fill:'#ff00ff',opacity:1,pixelErase:true});canvas.add(rect);canvas.setActiveObject(rect);mark();}));
     tools.append(button('返回後台','pixel-back',async()=>{
       if(busy||restoringHistory)return;
       clearTimeout(historyTimer);recordHistory();
@@ -387,7 +387,11 @@
       canvas.on('object:added',layerChanged);
       canvas.on('object:removed',layerChanged);
       canvas.on('object:modified',mark);
+      let tap=null;
+      const sample=document.createElement('canvas');sample.width=sample.height=1;
+      const pixel=sample.getContext('2d',{willReadFrequently:true});
       canvas.on('mouse:down',event=>{
+        tap=null;
         if(busy||event.target)return;
         const point=canvas.getPointer(event.e);
         if(contour){
@@ -399,10 +403,27 @@
           const rectangle=[firstCorner.x,firstCorner.y,point.x,point.y];
           manualSelecting=false;firstCorner=null;updateSelectionMode();void extractAt(point,rectangle);return;
         }
-        if(!selecting)return;
+        if(!selecting){tap=canvas.getPointer(event.e,true);return;}
         selecting=false;updateSelectionMode();void extractAt(point);
       });
       rebuildBackground();
+      canvas.upperCanvasEl.addEventListener('touchstart',e=>{if(e.touches.length>1)tap=null;},{passive:true});
+      canvas.upperCanvasEl.addEventListener('touchcancel',()=>{tap=null;});
+      canvas.on('mouse:move',event=>{
+        if(!tap)return;
+        const p=canvas.getPointer(event.e,true);
+        if(Math.hypot(tap.x-p.x,tap.y-p.y)>6)tap=null;
+      });
+      canvas.on('mouse:up',event=>{
+        if(!tap)return;
+        tap=null;
+        if(busy||event.target||restoringHistory)return;
+        const p=canvas.getPointer(event.e),bg=canvas.backgroundImage?.getElement();
+        if(!bg)return;
+        pixel.clearRect(0,0,1,1);
+        pixel.drawImage(bg,Math.floor(p.x*bg.width/canvas.getWidth()),Math.floor(p.y*bg.height/canvas.getHeight()),1,1,0,0,1,1);
+        if(pixel.getImageData(0,0,1,1).data[3])void extractAt(p);
+      });
       canvas.on('after:render',({ctx})=>{
         canvas.backgroundColor='transparent';
         if(!contour?.length||ctx?.canvas!==canvas.lowerCanvasEl)return;

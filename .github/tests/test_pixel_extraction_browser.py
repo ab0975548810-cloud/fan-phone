@@ -71,7 +71,6 @@ def run():
             print('PIXEL_EDITOR_OPEN_SECONDS',browser.browser_type.name,round(time.monotonic()-started,2),flush=True)
             assert page.evaluate('canvas.getObjects().length')==0
             assert page.evaluate("(canvas.backgroundImage.getElement().height||canvas.backgroundImage.getElement().naturalHeight)<=1200")
-            page.locator('#pixel-extract').click()
             x,y=page.evaluate("""() => {
                 const point=fabric.util.transformPoint(new fabric.Point(50,70),canvas.viewportTransform);
                 const box=canvas.upperCanvasEl.getBoundingClientRect();
@@ -110,13 +109,19 @@ def run():
                     return [box.left+point.x*box.width/canvas.getWidth(),box.top+point.y*box.height/canvas.getHeight()];
                 }""",[left,top])
                 page.touchscreen.tap(x,y)
+            if not page.locator('#pixel-extra').evaluate('e=>e.open'):
+                page.locator('#pixel-extra summary').click()
             page.locator('#pixel-contour').click()
             for point in ((172,222),(244,222),(244,293),(172,293)):
                 tap_canvas(*point)
             page.locator('#pixel-contour-undo').click()
             assert '3 點' in page.locator('#pixel-status').inner_text()
+            if not page.locator('#pixel-extra').evaluate('e=>e.open'):
+                page.locator('#pixel-extra summary').click()
             page.locator('#pixel-contour').click()
             assert page.evaluate('canvas.getObjects().length===2')
+            if not page.locator('#pixel-extra').evaluate('e=>e.open'):
+                page.locator('#pixel-extra summary').click()
             page.locator('#pixel-contour').click()
             for point in ((172,222),(244,222),(244,293),(172,293)):
                 tap_canvas(*point)
@@ -144,6 +149,8 @@ def run():
             assert output.getpixel((510,500))==art.getpixel((510,500))
             assert v3['proof']['alphaExpansion'] and v3['profile'] is None
             page.locator('#pixel-close').click()
+            if not page.locator('#pixel-extra').evaluate('e=>e.open'):
+                page.locator('#pixel-extra summary').click()
             page.locator('#pixel-clear-original').click()
             tap_canvas(65,400)
             wait(page,"document.querySelector('#pixel-status')?.textContent.includes('已清除原圖選取區')")
