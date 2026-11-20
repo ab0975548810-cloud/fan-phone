@@ -59,7 +59,7 @@ SIZE = (2030, 4241)
 MODEL = 'qa-116-phone'
 STYLE = 'qa-116-case'
 PRINT_W, PRINT_H = (pixels * 25.4 / 720 for pixels in SIZE)
-BUILD = 'e6a05471268f7260aa8432f9bfd38025f617da48'
+BUILD = '6451aed10d63be782a461e42c68d176c26e34e0b'
 DIAG = data / 'diagnostics.jsonl'
 lock = threading.Lock()
 
@@ -123,6 +123,24 @@ def fixture_orders():
         'styles':[{'id':STYLE,'name':'QA','price':1}]}), encoding='utf-8')
 
 
+def fixture_stickers():
+    import base64
+    import io
+    items = []
+    for category,color in [('花朵','#ef6880'),('星星','#f5ba28')]:
+        image = Image.new('RGBA',(96,96))
+        draw = ImageDraw.Draw(image)
+        if category == '星星':
+            draw.polygon([(48,5),(59,34),(91,35),(65,55),(75,87),(48,68),(20,87),(30,55),(5,35),(37,34)],fill=color)
+        else:
+            for x,y in ((25,5),(5,35),(45,35),(25,55)):
+                draw.ellipse((x,y,x+36,y+36),fill=color)
+        out = io.BytesIO()
+        image.save(out,'PNG')
+        items.append({'category':category,'url':'data:image/png;base64,'+base64.b64encode(out.getvalue()).decode()})
+    Path(module.ASSETS_FILE).write_text(json.dumps({'categories':['花朵','星星'],'stickers':items}),encoding='utf-8')
+
+fixture_stickers()
 fixture_orders()
 
 
@@ -155,13 +173,13 @@ def restrict_routes():
         return None
     if not session.get('logged_in'):
         return redirect('/login') if request.method == 'GET' else ('Login required',401)
-    if path in ('/','/admin','/logout','/qa/results','/qa/metrics','/api/health','/api/assets'):
+    if path in ('/','/admin','/logout','/qa/results','/qa/metrics','/api/health','/api/assets','/api/admin/order-design/stickers'):
         return None
     if request.method == 'GET' and editor_fixture(path):
         return None
     order, tail = api_fixture(path)
     if order and (
-        request.method == 'POST' and tail in ('pixel/open','pixel/extract','pixel/save','revision/review')
+        request.method == 'POST' and tail in ('pixel/open','pixel/extract','pixel/save','revision/review','revision/finish')
         or request.method == 'GET' and (
             tail == 'pixel/alignment' or tail.startswith(('pixel/assets/','revision/assets/'))
         )
