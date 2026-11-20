@@ -65,3 +65,20 @@ with psycopg.connect(os.environ['TEST_POSTGRES_DSN']) as db:
         assert not db.execute("SELECT has_function_privilege(%s, 'public.prevent_active_print_job_order_delete()', 'EXECUTE')", (role,)).fetchone()[0]
     assert not db.execute("SELECT prosecdef FROM pg_proc WHERE oid='public.commerce_commit(bigint,jsonb,jsonb,text)'::regprocedure").fetchone()[0]
 print('POSTGRES_SCHEMA_AND_PRIVILEGES_OK')
+
+# Rehearse the manufacturing-order table migration with data, in the disposable CI DB.
+with psycopg.connect(os.environ['TEST_POSTGRES_DSN']) as db:
+    migration = (root / 'supabase/migrations/20261120090000_design_production_orders.sql').read_text()
+    db.execute("insert into order_design_versions values ('migration-fixture',2,'{}','qa','qa','qa',now())")
+    db.execute("""insert into design_production_orders(id,order_id,version,content_hash,actor)
+                  values ('MK-migration','migration-fixture',2,'qa','qa')""")
+    db.execute('create temp table production_backup as select * from design_production_orders')
+    for _ in range(2):
+        db.execute(migration)
+    db.execute('drop table design_production_orders')
+    db.execute(migration)
+    db.execute('insert into design_production_orders select * from production_backup')
+    assert db.execute('select * from production_backup except select * from design_production_orders').fetchall()==[]
+    assert db.execute('select * from design_production_orders except select * from production_backup').fetchall()==[]
+    db.rollback()
+print('PRODUCTION_ORDER_MIGRATION_REPLAY_RESTORE_OK')
