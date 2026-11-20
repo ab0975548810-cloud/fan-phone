@@ -1066,6 +1066,7 @@ def login_page():
                 503,
             )
         if request.form.get('password') == ADMIN_PASSWORD:
+            session.clear()
             session['logged_in'] = True
             return redirect(url_for('admin_page'))
         return '密碼錯誤', 401
