@@ -59,7 +59,7 @@ SIZE = (2030, 4241)
 MODEL = 'qa-116-phone'
 STYLE = 'qa-116-case'
 PRINT_W, PRINT_H = (pixels * 25.4 / 720 for pixels in SIZE)
-BUILD = '300b84a84c8e291ff7e0388d623aa339a31a5ff7'
+BUILD = '70f74b51915c019b479d02873005fcc3fd57f63b'
 DIAG = data / 'diagnostics.jsonl'
 lock = threading.Lock()
 
@@ -175,6 +175,11 @@ def restrict_routes():
         return redirect('/login') if request.method == 'GET' else ('Login required',401)
     if path in ('/','/admin','/logout','/qa/results','/qa/metrics','/api/health','/api/assets','/api/admin/order-design/stickers'):
         return None
+    if request.method == 'GET' and path.startswith('/admin/order-design/MK-'):
+        from production_orders import lookup
+        record = lookup(module,path.rsplit('/',1)[-1])
+        if record and record['order_id'] in FIXTURES:
+            return None
     if request.method == 'GET' and editor_fixture(path):
         return None
     order, tail = api_fixture(path)
