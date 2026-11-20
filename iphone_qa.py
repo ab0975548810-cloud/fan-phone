@@ -123,7 +123,48 @@ def fixture_orders():
         'styles':[{'id':STYLE,'name':'QA','price':1}]}), encoding='utf-8')
 
 
-Path(module.ASSETS_FILE).write_bytes(Path(__file__).with_name('qa-sticker-catalog.json').read_bytes())
+import hashlib
+import requests
+from flask import send_file
+from urllib.parse import urlparse
+catalog = json.loads(Path(__file__).with_name('qa-sticker-catalog.json').read_text())
+public_assets = {}
+for sticker in catalog['stickers']:
+    url = sticker['url']
+    parts = urlparse(url)
+    if parts.scheme != 'https' or parts.netloc != 'sazoqqgeabjiyzbihpdy.supabase.co' or not parts.path.startswith('/storage/v1/object/public/') or parts.query:
+        raise ValueError('Invalid public sticker manifest')
+    key = hashlib.sha256(url.encode()).hexdigest()
+    public_assets[key] = url
+    sticker['url'] = '/qa/sticker/'+key
+Path(module.ASSETS_FILE).write_text(json.dumps(catalog),encoding='utf-8')
+
+@app.get('/qa/sticker/<key>')
+def public_sticker(key):
+    if key not in public_assets:
+        abort(404)
+    path = data / ('sticker-'+key)
+    if not path.is_file():
+        from tempfile import NamedTemporaryFile
+        with requests.get(public_assets[key],stream=True,timeout=(5,20),allow_redirects=False) as upstream:
+            if upstream.status_code != 200:
+                abort(502)
+            with NamedTemporaryFile(dir=data,delete=False) as out:
+                temp = Path(out.name)
+                try:
+                    for block in upstream.iter_content(65536):
+                        out.write(block)
+                        if out.tell()>16*1024*1024:
+                            abort(413)
+                    out.flush()
+                    with Image.open(temp) as im:
+                        if im.format not in ('PNG','WEBP','JPEG'):abort(415)
+                        im.verify()
+                    temp.replace(path)
+                finally:
+                    temp.unlink(missing_ok=True)
+    with Image.open(path) as im:
+        return send_file(path,mimetype=Image.MIME[im.format],conditional=True)
 fixture_orders()
 
 
@@ -156,6 +197,7 @@ def restrict_routes():
         return None
     if not session.get('logged_in'):
         return redirect('/login') if request.method == 'GET' else ('Login required',401)
+    if path.startswith('/qa/sticker/') and request.method=='GET':return None
     if path in ('/','/admin','/logout','/qa/results','/qa/metrics','/api/health','/api/assets','/api/admin/order-design/stickers'):
         return None
     if request.method == 'GET' and path.startswith('/admin/order-design/MK-'):
