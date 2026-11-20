@@ -59,7 +59,7 @@ def run():
             started=time.monotonic()
             page.goto(url+path)
             wait(page,"document.querySelector('#pixel-status')?.textContent.includes('正在編輯 V1')")
-            assert page.locator('#page-home, #page-checkout, #page-cart').count()==0
+            assert page.locator('#page-home:visible, #page-checkout:visible, #page-cart:visible').count()==0
             assert not any('/api/shop_data' in url or '/home-assets/' in url or '/api/templates' in url
                            for url in requests)
             assert not any('/order-design/stickers' in u for u in requests)

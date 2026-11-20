@@ -14,7 +14,13 @@
     const r=await fetch('/static/index-base-20260913.html?v=20261119catalog',{cache:'no-store'});
     if(!r.ok)throw new Error('HTTP '+r.status);
     let html=await r.text();
+    if(window.__bfOrderDesignMode){
+      window.__bfOrderWorkspace=true;
+      html=html.replaceAll('src="/static/home-assets/', 'data-home-src="/static/home-assets/');
+      html=html.replace('https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js','/static/vendor/fabric-5.3.1.min.js');
+    }
     const fixes=[
+      window.__bfOrderDesignMode ? '<script src="/static/admin-order-design-workspace.js?v=3"><\/script>' : '',
       '<script src="/static/front-v22-fixes.js?v=20260923a"><\/script>',
       '<script src="/static/product-catalog-v1.js?v=20261025filmflow1"><\/script>',
       '<script src="/static/front-model-colors.js?v=20261119catalog"><\/script>',

@@ -248,8 +248,8 @@ def install(app):
     @app.app.route('/admin/order-design/<order_id>')
     @admin
     def page(order_id):
-        from order_design_workspace import workspace_html
-        response=app.app.response_class(workspace_html(), mimetype='text/html')
+        from editable_stickers import ROOT
+        response=app.app.response_class((ROOT / 'index.html').read_bytes(), mimetype='text/html')
         response.headers['Cache-Control']='no-store'
         return response
 
