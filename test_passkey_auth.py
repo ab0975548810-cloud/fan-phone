@@ -274,7 +274,7 @@ class PasskeyTests(unittest.TestCase):
                 self.assertIsNone(authorized())
             with patch.dict(os.environ,{'ADMIN_REEDIT_TEST_CREDENTIAL_SHA256':saved['device_label']}):
                 self.assertIsNone(authorized())
-            with patch.object(service,'_load',return_value={'credentials':[]}):
+            with patch.object(service,'registered_for_reedit',return_value=[]):
                 self.assertIsNone(authorized())
             self.password_login(user)
             self.assertIsNone(authorized())

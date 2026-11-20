@@ -23,7 +23,7 @@ def allowed(service, identity):
     if identity not in {value.strip() for value in permitted}:
         return False
     # Read current registration for every decision, including revocation checks.
-    return any(fingerprint(row) == identity for row in service._load()['credentials'])
+    return any(fingerprint(row) == identity for row in service.registered_for_reedit())
 
 
 def session_identity(service):

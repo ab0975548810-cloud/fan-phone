@@ -146,6 +146,23 @@ class PasskeyService:
             raise RuntimeError("Passkey credential store 格式不符")
         return data
 
+    def registered_for_reedit(self):
+        # The normal configuration loader can seed missing documents. The
+        # authorization check must be read-only even for revoked credentials.
+        for key,path in [(STORE_KEY,self.filepath),(STORE_KEY+':'+self.config.owner_id,
+                                                  self.filepath+'.'+self.config.owner_id)]:
+            if self.app_module.USE_SUPABASE:
+                rows=self.app_module.SUPABASE.table('app_store').select('value').eq('key',key).limit(1).execute().data
+                doc=rows[0]['value'] if rows else {}
+            else:
+                try:
+                    doc=json.loads(Path(path).read_text(encoding='utf-8'))
+                except FileNotFoundError:
+                    continue
+            if doc.get('owner_id')==self.config.owner_id and doc.get('version')==1:
+                return doc['credentials']
+        return []
+
     def _save(self, data):
         key, filepath, _ = self._store()
         self.app_module.cloud_save_json(key, filepath, data)
