@@ -75,6 +75,24 @@ class PixelTests(unittest.TestCase):
         self.assertEqual(app.commerce.read(),self.finance)
         self.assertEqual(app.print_center.store.job(self.source['id']),self.source)
 
+    def test_production_child_uses_immutable_parent(self):
+        revision = self.save(self.open())
+        def finish(saved):
+            return self.client.post(self.url.replace('/pixel','/revision/finish'),headers=HEAD,
+                                    json=dict(version=saved['version'],hash=saved['hash'])).json['productionOrder']
+        b = finish(revision)
+        self.assertIn('source='+b,self.client.get('/admin/order-design/'+b).location)
+        reopened = self.client.post(self.url+'/open',headers=HEAD,json={'source':b}).json
+        self.assertEqual(reopened['hash'],revision['hash'])
+        child = self.save(reopened)
+        c = finish(child)
+        self.assertNotEqual(b,c)
+        self.assertEqual(app.order_designs.rows(self.order)[-1]['document']['productionParent'],b)
+        old = self.client.post(self.url+'/open',headers=HEAD,json={'source':b}).json
+        self.assertEqual(old['hash'],revision['hash'])
+        self.assertEqual(self.client.post(self.url+'/open',headers=HEAD,json={'source':c}).json['hash'],child['hash'])
+        self.assertEqual(app.commerce.read(),self.finance)
+
     def test_alpha_expansion_saved_as_unprintable_draft(self):
         first=self.open()
         overlay=Image.new('RGBA',(72,144))
