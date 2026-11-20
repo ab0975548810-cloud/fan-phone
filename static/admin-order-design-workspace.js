@@ -1,14 +1,16 @@
 /* The order workspace owns navigation and loads the sticker catalog on demand. */
 (() => {
   const openStickers = window.openStickerSheet;
-  let stickers;
+  let stickers, catalogTag;
   window.openStickerSheet = async function () {
     if (!stickers) {
-      stickers = fetch('/api/assets', {cache: 'no-store'}).then(async response => {
+      stickers = fetch('/api/admin/order-design/stickers', {cache:'no-store',credentials:'same-origin',headers:catalogTag?{'If-None-Match':catalogTag}:{}}).then(async response => {
+        if(response.status===304)return;
         if (!response.ok) throw Error('貼紙庫暫時無法載入');
         const result = await response.json();
-        assetsData = result.data || result;
-      }).catch(error => { stickers = null; throw error; });
+        assetsData = result.data;
+        catalogTag=response.headers.get('ETag');
+      }).finally(() => { stickers = null; });
     }
     try {
       await stickers;
@@ -18,6 +20,16 @@
     }
   };
   window.BenfuwanOrderWorkspace = {
+    async finish(orderId, work) {
+      const response=await fetch('/api/admin/order-design/'+encodeURIComponent(orderId)+'/revision/finish',{
+        method:'POST',credentials:'same-origin',cache:'no-store',
+        headers:{'Content-Type':'application/json','X-Order-Design':'1'},
+        body:JSON.stringify({version:work.version,hash:work.hash})
+      });
+      const data=await response.json();
+      if(!response.ok||data.status!=='success')throw Error(data.msg||'請到列印中心核對製作狀態');
+      return 'V'+work.version+' 已保存；製作單 '+data.productionOrder+' · '+data.msg;
+    },
     openEditor() {
       document.getElementById('workspace-loading')?.remove();
       history.replaceState({page: 'page-editor'}, '', location.href);

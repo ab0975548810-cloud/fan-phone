@@ -46,13 +46,14 @@ def workspace_html():
     editor = editor.replace('onclick="navBack()"', 'onclick="navBack()" aria-label="返回"')
     editor = editor.replace(' 加入購物車</button>', ' 儲存修改</button>')
     editor = re.sub(r'<div class="editor-float right">.*?</div>', '', editor, count=1)
+    editor = editor.replace('onclick="openPreview()"', 'onclick="confirmDesignToCart()"').replace('>完成</button>', '>完成製作</button>')
     sheets = source.split('<!-- SHEETS -->', 1)[1].split('</body>', 1)[0]
     modules = []
     for src in re.findall(r'(?:src|href)="(/static/[^"]+)"', loader):
         filename = src.split('?', 1)[0].rsplit('/', 1)[-1]
         if filename in EDITOR_SCRIPTS:
             if filename in ('front-pixel-order-v1.js', 'front-order-design-v1.js'):
-                src += '&workspace=3'
+                src += '&workspace=4'
             src = escape(src, quote=True)
             if filename.endswith('.css'):
                 modules.append(f'<link rel="stylesheet" href="{src}">')
@@ -60,7 +61,7 @@ def workspace_html():
                 modules.append(f'<script src="{src}"></script>')
     if len(modules) != len(EDITOR_SCRIPTS):
         raise RuntimeError('Order workspace editor modules are missing')
-    modules.insert(0, '<script src="/static/admin-order-design-workspace.js?v=1"></script>')
+    modules.insert(0, '<script src="/static/admin-order-design-workspace.js?v=2"></script>')
     return (head + '</head><body class="admin-order-design-workspace">'
             '<script>window.__bfOrderDesignMode=true;window.__bfOrderWorkspace=true;</script>'
             '<main id="workspace-loading" role="status">正在開啟訂單設計…</main>'

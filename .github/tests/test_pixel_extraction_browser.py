@@ -1,5 +1,7 @@
 """Real WebKit/Chromium extraction test with private fixture and fake vendor only."""
 import copy
+import tempfile
+from unittest import mock
 import io
 import os
 import sys
@@ -60,6 +62,17 @@ def run():
             assert page.locator('#page-home, #page-checkout, #page-cart').count()==0
             assert not any('/api/shop_data' in url or '/home-assets/' in url or '/api/templates' in url
                            for url in requests)
+            assert not any('/order-design/stickers' in u for u in requests)
+            with tempfile.TemporaryDirectory() as folder, mock.patch.object(app,'ASSETS_FILE',str(Path(folder,'assets.json'))):
+                for category in ('測試分類','新分類'):
+                    app.local_save_json(app.ASSETS_FILE,{'categories':[category],'stickers':[{'category':category,'url':guide}]})
+                    page.locator('button[onclick="openStickerSheet()"]').click()
+                    page.locator('#sticker-cats').get_by_text(category,exact=True).click()
+                    if category=='新分類':
+                        page.locator('#sticker-grid button').first.click()
+                        wait(page,'canvas.getObjects().length===1')
+                        page.evaluate('()=>{canvas.remove(canvas.getObjects()[0]);canvas.requestRenderAll()}')
+                    page.evaluate('closeSheets()')
             alignment=page.locator('#order-alignment-controls')
             alignment.get_by_text('目前後台的刀模或定位已不同',exact=False).wait_for()
             visibility=alignment.get_by_label('顯示原始蒙版')

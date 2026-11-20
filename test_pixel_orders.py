@@ -47,6 +47,34 @@ class PixelTests(unittest.TestCase):
         r=self.client.post(self.url+'/save',headers=HEAD,json={'work':work['work'],'overlay':data(encode(overlay)),'erase':data(encode(erase)),'objects':[{'type':'rect','left':20,'top':30,'width':10,'height':10,'fill':'red'}]})
         self.assertEqual(r.status_code,200,r.json);return r.json
 
+    def test_finish_one_production_order_and_one_vendor_request(self):
+        saved = self.save(self.open())
+        url = self.url.replace('/pixel','/revision/finish')
+        payload = dict(version=saved['version'],hash=saved['hash'])
+        def finish():
+            response = self.client.post(url,headers=HEAD,json=payload)
+            self.assertEqual(response.status_code,200,response.json)
+            return response.json
+        blocked = finish()
+        self.assertEqual(blocked['state'],'REVIEW')
+        order = copy.deepcopy(self.original)
+        path = f'orders_{self.order}_sources_finish-mask.png'
+        mask = Image.new('RGBA',(74,146))
+        ImageDraw.Draw(mask).rectangle((1,1,72,144),fill='white')
+        Path(app.SAVE_DIR,path).write_bytes(encode(mask))
+        order['design_json'] = {'modelId':order['model_id'],'styleId':order['style_id'],
+            'production':{'maskPath':path,'printW':2.54,'printH':5.08},
+            'editorContext':{'printX':self.source['left_mm'],'printY':self.source['top_mm'],'printAngle':self.source['angle']}}
+        with mock.patch.object(app.commerce.store,'order',return_value=order):
+            with mock.patch.dict(os.environ,{'ORDER_PIXEL_REPRINT_ENABLED':'false'}):
+                self.assertEqual(finish()['state'],'DISABLED')
+            self.fx.fake.responses['/api/Device/receiveTask']={'code':0,'data':{'taskid':'fake-only','status':0}}
+            self.assertEqual(finish()['state'],'QUEUED')
+            self.assertEqual(finish()['productionOrder'],blocked['productionOrder'])
+        self.assertEqual(len(self.fx.fake.calls),1)
+        self.assertEqual(app.commerce.read(),self.finance)
+        self.assertEqual(app.print_center.store.job(self.source['id']),self.source)
+
     def test_alpha_expansion_saved_as_unprintable_draft(self):
         first=self.open()
         overlay=Image.new('RGBA',(72,144))
