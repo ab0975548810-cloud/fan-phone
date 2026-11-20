@@ -20,21 +20,27 @@ def measure():
     padding = bytes(MAX_BUNDLE - len(png) - 128 * 1024)
     digest = sha256(png).hexdigest()
     ref = {'sha256': digest}
-    raw = pack({'print': ref, 'preview': ref}, {digest: png, sha256(padding).hexdigest(): padding})
-    del padding
-    _, files = unpack(raw)
-    count = len(raw)
-    del raw, files
-    barrier = Barrier(2)
+    barrier = Barrier(3)
 
     def decode(_):
         with Image.open(BytesIO(png)) as im:
+            barrier.wait(timeout=15)
             im.load()
             barrier.wait(timeout=15)
             return list(im.size)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
-        sizes = list(executor.map(decode, range(2)))
+        decoders = [executor.submit(decode, i) for i in range(2)]
+        barrier.wait(timeout=15)
+        try:
+            raw = pack({'print': ref, 'preview': ref}, {digest: png, sha256(padding).hexdigest(): padding})
+            del padding
+            _, files = unpack(raw)
+            count = len(raw)
+            del raw, files
+        finally:
+            barrier.wait(timeout=15)
+        sizes = [future.result() for future in decoders]
     try:
         unpack(bytes(MAX_BUNDLE + 1))
     except ValueError:
