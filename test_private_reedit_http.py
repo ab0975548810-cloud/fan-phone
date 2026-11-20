@@ -237,6 +237,19 @@ class PrivateHttpTests(unittest.TestCase):
         self.make(key,'blue','待核對')
         self.assertTrue(self.qa.get('/private/info').json['review'])
 
+    def test_parallel_boot_responses_cannot_replace_editor_actor(self):
+        root=self.enter()
+        # Requests launched with the original cookie can finish in any order.
+        for path,method in [('/private/active','GET'),('/private/info','GET'),
+                            ('/api/admin/order-design/'+root+'/pixel/open','POST')]:
+            sibling=self.qa_app.test_client()
+            for cookie in self.qa._cookies.values():
+                sibling.set_cookie(cookie.key,cookie.value)
+            response=sibling.open(path,method=method,headers=self.headers)
+            self.assertEqual(response.status_code,200,response.data)
+            self.assertNotIn('Set-Cookie',response.headers)
+        self.make(root,'blue')
+
     def test_removed_registration_cannot_open_or_view(self):
         root=self.enter()
         self.credentials.clear()

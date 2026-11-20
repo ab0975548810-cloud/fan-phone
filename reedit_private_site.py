@@ -186,7 +186,9 @@ def create_private_site(volume, secret, authorize=online, clock=time.time):
         except PermissionError:
             abort(403)
         session.clear()
-        session.update(grant=token,snapshot=sid)
+        # Mint the shared editor's actor before the first parallel page, image
+        # and heartbeat requests. Later read responses must never replace it.
+        session.update(grant=token,snapshot=sid,logged_in=True,_bf_client_id=secrets.token_urlsafe(24))
         audit(sid,'redeemed')
         manifest = json.loads((volume/sid/'manifest.json').read_text('utf-8'))
         return jsonify(location='/admin/order-design/'+sid+('' if manifest.get('design') else '?pixel=1'))
@@ -266,8 +268,7 @@ def create_private_site(volume, secret, authorize=online, clock=time.time):
             abort(403)
         g.snapshot=access()
         g.manifest=json.loads((data_folder()/'manifest.json').read_text('utf-8'))
-        # A dedicated cookie domain and server-side live check gate the shared editor.
-        session['logged_in']=True
+        # Only redemption initializes the host-only cookie. Authorization remains live.
         key=(request.view_args or {}).get('order_id')
         if key and key!=g.snapshot:
             if not re.fullmatch('MK-[0-9a-f]{32}',key):
