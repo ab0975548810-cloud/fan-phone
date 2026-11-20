@@ -59,7 +59,7 @@ SIZE = (2030, 4241)
 MODEL = 'qa-116-phone'
 STYLE = 'qa-116-case'
 PRINT_W, PRINT_H = (pixels * 25.4 / 720 for pixels in SIZE)
-BUILD = '382d10ef4d2c078ae5e7efbecc911ae7420d8162'
+BUILD = 'e6a05471268f7260aa8432f9bfd38025f617da48'
 DIAG = data / 'diagnostics.jsonl'
 lock = threading.Lock()
 
