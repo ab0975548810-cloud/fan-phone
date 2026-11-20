@@ -59,7 +59,7 @@ SIZE = (2030, 4241)
 MODEL = 'qa-116-phone'
 STYLE = 'qa-116-case'
 PRINT_W, PRINT_H = (pixels * 25.4 / 720 for pixels in SIZE)
-BUILD = '70f74b51915c019b479d02873005fcc3fd57f63b'
+BUILD = 'eee2b9c598b47e325ab2055d367778f9f0c57c96'
 DIAG = data / 'diagnostics.jsonl'
 lock = threading.Lock()
 
@@ -123,24 +123,7 @@ def fixture_orders():
         'styles':[{'id':STYLE,'name':'QA','price':1}]}), encoding='utf-8')
 
 
-def fixture_stickers():
-    import base64
-    import io
-    items = []
-    for category,color in [('花朵','#ef6880'),('星星','#f5ba28')]:
-        image = Image.new('RGBA',(96,96))
-        draw = ImageDraw.Draw(image)
-        if category == '星星':
-            draw.polygon([(48,5),(59,34),(91,35),(65,55),(75,87),(48,68),(20,87),(30,55),(5,35),(37,34)],fill=color)
-        else:
-            for x,y in ((25,5),(5,35),(45,35),(25,55)):
-                draw.ellipse((x,y,x+36,y+36),fill=color)
-        out = io.BytesIO()
-        image.save(out,'PNG')
-        items.append({'category':category,'url':'data:image/png;base64,'+base64.b64encode(out.getvalue()).decode()})
-    Path(module.ASSETS_FILE).write_text(json.dumps({'categories':['花朵','星星'],'stickers':items}),encoding='utf-8')
-
-fixture_stickers()
+Path(module.ASSETS_FILE).write_bytes(Path(__file__).with_name('qa-sticker-catalog.json').read_bytes())
 fixture_orders()
 
 
