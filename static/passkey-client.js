@@ -91,6 +91,7 @@
         const row=document.createElement('div');row.className='passkey-item';
         const info=document.createElement('div'),title=document.createElement('b'),meta=document.createElement('small'),remove=document.createElement('button');
         title.textContent=item.device_label||'Passkey';meta.textContent=`建立：${formatDate(item.created_at)}｜最後使用：${formatDate(item.last_used_at)}`;info.append(title,meta);
+        const identity=document.createElement('code');identity.style.overflowWrap='anywhere';identity.textContent=(item.current_verified?'本次登入驗證的憑證 · ':'憑證指紋 · ')+item.fingerprint;info.append(identity);
         remove.type='button';remove.className='btn danger mini';remove.textContent='移除';remove.addEventListener('click',async()=>{if(!confirm(`確定移除「${title.textContent}」？密碼登入仍會保留。`))return;remove.disabled=true;try{await api('/api/admin/passkeys/revoke',{method:'POST',body:JSON.stringify({credential_id:item.credential_id})});await loadAdminPasskeys()}catch(error){alert(error.message)}finally{remove.disabled=false}});
         row.append(info,remove);list.appendChild(row);
       }

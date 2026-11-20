@@ -24,6 +24,7 @@ os.environ.pop("SUPABASE_URL", None)
 os.environ.pop("SUPABASE_SERVICE_ROLE_KEY", None)
 
 import app as app_module
+from test_reedit_handoffs import HandoffTests
 from passkey_auth import CeremonyRegistry, PasskeyConfig, install as install_passkey_auth
 from security_perf import install as install_security
 
@@ -253,6 +254,31 @@ class PasskeyTests(unittest.TestCase):
         saved = app_module.local_load_json(PASSKEY_FILE, {})["credentials"][0]
         self.assertEqual(saved["sign_count"], 1)
         self.assertTrue(saved["last_used_at"])
+        from reedit_access import session_identity
+        import reedit_access
+        from unittest.mock import patch
+        identity = reedit_access.fingerprint(saved)
+        listing = user.get('/api/admin/passkeys').get_json()['credentials']
+        self.assertTrue(listing[0]['current_verified'])
+        self.assertEqual(listing[0]['fingerprint'],identity)
+        def authorized():
+            with user.session_transaction() as current:
+                data = dict(current)
+            with app_module.app.test_request_context('/'):
+                from flask import session
+                session.update(data)
+                return session_identity(service)
+        with patch.dict(os.environ,{'ADMIN_REEDIT_TEST_ENABLED':'true','ADMIN_REEDIT_TEST_CREDENTIAL_SHA256':identity}):
+            self.assertEqual(authorized(),identity)
+            with patch.dict(os.environ,{'ADMIN_REEDIT_TEST_ENABLED':'false'}):
+                self.assertIsNone(authorized())
+            with patch.dict(os.environ,{'ADMIN_REEDIT_TEST_CREDENTIAL_SHA256':saved['device_label']}):
+                self.assertIsNone(authorized())
+            with patch.object(service,'_load',return_value={'credentials':[]}):
+                self.assertIsNone(authorized())
+            self.password_login(user)
+            self.assertIsNone(authorized())
+
         replay = user.post("/api/auth/passkey/verify", json=payload)
         self.assertEqual((replay.status_code, replay.get_json()["code"]), (400, "CHALLENGE_INVALID"))
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import reedit_access
 import json
 import os
 import secrets
@@ -166,6 +167,8 @@ class PasskeyService:
     def _public_credential(row):
         return {
             "credential_id": row.get("credential_id", ""),
+            "fingerprint": reedit_access.fingerprint(row),
+            "current_verified": session.get("auth_method") == "passkey" and session.get("reedit_fingerprint") == reedit_access.fingerprint(row),
             "device_label": row.get("device_label") or "Passkey",
             "transports": list(row.get("transports") or []),
             "created_at": row.get("created_at"),
@@ -350,6 +353,9 @@ class PasskeyService:
             session.clear()
             session["logged_in"] = True
             session["auth_method"] = "passkey"
+            session["passkey_credential_id"] = row["credential_id"]
+            session["reedit_fingerprint"] = reedit_access.fingerprint(row)
+            session["reedit_verified_at"] = int(time.time())
             return self.app_module.no_cache_json({"status": "success", "redirect": url_for("admin_page")})
         except Exception:
             return self._error("PASSKEY_VERIFY_FAILED", "Face ID 驗證失敗，請重新再試或使用密碼登入。", 401)
