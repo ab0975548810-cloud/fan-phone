@@ -7,6 +7,7 @@ import os
 import re
 import uuid
 import time
+import threading
 import zipfile
 from urllib.parse import urlsplit
 
@@ -74,19 +75,22 @@ def unpack(raw):
 
 
 def signed_headers(raw, claim):
-    signature = hmac.digest(service_key().encode(), claim.encode() + b'\0' + raw, 'sha256').hex()
+    mac=hmac.new(service_key().encode(),claim.encode()+b'\0','sha256')
+    mac.update(raw)
+    signature=mac.hexdigest()
     return {'X-Test-Claim': claim, 'X-Test-Signature': signature, 'Content-Type': 'application/octet-stream'}
 
 
 def install(module, service):
     app = module.app
+    export_slot=threading.BoundedSemaphore(1)
     signer = URLSafeTimedSerializer(app.secret_key, salt='private-reedit-online-v1')
 
     def configured():
         qa = origin('ADMIN_REEDIT_PRIVATE_ORIGIN')
         service_key()
         epoch = os.environ.get('ADMIN_REEDIT_GENERATION', '')
-        if len(epoch) < 16 or qa == service.config.origin:
+        if len(epoch) < 16 or qa in (service.config.origin,'https://iphone-safari-qa-iphone-qa.up.railway.app'):
             raise ValueError('測試環境尚未獨立設定')
         return qa, epoch
 
@@ -138,20 +142,25 @@ def install(module, service):
     def reedit_start(order_id):
         if request.headers.get('Origin') != service.config.origin or request.headers.get('X-Reedit-Test') != '1':
             abort(403)
+        if not export_slot.acquire(blocking=False):
+            return jsonify(msg='另一份測試快照正在交接，請稍後再試'),429
         try:
             subject = session_identity(service)
             if not subject:
                 abort(403)
-            
             qa, epoch = configured()
-            snapshot = uuid.uuid4().hex
-            claim = signer.dumps(dict(subject=subject, snapshot=snapshot, generation=epoch,
-                                      until=session['reedit_verified_at']+900))
+
             from security_perf import _limited
             if _limited('private-reedit-export',subject,4,60)[0]:
                 return jsonify(msg='請稍後再開啟測試設計'),429
             manifest, files = export_artwork(module, order_id)
+            # Resume the same owner's unchanged source snapshot, preserving its original retention deadline.
+            encoded=json.dumps([epoch,subject,order_id,manifest],sort_keys=True,allow_nan=False).encode()
+            snapshot=hmac.digest(service_key().encode(),encoded,'sha256').hex()[:32]
+            claim=signer.dumps(dict(subject=subject,snapshot=snapshot,generation=epoch,nonce=uuid.uuid4().hex,
+                                    until=session['reedit_verified_at']+900))
             manifest['snapshot'] = snapshot
+            manifest['operator']=hmac.digest(service_key().encode(),subject.encode(),'sha256').hex()[:24]
             raw = pack(manifest, files)
             if not session_identity(service):
                 abort(403)
@@ -166,3 +175,5 @@ def install(module, service):
             return jsonify(location=qa + '/private/enter#' + snapshot + '.' + code), 200, {'Cache-Control':'no-store'}
         except (requests.RequestException, ValueError, KeyError, OSError):
             return jsonify(msg='測試交接未完成，請確認原圖與隔離站狀態後再試'), 422
+        finally:
+            export_slot.release()

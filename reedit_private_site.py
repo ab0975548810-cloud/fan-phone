@@ -1,5 +1,6 @@
 """Dedicated private QA WSGI application. Intentionally never imports the shop app."""
 import hashlib
+import io
 import hmac
 import json
 import os
@@ -42,7 +43,9 @@ def cleanup(volume, now=None, revoke=False):
     with closing(sqlite3.connect(volume/'access.db')) as db, db:
         db.execute('begin immediate')
         if revoke:
+            db.execute('insert or replace into controls values (1,1)')
             db.execute('delete from handoffs')
+            db.execute('insert into audit values (?,?,?)',('','disabled',now))
         for (sid,) in db.execute('select id from snapshots where expires<=?',(now,)).fetchall():
             if not re.fullmatch('[0-9a-f]{32}',sid):
                 raise ValueError('無效的隔離工作區')
@@ -53,14 +56,21 @@ def cleanup(volume, now=None, revoke=False):
             db.execute('delete from snapshots where id=?',(sid,))
             db.execute('insert into audit values (?,?,?)',(sid,'expired',now))
         db.execute('delete from handoffs where created<?',(now-900,))
+        # Recover directories stranded by a worker crash between rename and commit.
+        for entry in volume.iterdir():
+            if (entry.is_dir() and not entry.is_symlink() and entry.stat().st_mtime <= now-300
+                    and (re.fullmatch('tmp[a-zA-Z0-9_-]+',entry.name) or
+                         (re.fullmatch('[a-f0-9]{32}',entry.name) and
+                          not db.execute('select 1 from snapshots where id=?',(entry.name,)).fetchone()))):
+                shutil.rmtree(entry)
 
 
 def replace_paths(value, mapping):
     if isinstance(value, dict):
-        return {k:replace_paths(v,mapping) for k,v in value.items()}
+        return {k:(mapping[v] if k in ('src','maskPath','previewPath') else replace_paths(v,mapping)) for k,v in value.items()}
     if isinstance(value, list):
         return [replace_paths(v,mapping) for v in value]
-    return mapping.get(value,value) if isinstance(value,str) else value
+    return value
 
 
 def create_private_site(volume, secret, authorize=online, clock=time.time):
@@ -76,17 +86,20 @@ def create_private_site(volume, secret, authorize=online, clock=time.time):
         db.executescript('''
             create table if not exists snapshots (id text primary key, claim text not null, expires integer not null);
             create table if not exists audit (snapshot text, event text, at integer);
+            create table if not exists controls (id integer primary key, disabled integer not null);
+            create table if not exists operations(snapshot text, operator text, operation text, at integer);
         ''')
     store = PrivateHandoffs(dbpath,authorize,clock)
 
     def access():
         sid = session.get('snapshot','')
         with closing(sqlite3.connect(dbpath)) as db:
-            row = db.execute('select claim from snapshots where id=? and expires>?',(sid,clock())).fetchone()
+            row = db.execute('select claim from snapshots where id=? and expires>? and not exists(select 1 from controls where disabled=1)',(sid,clock())).fetchone()
         if not row:
             abort(403)
         try:
-            store.access(session.get('grant',''), sid)
+            if store.access(session.get('grant',''), sid)!=row[0]:
+                abort(403)
         except PermissionError:
             abort(403)
         return sid
@@ -97,12 +110,12 @@ def create_private_site(volume, secret, authorize=online, clock=time.time):
 
     @app.post('/private/import')
     def receive():
-        raw = request.get_data()
         claim = request.headers.get('X-Test-Claim','')
-        if not claim or len(claim)>2000 or not hmac.compare_digest(
-                request.headers.get('X-Test-Signature',''),signed_headers(raw,claim)['X-Test-Signature']):
+        signature=request.headers.get('X-Test-Signature','')
+        if not claim or len(claim)>2000 or not re.fullmatch('[a-f0-9]{64}',signature) or not authorize(claim):
             abort(403)
-        if not authorize(claim):
+        raw=request.get_data()
+        if not hmac.compare_digest(signature,signed_headers(raw,claim)['X-Test-Signature']):
             abort(403)
         try:
             manifest,files = unpack(raw)
@@ -117,12 +130,21 @@ def create_private_site(volume, secret, authorize=online, clock=time.time):
                     (source/digest).write_bytes(data)
                 with closing(sqlite3.connect(dbpath)) as db, db:
                     db.execute('begin immediate')
-                    db.execute('insert into snapshots values (?,?,?)',(sid,claim,int(clock())+TTL))
+                    if db.execute('select 1 from controls where disabled=1').fetchone():
+                        abort(403)
+                    existing=db.execute('select expires from snapshots where id=?',(sid,)).fetchone()
+                    if existing:
+                        if existing[0]<=clock() or not (volume/sid/'manifest.json').is_file():
+                            raise ValueError('工作區已到期')
+                        db.execute('update snapshots set claim=? where id=?',(claim,sid))
+                    else:
+                        db.execute('insert into snapshots values (?,?,?)',(sid,claim,int(clock())+TTL))
+                    code=store.record_issue(db,claim,sid)
                     if not authorize(claim):
                         abort(403)
-                    source.rename(volume/sid)
-            code = store.issue(claim,sid)
-            audit(sid,'imported')
+                    db.execute('insert into audit values (?,?,?)',(sid,'resumed' if existing else 'imported',int(clock())))
+                    if not existing:
+                        source.rename(volume/sid)
             return jsonify(code=code),201
         except (ValueError,KeyError,BadZipFile,sqlite3.IntegrityError):
             return jsonify(msg='無法接受測試快照'),422
@@ -174,8 +196,11 @@ def create_private_site(volume, secret, authorize=online, clock=time.time):
 
     class CheckedConnection(sqlite3.Connection):
         def commit(self):
-            access()
-            super().commit()
+            # Serialize local kill and publication, including the fake-device receipt.
+            with closing(sqlite3.connect(dbpath)) as guard,guard:
+                guard.execute('begin immediate')
+                access()
+                super().commit()
 
     @contextmanager
     def connection():
@@ -220,14 +245,7 @@ def create_private_site(volume, secret, authorize=online, clock=time.time):
         manifest = g.manifest
         if manifest.get('design'):
             design = manifest['design']
-            from order_designs import asset_paths
-            mapping = {}
-            for sha in asset_paths(design):
-                name = 'order-design_'+key+'_'+sha+'.png'
-                if not (data_folder()/name).exists():
-                    os.link(data_folder()/sha,data_folder()/name)
-                mapping[sha]=name
-            design=replace_paths(design,mapping)
+            design=copy_document(design,key)
         else:
             sha = manifest['print']['sha256']
             size = manifest['print']['size']
@@ -242,7 +260,7 @@ def create_private_site(volume, secret, authorize=online, clock=time.time):
         if request.endpoint in {'static','enter','bind_browser','redeem','receive'}:
             return
         if request.endpoint not in {'page','open_work','open_pixel','asset','asset_file','save','save_work','extract',
-                                    'upload_design_source','release_design_sources','finish','catalog','checkpoint','heartbeat'}:
+                                    'upload_design_source','release_design_sources','finish','catalog','checkpoint','heartbeat','info','reference_image','sticker_image'}:
             abort(404)
         if request.method not in ('GET','HEAD') and request.headers.get('Origin')!=origin('ADMIN_REEDIT_PRIVATE_ORIGIN'):
             abort(403)
@@ -265,10 +283,50 @@ def create_private_site(volume, secret, authorize=online, clock=time.time):
     def privacy(response):
         if request.endpoint not in {'static','enter','bind_browser','redeem','receive'} and response.status_code<400:
             access()
+            if request.endpoint not in {'heartbeat','catalog','info','sticker_image'}:
+                with closing(sqlite3.connect(dbpath)) as db, db:
+                    db.execute('insert into operations values (?,?,?,?)',
+                               (g.snapshot,g.manifest['operator'],request.endpoint,int(clock())))
         response.headers.update({'Cache-Control':'private, no-store','Referrer-Policy':'no-referrer',
             'X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY',
             'Content-Security-Policy':"default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' blob: data:; frame-ancestors 'none'; form-action 'self'; base-uri 'none'"})
         return response
+
+    @app.get('/private/info')
+    def info():
+        made=[]
+        with connection() as db:
+            if db.execute("select 1 from sqlite_master where name='made'").fetchone():
+                made=[dict(order=i,parent=p,state=s,task=t) for i,p,s,t in db.execute('select id,parent,status,task from made order by rowid')]
+        return jsonify(review=g.manifest['review'],alignment=bool(g.manifest.get('alignment')),orders=made)
+
+    @app.get('/private/reference/<any(preview,alignment):kind>')
+    def reference_image(kind):
+        from flask import send_file
+        entry=g.manifest.get(kind)
+        if not entry:
+            abort(404)
+        raw=(data_folder()/entry['sha256']).read_bytes()
+        if hashlib.sha256(raw).hexdigest()!=entry['sha256']:
+            abort(409)
+        if kind=='alignment':
+            from PIL import Image, ImageChops, ImageFilter
+            with Image.open(io.BytesIO(raw)) as image:
+                alpha=image.convert('RGBA').getchannel('A')
+            bounds=alpha.getbbox()
+            if not bounds or alpha.getextrema()[0]!=0:
+                abort(422)
+            w,h=g.manifest['print']['size']
+            scale=min(1,1200/max(w,h))
+            area=alpha.crop(bounds).resize((max(1,round(w*scale)),max(1,round(h*scale))))
+            area=area.point(lambda v:255 if v>=24 else 0)
+            edge=ImageChops.subtract(area,area.filter(ImageFilter.MinFilter(3)))
+            guide=Image.new('RGBA',area.size,'#e82376')
+            guide.putalpha(ImageChops.lighter(edge,area.point(lambda v:25 if v else 0)))
+            out=io.BytesIO()
+            guide.save(out,'PNG')
+            raw=out.getvalue()
+        return send_file(io.BytesIO(raw),mimetype='image/png')
 
     @app.get('/private/active')
     def heartbeat():
@@ -294,11 +352,48 @@ def create_private_site(volume, secret, authorize=online, clock=time.time):
             return Response(path.read_bytes(),mimetype='application/json')
         return jsonify(None)
 
+    sticker_catalog=json.loads((ROOT/'private_reedit_stickers.json').read_text('utf-8'))
+    sticker_names={s['url'] for s in sticker_catalog['stickers']}
+    for sticker in sticker_catalog['stickers']:
+        name=sticker['url']
+        if not re.fullmatch(r'[a-zA-Z0-9_-]+\.png',name):
+            raise ValueError('素材清單含無效檔名')
+        sticker['url']='/private/sticker/'+name
+
+    @app.get('/private/sticker/<name>')
+    def sticker_image(name):
+        if name not in sticker_names:
+            abort(404)
+        from flask import send_file
+        from editable_stickers import image_bytes
+        path=volume/('sticker-'+name)
+        if not path.exists():
+            url='https://sazoqqgeabjiyzbihpdy.supabase.co/storage/v1/object/public/case-assets/stickers/'+name
+            with requests.get(url,stream=True,timeout=(3,12),allow_redirects=False) as upstream:
+                if upstream.status_code!=200:
+                    abort(502)
+                buffer=io.BytesIO()
+                for block in upstream.iter_content(65536):
+                    buffer.write(block)
+                    if buffer.tell()>16*1024*1024:abort(413)
+                image_bytes(buffer.getvalue())
+                with tempfile.NamedTemporaryFile(dir=volume,delete=False) as tmp:
+                    tmp.write(buffer.getbuffer())
+                os.replace(tmp.name,path)
+        return send_file(path,mimetype='image/png')
+
     @app.get('/api/<any(shop_data,assets,templates):kind>')
     def catalog(kind):
         if kind=='shop_data':
             return jsonify(data=dict(models=[],styles=[],brands=[]))
-        return jsonify(data={'categories':[],'items':[]} if kind=='assets' else [])
+        return jsonify(data=sticker_catalog if kind=='assets' else {'templates':[]})
+
+    def copy_document(doc, key):
+        from order_designs import asset_paths, persist_asset
+        mapping={}
+        for path in asset_paths(doc):
+            mapping[path]=persist_asset(module,key,(data_folder()/path).read_bytes())
+        return replace_paths(doc,mapping)
 
     @app.post('/private/finish/<order_id>')
     def finish(order_id):
@@ -328,25 +423,43 @@ def create_private_site(volume, secret, authorize=online, clock=time.time):
             db.execute('begin immediate')
             db.execute('create table if not exists made(id text primary key,parent text,status text,task text)')
             if not db.execute('select 1 from made where id=?',(key,)).fetchone():
-                if rows[-1]['version']!=record['version']:
+                current=db.execute('select max(version) from order_design_versions where order_id=?',(order_id,)).fetchone()[0]
+                if current!=record['version']:
                     abort(409)
+                version=1
                 if doc.get('mode')!='pixel-v1':
-                    from order_designs import asset_paths
-                    mapping={}
-                    for path in asset_paths(doc):
-                        target='order-design_'+key+'_'+hashlib.sha256((data_folder()/path).read_bytes()).hexdigest()+'.png'
-                        if not (data_folder()/target).exists():
-                            os.link(data_folder()/path,data_folder()/target)
-                        mapping[path]=target
-                    doc=replace_paths(doc,mapping)
-                db.execute('insert into made values (?,?,?,?)',(key,order_id,status,'FAKE-'+key if status=='假設備已接收' else None))
+                    baseline=copy_document(rows[0]['document'],key)
+                    db.execute('insert into order_design_versions values (?,?,?,?,?,?,CURRENT_TIMESTAMP)',
+                               (key,1,json.dumps(baseline),'private-qa','baseline',digest(baseline)))
+                    doc=copy_document(doc,key)
+                    version=2
+                task=None
+                if status=='假設備已接收':
+                    access()
+                    status,task=fake_receipt(db,key,proof['outputSha'])
+                db.execute('insert into made values (?,?,?,?)',(key,order_id,status,task))
                 db.execute('insert into order_design_versions values (?,?,?,?,?,?,CURRENT_TIMESTAMP)',
-                           (key,1,json.dumps(doc),'private-qa','original',digest(doc)))
+                           (key,version,json.dumps(doc),'private-qa','original',digest(doc)))
                 db.commit()
+            else:
+                status,task=db.execute('select status,task from made where id=?',(key,)).fetchone()
         audit(g.snapshot,'finished')
-        return jsonify(order=key,parent=order_id,state=status,location='/admin/order-design/'+key+('?pixel=1' if doc.get('mode')=='pixel-v1' else ''))
+        return jsonify(order=key,parent=order_id,state=status,task=task,location='/admin/order-design/'+key+('?pixel=1' if doc.get('mode')=='pixel-v1' else ''))
 
     return app
+
+
+def fake_receipt(db,key,artwork_hash):
+    """The QA device keeps an immutable local receipt and has no network client."""
+    db.execute('create table if not exists fake_device_receipts (order_id text primary key,sha256 text,task text unique)')
+    result=os.environ.get('PRIVATE_REEDIT_FAKE_RESULT','accepted')
+    if result=='rejected':
+        return '假設備拒絕',None
+    if result!='accepted':
+        return '待核對（假設備回應不明）',None
+    task='FAKE-'+key
+    db.execute('insert into fake_device_receipts values (?,?,?)',(key,artwork_hash,task))
+    return '假設備已接收',task
 
 
 def bool_alpha(value):

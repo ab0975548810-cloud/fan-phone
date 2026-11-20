@@ -38,7 +38,7 @@ class PrivateHttpTests(unittest.TestCase):
         self.volume=Path(temp.name)/'private'
         self.source.mkdir()
         self.volume.mkdir()
-        self.credentials=[dict(credential_id='credential',public_key='publickey')]
+        self.credentials=[dict(credential_id='credential-'+self._testMethodName,public_key='publickey')]
         self.identity=fingerprint(self.credentials[0])
         self.env=patch.dict(os.environ,dict(ADMIN_REEDIT_TEST_ENABLED='true',ADMIN_REEDIT_GENERATION='0123456789abcdef',
 
@@ -49,6 +49,9 @@ class PrivateHttpTests(unittest.TestCase):
         self.art=png('red')
         for name in ('print','preview','sources_mask'):
             (self.source/('orders_A_'+name+'.png')).write_bytes(self.art)
+        mask=Image.new('RGBA',(34,66))
+        mask.paste('white',(1,1,33,65))
+        mask.save(self.source/'orders_A_sources_mask.png')
         dims=[n*25.4/720 for n in (32,64)]
         row=dict(id='A',model_id='m',model_name='M',style_id='s',style_name='S',customer_name='PRIVATE-TEST',
                  print_path='orders_A_print.png',mockup_path='orders_A_preview.png',design_json=dict(
@@ -115,7 +118,7 @@ class PrivateHttpTests(unittest.TestCase):
         self.assertEqual(self.qa.post('/private/redeem',headers=self.headers,json=redeem).status_code,403)
         return snapshot
 
-    def make(self,key,color):
+    def make(self,key,color,expected='假設備已接收'):
         path='/api/admin/order-design/'+key+'/pixel'
         work=self.qa.post(path+'/open',headers=self.headers,json={}).json
         self.assertTrue(work.get('work'),work)
@@ -129,7 +132,7 @@ class PrivateHttpTests(unittest.TestCase):
         self.assertEqual(first.status_code,200,first.data)
         self.assertEqual(self.qa.post(submit,headers=self.headers,json=fields).json,first.json)
         self.assertEqual(first.json['parent'],key)
-        self.assertEqual(first.json['state'],'假設備已接收')
+        self.assertEqual(first.json['state'],expected)
         return first.json['order'],work['design']['previewPath']
 
     def test_private_a_b_c_rollback_retention(self):
@@ -163,6 +166,75 @@ class PrivateHttpTests(unittest.TestCase):
         cleanup(self.volume,now=time.time()+7*86400+1)
         self.assertFalse((self.volume/root).exists())
         self.assertEqual(self.source_contents(),self.before)
+
+    def test_layered_snapshot_private_assets_and_history(self):
+        from editable_stickers import ROOT,FONTS,VERSION
+        photo=png('navy')
+        sha=hashlib.sha256(photo).hexdigest()
+        asset='orders_A_sources_'+sha+'.png'
+        (self.source/asset).write_bytes(photo)
+        with closing(sqlite3.connect(self.source/'original.db')) as db,db:
+            order=json.loads(db.execute('select value from orders').fetchone()[0])
+            d=order['design_json']
+            d['editorContext'].update(productType='camera_film',previewPath='orders_A_sources_mask.png')
+            d.update(version='5.3.1',background='transparent',render_contract_version=VERSION,orderDesignVersion=1,
+                     logicalCanvas=dict(width=32,height=64),fontHashes={k:hashlib.sha256((ROOT/v).read_bytes()).hexdigest() for k,v in FONTS.items()},
+                     objects=[dict(type='image',src=asset,width=32,height=64,sourceSha256=sha,originalName='PRIVATE-TEST.jpg'),
+                              dict(type='rect',width=4,height=7,left=2,top=3,angle=27)])
+            db.execute('update orders set value=?',(json.dumps(order),))
+            db.execute('delete from print_jobs')
+        before=self.source_contents()
+        key=self.enter()
+        root='/api/admin/order-design/'+key
+        work=self.qa.post(root+'/open',headers=self.headers,json={}).json
+        d=work['design']
+        image=d['objects'][0]
+        self.assertEqual(self.qa.get(image['src']).data,photo)
+        self.assertNotIn('originalName',image)
+        self.assertEqual(d['editorContext']['productType'],'camera_film')
+        self.assertEqual(d['objects'][1]['angle'],27)
+        checkout='a'*32
+        upload=self.qa.post('/api/design-sources',headers=self.headers,data={'checkout':checkout,'file':(io.BytesIO(photo),'part.png','image/png')})
+        self.assertEqual(upload.status_code,200,upload.data)
+        image.pop('src');image['sourceRef']=upload.json['sourceRef']
+        d['sourceCheckout']=checkout
+        d['objects'][1]['angle']=42
+        save=self.qa.post(root+'/save',headers=self.headers,json={'work':work['work'],'design':d})
+        self.assertEqual(save.status_code,200,save.data)
+        made=self.qa.post('/private/finish/'+key,headers=self.headers,json=dict(hash=save.json['hash'],version=save.json['version'])).json
+        self.assertEqual(made['state'],'待核對')
+        self.assertEqual(key,self.enter())
+        reopen=self.qa.post('/api/admin/order-design/'+made['order']+'/open',headers=self.headers,json={}).json
+        self.assertEqual(reopen['design']['objects'][1]['angle'],42)
+        self.assertEqual(self.source_contents(),before)
+
+    def test_tampered_bundle_and_service_outage(self):
+        import requests
+        from reedit_private_site import online
+        with patch('requests.post',side_effect=requests.Timeout):
+            self.assertFalse(online('test'))
+        bad=self.qa.post('/private/import',data=b'not a bundle',headers={'X-Test-Claim':'invalid','X-Test-Signature':'0'*64})
+        self.assertEqual(bad.status_code,403)
+        self.assertEqual([p.name for p in self.volume.iterdir()],['access.db'])
+        from reedit_private_handoffs import PrivateHandoffs
+        self.login()
+        with patch.object(PrivateHandoffs,'record_issue',side_effect=ValueError('cancel')):
+            self.assertEqual(self.prod.post(self.start,headers=self.src_headers).status_code,422)
+        self.assertEqual([p.name for p in self.volume.iterdir()],['access.db'])
+        with closing(sqlite3.connect(self.volume/'access.db')) as db:
+            self.assertEqual(db.execute('select count(*) from snapshots').fetchone(),(0,))
+            self.assertEqual(db.execute('select count(*) from handoffs').fetchone(),(0,))
+
+    def test_fake_rejection_unknown_and_missing_evidence(self):
+        key=self.enter()
+        with patch.dict(os.environ,{'PRIVATE_REEDIT_FAKE_RESULT':'timeout'}):
+            key,_=self.make(key,'blue','待核對（假設備回應不明）')
+        with patch.dict(os.environ,{'PRIVATE_REEDIT_FAKE_RESULT':'rejected'}):
+            key,_=self.make(key,'green','假設備拒絕')
+        (self.source/'orders_A_sources_mask.png').unlink()
+        key=self.enter()
+        self.make(key,'blue','待核對')
+        self.assertTrue(self.qa.get('/private/info').json['review'])
 
     def test_removed_registration_cannot_open_or_view(self):
         root=self.enter()

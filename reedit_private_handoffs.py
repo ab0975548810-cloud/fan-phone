@@ -24,16 +24,18 @@ class PrivateHandoffs:
     def issue(self, subject, snapshot):
         if not self.authorize(subject):
             raise PermissionError()
-        now = int(self.clock())
-        code = secrets.token_urlsafe(32)
         with closing(sqlite3.connect(self.database)) as db, db:
             db.execute('begin immediate')
-            recent,pending = db.execute("""select count(*),count(case when expires>? and session_hash is null then 1 end)
-                from handoffs where subject=? and created>?""",(now,subject,now-60)).fetchone()
-            if recent>=6 or pending>=2:
-                raise ValueError('Too many pending requests')
-            db.execute('insert into handoffs values (?,?,?,?,null,null,?)',
-                       (hashed(code),subject,snapshot,now+45,now))
+            return self.record_issue(db,subject,snapshot)
+
+    def record_issue(self,db,subject,snapshot):
+        now=int(self.clock())
+        code=secrets.token_urlsafe(32)
+        recent,pending=db.execute("""select count(*),count(case when expires>? and session_hash is null then 1 end)
+            from handoffs where (subject=? or snapshot=?) and created>?""",(now,subject,snapshot,now-60)).fetchone()
+        if recent>=6 or pending>=2:
+            raise ValueError('Too many pending requests')
+        db.execute('insert into handoffs values (?,?,?,?,null,null,?)',(hashed(code),subject,snapshot,now+45,now))
         return code
 
     def redeem(self, code, subject):

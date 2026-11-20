@@ -69,7 +69,10 @@ def export_artwork(app, order_id):
                 raise ValueError()
             raw=read(app,path)
             from editable_stickers import image_bytes
-            image_bytes(raw)
+            image_bytes(raw,transparent=True)
+            with Image.open(io.BytesIO(raw)) as mask:
+                if mask.getchannel('A').getbbox() is None:
+                    raise ValueError('封存刀模缺少印刷範圍')
             sha=hashlib.sha256(raw).hexdigest()
             geometry=[float(production[k]) for k in ('printW','printH')]+[float(context[k]) for k in ('printX','printY','printAngle')]
             if not all(map(math.isfinite,geometry)) or design.get('modelId')!=order['model_id'] or design.get('styleId')!=order['style_id']:
@@ -131,12 +134,12 @@ OBJECT_KEYS = set("""type version originX originY left top width height scaleX s
     templateApplicationId layerName assetId duplicateOf normalizedGeometry zIndex adaptationRole locked canMove
     canScale canRotate canDelete canDuplicate canEdit templateSlot slotMeta layer_contract_version
     start end widthRatio heightRatio aiOutlineStyle aiOutlineStrength aiOutlineWidth aiOutlineColor
-    aiRemovalMode offset gradientUnits gradientTransform colorStops coords x1 y1 x2 y2 offsetX offsetY""".split())
+    aiRemovalMode minFontSize editableStickerStyle offset gradientUnits gradientTransform colorStops coords x1 y1 x2 y2 offsetX offsetY""".split())
 
 
 def export_layers(app, order_id, design, manifest, files):
     from order_designs import asset_paths, check_restore
-    from editable_stickers import image_bytes
+    from editable_stickers import FONTS, image_bytes, nodes
     check_restore(design)
     if design['modelId'] != manifest['model_id'] or design['styleId'] != manifest['style_id']:
         raise ValueError('型號或殼款不符')
@@ -158,6 +161,9 @@ def export_layers(app, order_id, design, manifest, files):
                 raise ValueError('快照素材總量過大')
             assets[sha] = raw
         mapping[path] = sha
+    for obj in nodes(design):
+        if obj.get('type')=='image' and obj.get('sourceSha256')!=mapping.get(obj.get('src')):
+            raise ValueError('原始圖片素材雜湊不符')
 
     def layer(value):
         if isinstance(value, list):
@@ -177,7 +183,7 @@ def export_layers(app, order_id, design, manifest, files):
 
     allowed = ('version','modelId','styleId','render_contract_version','orderDesignVersion','background','fontHashes')
     result = {key:design[key] for key in allowed if key in design}
-    result['fontHashes'] = {k:design['fontHashes'][k] for k in __import__('editable_stickers').FONTS}
+    result['fontHashes'] = {k:design['fontHashes'][k] for k in FONTS}
     result['logicalCanvas'] = {k:design['logicalCanvas'][k] for k in ('width','height')}
     for key in ('objects','sourceAssets','editorGuides','emptyTemplateSlots'):
         if key in design:
