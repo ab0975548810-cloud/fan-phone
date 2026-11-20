@@ -137,11 +137,36 @@ def application():
         <title>本福丸私有驗收</title><h1>合成訂單測試</h1><form method=post action=/qa/start>
         <label>專用測試碼 <input name=key type=password required></label><button>開啟測試訂單</button></form>"""
 
-    @source.post('/qa/start')
-    def start():
+    def require_operator():
         if request.headers.get('Origin')!=PUBLIC or not hmac.compare_digest(
                 hashlib.sha256(request.form.get('key','').encode()).hexdigest(),os.environ['QA_LOGIN_SHA256']):
             abort(403)
+    @source.post('/qa/control/<action>')
+    def control(action):
+        require_operator()
+        if not slot.acquire(False):
+            abort(429)
+        try:
+            if action == 'disable':
+                cleanup(VOLUME, revoke=True)
+            elif action == 'resume':
+                with closing(sqlite3.connect(VOLUME/'access.db')) as db, db:
+                    db.execute('delete from controls where id=1')
+            elif action == 'restore-drill':
+                from synthetic_reedit_load import verify_restore
+                return jsonify(verify_restore(VOLUME, SID))
+            elif action == 'measure':
+                from synthetic_reedit_load import measure
+                return jsonify(measure())
+            else:
+                abort(404)
+            return jsonify(action=action)
+        finally:
+            slot.release()
+
+    @source.post('/qa/start')
+    def start():
+        require_operator()
         if not slot.acquire(False):abort(429)
         try:
             claim=signer.dumps({'fixture':SID,'nonce':secrets.token_hex(16)})
@@ -167,7 +192,7 @@ def application():
 
     @source.after_request
     def headers(response):
-        response.headers.update({'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Frame-Options':'DENY'})
+        response.headers.update({'Cache-Control':'no-store','Referrer-Policy':'same-origin','X-Frame-Options':'DENY'})
         return response
 
     routes={r.rule for r in source.url_map.iter_rules()}
@@ -183,7 +208,7 @@ def application():
             # Flask responses here have known lengths. Reserve bytes before sending
             # and keep the cumulative allowance through Railway restarts.
             length=dict(headers).get('Content-Length')
-            if length is None and env['REQUEST_METHOD']!='HEAD':
+            if length is None and env['REQUEST_METHOD']!='HEAD' and status[:3] not in ('204','304'):
                 raise ValueError('Unbounded QA response')
             charge=int(length or 0)+2048
             with closing(sqlite3.connect(budget)) as db,db:
@@ -191,7 +216,7 @@ def application():
                     os.kill(os.getppid(),signal.SIGTERM)
                     raise RuntimeError('QA transfer budget exhausted')
             return start_response(status,headers,exc_info)
-        return (source if path in routes else editor)(env,bounded)
+        return (source if path in routes or path.startswith('/qa/control/') else editor)(env,bounded)
     return dispatch
 
 
