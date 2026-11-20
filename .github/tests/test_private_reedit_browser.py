@@ -66,12 +66,15 @@ def run():
                         recordHistory();
                     }""")
                 with page.expect_response(lambda response:response.url.endswith('/pixel/save')) as saving:
-                    page.locator('#pixel-save').click()
+                    page.get_by_role('button',name='完成測試製作').click()
                 reply=saving.value
                 assert reply.ok,(reply.status,reply.json().get('msg'))
                 link=page.locator('#private-reedit-status a')
                 link.wait_for()
                 assert '假設備已接收' in page.locator('#private-reedit-status').text_content()
+                with page.expect_response(lambda response:'/private/finish/' in response.url) as replay:
+                    page.get_by_role('button',name='完成測試製作').click()
+                assert replay.value.json()['order'] in link.text_content()
                 if step==1:link.click()
             private_db=next(fx.volume.glob('*/work.db'))
             with closing(sqlite3.connect(private_db)) as db:

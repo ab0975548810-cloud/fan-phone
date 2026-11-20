@@ -6,6 +6,12 @@
   banner.style.cssText='position:relative;z-index:10;background:#fff1c2;color:#462f00;padding:6px;text-align:center';
   banner.textContent='重新編輯（測試）· 私有工作副本 · 僅使用假設備';
   document.body.prepend(banner);
+  const modeStyle=document.createElement('style');
+  modeStyle.textContent='#pixel-save,#pixel-review,#order-design-save,#order-design-review{display:none!important}';
+  document.head.append(modeStyle);
+  const done=document.querySelector('#page-editor .done');
+  done.onclick=()=>window.confirmDesignToCart();
+  done.setAttribute('aria-label','完成測試製作');
   async function references(){
     const r=await fetch('/private/info',{cache:'no-store'});
     if(!r.ok)return;

@@ -403,7 +403,7 @@ def create_private_site(volume, secret, authorize=online, clock=time.time):
         payload=request.get_json()
         rows=module.order_designs.rows(order_id)
         record=next((r for r in rows if r['version']==payload.get('version') and r['content_hash']==payload.get('hash')),None)
-        if not record or record['version']<2:
+        if not record or record['version']<2 or record['request_id'] in ('original','baseline'):
             abort(409)
         key='MK-'+digest([order_id,record['content_hash'],record['version']])[:32]
         doc=record['document']
