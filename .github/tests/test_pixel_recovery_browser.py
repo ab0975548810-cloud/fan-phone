@@ -47,7 +47,6 @@ def run():
             assert page.evaluate('canvas.getRetinaScaling()') == 1
 
             def select():
-                page.locator('#pixel-extract').click()
                 x,y = page.evaluate("""() => {
                     const point=fabric.util.transformPoint(new fabric.Point(200,210),canvas.viewportTransform);
                     const r=canvas.upperCanvasEl.getBoundingClientRect();
