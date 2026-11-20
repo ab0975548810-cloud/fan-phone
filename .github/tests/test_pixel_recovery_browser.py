@@ -23,7 +23,8 @@ def run():
     size = (2030, 4241)
     original = Image.new('RGBA', size)
     draw = ImageDraw.Draw(original)
-    draw.ellipse((760, 820, 1230, 1300), fill=(45, 120, 190, 183))
+    for cx in (300, 650, 1000, 1350, 1700):
+        draw.ellipse((cx-100, 950, cx+100, 1150), fill=(45, 120, 190, 183))
     draw.rectangle((1500, 3000, 1590, 3090), fill=(240, 80, 30, 255))
     raw = fixture.encode(original)
     Path(app.SAVE_DIR, order['print_path']).write_bytes(raw)
@@ -46,12 +47,12 @@ def run():
             wait(page, "document.querySelector('#pixel-status')?.textContent.includes('正在編輯 V1')")
             assert page.evaluate('canvas.getRetinaScaling()') == 1
 
-            def select():
-                x,y = page.evaluate("""() => {
-                    const point=fabric.util.transformPoint(new fabric.Point(200,210),canvas.viewportTransform);
+            def select(cx):
+                x,y = page.evaluate("""cx => {
+                    const point=fabric.util.transformPoint(new fabric.Point(cx,210),canvas.viewportTransform);
                     const r=canvas.upperCanvasEl.getBoundingClientRect();
                     return [r.left+point.x*r.width/canvas.getWidth(),r.top+point.y*r.height/canvas.getHeight()];
-                }""")
+                }""",cx)
                 page.touchscreen.tap(x,y)
                 wait(page, "canvas.getObjects().some(o=>o.pixelExtractionBounds)")
 
@@ -66,7 +67,7 @@ def run():
                 }""",[key,value])
 
             for i in range(5):
-                select()
+                select((60,130,200,270,340)[i])
                 adjust('left',220+i)
                 adjust('scaleX',.28)
                 adjust('scaleY',.28)
@@ -85,12 +86,12 @@ def run():
                     }""")
                 if i < 4:
                     page.evaluate("canvas.remove(canvas.getObjects().find(o=>o.pixelExtractionBounds));recordHistory()")
-                    assert page.evaluate('canvas.getObjects().length') == 1
+                    assert page.evaluate('canvas.getObjects().length') == i+1
                     page.locator('#pixel-back').click()
                     page.wait_for_url(base+'/admin')
                     page.goto(base+path)
                     wait(page,"document.querySelector('#pixel-status')?.textContent.includes('已復原')")
-                    assert page.evaluate('canvas.getObjects().length') == 1
+                    assert page.evaluate('canvas.getObjects().length') == i+1
 
             with page.expect_response(lambda response: response.url.endswith('/pixel/save')) as saved:
                 page.locator('#pixel-save').click()
@@ -98,7 +99,7 @@ def run():
             wait(page,"document.querySelector('#pixel-status')?.textContent.includes('V2 已保存')")
             page.reload()
             wait(page,"document.querySelector('#pixel-status')?.textContent.includes('正在編輯 V2')")
-            assert page.evaluate('canvas.getObjects().filter(o=>o.pixelExtractionMask).length')==1
+            assert page.evaluate('canvas.getObjects().filter(o=>o.pixelExtractionMask).length')==5
             assert page.evaluate('canvas.getObjects().find(o=>o.pixelExtractionBounds).angle')==27
             page.locator('#pixel-review').click()
             wait(page,"Array.from(document.querySelectorAll('#pixel-compare img')).length===2 && Array.from(document.querySelectorAll('#pixel-compare img')).every(im=>im.naturalHeight===1200)")
