@@ -39,6 +39,7 @@ def run():
                 page.evaluate('async url=>{await addStickerImage(url)}',fixtures.data(fixtures.picture((30,30))))
                 wait(page,'canvas.getObjects().length===3')
                 page.evaluate("()=>{canvas.getObjects().forEach(o=>{o.set({left:110,top:30,scaleX:1,scaleY:1});});recordHistory();}")
+                page.locator('#pixel-extra summary').click()
                 page.get_by_role('button',name='新增局部遮蓋',exact=True).click()
                 page.get_by_role('button',name='新增擦除區（可移動／縮放）',exact=True).click()
                 page.evaluate("()=>{const o=canvas.getObjects().find(o=>o.pixelErase);o.set({left:80,top:80,width:20,height:20});canvas.fire('object:modified',{target:o});}")

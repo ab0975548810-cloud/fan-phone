@@ -7,6 +7,7 @@
   window.idbGet=async()=>null;window.idbSet=async()=>{};window.idbDel=async()=>{};
   const editorURL = new URL(location.href);
   const order=decodeURIComponent(location.pathname.split('/').pop()),root='/api/admin/order-design/'+encodeURIComponent(order)+'/pixel';
+  const recoveryOrder=new URLSearchParams(location.search).get('source')||order;
   let work,busy=false,dirty=false,generation=0,checkpointQueued=false,durableGeneration=-1;
   let checkpointWrite=Promise.resolve(), recoveryReady=false, recoveryUnavailable=false;
   const localImages=new Map();
@@ -28,7 +29,7 @@
         .map(([url,asset])=>[url,asset.bytes]);
       const captured=generation,record={hash:work.hash,objects,assets};
       checkpointWrite=checkpointWrite.catch(()=>{}).then(async()=>{
-        await BenfuwanPixelRecovery.write(order,record);
+        await BenfuwanPixelRecovery.write(recoveryOrder,record);
         durableGeneration=captured;recoveryUnavailable=false;reportRecovery();
       }).catch(error=>{
         recoveryUnavailable=true;reportRecovery();
@@ -43,7 +44,7 @@
     return value;
   }
   async function restoreDraft(design){
-    const draft=await BenfuwanPixelRecovery.read(order);
+    const draft=await BenfuwanPixelRecovery.read(recoveryOrder);
     if(!draft||draft.hash!==design.hash)return false;
     const urls=new Map();
     for(const [src,stored] of draft.assets){
@@ -70,11 +71,12 @@
   window.submitOrder=()=>toast('修補模式不建立銷售訂單');window.confirmDesignToCart=()=>save();
   window.openPreview=()=>compare();
   window.startNewDesign=()=>false;
+  window.navBack=()=>document.getElementById('pixel-back')?.click();
   // Native bitmap repair has no catalog mask. The server enforces V1 alpha.
   window.applyCaseBoundaryClip=()=>{if(typeof canvas!=='undefined'&&canvas)canvas.clipPath=null;};
   window.addEventListener('beforeunload',e=>{if(dirty&&durableGeneration!==generation){e.preventDefault();e.returnValue='';}});
   const button=(text,id,fn)=>{const b=document.createElement('button');b.textContent=text;b.id=id;b.onclick=fn;return b;};
-  let selecting=false,manualSelecting=false,firstCorner=null,originalPreview=null,previewBitmap=null,previewBackground=null,originalBackground=null;
+  let clearOriginal=false,selecting=false,manualSelecting=false,firstCorner=null,originalPreview=null,previewBitmap=null,previewBackground=null,originalBackground=null;
   const fabricImage=url=>new Promise((resolve,reject)=>fabric.Image.fromURL(url,im=>im?resolve(im):reject(Error('提取素材無法載入')),{crossOrigin:'anonymous'}));
   let contour=null;
   function updateSelectionMode(){
@@ -128,27 +130,39 @@
     const loaded=[];
     try{
       const payload=polygon?{work:work.work,polygon}:rectangle?{work:work.work,rectangle}:{work:work.work,x:point.x,y:point.y};
+      if(clearOriginal)payload.clear=true;
       const result=await api('/extract',payload);
       const bounds=result.bounds,factor=work.design.factor;
-      if(canvas.getObjects().some(o=>o.pixelExtractionBounds&&JSON.stringify(o.pixelExtractionBounds)===JSON.stringify(bounds)))
-        throw Error('這個圖案已經提取過，請直接移動既有圖層');
-      loaded.push(await extractionImage(result.cutout));
-      const picture=loaded[0].image;
       const key=result.eraseHash+':'+bounds.join(',');
       const existing=canvas.getObjects().find(o=>o.pixelExtractionMaskKey===key);
-      if(!existing)loaded.push(await extractionImage(result.erase));
+      if(existing&&!clearOriginal&&!rectangle&&!polygon){status('原圖此處已清除，可點選移動後的圖層。');return;}
+      if(clearOriginal&&existing){status('原圖選取區已清除；後加圖層可分開刪除。');return;}
+      const pictureAsset=clearOriginal?null:await extractionImage(result.cutout);
+      if(pictureAsset)loaded.push(pictureAsset);
+      const maskAsset=existing?null:await extractionImage(result.erase);
+      if(maskAsset)loaded.push(maskAsset);
       for(const {url,blob,bytes} of loaded)localImages.set(url,{blob,bytes});
-      const mask=existing||loaded[1].image;
       const placement={left:bounds[0]/factor,top:bounds[1]/factor,scaleX:1/factor,scaleY:1/factor};
-      mask.set({...placement,pixelErase:true,pixelExtractionMask:true,pixelExtractionMaskKey:key,visible:false,selectable:false,evented:false,objectCaching:false});
-      picture.set({...placement,pixelExtractionBounds:bounds,objectCaching:false});
-      if(!existing)canvas.add(mask);
-      canvas.add(picture);canvas.setActiveObject(picture);
+      if(maskAsset){
+        maskAsset.image.set({...placement,pixelErase:true,pixelExtractionMask:true,pixelExtractionMaskKey:key,
+          visible:false,selectable:false,evented:false,objectCaching:false});
+        canvas.add(maskAsset.image);
+      }
+      if(pictureAsset){
+        pictureAsset.image.set({...placement,pixelExtractionBounds:bounds,objectCaching:false});
+        canvas.add(pictureAsset.image);
+        canvas.setActiveObject(pictureAsset.image);
+      }
       rebuildBackground();canvas.requestRenderAll();mark();recordHistory();
-      status('已提取 '+result.pixels+' 個像素：現在可以移動、縮放、旋轉或刪除圖層。原始 V1 不變。');
+      status(clearOriginal?'已清除原圖選取區；可用「上一步」復原。原始 V1 不變。':
+        '已提取 '+result.pixels+' 個像素；可移動、縮放、旋轉或刪除提取圖層。原始 V1 不變。');
     }catch(error){status(error.message);}
     finally{
       for(const asset of loaded)if(!localImages.has(asset.url))URL.revokeObjectURL(asset.url);
+      if(clearOriginal){
+        clearOriginal=false;
+        document.getElementById('pixel-clear-original').setAttribute('aria-pressed','false');
+      }
       busy=false;pruneImages();
     }
   }
@@ -196,7 +210,7 @@
       canvas.backgroundImage=null;
       canvas.skipOffscreen=false;
       canvas.setViewportTransform([1,0,0,1,0,0]);
-      settings.forEach(([o,v])=>o.set({visible:name==='erase'?!!o.pixelErase&&(v||!!o.pixelExtractionMask):v&&!o.pixelErase,objectCaching:false}));
+      settings.forEach(([o,v])=>o.set({visible:name==='erase'?!!o.pixelErase&&v&&!o.pixelExtractionMask:v&&!o.pixelErase,objectCaching:false}));
       return canvas.toCanvasElement(design.factor,{
         left:x/design.factor,top:y/design.factor,
         width:(width+.001)/design.factor,height:(height+.001)/design.factor
@@ -206,9 +220,24 @@
       settings.forEach(([o,v,c])=>o.set({visible:v,objectCaching:c}));canvas.requestRenderAll();
     }
   }
+  function drawNativeErasure(bitmap, objects, factor, x, y){
+    const context=bitmap.getContext('2d');
+    for(const obj of objects){
+      if(!obj.pixelExtractionMask)continue;
+      const source=obj.getElement();
+      if(!source)continue;
+      const position=obj.pixelExtractionMaskKey?.split(':')[1]?.split(',').map(Number);
+      const left=(position?.length===4?position[0]:Math.round(obj.left*factor))-x;
+      const top=(position?.length===4?position[1]:Math.round(obj.top*factor))-y;
+      // Extracted alpha is already binary at native pixel resolution.
+      // Draw at integer coordinates without resampling the erase boundary.
+      context.drawImage(source,left,top);
+    }
+  }
   async function save(){
     if(busy)return;busy=true;
     try{
+      if(work.version>=2&&!dirty){status(await BenfuwanOrderWorkspace.finish(order,work));return;}
       await ensureCanvasFonts();canvas.discardActiveObject();
       clearTimeout(historyTimer);recordHistory();
       const submitted=generation, objects=canvas.getObjects().slice(), design=work.design;
@@ -230,6 +259,7 @@
             const bitmap=renderTile(design,objects,name,x,y,width,height);
             try{
               if(bitmap.width!==width||bitmap.height!==height)throw Error('高解析度畫布尺寸不符，請重新開啟再試');
+              if(name==='erase')drawNativeErasure(bitmap,objects,design.factor,x,y);
               form.append(name+'-'+x+'-'+y,await pngBlob(bitmap),name+'.png');
             }finally{bitmap.width=bitmap.height=0;}
           }
@@ -241,11 +271,12 @@
       work=result;dirty=generation!==submitted;
       if(dirty){checkpoint();}
       else{
-        try{await BenfuwanPixelRecovery.remove(order);}
+        try{await BenfuwanPixelRecovery.remove(recoveryOrder);}
         catch(e){emit('checkpoint-error');}
         reportRecovery();
       }
-      status('V'+work.version+' 已保存；V1 原圖未變更'+(work.design.proof?.alphaExpansion?'；此版移至原透明區，僅可保存／比較，禁止送印':'；尚未送印')+(dirty?'；另有尚未保存的修改':''));
+      if(dirty)status('V'+work.version+' 已保存；V1 原圖未變更'+(work.design.proof?.alphaExpansion?'；此版移至原透明區，僅可保存／比較，禁止送印':'；尚未送印')+(dirty?'；另有尚未保存的修改':''));
+      if(!dirty)status(await BenfuwanOrderWorkspace.finish(order,work));
     }catch(e){status(e.message);}finally{busy=false;}
   }
   async function compare(){
@@ -261,10 +292,11 @@
     const tools=document.createElement('div');tools.id='pixel-tools';tools.innerHTML='<strong>原生產圖像素修補</strong><p>點選獨立圖案，或沿相連素材的邊緣圈選，再拖曳調整位置。</p><p id="pixel-status" role="status">正在讀取原生產圖…</p><p id="pixel-recovery" aria-live="polite"></p>';
     document.querySelector('#page-editor > .top').after(tools);
     style.textContent+='#page-editor #canvas-shell{border-radius:0!important}#page-editor #safe-guide,#page-editor #phone-mask{display:none!important}';
-    tools.append(button('儲存修改','pixel-save',save),button('V1／V2 比較與確認','pixel-review',compare));
-    tools.append(button('點選原圖素材（提取成圖層）','pixel-extract',()=>{if(!work||busy)return;contour=null;manualSelecting=false;firstCorner=null;selecting=!selecting;updateSelectionMode();status(selecting?'請點一下原始圖案。再次按此鍵取消。':'已取消原圖選取。');}));
-    tools.append(button('手動框選素材（點兩個角落）','pixel-rectangle',()=>{if(!work||busy)return;contour=null;manualSelecting=!manualSelecting;selecting=false;firstCorner=null;updateSelectionMode();status(manualSelecting?'請依序點選圖案範圍的左上、右下兩角；可能會切到相鄰圖案，需人工檢查。':'已取消手動框選。');}));
-    tools.append(button('沿輪廓點選','pixel-contour',()=>{
+    tools.append(button('完成製作','pixel-save',save),button('版本紀錄','pixel-review',compare));
+    document.querySelectorAll('button[onclick="deleteActive()"]').forEach(b=>{b.textContent='刪除選取圖層';});
+    const extra=document.createElement('details');extra.id='pixel-extra';extra.innerHTML='<summary>更多操作／手動圈選</summary>';tools.append(extra);
+    extra.append(button('手動框選素材（點兩個角落）','pixel-rectangle',()=>{if(!work||busy)return;contour=null;manualSelecting=!manualSelecting;selecting=false;firstCorner=null;updateSelectionMode();status(manualSelecting?'請依序點選圖案範圍的左上、右下兩角；可能會切到相鄰圖案，需人工檢查。':'已取消手動框選。');}));
+    extra.append(button('沿輪廓點選','pixel-contour',()=>{
       if(!work||busy)return;
       selecting=manualSelecting=false;firstCorner=null;contour=contour?null:[];
       updateSelectionMode();status(contour?'沿素材邊緣依序點選，再按「完成圈選」。再次按此鍵可取消。':'已取消圈選');
@@ -275,8 +307,18 @@
     }),button('退回一點','pixel-contour-undo',()=>{
       if(!busy&&contour?.length){contour.pop();canvas.requestRenderAll();status('圈選已標記 '+contour.length+' 點');}
     }));
-    tools.append(button('新增局部遮蓋','pixel-cover',()=>{canvas.add(new fabric.Rect({left:10,top:10,width:40,height:40,fill:'#ffffff'}));mark();}));
-    tools.append(button('新增擦除區（可移動／縮放）','pixel-erase',()=>{const rect=new fabric.Rect({left:10,top:10,width:40,height:40,fill:'#ff00ff',opacity:1,pixelErase:true});canvas.add(rect);canvas.setActiveObject(rect);mark();}));
+    const clearButton=button('清除原圖選取區','pixel-clear-original',()=>{
+      if(!work||busy)return;
+      clearOriginal=!clearOriginal;
+      clearButton.setAttribute('aria-pressed',String(clearOriginal));
+      contour=null;manualSelecting=false;firstCorner=null;selecting=clearOriginal;
+      updateSelectionMode();
+      status(clearOriginal?'清除模式：可點選原圖、手動框選或沿輪廓圈選。只清除原圖選取區。':'已離開原圖清除模式。');
+    });
+    clearButton.setAttribute('aria-pressed','false');
+    extra.append(clearButton);
+    extra.append(button('新增局部遮蓋','pixel-cover',()=>{canvas.add(new fabric.Rect({left:10,top:10,width:40,height:40,fill:'#ffffff'}));mark();}));
+    extra.append(button('新增擦除區（可移動／縮放）','pixel-erase',()=>{const rect=new fabric.Rect({left:10,top:10,width:40,height:40,fill:'#ff00ff',opacity:1,pixelErase:true});canvas.add(rect);canvas.setActiveObject(rect);mark();}));
     tools.append(button('返回後台','pixel-back',async()=>{
       if(busy||restoringHistory)return;
       clearTimeout(historyTimer);recordHistory();
@@ -285,10 +327,12 @@
       location.href='/admin';
     }));
     try{
-      work=await api('/open');await loadAll();const d=work.design;
+      work=await api('/open',{source:new URLSearchParams(location.search).get('source')});const d=work.design;
       ctx={...ctx,modelId:'pixel-original',styleId:'pixel-original',modelName:'原生產 PNG',styleName:'像素修補',printW:d.size[0]/d.factor/3,printH:d.size[1]/d.factor/3,maskUrl:'',printLineUrl:'',backgroundColor:'transparent',backgroundOpacity:0};
       document.getElementById('editor-model').textContent=ctx.modelName;document.getElementById('editor-style').textContent=ctx.styleName;
-      editorURL.hash='editor';history.replaceState({page:'page-editor'},'',editorURL);showPage('page-editor');initCanvas();editorHasSession=true;
+      if(window.BenfuwanOrderWorkspace)BenfuwanOrderWorkspace.openEditor();
+      else{editorURL.hash='editor';history.replaceState({page:'page-editor'},'',editorURL);showPage('page-editor');}
+      initCanvas();editorHasSession=true;
       canvas.setDimensions({width:d.size[0]/d.factor,height:d.size[1]/d.factor});canvas.backgroundColor='transparent';canvas.clipPath=null;
       baseClip=new fabric.Rect({left:0,top:0,width:d.size[0]/d.factor,height:d.size[1]/d.factor,absolutePositioned:true});
       // BackgroundImage is outside the selectable object list and all layer controls.
@@ -298,7 +342,7 @@
       try{recovered=await restoreDraft(work);}
       catch(e){recoveryUnavailable=true;reportRecovery();emit('checkpoint-error',{cause:e.name});}
       for(const name of ['applyTemplate','applyTemplateById','setBackgroundColor'])if(typeof window[name]==='function')window[name]=()=>toast('像素修補不套用模板或整張背景，請新增局部遮蓋');
-      window.openPreview=compare;window.confirmDesignToCart=save;
+      window.openPreview=save;window.confirmDesignToCart=save;
       const rehydrate=window.rehydrateCanvas;
       window.rehydrateCanvas=function(){
         const result=rehydrate.apply(this,arguments);
@@ -346,7 +390,11 @@
       canvas.on('object:added',layerChanged);
       canvas.on('object:removed',layerChanged);
       canvas.on('object:modified',mark);
+      let tap=null;
+      const sample=document.createElement('canvas');sample.width=sample.height=1;
+      const pixel=sample.getContext('2d',{willReadFrequently:true});
       canvas.on('mouse:down',event=>{
+        tap=null;
         if(busy||event.target)return;
         const point=canvas.getPointer(event.e);
         if(contour){
@@ -358,10 +406,27 @@
           const rectangle=[firstCorner.x,firstCorner.y,point.x,point.y];
           manualSelecting=false;firstCorner=null;updateSelectionMode();void extractAt(point,rectangle);return;
         }
-        if(!selecting)return;
+        if(!selecting){tap=canvas.getPointer(event.e,true);return;}
         selecting=false;updateSelectionMode();void extractAt(point);
       });
       rebuildBackground();
+      canvas.upperCanvasEl.addEventListener('touchstart',e=>{if(e.touches.length>1)tap=null;},{passive:true});
+      canvas.upperCanvasEl.addEventListener('touchcancel',()=>{tap=null;});
+      canvas.on('mouse:move',event=>{
+        if(!tap)return;
+        const p=canvas.getPointer(event.e,true);
+        if(Math.hypot(tap.x-p.x,tap.y-p.y)>6)tap=null;
+      });
+      canvas.on('mouse:up',event=>{
+        if(!tap)return;
+        tap=null;
+        if(busy||event.target||restoringHistory)return;
+        const p=canvas.getPointer(event.e),bg=canvas.backgroundImage?.getElement();
+        if(!bg)return;
+        pixel.clearRect(0,0,1,1);
+        pixel.drawImage(bg,Math.floor(p.x*bg.width/canvas.getWidth()),Math.floor(p.y*bg.height/canvas.getHeight()),1,1,0,0,1,1);
+        if(pixel.getImageData(0,0,1,1).data[3])void extractAt(p);
+      });
       canvas.on('after:render',({ctx})=>{
         canvas.backgroundColor='transparent';
         if(!contour?.length||ctx?.canvas!==canvas.lowerCanvasEl)return;
@@ -369,8 +434,17 @@
         ctx.beginPath();contour.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y));ctx.closePath();ctx.stroke();
         for(const [x,y] of contour)ctx.fillRect(x-2,y-2,4,4);ctx.restore();
       });
+      if(window.BenfuwanOrderWorkspace){
+        fetch(root+'/alignment',{cache:'no-store'}).then(async response=>{
+          if(!response.ok)throw Error();
+          const guide=await response.json();
+          if(guide.modelName)document.getElementById('editor-model').textContent=guide.modelName;
+          if(guide.styleName)document.getElementById('editor-style').textContent=guide.styleName;
+          window.BenfuwanOrderWorkspace.addGuide(guide.guide,guide.note,tools);
+        }).catch(()=>window.BenfuwanOrderWorkspace.addGuide(null,'原始蒙版暫時無法讀取。',tools));
+      }
       window.BenfuwanEditorAccess?.fitCanvas?.();canvas.renderAll();status('正在編輯 V'+work.version+'；已使用輕量預覽。原始 720 DPI 保留，提取後可單獨移動。若移入 V1 完全透明區，可保存與比較，但無法送印。'+(recovered?' 已復原此裝置的未儲存草稿。':''));
-    }catch(e){navigate('page-editor');status(e.message);document.getElementById('pixel-save').disabled=true;}
+    }catch(e){window.BenfuwanOrderWorkspace?.openEditor();status(e.message);document.getElementById('pixel-save').disabled=true;}
   }
   window.addEventListener('pagehide',event=>{
     if(event.persisted)return;

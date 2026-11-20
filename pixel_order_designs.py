@@ -150,14 +150,14 @@ def install(app, store, admin, actor, signer):
         if not r or r['document'].get('mode')!='pixel-v1':raise ValueError('找不到像素修補版本')
         return r
     def asset_url(order_id,version,name):return f'/api/admin/order-design/{order_id}/pixel/assets/{version}/{name}'
-    def opened(order_id,r):
+    def opened(order_id,r,source=None,expected=None):
         d=copy.deepcopy(r['document'])
         for o in nodes({'objects':d.get('objects',[])}):
             if o.get('type')=='image':o['src']=asset_url(order_id,r['version'],sha(o['src'].encode()))
         for key in ('basePath','outputPath'):
             d[key]=asset_url(order_id,r['version'],key)
         d['previewPath']=asset_url(order_id,r['version'],'preview')
-        token=signer.dumps({'pixel':True,'order':order_id,'version':r['version'],'hash':r['content_hash'],'actor':actor(),'id':uuid.uuid4().hex})
+        token=signer.dumps({'pixel':True,'expected':expected or r['version'],'source':source,'order':order_id,'version':r['version'],'hash':r['content_hash'],'actor':actor(),'id':uuid.uuid4().hex})
         return app.no_cache_json({'status':'success','design':d,'version':r['version'],'hash':r['content_hash'],'work':token})
 
     @app.app.route(root+'/open',methods=['POST'])
@@ -173,7 +173,23 @@ def install(app, store, admin, actor, signer):
             store.append(order_id,0,d,actor(),'pixel-original')
             versions=rows(order_id)
         if versions[-1]['document'].get('mode')!='pixel-v1':raise ValueError('此訂單已有其他編輯版本，請先核對，避免覆蓋店員工作')
-        return opened(order_id,versions[-1])
+        from production_orders import starting_revision
+        source=(request.get_json(silent=True) or {}).get('source')
+        return opened(order_id,starting_revision(app,order_id,versions,source),source,versions[-1]['version'])
+
+    @app.app.route(root+'/alignment')
+    @admin
+    def pixel_alignment(order_id):
+        latest = next(iter(rows(order_id)), None)
+        if not latest or latest['document'].get('mode') != 'pixel-v1':
+            raise ValueError('找不到原始生產圖')
+        order = app.commerce.store.order(order_id)
+        if not order:
+            raise ValueError('訂單不存在')
+        from order_design_alignment import alignment
+        original = latest['document']
+        return app.no_cache_json({**alignment(app, order, original['size'], original.get('profile')),
+            'modelName':order.get('model_name'), 'styleName':order.get('style_name')})
 
     @app.app.route(root+'/extract',methods=['POST'])
     @admin
@@ -192,10 +208,12 @@ def install(app, store, admin, actor, signer):
         result=(select_polygon(raw,data['polygon'],original['factor']) if 'polygon' in data else
                 select_rectangle(raw,data['rectangle'],original['factor'])
                 if 'rectangle' in data else select_component(raw,data.get('x'),data.get('y'),original['factor']))
-        return app.no_cache_json({'status':'success','bounds':result['bounds'],'pixels':result['pixels'],
-             'cutout':'data:image/png;base64,'+base64.b64encode(result['cutout']).decode(),
-             'erase':'data:image/png;base64,'+base64.b64encode(result['erase']).decode(),
-             'eraseHash':sha(result['erase'])})
+        response = {'status':'success','bounds':result['bounds'],'pixels':result['pixels'],
+                    'erase':'data:image/png;base64,'+base64.b64encode(result['erase']).decode(),
+                    'eraseHash':sha(result['erase'])}
+        if data.get('clear') is not True:
+            response['cutout'] = 'data:image/png;base64,'+base64.b64encode(result['cutout']).decode()
+        return app.no_cache_json(response)
 
     @app.app.route(root+'/assets/<int:version>/<name>')
     @admin
@@ -234,7 +252,8 @@ def install(app, store, admin, actor, signer):
             overlay, erase = decode(data.get('overlay')), decode(data.get('erase'))
             objects = copy.deepcopy(data.get('objects'))
         output,proof=compose(raw,overlay,erase,allow_draft_expansion=True)
-        if not proof['bounds']:raise ValueError('沒有可保存的修補內容')
+        if not proof['bounds'] and (current['version']==1 or not base['objects']):
+            raise ValueError('沒有可保存的修補內容')
         validate({'render_contract_version':'editable-text-v1','orderDesignVersion':1,'logicalCanvas':dict(zip(('width','height'),[n/base['factor'] for n in base['size']])),'objects':objects})
         archived = {
             asset_url(order_id, version['version'], sha(o['src'].encode())): o['src']
@@ -260,8 +279,9 @@ def install(app, store, admin, actor, signer):
         # beyond V1's proven alpha cannot be authorized for real vendor send.
         original_profile=rows(order_id)[0]['document'].get('profile')
         d={**base,'objects':objects,'outputPath':persist_asset(app,order_id,output),'outputSha':sha(output),
-           'profile':None if proof['alphaExpansion'] else original_profile,'proof':proof}
-        result=store.append(order_id,claim['version'],d,actor(),claim['id'])
+           'profile':None if proof['alphaExpansion'] or not proof['bounds'] else original_profile,'proof':proof}
+        d['productionParent']=claim.get('source') or order_id
+        result=store.append(order_id,claim.get('expected',claim['version']),d,actor(),claim['id'])
         if not result['ok']:return app.no_cache_json({'status':'error','msg':'其他店員已保存，請重新開啟；目前畫布仍保留'},409)
         return opened(order_id,row(order_id,result['version']))
 
@@ -320,6 +340,75 @@ def install(app, store, admin, actor, signer):
                 raise ValueError('修改版超出 V1 透明邊界，禁止送印')
         app.print_center._assert_order_printable(app.print_center._order(order_id))
         return r
+
+    @app.app.route(revision_root+'/finish',methods=['POST'])
+    @admin
+    def finish(order_id):
+        from production_orders import create
+        from order_design_alignment import alignment
+        from pixel_print_store import authorize
+        from print_center import PrintError
+        data = request.get_json() or {}
+        versions = rows(order_id)
+        r = next((item for item in versions if item['version']==data.get('version')), {})
+        if r.get('version', 0) < 2 or (r['version'], r['content_hash']) != (data.get('version'), data.get('hash')):
+            raise ValueError('版本已變更，請重新開啟')
+        d = artwork_document(r['document'])
+        if not d.get('outputPath'):
+            raise ValueError(d.get('reason') or '缺少可驗證的生產圖')
+        raw = read(app, d['outputPath'])
+        if sha(raw) != d['outputSha']:
+            raise ValueError('修改版生產圖雜湊不符')
+        png(raw, d['size'], True)
+        del raw
+        number = create(app, order_id, r, actor())
+        def result(state, message):
+            return app.no_cache_json(dict(status='success', productionOrder=number, state=state, msg=message))
+        key = 'pixel-'+digest([order_id,r['version'],r['content_hash']])[:64]
+        def current(job):
+            state = job['state']
+            if state == 'UNKNOWN' or job.get('ambiguous_operation'):
+                return result('UNKNOWN','瑞印回應不明，待列印中心核對')
+            if state == 'SENDING':
+                return result(state,'送印中')
+            if job.get('vendor_taskid'):
+                return result(state,'瑞印已接收，任務狀態 '+state)
+            return result(state,job.get('last_error') or '已建立送印任務，請在列印中心查核')
+        prior = app.print_center.store.request(key)
+        if prior:
+            return current(app.print_center.store.job(prior['job_id']))
+        if r['version']!=versions[-1]['version']:
+            return result('REVIEW','已有後續版本，保留此製作單供重新編輯')
+        if not d.get('profile') or not alignment(app,app.commerce.store.order(order_id),d['size'],d['profile']).get('guide'):
+            return result('REVIEW','請核對歷史刀模、定位及透明區')
+        if os.environ.get('ORDER_PIXEL_REPRINT_ENABLED') != 'true':
+            return result('DISABLED','修改版送印尚未啟用')
+        print_version(order_id,data)
+        output = png(read(app,d['outputPath']),d['size'],True)
+        original = png(read(app,d['basePath']),d['size'],True)
+        if d.get('mode') != 'pixel-v1':
+            outside = original.getchannel('A').point(lambda a: 0 if a else 255)
+            if ImageChops.multiply(output.getchannel('A'),outside).getbbox():
+                return result('REVIEW','修改版超出原圖透明邊界')
+        order = app.commerce.store.order(order_id)
+        path = order['design_json']['production']['maskPath']
+        with Image.open(io.BytesIO(read(app,path))) as image:
+            alpha = image.convert('RGBA').getchannel('A')
+        allowed = alpha.crop(alpha.getbbox()).resize(output.size,Image.Resampling.NEAREST)
+        outside = allowed.point(lambda a: 0 if a else 255)
+        if ImageChops.multiply(output.getchannel('A'),outside).getbbox():
+            return result('REVIEW','生產圖超出歷史刀模或覆蓋孔位')
+        approved = authorize(app,order_id,r,actor(),'後台完成製作',0)
+        if not approved.get('ok'):
+            return result('REVIEW','版本或既有任務需核對')
+        job = approved['job']
+        try:
+            job = app.print_center.send(job['id'],'pixel-send-'+digest(key)[:64],manual_reprint=True)
+        except PrintError as exc:
+            job = app.print_center.store.job(job['id'])
+            if job['state'] == 'PREPARED':
+                return result('BLOCKED',str(exc))
+        return current(job)
 
     @app.app.route(revision_root+'/confirm',methods=['POST'])
     @app.app.route(root+'/confirm',methods=['POST'])

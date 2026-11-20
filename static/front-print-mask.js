@@ -92,7 +92,7 @@
     const source = mask && mask.canvas ? mask.canvas : mask;
     if (!source || !(width > 0 && height > 0)) throw new Error('可印範圍尺寸無效。');
     const output = makeCanvas(width, height);
-    const g = output.getContext('2d');
+    const g = output.getContext('2d',{willReadFrequently:true});
     g.imageSmoothingEnabled = true;
     g.imageSmoothingQuality = 'high';
     g.drawImage(source, 0, 0, source.width, source.height, 0, 0, width, height);
@@ -199,6 +199,25 @@
     return 'data:image/png;base64,' + btoa(strings.join(''));
   }
 
+  // Production uses a fixed logical transform and a readback canvas. The
+  // interactive viewport can have a different backing scale after reopening.
+  function printSurface(target, scale) {
+    const output=makeCanvas(target.width*scale,target.height*scale);
+    const ctx=output.getContext('2d',{willReadFrequently:true});
+    const state={width:target.width,height:target.height,viewportTransform:target.viewportTransform,
+      enableRetinaScaling:target.enableRetinaScaling,interactive:target.interactive,contextTop:target.contextTop};
+    try{
+      Object.assign(target,{width:state.width*scale,height:state.height*scale,
+        viewportTransform:[scale,0,0,scale,0,0],enableRetinaScaling:false,interactive:false,contextTop:null});
+      target.calcViewportBoundaries();
+      target.renderCanvas(ctx,target.getObjects());
+      return output;
+    }finally{
+      Object.assign(target,state);
+      target.calcViewportBoundaries();
+    }
+  }
+
   function renderPrint(target, mask, width, height) {
     const hidden = target.getObjects().filter(o => ['guide', 'slot-guide'].includes(o.role));
     const visibility = hidden.map(o => o.visible);
@@ -207,14 +226,14 @@
     try {
       hidden.forEach(o => { o.visible = false; });
       target.clipPath = null;
-      source = target.toCanvasElement(Math.max(width / target.width, height / target.height));
+      source = printSurface(target, Math.max(width / target.width, height / target.height));
     } finally {
       target.clipPath = originalClip;
       hidden.forEach((o, i) => { o.visible = visibility[i]; });
       target.renderAll();
     }
     const output = makeCanvas(width, height);
-    const g = output.getContext('2d');
+    const g = output.getContext('2d',{willReadFrequently:true});
     g.imageSmoothingEnabled = true;
     g.imageSmoothingQuality = 'high';
     // normalized print mask 已依 alpha bounds 裁切；artwork 必須套用同一個
@@ -370,14 +389,14 @@
     try {
       hidden.forEach(o => { o.visible = false; });
       target.clipPath = null;
-      source = target.toCanvasElement(Math.max(width / target.width, height / target.height));
+      source = printSurface(target, Math.max(width / target.width, height / target.height));
     } finally {
       target.clipPath = originalClip;
       hidden.forEach((o, i) => { o.visible = visibility[i]; });
       target.renderAll();
     }
     const output = renderPreviewFallback(mask, width, height);
-    const g = output.getContext('2d');
+    const g = output.getContext('2d',{willReadFrequently:true});
     g.drawImage(source, 0, 0, width, height);
     g.globalCompositeOperation = 'destination-in';
     const maskLayer = resampleMask(mask, width, height);

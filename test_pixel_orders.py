@@ -47,6 +47,67 @@ class PixelTests(unittest.TestCase):
         r=self.client.post(self.url+'/save',headers=HEAD,json={'work':work['work'],'overlay':data(encode(overlay)),'erase':data(encode(erase)),'objects':[{'type':'rect','left':20,'top':30,'width':10,'height':10,'fill':'red'}]})
         self.assertEqual(r.status_code,200,r.json);return r.json
 
+    def test_finish_one_production_order_and_one_vendor_request(self):
+        saved = self.save(self.open())
+        url = self.url.replace('/pixel','/revision/finish')
+        payload = dict(version=saved['version'],hash=saved['hash'])
+        def finish():
+            response = self.client.post(url,headers=HEAD,json=payload)
+            self.assertEqual(response.status_code,200,response.json)
+            return response.json
+        blocked = finish()
+        self.assertEqual(blocked['state'],'REVIEW')
+        order = copy.deepcopy(self.original)
+        path = f'orders_{self.order}_sources_finish-mask.png'
+        mask = Image.new('RGBA',(74,146))
+        ImageDraw.Draw(mask).rectangle((1,1,72,144),fill='white')
+        Path(app.SAVE_DIR,path).write_bytes(encode(mask))
+        order['design_json'] = {'modelId':order['model_id'],'styleId':order['style_id'],
+            'production':{'maskPath':path,'printW':2.54,'printH':5.08},
+            'editorContext':{'printX':self.source['left_mm'],'printY':self.source['top_mm'],'printAngle':self.source['angle']}}
+        with mock.patch.object(app.commerce.store,'order',return_value=order):
+            with mock.patch.dict(os.environ,{'ORDER_PIXEL_REPRINT_ENABLED':'false'}):
+                self.assertEqual(finish()['state'],'DISABLED')
+            self.fx.fake.responses['/api/Device/receiveTask']={'code':0,'data':{'taskid':'fake-only','status':0}}
+            self.assertEqual(finish()['state'],'QUEUED')
+            parent=finish()['productionOrder']
+            self.assertEqual(parent,blocked['productionOrder'])
+            job=next(j for j in app.print_center.store.jobs_for_order(self.order) if j['vendor_taskid']=='fake-only')
+            app.print_center.store.patch_job(job['id'],{'state':'COMPLETED'})
+            reopened=self.client.post(self.url+'/open',headers=HEAD,json={'source':parent}).json
+            child=self.save(reopened)
+            payload.update(version=child['version'],hash=child['hash'])
+            self.fx.fake.timeout_paths.add('/api/Device/receiveTask')
+            unknown=finish()
+            self.assertNotEqual(unknown['productionOrder'],parent)
+            self.assertEqual(unknown['state'],'UNKNOWN')
+            self.assertEqual(finish(),unknown)
+        family=self.client.get(self.url.replace('/pixel','/production-orders')).json['orders']
+        self.assertEqual(family[0]['task'],'fake-only')
+        self.assertEqual(family[1]['source'],parent)
+        self.assertEqual(family[1]['state'],'UNKNOWN')
+        self.assertEqual(len(self.fx.fake.calls),2)
+        self.assertEqual(app.commerce.read(),self.finance)
+        self.assertEqual(app.print_center.store.job(self.source['id']),self.source)
+
+    def test_production_child_uses_immutable_parent(self):
+        revision = self.save(self.open())
+        def finish(saved):
+            return self.client.post(self.url.replace('/pixel','/revision/finish'),headers=HEAD,
+                                    json=dict(version=saved['version'],hash=saved['hash'])).json['productionOrder']
+        b = finish(revision)
+        self.assertIn('source='+b,self.client.get('/admin/order-design/'+b).location)
+        reopened = self.client.post(self.url+'/open',headers=HEAD,json={'source':b}).json
+        self.assertEqual(reopened['hash'],revision['hash'])
+        child = self.save(reopened)
+        c = finish(child)
+        self.assertNotEqual(b,c)
+        self.assertEqual(app.order_designs.rows(self.order)[-1]['document']['productionParent'],b)
+        old = self.client.post(self.url+'/open',headers=HEAD,json={'source':b}).json
+        self.assertEqual(old['hash'],revision['hash'])
+        self.assertEqual(self.client.post(self.url+'/open',headers=HEAD,json={'source':c}).json['hash'],child['hash'])
+        self.assertEqual(app.commerce.read(),self.finance)
+
     def test_alpha_expansion_saved_as_unprintable_draft(self):
         first=self.open()
         overlay=Image.new('RGBA',(72,144))
@@ -84,6 +145,52 @@ class PixelTests(unittest.TestCase):
         self.assertEqual(blocked.status_code,403)
         self.assertEqual(app.commerce.store.order(self.order),self.original)
         self.assertEqual(app.commerce.read(),self.finance)
+
+    def test_last_overlay_can_be_deleted_without_retaining_previous_output(self):
+        initial=self.open()
+        added=self.save(initial)
+        blank=data(encode(Image.new('RGBA',(72,144))))
+        cleared=self.client.post(self.url+'/save',headers=HEAD,json={
+            'work':added['work'],'overlay':blank,'erase':blank,'objects':[]})
+        self.assertEqual(cleared.status_code,200,cleared.json)
+        self.assertEqual(self.open()['design']['objects'],[])
+        self.assertEqual(self.client.get(initial['design']['basePath']).data,self.raw)
+        output=self.client.get(cleared.json['design']['outputPath'])
+        self.assertEqual(png(output.data,dpi=True).tobytes(),png(self.raw,dpi=True).tobytes())
+        self.assertIsNone(cleared.json['design']['profile'])
+
+    def test_alignment_uses_order_owned_original_and_reports_current_difference(self):
+        self.open()
+        order=copy.deepcopy(self.original)
+        path=f'orders_{self.order}_sources_original-mask.png'
+        order['design_json']={'modelId':order['model_id'],'styleId':order['style_id'],
+            'production':{'maskPath':path,'printW':2.54,'printH':5.08},
+            'editorContext':{'printX':self.source['left_mm'],'printY':self.source['top_mm'],'printAngle':self.source['angle']}}
+        mask=Image.new('RGBA',(90,165))
+        shape=ImageDraw.Draw(mask)
+        shape.rectangle((10,10,81,153),fill='white')
+        shape.rectangle((20,20,42,41),fill=(0,0,0,0))
+        profile={'print_line_img':'/static/current.png','preview_mask_img':'/static/current.png',
+                 'print_w':2.54,'print_h':5.08,'print_x':self.source['left_mm'],'print_y':self.source['top_mm'],'print_angle':self.source['angle']}
+        catalog={'models':[{'id':order['model_id'],'case_profiles':{order['style_id']:profile}}]}
+        with mock.patch.object(app.commerce.store,'order',return_value=order), \
+             mock.patch('order_design_alignment.read',return_value=encode(mask)) as read_mask, \
+             mock.patch('order_design_alignment.public_image',return_value=self.raw), \
+             mock.patch.object(app,'cloud_get_json',return_value=catalog):
+            result=self.client.get(self.url+'/alignment')
+            self.assertEqual(result.status_code,200,result.json)
+            self.assertIn('已不同',result.json['note'])
+            read_mask.assert_called_once_with(app,path)
+            guide=Image.open(io.BytesIO(base64.b64decode(result.json['guide'].split(',')[1])))
+            self.assertEqual(guide.size,(72,144))
+            self.assertEqual(guide.getpixel((20,20))[3],0)
+            self.assertGreater(guide.getpixel((0,0))[3],0)
+            order['design_json']['production']['maskPath']='orders_foreign_sources_mask.png'
+            rejected=self.client.get(self.url+'/alignment')
+            self.assertEqual(rejected.status_code,200)
+            self.assertNotIn('guide',rejected.json)
+            self.assertEqual(read_mask.call_count,1)
+        self.assertEqual(app.app.test_client().get(self.url+'/alignment').status_code,401)
 
     def test_pixels_no_expansion_and_wrong_size(self):
         overlay=Image.new('RGBA',(72,144),(200,0,0,255));erase=Image.new('RGBA',(72,144))

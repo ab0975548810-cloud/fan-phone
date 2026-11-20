@@ -79,7 +79,7 @@
     const box=document.getElementById('sticker-grid');if(!box)return;box.innerHTML='';
     const list=assetsData.editable_stickers||[];
     if(!list.length){box.textContent='目前沒有文字貼紙，請店員先建立對話框';return;}
-    for(const asset of list){const b=document.createElement('button');b.className='editable-sticker-choice';const img=document.createElement('img');img.alt='';img.src=asset.imageSrc;img.onerror=()=>img.hidden=true;const name=document.createElement('span');name.textContent=asset.name;b.append(img,name);
+    for(const asset of list){const b=document.createElement('button');b.className='editable-sticker-choice';const img=document.createElement('img');img.alt='';img.loading='lazy';img.decoding='async';img.src=asset.thumbnailUrl||asset.imageSrc;img.onerror=()=>img.hidden=true;const name=document.createElement('span');name.textContent=asset.name;b.append(img,name);
       b.onclick=async()=>{b.blur();const loader=window.BenfuwanEditorImage;if(await loader.insert(asset.id,b,(c,isCurrent)=>core.add(c,asset,{loadImage:loader.image,isCurrent})))restoreViewport();};box.append(b);}
   }
   let selected=null;
