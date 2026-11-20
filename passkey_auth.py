@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import reedit_access
 import json
 import os
 import secrets
@@ -145,6 +146,23 @@ class PasskeyService:
             raise RuntimeError("Passkey credential store 格式不符")
         return data
 
+    def registered_for_reedit(self):
+        # The normal configuration loader can seed missing documents. The
+        # authorization check must be read-only even for revoked credentials.
+        for key,path in [(STORE_KEY,self.filepath),(STORE_KEY+':'+self.config.owner_id,
+                                                  self.filepath+'.'+self.config.owner_id)]:
+            if self.app_module.USE_SUPABASE:
+                rows=self.app_module.SUPABASE.table('app_store').select('value').eq('key',key).limit(1).execute().data
+                doc=rows[0]['value'] if rows else {}
+            else:
+                try:
+                    doc=json.loads(Path(path).read_text(encoding='utf-8'))
+                except FileNotFoundError:
+                    continue
+            if doc.get('owner_id')==self.config.owner_id and doc.get('version')==1:
+                return doc['credentials']
+        return []
+
     def _save(self, data):
         key, filepath, _ = self._store()
         self.app_module.cloud_save_json(key, filepath, data)
@@ -166,6 +184,8 @@ class PasskeyService:
     def _public_credential(row):
         return {
             "credential_id": row.get("credential_id", ""),
+            "fingerprint": reedit_access.fingerprint(row),
+            "current_verified": session.get("auth_method") == "passkey" and session.get("reedit_fingerprint") == reedit_access.fingerprint(row),
             "device_label": row.get("device_label") or "Passkey",
             "transports": list(row.get("transports") or []),
             "created_at": row.get("created_at"),
@@ -350,6 +370,9 @@ class PasskeyService:
             session.clear()
             session["logged_in"] = True
             session["auth_method"] = "passkey"
+            session["passkey_credential_id"] = row["credential_id"]
+            session["reedit_fingerprint"] = reedit_access.fingerprint(row)
+            session["reedit_verified_at"] = int(time.time())
             return self.app_module.no_cache_json({"status": "success", "redirect": url_for("admin_page")})
         except Exception:
             return self._error("PASSKEY_VERIFY_FAILED", "Face ID 驗證失敗，請重新再試或使用密碼登入。", 401)
@@ -402,4 +425,6 @@ def install(app_module):
     app.add_url_rule("/api/admin/passkey/register/options", "admin_passkey_register_options", service.registration_options, methods=["POST"])
     app.add_url_rule("/api/admin/passkey/register/verify", "admin_passkey_register_verify", service.verify_registration, methods=["POST"])
     app.add_url_rule("/api/admin/passkeys/revoke", "admin_passkey_revoke", service.revoke, methods=["POST"])
+    from reedit_transport import install as install_test_handoff
+    install_test_handoff(app_module, service)
     return service
