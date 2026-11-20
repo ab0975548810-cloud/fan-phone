@@ -31,7 +31,7 @@
       return 'V'+work.version+' 已保存；製作單 '+data.productionOrder+' · '+data.msg;
     },
     openEditor() {
-      document.getElementById('workspace-loading')?.remove();
+      document.querySelector('#page-editor .done').onclick=()=>window.confirmDesignToCart();
       history.replaceState({page: 'page-editor'}, '', location.href);
       showPage('page-editor');
     },
@@ -63,7 +63,7 @@
       controls.append(label('顯示原始蒙版', visible), label('蒙版透明度', alpha));
       const apply = () => {
         const opacity = visible.checked ? Number(alpha.value) / 100 : 0;
-        if (existing) canvasShell.style.setProperty('--order-guide-opacity', opacity);
+        if (existing) canvasShell.querySelectorAll('#phone-mask,#print-area-guide,#safe-guide').forEach(el=>el.style.setProperty('opacity',opacity,'important'));
         else {
           guide.hidden = !visible.checked;
           guide.style.opacity = String(opacity);
