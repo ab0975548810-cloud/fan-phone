@@ -65,7 +65,10 @@ def run():
                         canvas.fire('object:modified',{target:layer});
                         recordHistory();
                     }""")
-                page.locator('#pixel-save').click()
+                with page.expect_response(lambda response:response.url.endswith('/pixel/save')) as saving:
+                    page.locator('#pixel-save').click()
+                reply=saving.value
+                assert reply.ok,(reply.status,reply.json().get('msg'))
                 link=page.locator('#private-reedit-status a')
                 link.wait_for()
                 assert '假設備已接收' in page.locator('#private-reedit-status').text_content()
