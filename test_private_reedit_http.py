@@ -24,9 +24,9 @@ SOURCE='https://shop.test'
 QA='https://private.test'
 
 
-def png(color):
+def png(color,size=(32,64)):
     out=io.BytesIO()
-    Image.new('RGBA',(32,64),color).save(out,'PNG',dpi=(720,720))
+    Image.new('RGBA',size,color).save(out,'PNG',dpi=(720,720))
     return out.getvalue()
 
 
@@ -46,13 +46,14 @@ class PrivateHttpTests(unittest.TestCase):
             ADMIN_REEDIT_SOURCE_ORIGIN=SOURCE, ADMIN_REEDIT_TRANSFER_KEY='k'*45))
         self.env.start()
         self.addCleanup(self.env.stop)
-        self.art=png('red')
+        size=getattr(self,'art_size',(32,64))
+        self.art=png('red',size)
         for name in ('print','preview','sources_mask'):
             (self.source/('orders_A_'+name+'.png')).write_bytes(self.art)
         mask=Image.new('RGBA',(34,66))
         mask.paste('white',(1,1,33,65))
         mask.save(self.source/'orders_A_sources_mask.png')
-        dims=[n*25.4/720 for n in (32,64)]
+        dims=[n*25.4/720 for n in size]
         row=dict(id='A',model_id='m',model_name='M',style_id='s',style_name='S',customer_name='PRIVATE-TEST',
                  print_path='orders_A_print.png',mockup_path='orders_A_preview.png',design_json=dict(
                      modelId='m',styleId='s',production=dict(printW=dims[0],printH=dims[1],maskPath='orders_A_sources_mask.png'),

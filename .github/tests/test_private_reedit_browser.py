@@ -5,6 +5,10 @@ import sys
 import threading
 from unittest.mock import patch
 import logging
+import json
+import sqlite3
+from contextlib import closing
+from PIL import Image
 
 from flask import jsonify
 from playwright.sync_api import sync_playwright
@@ -17,6 +21,7 @@ from test_private_reedit_http import PrivateHttpTests
 
 def run():
     fx=PrivateHttpTests()
+    fx.art_size=(2030,4241)
     fx.setUp()
     servers=[]
     try:
@@ -52,11 +57,29 @@ def run():
             for step in (1,2):
                 page.wait_for_function("document.querySelector('#pixel-status')?.textContent.includes('正在編輯 V1')")
                 page.locator('#pixel-cover').click()
+                if step==2:
+                    page.evaluate("""()=>{
+                        const layer=canvas.getObjects().at(-1);
+                        layer.set({left:100,top:120,angle:15});
+                        layer.setCoords();
+                        canvas.fire('object:modified',{target:layer});
+                        recordHistory();
+                    }""")
                 page.locator('#pixel-save').click()
                 link=page.locator('#private-reedit-status a')
                 link.wait_for()
                 assert '假設備已接收' in page.locator('#private-reedit-status').text_content()
                 if step==1:link.click()
+            private_db=next(fx.volume.glob('*/work.db'))
+            with closing(sqlite3.connect(private_db)) as db:
+                rows=db.execute('select document from order_design_versions where version=2 order by rowid').fetchall()
+                assert len(rows)==2
+                docs=[json.loads(row[0]) for row in rows]
+                assert docs[0]['outputSha']!=docs[1]['outputSha']
+                for document in docs:
+                    with Image.open(private_db.parent/document['outputPath']) as output:
+                        assert output.size==(2030,4241) and abs(output.info['dpi'][0]-720)<.1
+                        assert output.getpixel((2020,4200))==(255,0,0,255)
             assert fx.before==fx.source_contents()
             fx.credentials.clear()
             assert page.evaluate("fetch('/private/active').then(r=>r.status)") == 403
