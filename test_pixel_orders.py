@@ -70,8 +70,23 @@ class PixelTests(unittest.TestCase):
                 self.assertEqual(finish()['state'],'DISABLED')
             self.fx.fake.responses['/api/Device/receiveTask']={'code':0,'data':{'taskid':'fake-only','status':0}}
             self.assertEqual(finish()['state'],'QUEUED')
-            self.assertEqual(finish()['productionOrder'],blocked['productionOrder'])
-        self.assertEqual(len(self.fx.fake.calls),1)
+            parent=finish()['productionOrder']
+            self.assertEqual(parent,blocked['productionOrder'])
+            job=next(j for j in app.print_center.store.jobs_for_order(self.order) if j['vendor_taskid']=='fake-only')
+            app.print_center.store.patch_job(job['id'],{'state':'COMPLETED'})
+            reopened=self.client.post(self.url+'/open',headers=HEAD,json={'source':parent}).json
+            child=self.save(reopened)
+            payload.update(version=child['version'],hash=child['hash'])
+            self.fx.fake.timeout_paths.add('/api/Device/receiveTask')
+            unknown=finish()
+            self.assertNotEqual(unknown['productionOrder'],parent)
+            self.assertEqual(unknown['state'],'UNKNOWN')
+            self.assertEqual(finish(),unknown)
+        family=self.client.get(self.url.replace('/pixel','/production-orders')).json['orders']
+        self.assertEqual(family[0]['task'],'fake-only')
+        self.assertEqual(family[1]['source'],parent)
+        self.assertEqual(family[1]['state'],'UNKNOWN')
+        self.assertEqual(len(self.fx.fake.calls),2)
         self.assertEqual(app.commerce.read(),self.finance)
         self.assertEqual(app.print_center.store.job(self.source['id']),self.source)
 

@@ -88,6 +88,15 @@
     });
     document.getElementById('bf-order-manager').addEventListener('click',ev=>{
       const btn=ev.target.closest('[data-order-action]');if(!btn)return;
+      if(btn.dataset.orderAction==='production-family'){
+        const box=btn.nextElementSibling;
+        btn.disabled=true;
+        fetch('/api/admin/order-design/'+encodeURIComponent(btn.dataset.orderId)+'/production-orders',{cache:'no-store'})
+          .then(async r=>{if(!r.ok)throw Error();return r.json();})
+          .then(data=>{box.innerHTML=data.orders.map(o=>'<p>'+e(o.source)+' → <a href="/admin/order-design/'+encodeURIComponent(o.id)+'">'+e(o.id)+' 重新編輯</a> · '+e(o.state)+(o.task?' · 瑞印 '+e(o.task):'')+'</p>').join('')||'尚無補印單';})
+          .catch(()=>{box.textContent='暫時無法讀取補印單';}).finally(()=>{btn.disabled=false;});
+        return;
+      }
       if(btn.dataset.orderAction==='print')return window.BenfuwanPrintCenter?.openOrder(btn.dataset.orderId);
       if(btn.dataset.orderAction==='print-resend'&&ev.detail>1)return;
       if(btn.dataset.orderAction.startsWith('print-'))return runPrintAction(btn.dataset.orderId,btn.dataset.orderAction);
@@ -168,6 +177,7 @@
         <div class="bf-order-printstate${(!printStatusLoaded||physical)?' warn':''}">${printLabel}</div>
         ${isVoid?'':`<div class="bf-order-status-row"><span style="font-size:10px;color:#887a80">生產狀態</span><select data-order-status="${e(o.order_id)}" data-current-status="${e(current)}">${statusOptions(o)}</select></div>`}
         <div class="bf-order-actions">
+          <button data-order-action="production-family" data-order-id="${e(o.order_id)}">補印製作單</button><div aria-live="polite"></div>
           <a href="/admin/order-design/${encodeURIComponent(o.order_id)}" target="_self">重新編輯設計</a>
           ${o.print_url?`<a href="${e(o.print_url)}" target="_blank" rel="noopener"><i class="fa-solid fa-file-arrow-down"></i> 生產圖</a>`:''}
           ${!isVoid&&o.has_print?`<button data-order-action="print" data-order-id="${e(o.order_id)}">前往列印中心</button>`:''}

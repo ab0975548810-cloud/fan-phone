@@ -260,6 +260,24 @@ def install(app):
         response.headers['Cache-Control']='no-store'
         return response
 
+    @app.app.get('/api/admin/order-design/<order_id>/production-orders')
+    @admin
+    def production_family(order_id):
+        if app.USE_SUPABASE:
+            records=app.SUPABASE.table('design_production_orders').select('id,version,content_hash').eq('order_id',order_id).order('version').execute().data
+        else:
+            with app.print_center.store.connection() as db:
+                exists=db.execute("SELECT 1 FROM sqlite_master WHERE name='design_production_orders'").fetchone()
+                records=db.execute('SELECT id,version,content_hash FROM design_production_orders WHERE order_id=? ORDER BY version',(order_id,)).fetchall() if exists else []
+        versions={r['version']:r['document'] for r in store.rows(order_id)} if records else {}
+        items=[]
+        for r in records:
+            operation=app.print_center.store.request('pixel-'+digest([order_id,r['version'],r['content_hash']])[:64])
+            job=app.print_center.store.job(operation['job_id']) if operation else {}
+            items.append(dict(id=r['id'],source=versions[r['version']].get('productionParent',order_id),
+                              state=job.get('state','待核對／尚未送印'),task=job.get('vendor_taskid')))
+        return app.no_cache_json(dict(status='success',orders=items))
+
     @app.app.route('/api/admin/order-design/<order_id>/alignment')
     @admin
     def alignment_note(order_id):
