@@ -168,12 +168,47 @@ def public_sticker(key):
 fixture_orders()
 
 
+# Only exact files from the selected read-only export may enter private QA storage.
+REAL_ID = 'QA-REAL-CASE-01'
+REAL_HASHES = {'print':'0552dcf6bb2cbda16f4ec0975cc7fcaa3a2e27dfbab3a2ed41de0c69e86e8bd0','preview':'38e637e6ff10959caa5affc7d6adb6fb307b25f2fbe2cf8869a42316b4be38f8'}
+
+@app.post('/qa/import-case')
+def import_case():
+    from flask import request
+    from tempfile import NamedTemporaryFile
+    if request.headers.get('X-QA-Import')!='private-copy':abort(403)
+    files={}
+    for kind, expected in REAL_HASHES.items():
+        upload=request.files.get(kind)
+        if not upload:abort(400)
+        raw=upload.read(24*1024*1024+1)
+        if hashlib.sha256(raw).hexdigest()!=expected:abort(422)
+        files[kind]=raw
+    for kind,raw in files.items():
+        target=Path(module.SAVE_DIR,REAL_ID+'-'+kind+'.png')
+        with NamedTemporaryFile(dir=target.parent,delete=False) as output:
+            output.write(raw)
+        Path(output.name).replace(target)
+    record=dict(id=REAL_ID,model_id='model_apple_17_pro',model_name='iPhone 17 Pro/iPhone 18 Pro',
+                style_id='style_1789287807818',style_name='(晶彩)磁吸防摔殼・白色',
+                print_path=REAL_ID+'-print.png',mockup_path=REAL_ID+'-preview.png',design_json={},status='待核對')
+    with module.commerce.store.connection() as db:
+        db.execute('insert or ignore into orders(id,value) values (?,?)',(REAL_ID,json.dumps(record)))
+        db.commit()
+    return {'id':REAL_ID,'verified':list(files)}
+
+@app.get('/qa/real-preview')
+def real_preview():
+    response=send_file(Path(module.SAVE_DIR,REAL_ID+'-preview.png'),mimetype='image/png')
+    response.headers['Cache-Control']='private, no-store'
+    return response
+
 def editor_fixture(path):
     prefix = '/admin/order-design/'
     if not path.startswith(prefix):
         return None
     order = path[len(prefix):]
-    return order if order in FIXTURES else None
+    return order if (order in FIXTURES or order==REAL_ID) else None
 
 
 def api_fixture(path):
@@ -181,7 +216,7 @@ def api_fixture(path):
     if not path.startswith(prefix):
         return None, ''
     order, sep, tail = path[len(prefix):].partition('/')
-    return (order, tail) if sep and order in FIXTURES else (None, '')
+    return (order, tail) if sep and (order in FIXTURES or order==REAL_ID) else (None, '')
 
 
 @app.before_request
@@ -197,13 +232,15 @@ def restrict_routes():
         return None
     if not session.get('logged_in'):
         return redirect('/login') if request.method == 'GET' else ('Login required',401)
+    if path=='/qa/import-case' and request.method=='POST':return None
+    if path=='/qa/real-preview' and request.method=='GET':return None
     if path.startswith('/qa/sticker/') and request.method=='GET':return None
     if path in ('/','/admin','/logout','/qa/results','/qa/metrics','/api/health','/api/assets','/api/admin/order-design/stickers'):
         return None
     if request.method == 'GET' and path.startswith('/admin/order-design/MK-'):
         from production_orders import lookup
         record = lookup(module,path.rsplit('/',1)[-1])
-        if record and record['order_id'] in FIXTURES:
+        if record and (record['order_id'] in FIXTURES or record['order_id']==REAL_ID):
             return None
     if request.method == 'GET' and editor_fixture(path):
         return None
@@ -261,6 +298,10 @@ def qa_home():
     <style>body{font:17px system-ui;padding:1em;color:#252530}a,button{display:inline-block;padding:.55em .3em;min-height:28px}main{max-width:45em;margin:auto}</style></head>
     <body><main><h1>#116 iPhone Safari 驗收</h1>
     <p>兩筆獨立訂單都使用 2030×4241、720 DPI 的透明測試圖。上方有貓咪、荷包蛋、蝴蝶結，下方有重疊圖案。</p>
+    <h2>真實訂單隔離複本</h2><p>QA-REAL-CASE-01 · iPhone 17 Pro/iPhone 18 Pro · (晶彩)磁吸防摔殼・白色</p>
+    <a href="/qa/real-preview"><img src="/qa/real-preview" alt="原訂單保存的預覽圖" width="100"></a>
+    <a href="/admin/order-design/QA-REAL-CASE-01?pixel=1">重新編輯原生產圖</a>
+    <p>這份複本目前只有原生產圖與預覽圖；原圖層、封存刀模與列印定位尚未匯入，送印待核對。</p>
     <ul>
       <li><a data-qa-action="open-mask" href="/admin/order-design/IPHONE-QA-116-MASK?pixel=1">有歷史封存蒙版</a>。測試顯示、隱藏、透明度和版本差異提示。</li>
       <li><a data-qa-action="open-no-mask" href="/admin/order-design/IPHONE-QA-116-NO-MASK?pixel=1">無歷史封存蒙版</a>。測試缺少歷史證據的提示。</li>
