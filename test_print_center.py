@@ -484,6 +484,21 @@ class PrintCenterTests(unittest.TestCase):
         self.assertEqual(app.print_center.store.job(job["id"])["state"], "QUEUED")
         self.assertEqual(len([p for p, _ in self.fake.calls if p.endswith("receiveTask")]), 1)
 
+    def test_prepared_auto_job_sends_when_outbox_recovery_temporarily_fails(self):
+        """A failed outbox read must not block an already validated prepared job."""
+        self.save_profile()
+        order_id = self.create_order(key="auto-isolated-recovery-failure-0001")
+        job = app.print_center.enqueue_auto(order_id)["job"]
+        self.fake.responses["/api/Device/receiveTask"] = {
+            "code": 0, "data": {"taskid": "prepared-after-outbox-outage", "status": 0}}
+        with mock.patch.object(app.print_center, "recover_auto_handoffs_once",
+                               side_effect=RuntimeError("fixture commerce outage")):
+            app.print_center.dispatch_auto_once()
+            app.print_center.dispatch_auto_once()
+        self.assertEqual(app.print_center.store.job(job["id"])["state"], "QUEUED")
+        self.assertEqual(len([path for path, _ in self.fake.calls
+                              if path.endswith("receiveTask")]), 1)
+
     def test_order_history_filters_pagination_and_exact_print_lookup(self):
         # Rows beyond the recent 200 must remain reachable without changing commerce state.
         with app.commerce.store.connection() as db:
