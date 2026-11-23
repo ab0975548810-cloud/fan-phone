@@ -487,7 +487,15 @@ class PrintService:
         """Drain durable auto markers once; safe across retries and processes."""
         if not self.auto_ready:
             return []
-        self.recover_auto_handoffs_once()
+        # New outbox recovery and sending already-PREPARED, validated jobs are
+        # independent stages. A transient commerce/Storage failure during
+        # recovery must not starve unrelated safe send requests. The DB-backed
+        # claim and ambiguity guards in send() still decide every vendor call.
+        try:
+            self.recover_auto_handoffs_once()
+        except Exception:
+            self.app.app.logger.exception(
+                "Automatic handoff recovery failed; proceeding with already prepared jobs")
         results = []
         for job in self.store.auto_prepared_jobs():
             if not self.auto_ready:
