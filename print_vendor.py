@@ -117,11 +117,13 @@ class YunPrintClient:
             except TimeoutError as exc:
                 raise VendorAmbiguous("雲打印連線逾時，必須先查核任務") from exc
         try:
-            response = requests.post(self.base_url + path, data=payload, timeout=(5, 20))
+            response = requests.post(self.base_url + path, data=payload, timeout=(5, 20), allow_redirects=False)
         except requests.Timeout as exc:
             raise VendorAmbiguous("雲打印連線逾時，必須先查核任務") from exc
         except requests.RequestException as exc:
             raise VendorAmbiguous("雲打印連線中斷，必須先查核任務") from exc
+        if 300 <= response.status_code < 400:
+            raise VendorAmbiguous("雲打印回傳重新導向，請查核原任務")
         if response.status_code >= 500:
             raise VendorAmbiguous("雲打印服務暫時異常，必須先查核任務")
         if response.status_code < 200 or response.status_code >= 300:
