@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlsplit
 
+from httpx import TransportError
 from flask import Response, request, session, url_for
 
 from print_store import ACTIVE_STATES, PrintConflict, PrintStore, utcnow
@@ -492,7 +493,7 @@ class PrintService:
         # recovery must not starve unrelated safe send requests. The DB-backed
         # claim and ambiguity guards in send() still decide every vendor call.
         try:
-            self.recover_auto_handoffs_once()
+            self.recover_auto_handoffs_once(limit=1)
         except Exception:
             self.app.app.logger.exception(
                 "Automatic handoff recovery failed; proceeding with already prepared jobs")
@@ -858,6 +859,30 @@ class PrintService:
             base = (configured or request.host_url).strip().rstrip("/")
         return base
 
+    @staticmethod
+    def _retry_send_db(operation, *args):
+        """Retry only an idempotent database operation, never a vendor request."""
+        for attempt in range(3):
+            try:
+                return operation(*args)
+            except TransportError:
+                if attempt == 2:
+                    raise
+                time.sleep(.2 * (attempt + 1))
+
+    def _check_send_order(self, order_id, manual_reprint):
+        if self.app.USE_SUPABASE:
+            rows = (self.app.SUPABASE.table("orders").select("id,status,model_id,style_id,print_path")
+                    .eq("id", order_id).limit(1).execute().data)
+            if not rows:
+                raise PrintError("ORDER_NOT_FOUND", "找不到列印訂單", 404)
+            order = rows[0]
+        else:
+            order = self._order(order_id)
+        self._assert_order_printable(order)
+        if not manual_reprint:
+            self._assert_style_configured(order)
+
     def send(self, job_id, key, manual_reprint=False):
         fingerprint = _payload_hash("send", job_id)
         replay = self._existing_operation(key, "send", job_id, fingerprint)
@@ -873,16 +898,13 @@ class PrintService:
             if job.get("manual_independent"):
                 raise PrintError("MANUAL_REPRINT_AUTH_REQUIRED", "獨立人工重印只能使用原操作識別送出", 403)
             self._assert_no_prior_physical_activity(job["order_id"])
-        order = self._order(job["order_id"])
-        self._assert_order_printable(order)
+        self._retry_send_db(self._check_send_order, job["order_id"], manual_reprint)
         if job["state"] == "UNKNOWN":
             raise PrintError("RECONCILE_REQUIRED", "前次送出結果不明，必須先查核，禁止直接重送")
         if job["state"] != "PREPARED":
             raise PrintError("BAD_PRINT_STATE", "目前任務狀態不可送到銳印")
         if not job.get("profile_complete"):
             raise PrintError("PROFILE_MISSING", "列印參數未設定，不可送到銳印")
-        if not manual_reprint:
-            self._assert_style_configured(order)
         if not self.vendor_ready:
             raise PrintError("VENDOR_NOT_READY", "雲打印憑證、HTTPS public URL 或生產圖密鑰尚未完整設定", 503)
         # For operator-confirmed missing attempts, perform one more vendor
@@ -904,8 +926,20 @@ class PrintService:
         expiry = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
         claim = (self.store.claim_manual_reprint_send_if_safe if manual_reprint
                  else self.store.claim_send_if_safe)
-        decision = claim(job_id, nonce=nonce, expires_at=expiry,
-                         device_id=self.client.device_id)
+        attempted_claim = False
+
+        def acquire_claim():
+            nonlocal attempted_claim
+            # After a dropped RPC response, read back our unique nonce before
+            # considering another PREPARED -> SENDING compare-and-set.
+            if attempted_claim:
+                current = self.store.job(job_id) or {}
+                if current.get("state") == "SENDING" and current.get("artwork_token_nonce") == nonce:
+                    return {"ok": True, "job": current}
+            attempted_claim = True
+            return claim(job_id, nonce=nonce, expires_at=expiry, device_id=self.client.device_id)
+
+        decision = self._retry_send_db(acquire_claim)
         if not decision.get("ok"):
             code = str(decision.get("code") or "CONCURRENT_OPERATION")
             self.store.finish_request(key, "FAILED", {"job_id": job_id, "code": code})
@@ -922,10 +956,7 @@ class PrintService:
             raise PrintError("CONCURRENT_OPERATION", "另一個列印操作正在執行")
         claimed = decision["job"]
         try:
-            claimed_order = self._order(claimed["order_id"])
-            self._assert_order_printable(claimed_order)
-            if not manual_reprint:
-                self._assert_style_configured(claimed_order)
+            self._retry_send_db(self._check_send_order, claimed["order_id"], manual_reprint)
         except PrintError:
             self.store.patch_job(job_id, {"state": "PREPARED", "last_error": "送出前訂單或生產設定已失效"}, ("SENDING",))
             self.store.finish_request(key, "FAILED", {"job_id": job_id, "code": "SEND_PREFLIGHT_FAILED"})
@@ -936,7 +967,8 @@ class PrintService:
         # The database claim above is the cross-process safety boundary. This
         # final read additionally avoids a vendor call when a callback acquired
         # the same order lock immediately after the claim and quarantined it.
-        if (self.store.job(job_id) or {}).get("state") != "SENDING":
+        current = self._retry_send_db(self.store.job, job_id) or {}
+        if current.get("state") != "SENDING" or current.get("artwork_token_nonce") != nonce:
             self.store.finish_request(key, "UNKNOWN", {
                 "job_id": job_id, "code": "RECONCILE_REQUIRED"})
             raise PrintError("RECONCILE_REQUIRED", "舊列印活動已封鎖本次送出，請人工查核", 503)
@@ -959,13 +991,18 @@ class PrintService:
             self.store.finish_request(key, "UNKNOWN", {"job_id": job_id, "code": "RECONCILE_REQUIRED"})
             raise PrintError("RECONCILE_REQUIRED", "送出結果無法確認，任務已鎖定；請先查核", 503) from exc
         raw_status = str(result.get("status", "0"))
-        job = self.store.patch_job(job_id, {
+        job = self._retry_send_db(self.store.patch_job, job_id, {
             "state": CALLBACK_STATES.get(raw_status, "QUEUED"), "vendor_taskid": taskid,
             "vendor_raw_status": raw_status, "vendor_raw_message": str(result.get("msg") or "")[:500],
             "sent_at": utcnow(), "ambiguous_operation": None,
         }, ("SENDING",))
         if not job:
-            current = self.store.job(job_id) or {}
+            current = self._retry_send_db(self.store.job, job_id) or {}
+            if (str(current.get("vendor_taskid") or "") == taskid and current.get("sent_at")
+                    and not current.get("ambiguous_operation") and current.get("state") != "UNKNOWN"):
+                self._retry_send_db(self.store.finish_request, key, "COMPLETED",
+                                    {"job_id": job_id, "vendor_taskid": taskid})
+                return current
             if str(current.get("ambiguous_operation") or "") == "prior_attempt_activity":
                 # The send claim won the database lock, but a superseded
                 # physical callback quarantined this attempt while receiveTask
@@ -991,7 +1028,7 @@ class PrintService:
                 "code": "RECONCILE_REQUIRED",
             })
             raise PrintError("RECONCILE_REQUIRED", "送出期間任務狀態改變，請人工查核", 503)
-        self.store.finish_request(key, "COMPLETED", {"job_id": job_id, "vendor_taskid": taskid})
+        self._retry_send_db(self.store.finish_request, key, "COMPLETED", {"job_id": job_id, "vendor_taskid": taskid})
         return job
 
     def start(self, job_id, key):

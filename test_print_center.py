@@ -484,6 +484,40 @@ class PrintCenterTests(unittest.TestCase):
         self.assertEqual(app.print_center.store.job(job["id"])["state"], "QUEUED")
         self.assertEqual(len([p for p, _ in self.fake.calls if p.endswith("receiveTask")]), 1)
 
+    def test_db_disconnects_at_send_boundaries_do_not_duplicate_vendor_submission(self):
+        from httpx import RemoteProtocolError
+
+        self.save_profile()
+        order_id = self.create_order()
+        service = app.print_center
+        job = service.enqueue_auto(order_id)["job"]
+        self.fake.responses["/api/Device/receiveTask"] = {"code": 0, "data": {"taskid": "accepted-once"}}
+        claim, check, patch = service.store.claim_send_if_safe, service._check_send_order, service.store.patch_job
+        checks = 0
+        def lost_claim(*args, **kwargs):
+            self.assertTrue(claim(*args, **kwargs)["ok"])
+            raise RemoteProtocolError("lost committed claim response")
+        def interrupted_read(*args):
+            nonlocal checks
+            checks += 1
+            if checks == 2:
+                raise RemoteProtocolError("post-claim read disconnected")
+            return check(*args)
+        def lost_ack(*args, **kwargs):
+            row = patch(*args, **kwargs)
+            if row and row.get("vendor_taskid"):
+                raise RemoteProtocolError("lost committed receipt response")
+            return row
+        with mock.patch.object(service.store, "claim_send_if_safe", side_effect=lost_claim), \
+                mock.patch.object(service, "_check_send_order", side_effect=interrupted_read), \
+                mock.patch.object(service.store, "patch_job", side_effect=lost_ack):
+            service.dispatch_auto_once()
+            service.dispatch_auto_once()
+        self.assertEqual(checks, 3)
+        self.assertEqual(service.store.job(job["id"])["state"], "QUEUED")
+        self.assertEqual(service.store.request(service._auto_key("send", job["id"]))["status"], "COMPLETED")
+        self.assertEqual([path for path, _ in self.fake.calls], ["/api/Device/receiveTask"])
+
     def test_prepared_auto_job_sends_when_outbox_recovery_temporarily_fails(self):
         """A failed outbox read must not block an already validated prepared job."""
         self.save_profile()
