@@ -111,7 +111,7 @@
 <div class="toolbar"><button class="btn alt mini" onclick="document.getElementById('tpl-bg-file').click()">更換底圖</button><input id="tpl-bg-file" type="file" accept="image/png,image/jpeg,image/webp" hidden onchange="uploadTemplateBg(event)"><button class="btn alt mini" onclick="addSlot()">新增照片插槽</button><button class="btn alt mini" onclick="addText()">加入文字</button><button class="btn alt mini" onclick="pickSticker()">加入貼紙</button><button class="btn danger mini" onclick="deleteEditorObject()">刪除選取</button></div><div class="notice">Fabric 編輯器只在你開啟模板時才下載，不會拖慢平常訂單後台。</div>
 </div><div class="mf"><button class="btn danger" onclick="closeModal('template-modal')">取消</button><button class="btn" onclick="saveTemplate()">儲存模板</button></div></div></div>
 
-<script src="/static/passkey-client.js?v=20260925a"></script>
+<script src="/static/passkey-client.js?v=20261120verified"></script>
 <script>
 const $=id=>document.getElementById(id);let currentView='orders';let shopData={brands:[],models:[],styles:[]};let assetsData={stickers:[],categories:['全部']};let templatesData={templates:[],categories:['全部','熱門']};let shopVersion='',assetsVersion='',templatesVersion='';let shopLoaded=false,assetsLoaded=false,templatesLoaded=false,ordersBusy=false,modelSaveBusy=false,styleSaveBusy=false,shopMutationBusy=false,templateDeleteBusy=false;let currentAsset='全部',currentTpl='全部';let fabricPromise=null,visualCanvas=null,tplW=0,tplH=0;const VISUAL_SCALE=2;
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
